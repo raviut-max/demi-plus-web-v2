@@ -1,22 +1,19 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // ✅ ปิด ESLint ระหว่าง build (สำหรับ development)
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  // ✅ ปิด TypeScript checking ระหว่าง build
   typescript: {
     ignoreBuildErrors: true,
   },
-  // ✅ รองรับ images จาก Supabase
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   images: {
     remotePatterns: [
       {
-        protocol: 'https',
-        hostname: '**.supabase.co',
+        protocol: "https",
+        hostname: "**.supabase.co",
       },
     ],
   },
 };
 
-export default nextConfig;
+module.exports = nextConfig;
