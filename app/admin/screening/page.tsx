@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening } from '@/lib/supabase/queries';
+import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening, createDefaultGoals } from '@/lib/supabase/queries';
 import { FileText, Save, ArrowLeft, LogOut, AlertCircle } from 'lucide-react';
 
 export default function ScreeningPage() {
@@ -81,7 +81,7 @@ export default function ScreeningPage() {
   };
 
   // =====================================================
-  // 📊 ฟังก์ชันคำนวณระดับผู้ป่วย (ฉบับแก้ไข)
+  // 📊 ฟังก์ชันคำนวณระดับผู้ป่วย (ฉบับแก้ไข - PROMs ≤ 8)
   // =====================================================
   /**
    * ระบบการประเมินระดับผู้ป่วยแบบมีเงื่อนไข
@@ -94,11 +94,11 @@ export default function ScreeningPage() {
    * เงื่อนไขบังคับ Red Zone (L1):
    * 1. PAM ≤ 5 → L1 ทันที (ไม่ว่า PROMs จะเป็นเท่าไหร่)
    * 2. PROMs ข้อใดข้อหนึ่ง ≤ 2 → L1 ทันที
-   * 3. PROMs รวม ≤ 8 → L1 ทันที
+   * 3. PROMs รวม ≤ 8 → L1 ทันที (แก้ไขจาก ≤10 เป็น ≤8)
    * 
-   * เงื่อนไขอื่นๆ (PAM > 5 และ PROMs > 10):
+   * เงื่อนไขอื่นๆ (PAM > 5 และ PROMs > 8):
    * - L2: คะแนนรวม < 22 (< 50%)
-   * - L3: คะแนนรวม 22-32 (50-75%)
+   * - L3: คะแนนรวม 22-32 (50-74%)
    * - L4: คะแนนรวม ≥ 33 (≥ 75%)
    */
   const calculatePatientLevel = () => {
@@ -155,12 +155,12 @@ export default function ScreeningPage() {
       };
     }
 
-    // 3. PROMs รวม ≤ 8 → L1 ทันที
+    // 3. PROMs รวม ≤ 8 → L1 ทันที (✅ แก้ไขจาก ≤10 เป็น ≤8)
     if (promsTotal <= 8) {
       return {
         level: 'L1',
         zone: 'Red Zone',
-        reason: 'PROMs Score รวมต่ำมาก (≤10 จาก 24)',
+        reason: 'PROMs Score รวมต่ำมาก (≤8 จาก 24)',
         pamTotal,
         pamAvg,
         pamMax,
@@ -313,14 +313,47 @@ export default function ScreeningPage() {
       });
 
       if (result.success) {
-        alert(`บันทึกแบบประเมินสำเร็จ!\n\nระดับผู้ป่วย: ${patientLevel.level} - ${patientLevel.zone}\nเหตุผล: ${patientLevel.reason}`);
-        
-        // Reset form
-        setSelectedPatient('');
-        setPamAnswers({});
-        setPromsAnswers({});
-        setConfidenceScore(0);
-        setConfidencePlan('');
+        // ✅ สร้าง Default Goals อัตโนมัติ
+        console.log('🎯 Creating default goals for patient:', selectedPatient);
+        const goalsResult = await createDefaultGoals(
+          selectedPatient,
+          patientLevel.level, // L1, L2, L3, L4
+          user?.id
+        );
+
+        // ✅ แสดงข้อความสำเร็จพร้อมปุ่มไปหน้า Goals
+        let goalsMessage = '';
+        if (goalsResult.success && goalsResult.count > 0) {
+          goalsMessage = `\n\n🎯 สร้างเป้าหมายเริ่มต้นสำเร็จ: ${goalsResult.count} กิจกรรม`;
+          if (patientLevel.level === 'L2' || patientLevel.level === 'L3') {
+            goalsMessage += '\n(กฎทอง 5 ข้อ - 5 วัน/สัปดาห์)';
+          } else if (patientLevel.level === 'L4') {
+            goalsMessage += '\n(แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์)';
+          }
+        } else if (patientLevel.level === 'L1') {
+          goalsMessage = '\n\n⚠️ ผู้ป่วยระดับ L1 - ไม่สร้างเป้าหมายอัตโนมัติ (ต้องดูแลใกล้ชิดก่อน)';
+        }
+
+        const confirmGoToGoals = confirm(
+          `✅ บันทึกแบบประเมินสำเร็จ!\n\n` +
+          `ระดับผู้ป่วย: ${patientLevel.level} - ${patientLevel.zone}\n` +
+          `เหตุผล: ${patientLevel.reason}` +
+          goalsMessage +
+          `\n\n🎯 ไปหน้าบันทึกเป้าหมายเลยหรือไม่?`
+        );
+
+        if (confirmGoToGoals) {
+          // ✅ ไปหน้า Goals พร้อม patient_id
+          router.push(`/admin/goals?patient_id=${selectedPatient}`);
+        } else {
+          // ✅ อยู่หน้า Screening ต่อไป
+          // Reset form
+          setSelectedPatient('');
+          setPamAnswers({});
+          setPromsAnswers({});
+          setConfidenceScore(0);
+          setConfidencePlan('');
+        }
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }

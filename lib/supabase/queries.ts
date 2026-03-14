@@ -1039,3 +1039,261 @@ export async function getDeactivatedStaff() {
     return [];
   }
 }
+
+// =====================================================
+// ฟังก์ชันสร้างเป้าหมายเริ่มต้นตาม PAM Level
+// =====================================================
+export async function createDefaultGoals(userId: string, pamLevel: string, createdBy: string) {
+  try {
+    console.log('🎯 Creating default goals for user:', userId, 'PAM Level:', pamLevel);
+    
+    // L1: ไม่สร้าง goals (ต้องดูแลใกล้ชิดก่อน)
+    if (pamLevel === 'L1') {
+      console.log('⚠️ L1 Patient: No default goals created');
+      return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ' };
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const goals = [];
+
+    // L2 และ L3: กฎทอง 5 ข้อ
+    if (pamLevel === 'L2' || pamLevel === 'L3') {
+      goals.push(
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'stop_sweets',
+          goal_name_th: 'หยุดกินหวาน',
+          description: 'เลิกกินของหวาน น้ำหวาน',
+          description_th: 'เลิกกินของหวาน น้ำหวาน',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'reduce_rice',
+          goal_name_th: 'ลดข้าวลง',
+          description: 'ลดข้าว/แป้งลง',
+          description_th: 'ลดข้าว/แป้งลง',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'protein_every_meal',
+          goal_name_th: 'โปรตีนทุกมื้อ',
+          description: 'กินโปรตีนในทุกมื้ออาหาร',
+          description_th: 'กินโปรตีนในทุกมื้ออาหาร',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'walk_daily',
+          goal_name_th: 'เดินทุกวัน',
+          description: 'เดินออกกำลังกาย',
+          description_th: 'เดินออกกำลังกาย',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'track_weight_sugar',
+          goal_name_th: 'บันทึกน้ำหนัก/น้ำตาล',
+          description: 'บันทึกน้ำหนักตัวและ/หรือน้ำตาลในเลือด',
+          description_th: 'บันทึกน้ำหนักตัวและ/หรือน้ำตาลในเลือด',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        }
+      );
+    }
+
+    // L4: เป้าหมายแชมป์ 8 ข้อ
+    if (pamLevel === 'L4') {
+      goals.push(
+        // อาหาร (3 ข้อ)
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'carb_less_than_5',
+          goal_name_th: 'กินคาร์บ <5 คาร์บ/วัน',
+          description: 'กินคาร์โบไฮเดรต <5 คาร์บ/วัน',
+          description_th: 'กินคาร์โบไฮเดรต <5 คาร์บ/วัน',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'protein_more_than_3',
+          goal_name_th: 'กินโปรตีน >3 หน่วย',
+          description: 'กินโปรตีน >3 หน่วย/วัน',
+          description_th: 'กินโปรตีน >3 หน่วย/วัน',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'water_more_than_1L',
+          goal_name_th: 'ดื่มน้ำ >1 ลิตร',
+          description: 'ดื่มน้ำ >1 ลิตร/วัน',
+          description_th: 'ดื่มน้ำ >1 ลิตร/วัน',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        // ออกกำลังกาย (4 ข้อ)
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'stretching',
+          goal_name_th: 'Stretching',
+          description: 'ยืดเหยียด',
+          description_th: 'ยืดเหยียด',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'cardio',
+          goal_name_th: 'Cardio',
+          description: 'คาร์ดิโอ',
+          description_th: 'คาร์ดิโอ',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'strengthening',
+          goal_name_th: 'Strengthening',
+          description: 'เสริมสร้างกล้ามเนื้อ',
+          description_th: 'เสริมสร้างกล้ามเนื้อ',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'hiit',
+          goal_name_th: 'HIIT',
+          description: 'High Intensity Interval Training',
+          description_th: 'High Intensity Interval Training',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        },
+        // พักผ่อน (1 ข้อ)
+        {
+          user_id: userId,
+          goal_type: 'weekly_activity',
+          goal_name: 'sleep_enough',
+          goal_name_th: 'นอนหลับเพียงพอ',
+          description: 'นอนหลับ 7-8 ชั่วโมง/คืน',
+          description_th: 'นอนหลับ 7-8 ชั่วโมง/คืน',
+          target_days: 5,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: createdBy,
+        }
+      );
+    }
+
+    // บันทึก goals ลงฐานข้อมูล
+    if (goals.length > 0) {
+      const { error } = await supabase.from('goals').insert(goals);
+      
+      if (error) {
+        console.error('❌ Error creating goals:', error);
+        return { success: false, error: error.message };
+      }
+      
+      console.log(`✅ Created ${goals.length} default goals successfully`);
+      return { success: true, count: goals.length };
+    }
+    
+    return { success: true, count: 0 };
+  } catch (err) {
+    console.error('Create default goals error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างเป้าหมาย' };
+  }
+}
+
+// =====================================================
+// ฟังก์ชันดึงเป้าหมายของผู้ป่วย
+// =====================================================
+export async function getPatientGoals(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .order('priority', { ascending: true })
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching goals:', error);
+      return [];
+    }
+    
+    return data || [];
+  } catch (err) {
+    console.error('Get patient goals error:', err);
+    return [];
+  }
+}
