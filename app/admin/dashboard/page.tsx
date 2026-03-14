@@ -2,40 +2,55 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getDashboardStats } from '@/lib/supabase/queries';
+import { checkSession, logout, getDashboardStats, getPatientList } from '@/lib/supabase/queries';
 import { 
   Users, 
-  Calendar, 
   FileText, 
-  Settings, 
+  Calendar, 
+  Clock, 
   LogOut, 
-  Activity, 
-  TrendingUp, 
   UserPlus, 
-  ClipboardCheck, 
-  Shield,
-  RefreshCw
+  UserCheck, 
+  Target,
+  ClipboardCheck,
+  Stethoscope,
+  Activity,
+  BarChart3,
+  Settings,
+  BookOpen,
+  Award
 } from 'lucide-react';
 
-export default function AdminDashboardPage() {
+interface DashboardStats {
+  totalPatients: number;
+  todayRecords: number;
+  todayAppointments: number;
+  pendingAssessments: number;
+}
+
+interface MenuItem {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+  href: string;
+  badge?: number;
+}
+
+export default function AdminDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<DashboardStats>({
     totalPatients: 0,
     todayRecords: 0,
     todayAppointments: 0,
     pendingAssessments: 0,
   });
-  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const userData = checkSession();
     
-    console.log('📊 [Dashboard] userData:', userData);
-    console.log('📊 [Dashboard] full_name_th:', userData?.full_name_th);
-    console.log('📊 [Dashboard] role:', userData?.role);
-
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -47,33 +62,99 @@ export default function AdminDashboardPage() {
       return;
     }
 
-    // ✅ ต้องมีบรรทัดนี้!
     setUser(userData);
-
     loadDashboardStats();
-    setLoading(false);
   }, [router]);
 
   const loadDashboardStats = async () => {
     try {
-      setRefreshing(true);
-      const statsData = await getDashboardStats();
-      setStats(statsData);
+      const data = await getDashboardStats();
+      setStats(data);
     } catch (error) {
-      console.error('Error loading stats:', error);
+      console.error('Error loading dashboard stats:', error);
     } finally {
-      setRefreshing(false);
+      setLoading(false);
     }
-  };
-
-  const handleRefresh = () => {
-    loadDashboardStats();
   };
 
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
   };
+
+  // ✅ เมนูจัดการระบบ - แก้ไข "กิจกรรม" เป็น "เป้าหมาย"
+  const menuItems: MenuItem[] = [
+    {
+      title: 'จัดการผู้ป่วย',
+      description: 'เพิ่ม/แก้ไข/ดูข้อมูลผู้ป่วย',
+      icon: <Users className="w-8 h-8" />,
+      color: 'from-blue-500 to-cyan-500',
+      href: '/admin/patients',
+    },
+    {
+      title: 'แบบประเมิน',
+      description: 'ทำแบบประเมิน PAM และ PROMs',
+      icon: <FileText className="w-8 h-8" />,
+      color: 'from-purple-500 to-pink-500',
+      href: '/admin/screening',
+    },
+    {
+      title: 'เป้าหมาย',
+      description: 'กำหนดและจัดการเป้าหมายผู้ป่วย',
+      icon: <Target className="w-8 h-8" />,
+      color: 'from-green-500 to-emerald-500',
+      href: '/admin/goals',
+    },
+    {
+      title: 'นัดหมาย',
+      description: 'จัดการนัดหมายผู้ป่วย',
+      icon: <Calendar className="w-8 h-8" />,
+      color: 'from-orange-500 to-red-500',
+      href: '/admin/appointments',
+    },
+    {
+      title: 'จัดการเจ้าหน้าที่',
+      description: 'เพิ่ม/แก้ไข/ดูข้อมูลเจ้าหน้าที่',
+      icon: <Stethoscope className="w-8 h-8" />,
+      color: 'from-indigo-500 to-purple-500',
+      href: '/admin/staff',
+    },
+    {
+      title: 'กิจกรรม',
+      description: 'จัดการกิจกรรมตาม PAM Level',
+      icon: <Activity className="w-8 h-8" />,
+      color: 'from-teal-500 to-cyan-500',
+      href: '/admin/activities',
+    },
+    {
+      title: 'รายงาน',
+      description: 'ดูสถิติและรายงาน',
+      icon: <BarChart3 className="w-8 h-8" />,
+      color: 'from-red-500 to-pink-500',
+      href: '/admin/reports',
+    },
+    {
+      title: 'ความรู้',
+      description: 'จัดการบทความและวิดีโอ',
+      icon: <BookOpen className="w-8 h-8" />,
+      color: 'from-yellow-500 to-orange-500',
+      href: '/admin/knowledge',
+    },
+    {
+      title: 'Mentor',
+      description: 'จัดการ Mentor และ Mentee',
+      icon: <Award className="w-8 h-8" />,
+      color: 'from-violet-500 to-purple-500',
+      href: '/admin/mentors',
+    },
+    {
+      title: 'ตั้งค่า',
+      description: 'ตั้งค่าระบบ',
+      icon: <Settings className="w-8 h-8" />,
+      color: 'from-gray-500 to-slate-500',
+      href: '/admin/settings',
+    },
+  ];
 
   if (loading) {
     return (
@@ -85,67 +166,6 @@ export default function AdminDashboardPage() {
       </div>
     );
   }
-
-  const menuItems = [
-    {
-      icon: <Users className="w-8 h-8" />,
-      title: 'จัดการผู้ป่วย',
-      description: 'เพิ่ม/แก้ไข/ดูข้อมูลผู้ป่วย',
-      color: 'bg-blue-500',
-      link: '/admin/patients',
-    },
-    {
-      icon: <Calendar className="w-8 h-8" />,
-      title: 'นัดหมาย',
-      description: 'จัดการนัดหมายผู้ป่วย',
-      color: 'bg-green-500',
-      link: '/admin/appointments',
-    },
-    {
-      icon: <FileText className="w-8 h-8" />,
-      title: 'แบบประเมิน',
-      description: 'ทำ Screening ให้ผู้ป่วย',
-      color: 'bg-purple-500',
-      link: '/admin/screening',
-    },
-    {
-      icon: <Shield className="w-8 h-8" />,
-      title: 'จัดการเจ้าหน้าที่',
-      description: 'เพิ่ม/แก้ไข/ดูข้อมูลเจ้าหน้าที่',
-      color: 'bg-indigo-500',
-      link: '/admin/staff',
-    },
-    {
-      icon: <Activity className="w-8 h-8" />,
-      title: 'กิจกรรม',
-      description: 'จัดการกิจกรรม',
-      color: 'bg-orange-500',
-      link: '/admin/activities',
-    },
-    {
-      icon: <TrendingUp className="w-8 h-8" />,
-      title: 'รายงาน',
-      description: 'ดูสถิติและรายงาน',
-      color: 'bg-red-500',
-      link: '/admin/reports',
-    },
-    {
-      icon: <Settings className="w-8 h-8" />,
-      title: 'ตั้งค่า',
-      description: 'ตั้งค่าระบบ',
-      color: 'bg-gray-500',
-      link: '/admin/settings',
-    },
-  ];
-
-  const getRoleText = (role: string) => {
-    switch (role) {
-      case 'admin': return 'ผู้ดูแลระบบ';
-      case 'doctor': return 'แพทย์';
-      case 'helper': return 'เจ้าหน้าที่';
-      default: return 'ผู้ดูแลระบบ';
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
@@ -159,21 +179,14 @@ export default function AdminDashboardPage() {
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <p className="text-sm font-medium text-gray-800">
+                <p className="text-sm font-semibold text-gray-800">
                   {user?.full_name_th || 'ผู้ดูแลระบบ'}
                 </p>
                 <p className="text-xs text-gray-500">
-                  {getRoleText(user?.role || 'admin')}
+                  {user?.role === 'admin' ? 'ผู้ดูแลระบบ' : 
+                   user?.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
                 </p>
               </div>
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                รีเฟรช
-              </button>
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -188,52 +201,57 @@ export default function AdminDashboardPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        
+        {/* Statistics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Total Patients */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-600" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.totalPatients}</p>
+                <p className="text-sm text-gray-600 mb-1">ผู้ป่วยทั้งหมด</p>
+                <p className="text-3xl font-bold text-gray-800">{stats.totalPatients}</p>
+              </div>
+              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
+                <Users className="w-8 h-8 text-white" />
               </div>
             </div>
           </div>
 
+          {/* Today's Records */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                <Activity className="w-6 h-6 text-green-600" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">บันทึกวันนี้</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.todayRecords}</p>
+                <p className="text-sm text-gray-600 mb-1">บันทึกวันนี้</p>
+                <p className="text-3xl font-bold text-gray-800">{stats.todayRecords}</p>
+              </div>
+              <div className="w-14 h-14 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center">
+                <ClipboardCheck className="w-8 h-8 text-white" />
               </div>
             </div>
           </div>
 
+          {/* Today's Appointments */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                <Calendar className="w-6 h-6 text-purple-600" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">นัดหมายวันนี้</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.todayAppointments}</p>
+                <p className="text-sm text-gray-600 mb-1">นัดหมายวันนี้</p>
+                <p className="text-3xl font-bold text-gray-800">{stats.todayAppointments}</p>
+              </div>
+              <div className="w-14 h-14 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center">
+                <Calendar className="w-8 h-8 text-white" />
               </div>
             </div>
           </div>
 
+          {/* Pending Assessments */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                <Activity className="w-6 h-6 text-orange-600" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500">รอประเมิน</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.pendingAssessments}</p>
+                <p className="text-sm text-gray-600 mb-1">รอประเมิน</p>
+                <p className="text-3xl font-bold text-gray-800">{stats.pendingAssessments}</p>
+              </div>
+              <div className="w-14 h-14 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+                <Clock className="w-8 h-8 text-white" />
               </div>
             </div>
           </div>
@@ -242,7 +260,7 @@ export default function AdminDashboardPage() {
         {/* Quick Actions */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4">ดำเนินการด่วน</h2>
-          <div className="flex flex-wrap gap-4">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={() => router.push('/admin/patients/new')}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -258,47 +276,49 @@ export default function AdminDashboardPage() {
               ทำแบบประเมิน
             </button>
             <button
-              onClick={() => router.push('/admin/staff')}
+              onClick={() => router.push('/admin/staff/new')}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
             >
-              <Shield className="w-4 h-4" />
-              จัดการเจ้าหน้าที่
+              <UserCheck className="w-4 h-4" />
+              เพิ่มเจ้าหน้าที่
             </button>
             <button
-              onClick={() => router.push('/admin/appointments')}
+              onClick={() => router.push('/admin/goals')}
               className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
             >
-              <Calendar className="w-4 h-4" />
-              ดูนัดหมาย
+              <Target className="w-4 h-4" />
+              จัดการเป้าหมาย
             </button>
           </div>
         </div>
 
         {/* Menu Grid */}
-        <h2 className="text-xl font-bold text-gray-800 mb-4">เมนูจัดการ</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {menuItems.map((item, index) => (
             <button
               key={index}
-              onClick={() => router.push(item.link)}
-              className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all active:scale-95"
+              onClick={() => router.push(item.href)}
+              className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl hover:scale-105 transition-all text-left group"
             >
-              <div className="flex items-start gap-4">
-                <div className={`${item.color} w-14 h-14 rounded-xl flex items-center justify-center text-white`}>
+              <div className={`w-14 h-14 bg-gradient-to-br ${item.color} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
+                <div className="text-white">
                   {item.icon}
                 </div>
-                <div className="text-left">
-                  <h3 className="text-lg font-bold text-gray-800">{item.title}</h3>
-                  <p className="text-sm text-gray-600">{item.description}</p>
-                </div>
               </div>
+              <h3 className="text-lg font-bold text-gray-800 mb-1">{item.title}</h3>
+              <p className="text-sm text-gray-600">{item.description}</p>
+              {item.badge !== undefined && item.badge > 0 && (
+                <span className="inline-block mt-2 px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded-full">
+                  {item.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-gray-500">
-          <p>DeMi+ Admin Dashboard v1.0.0 | © 2026 Development for Mind & health</p>
+          <p>DeMi+ Admin Dashboard v2.0 | © 2024 All rights reserved</p>
         </div>
       </div>
     </div>

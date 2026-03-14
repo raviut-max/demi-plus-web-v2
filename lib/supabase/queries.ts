@@ -1043,217 +1043,155 @@ export async function getDeactivatedStaff() {
 // =====================================================
 // ฟังก์ชันสร้างเป้าหมายเริ่มต้นตาม PAM Level
 // =====================================================
-export async function createDefaultGoals(userId: string, pamLevel: string, createdBy: string) {
+/**
+ * สร้าง Default Goals หลังจากทำ Screening
+ * 
+ * L1: ไม่สร้าง goals (ต้องดูแลใกล้ชิดก่อน)
+ * L2, L3: กฎทอง 5 ข้อ (5 วัน/สัปดาห์)
+ * L4: แชมป์ 8 กิจกรรม (5 วัน/สัปดาห์)
+ * 
+ * @param userId - UUID ของผู้ป่วย
+ * @param pamLevel - ระดับ PAM (L1, L2, L3, L4)
+ * @param createdBy - UUID ของหมอ/admin ที่ทำ screening
+ */
+export async function createDefaultGoals(
+  userId: string, 
+  pamLevel: string, 
+  createdBy: string
+) {
   try {
     console.log('🎯 Creating default goals for user:', userId, 'PAM Level:', pamLevel);
     
     // L1: ไม่สร้าง goals (ต้องดูแลใกล้ชิดก่อน)
     if (pamLevel === 'L1') {
       console.log('⚠️ L1 Patient: No default goals created');
-      return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ' };
+      return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
     }
 
     const today = new Date().toISOString().split('T')[0];
     const goals = [];
 
-    // L2 และ L3: กฎทอง 5 ข้อ
+    // ===========================================
+    // L2 และ L3: กฎทอง 5 ข้อ (5 วัน/สัปดาห์)
+    // ===========================================
     if (pamLevel === 'L2' || pamLevel === 'L3') {
-      goals.push(
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'stop_sweets',
-          goal_name_th: 'หยุดกินหวาน',
-          description: 'เลิกกินของหวาน น้ำหวาน',
-          description_th: 'เลิกกินของหวาน น้ำหวาน',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'reduce_rice',
-          goal_name_th: 'ลดข้าวลง',
-          description: 'ลดข้าว/แป้งลง',
-          description_th: 'ลดข้าว/แป้งลง',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'protein_every_meal',
-          goal_name_th: 'โปรตีนทุกมื้อ',
-          description: 'กินโปรตีนในทุกมื้ออาหาร',
-          description_th: 'กินโปรตีนในทุกมื้ออาหาร',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'walk_daily',
-          goal_name_th: 'เดินทุกวัน',
-          description: 'เดินออกกำลังกาย',
-          description_th: 'เดินออกกำลังกาย',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'track_weight_sugar',
-          goal_name_th: 'บันทึกน้ำหนัก/น้ำตาล',
-          description: 'บันทึกน้ำหนักตัวและ/หรือน้ำตาลในเลือด',
-          description_th: 'บันทึกน้ำหนักตัวและ/หรือน้ำตาลในเลือด',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        }
-      );
+      // ดึง activities จากฐานข้อมูล
+      const { data: activities, error: activitiesError } = await supabase
+        .from('activities')
+        .select('id, activity_code, activity_name_th, description_th, activity_type')
+        .in('activity_code', [
+          'stop_sweet',
+          'reduce_rice',
+          'protein_vegetable',
+          'exercise_walk',
+          'record_weight_sugar'
+        ])
+        .eq('is_active', true);
+
+      if (activitiesError) {
+        console.error('Error fetching activities:', activitiesError);
+      }
+
+      // สร้าง goals จาก activities ที่มี
+      if (activities && activities.length > 0) {
+        activities.forEach(activity => {
+          let targetValue = null;
+          let targetUnit = null;
+
+          // กำหนด target_value สำหรับ exercise_walk (15 นาที)
+          if (activity.activity_code === 'exercise_walk') {
+            targetValue = 15;
+            targetUnit = 'minutes';
+          }
+
+          goals.push({
+            user_id: userId,
+            goal_type: 'weekly_activity',
+            goal_name: activity.activity_code,
+            goal_name_th: activity.activity_name_th,
+            description: activity.description_th,
+            description_th: activity.description_th,
+            target_value: targetValue,
+            target_unit: targetUnit,
+            target_days: 5,
+            start_date: today,
+            status: 'active',
+            priority: 1,
+            is_core_goal: true,
+            activity_id: activity.id,
+            created_by: createdBy,
+          });
+        });
+      }
+
+      console.log(`✅ L2/L3: Created ${goals.length} default goals`);
     }
 
-    // L4: เป้าหมายแชมป์ 8 ข้อ
+    // ===========================================
+    // L4: แชมป์ 8 กิจกรรม (5 วัน/สัปดาห์)
+    // ===========================================
     if (pamLevel === 'L4') {
-      goals.push(
-        // อาหาร (3 ข้อ)
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'carb_less_than_5',
-          goal_name_th: 'กินคาร์บ <5 คาร์บ/วัน',
-          description: 'กินคาร์โบไฮเดรต <5 คาร์บ/วัน',
-          description_th: 'กินคาร์โบไฮเดรต <5 คาร์บ/วัน',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'protein_more_than_3',
-          goal_name_th: 'กินโปรตีน >3 หน่วย',
-          description: 'กินโปรตีน >3 หน่วย/วัน',
-          description_th: 'กินโปรตีน >3 หน่วย/วัน',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'water_more_than_1L',
-          goal_name_th: 'ดื่มน้ำ >1 ลิตร',
-          description: 'ดื่มน้ำ >1 ลิตร/วัน',
-          description_th: 'ดื่มน้ำ >1 ลิตร/วัน',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        // ออกกำลังกาย (4 ข้อ)
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'stretching',
-          goal_name_th: 'Stretching',
-          description: 'ยืดเหยียด',
-          description_th: 'ยืดเหยียด',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'cardio',
-          goal_name_th: 'Cardio',
-          description: 'คาร์ดิโอ',
-          description_th: 'คาร์ดิโอ',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'strengthening',
-          goal_name_th: 'Strengthening',
-          description: 'เสริมสร้างกล้ามเนื้อ',
-          description_th: 'เสริมสร้างกล้ามเนื้อ',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'hiit',
-          goal_name_th: 'HIIT',
-          description: 'High Intensity Interval Training',
-          description_th: 'High Intensity Interval Training',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        },
-        // พักผ่อน (1 ข้อ)
-        {
-          user_id: userId,
-          goal_type: 'weekly_activity',
-          goal_name: 'sleep_enough',
-          goal_name_th: 'นอนหลับเพียงพอ',
-          description: 'นอนหลับ 7-8 ชั่วโมง/คืน',
-          description_th: 'นอนหลับ 7-8 ชั่วโมง/คืน',
-          target_days: 5,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: createdBy,
-        }
-      );
+      // ดึง activities จากฐานข้อมูล
+      const { data: activities, error: activitiesError } = await supabase
+        .from('activities')
+        .select('id, activity_code, activity_name_th, description_th, activity_type')
+        .in('activity_code', [
+          // อาหาร (3)
+          'carb_control',
+          'protein_intake',
+          'water_intake',
+          // ออกกำลังกาย (4)
+          'stretching',
+          'cardio',
+          'strengthening',
+          'hiit',
+          // พักผ่อน (1)
+          'sleep'
+        ])
+        .eq('is_active', true);
+
+      if (activitiesError) {
+        console.error('Error fetching activities:', activitiesError);
+      }
+
+      // สร้าง goals จาก activities ที่มี
+      if (activities && activities.length > 0) {
+        activities.forEach(activity => {
+          let targetValue = null;
+          let targetUnit = null;
+
+          // กำหนด target_value สำหรับ activity บางตัว
+          if (activity.activity_code === 'water_intake') {
+            targetValue = 1;
+            targetUnit = 'liters';
+          }
+
+          goals.push({
+            user_id: userId,
+            goal_type: 'weekly_activity',
+            goal_name: activity.activity_code,
+            goal_name_th: activity.activity_name_th,
+            description: activity.description_th,
+            description_th: activity.description_th,
+            target_value: targetValue,
+            target_unit: targetUnit,
+            target_days: 5,
+            start_date: today,
+            status: 'active',
+            priority: 1,
+            is_core_goal: true,
+            activity_id: activity.id,
+            created_by: createdBy,
+          });
+        });
+      }
+
+      console.log(`✅ L4: Created ${goals.length} default goals`);
     }
 
+    // ===========================================
     // บันทึก goals ลงฐานข้อมูล
+    // ===========================================
     if (goals.length > 0) {
       const { error } = await supabase.from('goals').insert(goals);
       
