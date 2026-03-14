@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, logout, getPatientDetail } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, LogOut, Save } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -20,16 +20,18 @@ export default function EditPatientPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [patient, setPatient] = useState<any>(null);
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
-  const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
 
   const [formData, setFormData] = useState({
+    // ข้อมูลส่วนตัว
     full_name: '',
     hospital_number: '',
     birth_date: '',
     gender: '',
     phone: '',
     email: '',
+    id_card: '',
+    
+    // ข้อมูลสุขภาพ
     current_weight: '',
     height: '',
     waist_circumference: '',
@@ -38,12 +40,18 @@ export default function EditPatientPage() {
     hba1c_level: '',
     blood_type: '',
     allergies: '',
+    current_medications: '',
     occupation: '',
     education_level: '',
+    
+    // ที่อยู่
     address_line1: '',
+    address_line2: '',
     district: '',
     province: '',
     postal_code: '',
+    
+    // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
@@ -79,6 +87,7 @@ export default function EditPatientPage() {
           gender: data.gender || '',
           phone: data.phone || '',
           email: data.email || '',
+          id_card: data.users?.id_card || '',
           current_weight: data.current_weight?.toString() || '',
           height: data.height?.toString() || '',
           waist_circumference: data.waist_circumference?.toString() || '',
@@ -87,9 +96,11 @@ export default function EditPatientPage() {
           hba1c_level: data.hba1c_level?.toString() || '',
           blood_type: data.blood_type || '',
           allergies: data.allergies || '',
+          current_medications: data.current_medications || '',
           occupation: data.occupation || '',
           education_level: data.education_level || '',
           address_line1: data.address_line1 || '',
+          address_line2: data.address_line2 || '',
           district: data.district || '',
           province: data.province || '',
           postal_code: data.postal_code || '',
@@ -100,216 +111,16 @@ export default function EditPatientPage() {
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ป่วย');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบเบอร์โทรศัพท์ไทย
-  const validatePhoneNumber = (phone: string): { valid: boolean; message: string } => {
-    if (!phone) return { valid: true, message: '' }; // อนุญาตให้ว่างได้
-    
-    // ลบช่องว่างและขีดกลาง
-    const cleaned = phone.replace(/[\s-]/g, '');
-    
-    // ตรวจสอบว่าเป็นตัวเลขเท่านั้น
-    if (!/^\d+$/.test(cleaned)) {
-      return { valid: false, message: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น' };
-    }
-    
-    // ตรวจสอบความยาว (9-10 หลัก)
-    if (cleaned.length < 9 || cleaned.length > 10) {
-      return { valid: false, message: 'เบอร์โทรศัพท์ต้องมี 9-10 หลัก' };
-    }
-    
-    // ตรวจสอบว่าขึ้นต้นด้วย 0
-    if (!cleaned.startsWith('0')) {
-      return { valid: false, message: 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0' };
-    }
-    
-    return { valid: true, message: 'เบอร์โทรศัพท์ถูกต้อง' };
-  };
-
-  // ✅ ฟังก์ชันตรวจสอบอีเมล
-  const validateEmail = (email: string): { valid: boolean; message: string } => {
-    if (!email) return { valid: true, message: '' };
-    
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return { valid: false, message: 'รูปแบบอีเมลไม่ถูกต้อง' };
-    }
-    
-    return { valid: true, message: 'อีเมลถูกต้อง' };
-  };
-
-  // ✅ ฟังก์ชันตรวจสอบค่าตัวเลขในช่วง
-  const validateRange = (
-    value: string,
-    fieldName: string,
-    min: number,
-    max: number,
-    unit: string,
-    required: boolean = false
-  ): { valid: boolean; message: string } => {
-    if (!value) {
-      if (required) {
-        return { valid: false, message: `${fieldName} เป็นข้อมูลจำเป็น` };
-      }
-      return { valid: true, message: '' };
-    }
-    
-    const numValue = parseFloat(value);
-    
-    if (isNaN(numValue)) {
-      return { valid: false, message: `${fieldName} ต้องเป็นตัวเลข` };
-    }
-    
-    if (numValue < min || numValue > max) {
-      return { 
-        valid: false, 
-        message: `${fieldName} ต้องอยู่ระหว่าง ${min}-${max} ${unit}` 
-      };
-    }
-    
-    return { valid: true, message: `${fieldName} ถูกต้อง` };
-  };
-
-  // ✅ ฟังก์ชันตรวจสอบ HN
-  const validateHospitalNumber = (hn: string): { valid: boolean; message: string } => {
-    if (!hn) return { valid: false, message: 'HN เป็นข้อมูลจำเป็น' };
-    
-    if (hn.length < 3) {
-      return { valid: false, message: 'HN ต้องมีความยาวอย่างน้อย 3 ตัวอักษร' };
-    }
-    
-    return { valid: true, message: 'HN ถูกต้อง' };
-  };
-
-  // ✅ ตรวจสอบ Real-time เมื่อมีการเปลี่ยนแปลง
-  useEffect(() => {
-    const errors: Record<string, string> = {};
-    const success: Record<string, boolean> = {};
-
-    // ตรวจสอบเบอร์โทรศัพท์
-    const phoneResult = validatePhoneNumber(formData.phone);
-    if (!phoneResult.valid) {
-      errors.phone = phoneResult.message;
-    } else if (formData.phone) {
-      success.phone = true;
-    }
-
-    // ตรวจสอบอีเมล
-    const emailResult = validateEmail(formData.email);
-    if (!emailResult.valid) {
-      errors.email = emailResult.message;
-    } else if (formData.email) {
-      success.email = true;
-    }
-
-    // ตรวจสอบน้ำหนัก (30-200 kg)
-    const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
-    if (!weightResult.valid) {
-      errors.current_weight = weightResult.message;
-    } else if (formData.current_weight) {
-      success.current_weight = true;
-    }
-
-    // ตรวจสอบส่วนสูง (100-250 cm)
-    const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
-    if (!heightResult.valid) {
-      errors.height = heightResult.message;
-    } else if (formData.height) {
-      success.height = true;
-    }
-
-    // ตรวจสอบรอบเอว (26-200 cm)
-    const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
-    if (!waistResult.valid) {
-      errors.waist_circumference = waistResult.message;
-    } else if (formData.waist_circumference) {
-      success.waist_circumference = true;
-    }
-
-    // ตรวจสอบ HN
-    const hnResult = validateHospitalNumber(formData.hospital_number);
-    if (!hnResult.valid) {
-      errors.hospital_number = hnResult.message;
-    } else {
-      success.hospital_number = true;
-    }
-
-    setValidationErrors(errors);
-    setValidationSuccess(success);
-  }, [formData]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // ✅ ตรวจสอบข้อมูลก่อนบันทึก
-    const errors: string[] = [];
-    
-    // ตรวจสอบ HN
-    if (!formData.hospital_number) {
-      errors.push('• HN เป็นข้อมูลจำเป็น');
-    }
-    
-    // ตรวจสอบเบอร์โทรศัพท์
-    if (formData.phone) {
-      const phoneResult = validatePhoneNumber(formData.phone);
-      if (!phoneResult.valid) {
-        errors.push(`• ${phoneResult.message}`);
-      }
-    }
-    
-    // ตรวจสอบอีเมล
-    if (formData.email) {
-      const emailResult = validateEmail(formData.email);
-      if (!emailResult.valid) {
-        errors.push(`• ${emailResult.message}`);
-      }
-    }
-    
-    // ตรวจสอบน้ำหนัก
-    if (formData.current_weight) {
-      const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
-      if (!weightResult.valid) {
-        errors.push(`• ${weightResult.message}`);
-      }
-    }
-    
-    // ตรวจสอบส่วนสูง
-    if (formData.height) {
-      const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
-      if (!heightResult.valid) {
-        errors.push(`• ${heightResult.message}`);
-      }
-    }
-    
-    // ตรวจสอบรอบเอว
-    if (formData.waist_circumference) {
-      const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
-      if (!waistResult.valid) {
-        errors.push(`• ${waistResult.message}`);
-      }
-    }
-    
-    // แสดง error ถ้ามี
-    if (errors.length > 0) {
-      alert(
-        `❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\n` +
-        `กรุณาแก้ไขข้อมูลดังต่อไปนี้:\n\n` +
-        errors.join('\n') +
-        `\n\n💡 คำแนะนำ: ดูข้อความแจ้งเตือนใต้ช่องกรอกข้อมูล`
-      );
-      return;
-    }
-    
     setSaving(true);
-    
+
     try {
-      console.log('💾 Updating patient with data:', formData);
-      
       const updateData: any = {
         full_name: formData.full_name,
         hospital_number: formData.hospital_number,
@@ -317,17 +128,19 @@ export default function EditPatientPage() {
         gender: formData.gender,
         phone: formData.phone,
         email: formData.email,
-        current_weight: formData.current_weight ? parseFloat(formData.current_weight) : null,
-        height: formData.height ? parseFloat(formData.height) : null,
-        waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
+        current_weight: formData.current_weight && formData.current_weight !== 'not_measured' ? parseFloat(formData.current_weight) : null,
+        height: formData.height && formData.height !== 'not_measured' ? parseFloat(formData.height) : null,
+        waist_circumference: formData.waist_circumference && formData.waist_circumference !== 'not_measured' ? parseFloat(formData.waist_circumference) : null,
         diabetes_type: formData.diabetes_type,
         diagnosis_date: formData.diagnosis_date,
-        hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : null,
+        hba1c_level: formData.hba1c_level && formData.hba1c_level !== 'not_measured' ? parseFloat(formData.hba1c_level) : null,
         blood_type: formData.blood_type,
         allergies: formData.allergies,
+        current_medications: formData.current_medications,
         occupation: formData.occupation,
         education_level: formData.education_level,
         address_line1: formData.address_line1,
+        address_line2: formData.address_line2,
         district: formData.district,
         province: formData.province,
         postal_code: formData.postal_code,
@@ -343,30 +156,8 @@ export default function EditPatientPage() {
         .eq('id', patientId);
 
       if (error) {
-        console.error('❌ Error updating patient:', error);
-        
-        let errorMessage = 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ';
-        
-        if (error.message) {
-          if (error.message.includes('waist_circumference')) {
-            errorMessage = '❌ รอบเอวต้องอยู่ระหว่าง 26-200 cm\n\nค่าที่กรอก: ' + formData.waist_circumference + ' cm';
-          } else if (error.message.includes('current_weight')) {
-            errorMessage = '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 kg\n\nค่าที่กรอก: ' + formData.current_weight + ' kg';
-          } else if (error.message.includes('height')) {
-            errorMessage = '❌ ส่วนสูงต้องอยู่ระหว่าง 100-250 cm\n\nค่าที่กรอก: ' + formData.height + ' cm';
-          } else if (error.message.includes('hospital_number')) {
-            errorMessage = '❌ เลข HN ซ้ำ กรุณาตรวจสอบ';
-          } else {
-            errorMessage = '❌ ' + error.message;
-          }
-        }
-        
-        alert(
-          `บันทึกข้อมูลไม่สำเร็จ\n\n` +
-          `${errorMessage}\n\n` +
-          `Technical: ${error.code || ''}\n\n` +
-          `กรุณาแก้ไขข้อมูลและลองใหม่อีกครั้ง`
-        );
+        console.error('Error updating patient:', error);
+        alert('❌ บันทึกข้อมูลไม่สำเร็จ\n\n' + error.message);
         return;
       }
 
@@ -374,11 +165,7 @@ export default function EditPatientPage() {
       router.push(`/admin/patients/${patientId}`);
     } catch (error: any) {
       console.error('Exception during update:', error);
-      alert(
-        `❌ เกิดข้อผิดพลาดในการบันทึก\n\n` +
-        `รายละเอียด: ${error.message || 'ไม่สามารถเชื่อมต่อระบบได้'}\n\n` +
-        `กรุณาติดต่อผู้ดูแลระบบหากปัญหายังคงอยู่`
-      );
+      alert('❌ เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
     }
@@ -431,8 +218,9 @@ export default function EditPatientPage() {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
+          
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลส่วนตัว</h2>
@@ -460,23 +248,8 @@ export default function EditPatientPage() {
                   required
                   value={formData.hospital_number}
                   onChange={(e) => setFormData({...formData, hospital_number: e.target.value})}
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.hospital_number ? 'border-red-500' : 
-                    validationSuccess.hospital_number ? 'border-green-500' : 'border-gray-300'
-                  }`}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
-                {validationErrors.hospital_number && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.hospital_number}
-                  </p>
-                )}
-                {validationSuccess.hospital_number && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.hospital_number}
-                  </p>
-                )}
               </div>
               
               <div>
@@ -516,24 +289,8 @@ export default function EditPatientPage() {
                   value={formData.phone}
                   onChange={(e) => setFormData({...formData, phone: e.target.value})}
                   placeholder="เช่น 0812345678"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.phone ? 'border-red-500' : 
-                    validationSuccess.phone ? 'border-green-500' : 'border-gray-300'
-                  }`}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
-                <p className="text-xs text-gray-500 mt-1">รูปแบบ: 0812345678 (9-10 หลัก)</p>
-                {validationErrors.phone && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.phone}
-                  </p>
-                )}
-                {validationSuccess.phone && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.phone}
-                  </p>
-                )}
               </div>
               
               <div>
@@ -544,24 +301,9 @@ export default function EditPatientPage() {
                   type="email"
                   value={formData.email}
                   onChange={(e) => setFormData({...formData, email: e.target.value})}
-                  placeholder="เช่น patient@example.com"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.email ? 'border-red-500' : 
-                    validationSuccess.email ? 'border-green-500' : 'border-gray-300'
-                  }`}
+                  placeholder="patient@example.com"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
-                {validationErrors.email && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.email}
-                  </p>
-                )}
-                {validationSuccess.email && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.email}
-                  </p>
-                )}
               </div>
             </div>
           </div>
@@ -575,31 +317,23 @@ export default function EditPatientPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   น้ำหนัก (kg)
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="30"
-                  max="200"
-                  value={formData.current_weight}
+                <select
+                  value={formData.current_weight || ''}
                   onChange={(e) => setFormData({...formData, current_weight: e.target.value})}
-                  placeholder="เช่น 65"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.current_weight ? 'border-red-500' : 
-                    validationSuccess.current_weight ? 'border-green-500' : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">ช่วงที่ยอมรับ: 30-200 kg</p>
-                {validationErrors.current_weight && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.current_weight}
-                  </p>
-                )}
-                {validationSuccess.current_weight && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.current_weight}
-                  </p>
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">-- เลือกค่า --</option>
+                  <option value="not_measured">ยังไม่ตรวจวัด</option>
+                  <option value="custom">ระบุเอง</option>
+                </select>
+                {formData.current_weight === 'custom' && (
+                  <input
+                    type="number"
+                    step="0.1"
+                    onChange={(e) => setFormData({...formData, current_weight: e.target.value})}
+                    className="w-full px-4 py-2 mt-2 border border-gray-300 rounded-lg"
+                    placeholder="ระบุน้ำหนัก"
+                  />
                 )}
               </div>
               
@@ -607,31 +341,23 @@ export default function EditPatientPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   ส่วนสูง (cm)
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="100"
-                  max="250"
-                  value={formData.height}
+                <select
+                  value={formData.height || ''}
                   onChange={(e) => setFormData({...formData, height: e.target.value})}
-                  placeholder="เช่น 170"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.height ? 'border-red-500' : 
-                    validationSuccess.height ? 'border-green-500' : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">ช่วงที่ยอมรับ: 100-250 cm</p>
-                {validationErrors.height && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.height}
-                  </p>
-                )}
-                {validationSuccess.height && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.height}
-                  </p>
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">-- เลือกค่า --</option>
+                  <option value="not_measured">ยังไม่ตรวจวัด</option>
+                  <option value="custom">ระบุเอง</option>
+                </select>
+                {formData.height === 'custom' && (
+                  <input
+                    type="number"
+                    step="0.1"
+                    onChange={(e) => setFormData({...formData, height: e.target.value})}
+                    className="w-full px-4 py-2 mt-2 border border-gray-300 rounded-lg"
+                    placeholder="ระบุส่วนสูง"
+                  />
                 )}
               </div>
               
@@ -639,31 +365,23 @@ export default function EditPatientPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   รอบเอว (cm)
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="26"
-                  max="200"
-                  value={formData.waist_circumference}
+                <select
+                  value={formData.waist_circumference || ''}
                   onChange={(e) => setFormData({...formData, waist_circumference: e.target.value})}
-                  placeholder="เช่น 85"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.waist_circumference ? 'border-red-500' : 
-                    validationSuccess.waist_circumference ? 'border-green-500' : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">ช่วงที่ยอมรับ: 26-200 cm</p>
-                {validationErrors.waist_circumference && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.waist_circumference}
-                  </p>
-                )}
-                {validationSuccess.waist_circumference && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.waist_circumference}
-                  </p>
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">-- เลือกค่า --</option>
+                  <option value="not_measured">ยังไม่ตรวจวัด</option>
+                  <option value="custom">ระบุเอง</option>
+                </select>
+                {formData.waist_circumference === 'custom' && (
+                  <input
+                    type="number"
+                    step="0.1"
+                    onChange={(e) => setFormData({...formData, waist_circumference: e.target.value})}
+                    className="w-full px-4 py-2 mt-2 border border-gray-300 rounded-lg"
+                    placeholder="ระบุรอบเอว"
+                  />
                 )}
               </div>
               
@@ -700,11 +418,173 @@ export default function EditPatientPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   ค่า HbA1c
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.hba1c_level}
+                <select
+                  value={formData.hba1c_level || ''}
                   onChange={(e) => setFormData({...formData, hba1c_level: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">-- เลือกค่า --</option>
+                  <option value="not_measured">ยังไม่ตรวจวัด</option>
+                  <option value="custom">ระบุเอง</option>
+                </select>
+                {formData.hba1c_level === 'custom' && (
+                  <input
+                    type="number"
+                    step="0.1"
+                    onChange={(e) => setFormData({...formData, hba1c_level: e.target.value})}
+                    className="w-full px-4 py-2 mt-2 border border-gray-300 rounded-lg"
+                    placeholder="ระบุค่า HbA1c"
+                  />
+                )}
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  หมู่เลือด
+                </label>
+                <select
+                  value={formData.blood_type}
+                  onChange={(e) => setFormData({...formData, blood_type: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                >
+                  <option value="">-- เลือกหมู่เลือด --</option>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                  <option value="AB">AB</option>
+                  <option value="O">O</option>
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                </select>
+              </div>
+              
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  การแพ้ยา/อาหาร
+                </label>
+                <input
+                  type="text"
+                  value={formData.allergies}
+                  onChange={(e) => setFormData({...formData, allergies: e.target.value})}
+                  placeholder="เช่น Penicillin, ถั่วลิสง"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* ที่อยู่ */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">ที่อยู่</h2>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ที่อยู่บรรทัดที่ 1
+                </label>
+                <input
+                  type="text"
+                  value={formData.address_line1}
+                  onChange={(e) => setFormData({...formData, address_line1: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ที่อยู่บรรทัดที่ 2
+                </label>
+                <input
+                  type="text"
+                  value={formData.address_line2}
+                  onChange={(e) => setFormData({...formData, address_line2: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    เขต/อำเภอ
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.district}
+                    onChange={(e) => setFormData({...formData, district: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    จังหวัด
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.province}
+                    onChange={(e) => setFormData({...formData, province: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    รหัสไปรษณีย์
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.postal_code}
+                    onChange={(e) => setFormData({...formData, postal_code: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ผู้ติดต่อฉุกเฉิน */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">ผู้ติดต่อฉุกเฉิน</h2>
+            
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ชื่อผู้ติดต่อ
+                </label>
+                <input
+                  type="text"
+                  value={formData.emergency_contact_name}
+                  onChange={(e) => setFormData({...formData, emergency_contact_name: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  เบอร์โทรศัพท์
+                </label>
+                <input
+                  type="tel"
+                  value={formData.emergency_contact_phone}
+                  onChange={(e) => setFormData({...formData, emergency_contact_phone: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ความสัมพันธ์
+                </label>
+                <input
+                  type="text"
+                  value={formData.emergency_contact_relationship}
+                  onChange={(e) => setFormData({...formData, emergency_contact_relationship: e.target.value})}
+                  placeholder="เช่น พ่อ, แม่, สามี"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
@@ -715,7 +595,7 @@ export default function EditPatientPage() {
           <div className="flex gap-4">
             <button
               type="submit"
-              disabled={saving || Object.keys(validationErrors).length > 0}
+              disabled={saving}
               className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {saving ? (
