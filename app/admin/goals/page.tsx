@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Target, Trophy } from 'lucide-react';
+import { ArrowLeft, LogOut, Save, Target, History } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -14,18 +14,18 @@ const supabase = createClient(
 // ✅ กิจกรรมคงที่ตาม PAM Level (ไม่สามารถเพิ่ม/ลบได้)
 const FIXED_GOALS = {
   L2: [
-    { code: 'stop_sweet', name_th: 'หยุดกินหวาน', type: 'food', default_days: 5 },
-    { code: 'reduce_rice', name_th: 'ลดข้าวลง', type: 'food', default_days: 5 },
-    { code: 'protein_vegetable', name_th: 'โปรตีนทุกมื้อ', type: 'food', default_days: 5 },
-    { code: 'exercise_walk', name_th: 'เดินทุกวัน', type: 'exercise', default_days: 5, target_value: 15, target_unit: 'minutes' },
-    { code: 'record_weight_sugar', name_th: 'บันทึกน้ำหนัก/น้ำตาล', type: 'measurement', default_days: 5 },
+    { code: 'stop_sweet', name_th: 'หยุดกินหวาน', type: 'food', default_days: 3 },
+    { code: 'reduce_rice', name_th: 'ลดข้าวลง', type: 'food', default_days: 3 },
+    { code: 'protein_vegetable', name_th: 'โปรตีนทุกมื้อ', type: 'food', default_days: 3 },
+    { code: 'exercise_walk', name_th: 'เดินทุกวัน', type: 'exercise', default_days: 3, target_value: 15, target_unit: 'minutes' },
+    { code: 'record_weight_sugar', name_th: 'บันทึกน้ำหนัก/น้ำตาล', type: 'measurement', default_days: 3 },
   ],
   L3: [
-    { code: 'stop_sweet', name_th: 'หยุดกินหวาน', type: 'food', default_days: 5 },
-    { code: 'reduce_rice', name_th: 'ลดข้าวลง', type: 'food', default_days: 5 },
-    { code: 'protein_vegetable', name_th: 'โปรตีนทุกมื้อ', type: 'food', default_days: 5 },
-    { code: 'exercise_walk', name_th: 'เดินทุกวัน', type: 'exercise', default_days: 5, target_value: 15, target_unit: 'minutes' },
-    { code: 'record_weight_sugar', name_th: 'บันทึกน้ำหนัก/น้ำตาล', type: 'measurement', default_days: 5 },
+    { code: 'stop_sweet', name_th: 'หยุดกินหวาน', type: 'food', default_days: 4 },
+    { code: 'reduce_rice', name_th: 'ลดข้าวลง', type: 'food', default_days: 4 },
+    { code: 'protein_vegetable', name_th: 'โปรตีนทุกมื้อ', type: 'food', default_days: 4 },
+    { code: 'exercise_walk', name_th: 'เดินทุกวัน', type: 'exercise', default_days: 4, target_value: 15, target_unit: 'minutes' },
+    { code: 'record_weight_sugar', name_th: 'บันทึกน้ำหนัก/น้ำตาล', type: 'measurement', default_days: 4 },
   ],
   L4: [
     // อาหาร (3)
@@ -42,6 +42,14 @@ const FIXED_GOALS = {
   ],
 };
 
+// ✅ Long-term Goals 4 ข้อ (Core Performance Goals)
+const LONG_TERM_GOALS = [
+  { code: 'weight', name_th: 'น้ำหนักลด (Weight Reduction)', description: 'ลดลงอย่างน้อย 5-10% และลด Visceral Fat' },
+  { code: 'glucose', name_th: 'น้ำตาลลง (Glucose Control)', description: 'ควบคุมระดับน้ำตาลในเลือดให้เข้าสู่เกณฑ์ปกติ' },
+  { code: 'medication', name_th: 'ลดยาได้ (Medication De-escalation)', description: 'ปรับลดหรือหยุดยาภายใต้การกำกับของแพทย์' },
+  { code: 'remission', name_th: 'ภาวะเบาหวานสงบ (Remission)', description: 'บรรลุ HbA1c < 6.5% โดยไม่ต้องใช้ยาต่อเนื่อง' },
+];
+
 interface Goal {
   id: string;
   user_id: string;
@@ -52,6 +60,7 @@ interface Goal {
   target_value: number | null;
   target_unit: string | null;
   activity_id: string | null;
+  created_at: string;
 }
 
 export default function AdminGoalsPage() {
@@ -83,7 +92,6 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadPatients();
 
-    // ✅ ถ้ามี patient_id ใน URL
     const patientId = searchParams.get('patient_id');
     if (patientId) {
       setSelectedPatient(patientId);
@@ -104,19 +112,18 @@ export default function AdminGoalsPage() {
   const loadPatientGoals = async (patientId: string) => {
     try {
       const data = await getPatientGoals(patientId);
-      setGoals(data);
       
-      // หา PAM Level จากผู้ป่วย
       const patient = patients.find(p => p.id === patientId);
       if (patient) {
         setPatientPamLevel(patient.pam_level || 'L2');
       }
 
-      // ✅ โหลดค่าที่แก้ไขแล้ว
+      setGoals(data);
+
       const edits: Record<string, { target_days: number; target_value?: string }> = {};
       data.forEach((goal: Goal) => {
         edits[goal.goal_name] = {
-          target_days: goal.target_days,
+          target_days: goal.target_days || 5,
           target_value: goal.target_value?.toString() || '',
         };
       });
@@ -147,77 +154,51 @@ export default function AdminGoalsPage() {
     }));
   };
 
-  const handleSaveAll = async () => {
+  const handleSaveNewRound = async () => {
     if (!selectedPatient) {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
 
-    setSaving(true);
-
-    try {
-      // ✅ อัพเดททุก goal ที่มีการแก้ไข
-      const updatePromises = goals.map(goal => {
-        const edit = editedGoals[goal.goal_name];
-        if (!edit) return null;
-
-        return supabase
-          .from('goals')
-          .update({
-            target_days: edit.target_days,
-            target_value: edit.target_value ? parseFloat(edit.target_value) : null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', goal.id);
-      });
-
-      await Promise.all(updatePromises.filter(Boolean));
-
-      alert('✅ บันทึกเป้าหมายสำเร็จ!');
-      loadPatientGoals(selectedPatient);
-    } catch (error) {
-      console.error('Error saving goals:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึก');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCreateDefaultGoals = async () => {
-    if (!selectedPatient || !patientPamLevel) {
-      alert('กรุณาเลือกผู้ป่วย');
-      return;
-    }
-
-    if (confirm('ต้องการสร้างเป้าหมายเริ่มต้นใหม่หรือไม่? (เป้าหมายเดิมจะถูกลบและสร้างใหม่)')) {
+    if (confirm('ต้องการบันทึกกิจกรรมรอบใหม่หรือไม่?\n\nระบบจะเก็บเป้าหมายเดิมเป็นประวัติ และสร้างเป้าหมายใหม่แทน')) {
       setSaving(true);
 
       try {
-        // ✅ ลบ goals เดิมทั้งหมด
-        await supabase
-          .from('goals')
-          .delete()
-          .eq('user_id', selectedPatient)
-          .eq('goal_type', 'weekly_activity');
+        // ✅ 1. เก็บ goals เดิมเป็นประวัติ (เปลี่ยน status เป็น 'archived')
+        if (goals.length > 0) {
+          await supabase
+            .from('goals')
+            .update({ 
+              status: 'archived',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', selectedPatient)
+            .eq('goal_type', 'weekly_activity')
+            .eq('status', 'active');
+        }
 
-        // ✅ สร้าง goals ใหม่จาก FIXED_GOALS
+        // ✅ 2. สร้าง goals ใหม่จากที่แก้ไข
         const fixedGoals = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS] || [];
         const today = new Date().toISOString().split('T')[0];
 
-        const newGoals = fixedGoals.map(goal => ({
-          user_id: selectedPatient,
-          goal_type: 'weekly_activity' as const,
-          goal_name: goal.code,
-          goal_name_th: goal.name_th,
-          target_days: goal.default_days,
-          target_value: (goal as any).target_value || null,
-          target_unit: (goal as any).target_unit || null,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: user?.id,
-        }));
+        const newGoals = fixedGoals.map(goal => {
+          const edit = editedGoals[goal.code] || { target_days: goal.default_days };
+          
+          return {
+            user_id: selectedPatient,
+            goal_type: 'weekly_activity' as const,
+            goal_name: goal.code,
+            goal_name_th: goal.name_th,
+            target_days: edit.target_days,
+            target_value: goal.target_value !== undefined ? (edit.target_value ? parseFloat(edit.target_value) : goal.target_value) : null,
+            target_unit: goal.target_unit || null,
+            start_date: today,
+            status: 'active',
+            priority: 1,
+            is_core_goal: true,
+            created_by: user?.id,
+          };
+        });
 
         const { error } = await supabase.from('goals').insert(newGoals);
 
@@ -226,11 +207,11 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        alert(`✅ สร้างเป้าหมายสำเร็จ: ${newGoals.length} กิจกรรม`);
+        alert(`✅ บันทึกกิจกรรมรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม\n\nเป้าหมายเดิมถูกเก็บเป็นประวัติแล้ว`);
         loadPatientGoals(selectedPatient);
       } catch (error) {
-        console.error('Error creating default goals:', error);
-        alert('เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
+        console.error('Error saving new round:', error);
+        alert('เกิดข้อผิดพลาดในการบันทึก');
       } finally {
         setSaving(false);
       }
@@ -242,27 +223,27 @@ export default function AdminGoalsPage() {
     router.push('/admin/login');
   };
 
-  // ✅ แยก goals ตามประเภท
+  // ✅ แยก goals ตามประเภท (ไม่มี Rest สำหรับ L2/L3)
   const foodGoals = goals.filter(g => {
-    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const allGoals = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS] || [];
     const goal = allGoals.find(a => a.code === g.goal_name);
     return goal?.type === 'food';
   });
 
   const exerciseGoals = goals.filter(g => {
-    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const allGoals = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS] || [];
     const goal = allGoals.find(a => a.code === g.goal_name);
     return goal?.type === 'exercise';
   });
 
   const measurementGoals = goals.filter(g => {
-    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const allGoals = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS] || [];
     const goal = allGoals.find(a => a.code === g.goal_name);
     return goal?.type === 'measurement';
   });
 
   const restGoals = goals.filter(g => {
-    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const allGoals = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS] || [];
     const goal = allGoals.find(a => a.code === g.goal_name);
     return goal?.type === 'rest';
   });
@@ -315,15 +296,6 @@ export default function AdminGoalsPage() {
               <Target className="w-5 h-5 text-blue-600" />
               เลือกผู้ป่วย
             </h2>
-            {selectedPatient && (
-              <button
-                onClick={handleCreateDefaultGoals}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm"
-              >
-                <Trophy className="w-4 h-4" />
-                สร้างเป้าหมายเริ่มต้นใหม่
-              </button>
-            )}
           </div>
           <select
             value={selectedPatient}
@@ -346,11 +318,29 @@ export default function AdminGoalsPage() {
               <p className="text-sm text-blue-800">
                 <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
                 <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
-                {patientPamLevel === 'L2' || patientPamLevel === 'L3' ? ' (กฎทอง 5 ข้อ)' : ' (แชมป์ 8 กิจกรรม)'}
+                {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
+                {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
+                {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
               </p>
               <p className="text-xs text-blue-600 mt-1">
-                💡 สามารถแก้ไขจำนวนวัน/สัปดาห์ และค่าเป้าหมาย (สำหรับกิจกรรมเดิน) เท่านั้น
+                💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกกิจกรรมรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
               </p>
+            </div>
+
+            {/* Long-term Goals (Core Performance Goals) */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <History className="w-5 h-5 text-purple-600" />
+                เป้าหมายหลัก 4 ประการ (Core Performance Goals)
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {LONG_TERM_GOALS.map((goal, index) => (
+                  <div key={index} className="p-4 rounded-xl border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50">
+                    <p className="font-bold text-gray-800 mb-1">{index + 1}. {goal.name_th}</p>
+                    <p className="text-sm text-gray-600">{goal.description}</p>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Food Goals */}
@@ -365,13 +355,15 @@ export default function AdminGoalsPage() {
                     <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์</p>
+                        <p className="text-sm text-gray-500">
+                          ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์
+                        </p>
                       </div>
                       <div className="flex items-center gap-4">
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
                           <select
-                            value={editedGoals[goal.goal_name]?.target_days || 5}
+                            value={editedGoals[goal.goal_name]?.target_days || FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days || 5}
                             onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
                             className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                           >
@@ -416,7 +408,7 @@ export default function AdminGoalsPage() {
                                 min="5"
                                 max="120"
                                 step="5"
-                                value={editedGoals[goal.goal_name]?.target_value || fixedGoal?.target_value || 15}
+                                value={editedGoals[goal.goal_name]?.target_value || fixedGoal?.target_value?.toString() || '15'}
                                 onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_value', e.target.value)}
                                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
                               />
@@ -425,7 +417,7 @@ export default function AdminGoalsPage() {
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
                             <select
-                              value={editedGoals[goal.goal_name]?.target_days || 5}
+                              value={editedGoals[goal.goal_name]?.target_days || fixedGoal?.default_days || 5}
                               onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
                               className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                             >
@@ -456,12 +448,14 @@ export default function AdminGoalsPage() {
                     <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์</p>
+                        <p className="text-sm text-gray-500">
+                          ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์
+                        </p>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
                         <select
-                          value={editedGoals[goal.goal_name]?.target_days || 5}
+                          value={editedGoals[goal.goal_name]?.target_days || FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days || 5}
                           onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
                           className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                         >
@@ -478,24 +472,26 @@ export default function AdminGoalsPage() {
               )}
             </div>
 
-            {/* Rest Goals */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                🌙 เป้าหมายรายสัปดาห์ - พักผ่อน
-              </h2>
+            {/* Rest Goals (เฉพาะ L4) */}
+            {patientPamLevel === 'L4' && restGoals.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  🌙 เป้าหมายรายสัปดาห์ - พักผ่อน
+                </h2>
 
-              {restGoals.length > 0 ? (
                 <div className="space-y-4">
                   {restGoals.map((goal) => (
                     <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์</p>
+                        <p className="text-sm text-gray-500">
+                          ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์
+                        </p>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
                         <select
-                          value={editedGoals[goal.goal_name]?.target_days || 5}
+                          value={editedGoals[goal.goal_name]?.target_days || FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days || 5}
                           onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
                           className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                         >
@@ -507,17 +503,15 @@ export default function AdminGoalsPage() {
                     </div>
                   ))}
                 </div>
-              ) : (
-                <p className="text-gray-500 text-center py-4">ยังไม่มีกิจกรรมพักผ่อน</p>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Save Button */}
             <div className="flex gap-4">
               <button
-                onClick={handleSaveAll}
+                onClick={handleSaveNewRound}
                 disabled={saving || goals.length === 0}
-                className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {saving ? (
                   <>
@@ -527,7 +521,7 @@ export default function AdminGoalsPage() {
                 ) : (
                   <>
                     <Save className="w-5 h-5" />
-                    บันทึกการแก้ไข
+                    บันทึกกิจกรรมรอบใหม่
                   </>
                 )}
               </button>
