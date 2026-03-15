@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, getPatientGoals, createDefaultGoals } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Plus, Edit, Trash2, Target, Trophy, Activity } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
+import { ArrowLeft, LogOut, Save, Target, Trophy } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -11,18 +11,23 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// ✅ กิจกรรมทั้งหมดที่สอดคล้องกับ Mobile App
-const ACTIVITY_CODES = {
-  // L2/L3 - กฎทอง 5 ข้อ
-  GOLDEN_RULES: [
+// ✅ กิจกรรมคงที่ตาม PAM Level (ไม่สามารถเพิ่ม/ลบได้)
+const FIXED_GOALS = {
+  L2: [
     { code: 'stop_sweet', name_th: 'หยุดกินหวาน', type: 'food', default_days: 5 },
     { code: 'reduce_rice', name_th: 'ลดข้าวลง', type: 'food', default_days: 5 },
     { code: 'protein_vegetable', name_th: 'โปรตีนทุกมื้อ', type: 'food', default_days: 5 },
     { code: 'exercise_walk', name_th: 'เดินทุกวัน', type: 'exercise', default_days: 5, target_value: 15, target_unit: 'minutes' },
     { code: 'record_weight_sugar', name_th: 'บันทึกน้ำหนัก/น้ำตาล', type: 'measurement', default_days: 5 },
   ],
-  // L4 - แชมป์ 8 กิจกรรม
-  CHAMPION: [
+  L3: [
+    { code: 'stop_sweet', name_th: 'หยุดกินหวาน', type: 'food', default_days: 5 },
+    { code: 'reduce_rice', name_th: 'ลดข้าวลง', type: 'food', default_days: 5 },
+    { code: 'protein_vegetable', name_th: 'โปรตีนทุกมื้อ', type: 'food', default_days: 5 },
+    { code: 'exercise_walk', name_th: 'เดินทุกวัน', type: 'exercise', default_days: 5, target_value: 15, target_unit: 'minutes' },
+    { code: 'record_weight_sugar', name_th: 'บันทึกน้ำหนัก/น้ำตาล', type: 'measurement', default_days: 5 },
+  ],
+  L4: [
     // อาหาร (3)
     { code: 'carb_control', name_th: 'กินคาร์บ <5 คาร์บ/วัน', type: 'food', default_days: 5 },
     { code: 'protein_intake', name_th: 'กินโปรตีน >3 หน่วย', type: 'food', default_days: 5 },
@@ -35,13 +40,6 @@ const ACTIVITY_CODES = {
     // พักผ่อน (1)
     { code: 'sleep', name_th: 'นอนหลับเพียงพอ', type: 'rest', default_days: 5 },
   ],
-  // Long-term Goals
-  LONG_TERM: [
-    { code: 'weight', name_th: 'น้ำหนัก', type: 'weight' },
-    { code: 'glucose', name_th: 'น้ำตาลในเลือด', type: 'glucose' },
-    { code: 'medication', name_th: 'การกินยา', type: 'medication' },
-    { code: 'remission', name_th: 'ภาวะสงบ', type: 'remission' },
-  ],
 };
 
 interface Goal {
@@ -50,19 +48,15 @@ interface Goal {
   goal_type: string;
   goal_name: string;
   goal_name_th: string;
-  description_th: string | null;
+  target_days: number;
   target_value: number | null;
   target_unit: string | null;
-  target_days: number;
-  start_date: string;
-  status: string;
-  priority: number;
-  is_core_goal: boolean;
   activity_id: string | null;
 }
 
 export default function AdminGoalsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,21 +64,7 @@ export default function AdminGoalsPage() {
   const [selectedPatient, setSelectedPatient] = useState('');
   const [patientPamLevel, setPatientPamLevel] = useState('');
   const [goals, setGoals] = useState<Goal[]>([]);
-  const [showModal, setShowModal] = useState(false);
-  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
-  const [goalType, setGoalType] = useState<'weekly' | 'long_term'>('weekly');
-
-  const [formData, setFormData] = useState({
-    goal_type: 'weekly_activity',
-    goal_name: '',
-    goal_name_th: '',
-    description_th: '',
-    target_value: '',
-    target_unit: '',
-    target_days: 5,
-    priority: 1,
-    is_core_goal: true,
-  });
+  const [editedGoals, setEditedGoals] = useState<Record<string, { target_days: number; target_value?: string }>>({});
 
   useEffect(() => {
     const userData = checkSession();
@@ -102,7 +82,13 @@ export default function AdminGoalsPage() {
 
     setUser(userData);
     loadPatients();
-  }, [router]);
+
+    // ✅ ถ้ามี patient_id ใน URL
+    const patientId = searchParams.get('patient_id');
+    if (patientId) {
+      setSelectedPatient(patientId);
+    }
+  }, [router, searchParams]);
 
   const loadPatients = async () => {
     try {
@@ -125,6 +111,16 @@ export default function AdminGoalsPage() {
       if (patient) {
         setPatientPamLevel(patient.pam_level || 'L2');
       }
+
+      // ✅ โหลดค่าที่แก้ไขแล้ว
+      const edits: Record<string, { target_days: number; target_value?: string }> = {};
+      data.forEach((goal: Goal) => {
+        edits[goal.goal_name] = {
+          target_days: goal.target_days,
+          target_value: goal.target_value?.toString() || '',
+        };
+      });
+      setEditedGoals(edits);
     } catch (error) {
       console.error('Error loading goals:', error);
     }
@@ -137,152 +133,106 @@ export default function AdminGoalsPage() {
     } else {
       setGoals([]);
       setPatientPamLevel('');
+      setEditedGoals({});
     }
   };
 
-  const handleAddGoal = (activityCode?: string, activityName?: string, activityType?: string) => {
-    setEditingGoal(null);
-    if (activityCode && activityName) {
-      setFormData({
-        goal_type: 'weekly_activity',
-        goal_name: activityCode,
-        goal_name_th: activityName || '',
-        description_th: '',
-        target_value: '',
-        target_unit: '',
-        target_days: 5,
-        priority: 1,
-        is_core_goal: true,
-      });
-    } else {
-      setFormData({
-        goal_type: goalType === 'weekly' ? 'weekly_activity' : 'weight',
-        goal_name: '',
-        goal_name_th: '',
-        description_th: '',
-        target_value: '',
-        target_unit: '',
-        target_days: 5,
-        priority: 1,
-        is_core_goal: true,
-      });
+  const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
+    setEditedGoals(prev => ({
+      ...prev,
+      [goalName]: {
+        ...prev[goalName],
+        [field]: value,
+      },
+    }));
+  };
+
+  const handleSaveAll = async () => {
+    if (!selectedPatient) {
+      alert('กรุณาเลือกผู้ป่วย');
+      return;
     }
-    setShowModal(true);
-  };
 
-  const handleEditGoal = (goal: Goal) => {
-    setEditingGoal(goal);
-    setFormData({
-      goal_type: goal.goal_type,
-      goal_name: goal.goal_name,
-      goal_name_th: goal.goal_name_th,
-      description_th: goal.description_th || '',
-      target_value: goal.target_value?.toString() || '',
-      target_unit: goal.target_unit || '',
-      target_days: goal.target_days || 5,
-      priority: goal.priority || 1,
-      is_core_goal: goal.is_core_goal || false,
-    });
-    setShowModal(true);
-  };
-
-  const handleDeleteGoal = async (goalId: string) => {
-    if (confirm('ยืนยันการลบเป้าหมายนี้?')) {
-      try {
-        const { error } = await supabase
-          .from('goals')
-          .update({ status: 'cancelled' })
-          .eq('id', goalId);
-
-        if (error) {
-          alert('เกิดข้อผิดพลาด: ' + error.message);
-          return;
-        }
-
-        alert('✅ ลบเป้าหมายสำเร็จ!');
-        loadPatientGoals(selectedPatient);
-      } catch (error) {
-        alert('เกิดข้อผิดพลาดในการลบ');
-      }
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
     setSaving(true);
 
     try {
-      const goalData: any = {
-        user_id: selectedPatient,
-        goal_type: formData.goal_type,
-        goal_name: formData.goal_name,
-        goal_name_th: formData.goal_name_th,
-        description: formData.description_th,
-        description_th: formData.description_th,
-        target_value: formData.target_value ? parseFloat(formData.target_value) : null,
-        target_unit: formData.target_unit,
-        target_days: formData.target_days,
-        start_date: new Date().toISOString().split('T')[0],
-        status: 'active',
-        priority: formData.priority,
-        is_core_goal: formData.is_core_goal,
-        created_by: user?.id,
-      };
+      // ✅ อัพเดททุก goal ที่มีการแก้ไข
+      const updatePromises = goals.map(goal => {
+        const edit = editedGoals[goal.goal_name];
+        if (!edit) return null;
 
-      if (editingGoal) {
-        // แก้ไขเป้าหมายเดิม
-        const { error } = await supabase
+        return supabase
           .from('goals')
-          .update(goalData)
-          .eq('id', editingGoal.id);
+          .update({
+            target_days: edit.target_days,
+            target_value: edit.target_value ? parseFloat(edit.target_value) : null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', goal.id);
+      });
 
-        if (error) {
-          alert('เกิดข้อผิดพลาด: ' + error.message);
-          return;
-        }
+      await Promise.all(updatePromises.filter(Boolean));
 
-        alert('✅ แก้ไขเป้าหมายสำเร็จ!');
-      } else {
-        // เพิ่มเป้าหมายใหม่
-        const { error } = await supabase
-          .from('goals')
-          .insert(goalData);
-
-        if (error) {
-          alert('เกิดข้อผิดพลาด: ' + error.message);
-          return;
-        }
-
-        alert('✅ เพิ่มเป้าหมายสำเร็จ!');
-      }
-
-      setShowModal(false);
+      alert('✅ บันทึกเป้าหมายสำเร็จ!');
       loadPatientGoals(selectedPatient);
     } catch (error) {
+      console.error('Error saving goals:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleRecreateDefaultGoals = async () => {
+  const handleCreateDefaultGoals = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
 
-    if (confirm('ต้องการสร้างเป้าหมายเริ่มต้นใหม่หรือไม่? (เป้าหมายเดิมจะยังคงอยู่)')) {
+    if (confirm('ต้องการสร้างเป้าหมายเริ่มต้นใหม่หรือไม่? (เป้าหมายเดิมจะถูกลบและสร้างใหม่)')) {
+      setSaving(true);
+
       try {
-        const result = await createDefaultGoals(selectedPatient, patientPamLevel, user?.id);
-        
-        if (result.success) {
-          alert(`✅ สร้างเป้าหมายสำเร็จ: ${result.count} กิจกรรม`);
-          loadPatientGoals(selectedPatient);
-        } else {
-          alert('เกิดข้อผิดพลาด: ' + result.error);
+        // ✅ ลบ goals เดิมทั้งหมด
+        await supabase
+          .from('goals')
+          .delete()
+          .eq('user_id', selectedPatient)
+          .eq('goal_type', 'weekly_activity');
+
+        // ✅ สร้าง goals ใหม่จาก FIXED_GOALS
+        const fixedGoals = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS] || [];
+        const today = new Date().toISOString().split('T')[0];
+
+        const newGoals = fixedGoals.map(goal => ({
+          user_id: selectedPatient,
+          goal_type: 'weekly_activity' as const,
+          goal_name: goal.code,
+          goal_name_th: goal.name_th,
+          target_days: goal.default_days,
+          target_value: (goal as any).target_value || null,
+          target_unit: (goal as any).target_unit || null,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: user?.id,
+        }));
+
+        const { error } = await supabase.from('goals').insert(newGoals);
+
+        if (error) {
+          alert('เกิดข้อผิดพลาด: ' + error.message);
+          return;
         }
+
+        alert(`✅ สร้างเป้าหมายสำเร็จ: ${newGoals.length} กิจกรรม`);
+        loadPatientGoals(selectedPatient);
       } catch (error) {
+        console.error('Error creating default goals:', error);
         alert('เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
+      } finally {
+        setSaving(false);
       }
     }
   };
@@ -292,31 +242,29 @@ export default function AdminGoalsPage() {
     router.push('/admin/login');
   };
 
-  // แยก goals ตามประเภท
-  const weeklyGoals = goals.filter(g => g.goal_type === 'weekly_activity');
-  const longTermGoals = goals.filter(g => 
-    ['weight', 'glucose', 'medication', 'remission'].includes(g.goal_type)
-  );
+  // ✅ แยก goals ตามประเภท
+  const foodGoals = goals.filter(g => {
+    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const goal = allGoals.find(a => a.code === g.goal_name);
+    return goal?.type === 'food';
+  });
 
-  // แยก weekly goals ตามประเภทกิจกรรม
-  const foodGoals = weeklyGoals.filter(g => {
-    const activity = [...ACTIVITY_CODES.GOLDEN_RULES, ...ACTIVITY_CODES.CHAMPION].find(a => a.code === g.goal_name);
-    return activity?.type === 'food';
+  const exerciseGoals = goals.filter(g => {
+    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const goal = allGoals.find(a => a.code === g.goal_name);
+    return goal?.type === 'exercise';
   });
-  
-  const exerciseGoals = weeklyGoals.filter(g => {
-    const activity = [...ACTIVITY_CODES.GOLDEN_RULES, ...ACTIVITY_CODES.CHAMPION].find(a => a.code === g.goal_name);
-    return activity?.type === 'exercise';
+
+  const measurementGoals = goals.filter(g => {
+    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const goal = allGoals.find(a => a.code === g.goal_name);
+    return goal?.type === 'measurement';
   });
-  
-  const measurementGoals = weeklyGoals.filter(g => {
-    const activity = [...ACTIVITY_CODES.GOLDEN_RULES, ...ACTIVITY_CODES.CHAMPION].find(a => a.code === g.goal_name);
-    return activity?.type === 'measurement';
-  });
-  
-  const restGoals = weeklyGoals.filter(g => {
-    const activity = [...ACTIVITY_CODES.GOLDEN_RULES, ...ACTIVITY_CODES.CHAMPION].find(a => a.code === g.goal_name);
-    return activity?.type === 'rest';
+
+  const restGoals = goals.filter(g => {
+    const allGoals = [...(FIXED_GOALS.L2 || []), ...(FIXED_GOALS.L4 || [])];
+    const goal = allGoals.find(a => a.code === g.goal_name);
+    return goal?.type === 'rest';
   });
 
   if (loading) {
@@ -367,12 +315,12 @@ export default function AdminGoalsPage() {
               <Target className="w-5 h-5 text-blue-600" />
               เลือกผู้ป่วย
             </h2>
-            {selectedPatient && patientPamLevel && (
+            {selectedPatient && (
               <button
-                onClick={handleRecreateDefaultGoals}
+                onClick={handleCreateDefaultGoals}
                 className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm"
               >
-                <Plus className="w-4 h-4" />
+                <Trophy className="w-4 h-4" />
                 สร้างเป้าหมายเริ่มต้นใหม่
               </button>
             )}
@@ -391,112 +339,47 @@ export default function AdminGoalsPage() {
           </select>
         </div>
 
-        {selectedPatient && (
+        {selectedPatient && patientPamLevel && (
           <>
-            {/* Long-term Goals */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Trophy className="w-5 h-5 text-yellow-600" />
-                  เป้าหมายระยะยาว
-                </h2>
-                <button
-                  onClick={() => {
-                    setGoalType('long_term');
-                    handleAddGoal();
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  เพิ่มเป้าหมาย
-                </button>
-              </div>
-
-              {longTermGoals.length > 0 ? (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {longTermGoals.map((goal) => (
-                    <div
-                      key={goal.id}
-                      className="p-4 rounded-xl border-2 bg-gradient-to-br from-blue-50 to-cyan-50 border-blue-200"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-lg font-bold text-gray-800">{goal.goal_name_th}</span>
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => handleEditGoal(goal)}
-                            className="p-1 text-blue-600 hover:bg-blue-100 rounded"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteGoal(goal.id)}
-                            className="p-1 text-red-600 hover:bg-red-100 rounded"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-sm text-gray-600">
-                        {goal.target_value && `${goal.target_value} ${goal.target_unit || ''}`}
-                      </p>
-                      <span className={`inline-block mt-2 px-2 py-1 rounded text-xs font-semibold ${
-                        goal.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {goal.status === 'active' ? 'ใช้งาน' : goal.status}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-gray-500 text-center py-4">ยังไม่มีเป้าหมายระยะยาว</p>
-              )}
+            {/* Info Banner */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+              <p className="text-sm text-blue-800">
+                <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
+                <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
+                {patientPamLevel === 'L2' || patientPamLevel === 'L3' ? ' (กฎทอง 5 ข้อ)' : ' (แชมป์ 8 กิจกรรม)'}
+              </p>
+              <p className="text-xs text-blue-600 mt-1">
+                💡 สามารถแก้ไขจำนวนวัน/สัปดาห์ และค่าเป้าหมาย (สำหรับกิจกรรมเดิน) เท่านั้น
+              </p>
             </div>
 
-            {/* Weekly Goals - Food */}
+            {/* Food Goals */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  🍚 เป้าหมายรายสัปดาห์ - อาหาร
-                </h2>
-                <button
-                  onClick={() => {
-                    setGoalType('weekly');
-                    handleAddGoal();
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  เพิ่มกิจกรรม
-                </button>
-              </div>
+              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                🍚 เป้าหมายรายสัปดาห์ - อาหาร
+              </h2>
 
               {foodGoals.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {foodGoals.map((goal) => (
-                    <div
-                      key={goal.id}
-                      className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:bg-gray-50"
-                    >
+                    <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">
-                          {goal.target_days} วัน/สัปดาห์
-                          {goal.target_value && ` | ${goal.target_value} ${goal.target_unit || ''}`}
-                        </p>
+                        <p className="text-sm text-gray-500">ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์</p>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleEditGoal(goal)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGoal(goal.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <div className="flex items-center gap-4">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
+                          <select
+                            value={editedGoals[goal.goal_name]?.target_days || 5}
+                            onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                          >
+                            {[1, 2, 3, 4, 5, 6, 7].map(day => (
+                              <option key={day} value={day}>{day} วัน</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -506,104 +389,86 @@ export default function AdminGoalsPage() {
               )}
             </div>
 
-            {/* Weekly Goals - Exercise */}
+            {/* Exercise Goals */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  🧘 เป้าหมายรายสัปดาห์ - ออกกำลังกาย
-                </h2>
-                <button
-                  onClick={() => {
-                    setGoalType('weekly');
-                    handleAddGoal();
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  เพิ่มกิจกรรม
-                </button>
-              </div>
+              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                🧘 เป้าหมายรายสัปดาห์ - ออกกำลังกาย
+              </h2>
 
               {exerciseGoals.length > 0 ? (
-                <div className="space-y-3">
-                  {exerciseGoals.map((goal) => (
-                    <div
-                      key={goal.id}
-                      className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:bg-gray-50"
-                    >
-                      <div className="flex-1">
-                        <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">
-                          {goal.target_days} วัน/สัปดาห์
-                          {goal.target_value && ` | ${goal.target_value} ${goal.target_unit || ''}`}
-                        </p>
+                <div className="space-y-4">
+                  {exerciseGoals.map((goal) => {
+                    const fixedGoal = FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name);
+                    const isWalking = goal.goal_name === 'exercise_walk';
+
+                    return (
+                      <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
+                        <div className="flex-1">
+                          <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
+                          <p className="text-sm text-gray-500">ค่าเริ่มต้น: {fixedGoal?.default_days} วัน/สัปดาห์</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          {isWalking && (
+                            <div>
+                              <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
+                              <input
+                                type="number"
+                                min="5"
+                                max="120"
+                                step="5"
+                                value={editedGoals[goal.goal_name]?.target_value || fixedGoal?.target_value || 15}
+                                onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_value', e.target.value)}
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
+                              />
+                            </div>
+                          )}
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
+                            <select
+                              value={editedGoals[goal.goal_name]?.target_days || 5}
+                              onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
+                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                            >
+                              {[1, 2, 3, 4, 5, 6, 7].map(day => (
+                                <option key={day} value={day}>{day} วัน</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleEditGoal(goal)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGoal(goal.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-gray-500 text-center py-4">ยังไม่มีกิจกรรมออกกำลังกาย</p>
               )}
             </div>
 
-            {/* Weekly Goals - Measurement */}
+            {/* Measurement Goals */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  📊 เป้าหมายรายสัปดาห์ - วัดและบันทึก
-                </h2>
-                <button
-                  onClick={() => {
-                    setGoalType('weekly');
-                    handleAddGoal();
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  เพิ่มกิจกรรม
-                </button>
-              </div>
+              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                📊 เป้าหมายรายสัปดาห์ - วัดและบันทึก
+              </h2>
 
               {measurementGoals.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {measurementGoals.map((goal) => (
-                    <div
-                      key={goal.id}
-                      className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:bg-gray-50"
-                    >
+                    <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">
-                          {goal.target_days} วัน/สัปดาห์
-                        </p>
+                        <p className="text-sm text-gray-500">ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์</p>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleEditGoal(goal)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
+                        <select
+                          value={editedGoals[goal.goal_name]?.target_days || 5}
+                          onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                         >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGoal(goal.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          {[1, 2, 3, 4, 5, 6, 7].map(day => (
+                            <option key={day} value={day}>{day} วัน</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   ))}
@@ -613,50 +478,31 @@ export default function AdminGoalsPage() {
               )}
             </div>
 
-            {/* Weekly Goals - Rest */}
+            {/* Rest Goals */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  🌙 เป้าหมายรายสัปดาห์ - พักผ่อน
-                </h2>
-                <button
-                  onClick={() => {
-                    setGoalType('weekly');
-                    handleAddGoal();
-                  }}
-                  className="flex items-center gap-2 px-3 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  เพิ่มกิจกรรม
-                </button>
-              </div>
+              <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                🌙 เป้าหมายรายสัปดาห์ - พักผ่อน
+              </h2>
 
               {restGoals.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {restGoals.map((goal) => (
-                    <div
-                      key={goal.id}
-                      className="flex items-center justify-between p-4 rounded-xl border border-gray-200 hover:bg-gray-50"
-                    >
+                    <div key={goal.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                       <div className="flex-1">
                         <p className="font-semibold text-gray-800">{goal.goal_name_th}</p>
-                        <p className="text-sm text-gray-500">
-                          {goal.target_days} วัน/สัปดาห์
-                        </p>
+                        <p className="text-sm text-gray-500">ค่าเริ่มต้น: {FIXED_GOALS[patientPamLevel as keyof typeof FIXED_GOALS]?.find(g => g.code === goal.goal_name)?.default_days} วัน/สัปดาห์</p>
                       </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleEditGoal(goal)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded"
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
+                        <select
+                          value={editedGoals[goal.goal_name]?.target_days || 5}
+                          onChange={(e) => handleUpdateGoal(goal.goal_name, 'target_days', parseInt(e.target.value))}
+                          className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
                         >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteGoal(goal.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          {[1, 2, 3, 4, 5, 6, 7].map(day => (
+                            <option key={day} value={day}>{day} วัน</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   ))}
@@ -665,172 +511,30 @@ export default function AdminGoalsPage() {
                 <p className="text-gray-500 text-center py-4">ยังไม่มีกิจกรรมพักผ่อน</p>
               )}
             </div>
+
+            {/* Save Button */}
+            <div className="flex gap-4">
+              <button
+                onClick={handleSaveAll}
+                disabled={saving || goals.length === 0}
+                className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {saving ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    กำลังบันทึก...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-5 h-5" />
+                    บันทึกการแก้ไข
+                  </>
+                )}
+              </button>
+            </div>
           </>
         )}
       </div>
-
-      {/* Modal Form */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold">
-                {editingGoal ? 'แก้ไขเป้าหมาย' : 'เพิ่มเป้าหมายใหม่'}
-              </h2>
-              <button
-                onClick={() => setShowModal(false)}
-                className="p-2 hover:bg-gray-100 rounded"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ชื่อเป้าหมาย (ภาษาไทย) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.goal_name_th}
-                  onChange={(e) => setFormData({...formData, goal_name_th: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="เช่น หยุดกินหวาน"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ชื่อเป้าหมาย (ภาษาอังกฤษ/Code) *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.goal_name}
-                  onChange={(e) => setFormData({...formData, goal_name: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="เช่น stop_sweet"
-                />
-                <p className="text-xs text-gray-500 mt-1">ใช้ activity_code จาก Mobile App</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  คำอธิบาย
-                </label>
-                <textarea
-                  value={formData.description_th}
-                  onChange={(e) => setFormData({...formData, description_th: e.target.value})}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="อธิบายเป้าหมายเพิ่มเติม"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    จำนวนวัน/สัปดาห์
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="7"
-                    value={formData.target_days}
-                    onChange={(e) => setFormData({...formData, target_days: parseInt(e.target.value)})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ความสำคัญ
-                  </label>
-                  <select
-                    value={formData.priority}
-                    onChange={(e) => setFormData({...formData, priority: parseInt(e.target.value)})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  >
-                    <option value={1}>สูง (1)</option>
-                    <option value={2}>ปานกลาง (2)</option>
-                    <option value={3}>ต่ำ (3)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ค่าเป้าหมาย
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={formData.target_value}
-                    onChange={(e) => setFormData({...formData, target_value: e.target.value})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="เช่น 15"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    หน่วย
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.target_unit}
-                    onChange={(e) => setFormData({...formData, target_unit: e.target.value})}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="เช่น minutes, liters"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="is_core_goal"
-                  checked={formData.is_core_goal}
-                  onChange={(e) => setFormData({...formData, is_core_goal: e.target.checked})}
-                  className="w-4 h-4"
-                />
-                <label htmlFor="is_core_goal" className="text-sm font-medium text-gray-700">
-                  เป้าหมายหลัก (Core Goal)
-                </label>
-              </div>
-
-              <div className="flex gap-4 pt-4">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="flex-1 bg-blue-500 text-white py-3 rounded-lg hover:bg-blue-600 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                      กำลังบันทึก...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-5 h-5" />
-                      บันทึก
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 bg-gray-500 text-white py-3 rounded-lg hover:bg-gray-600"
-                >
-                  ยกเลิก
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
