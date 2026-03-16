@@ -48,10 +48,54 @@ export default function PatientDetailPage() {
     router.push('/admin/login');
   };
 
+  // ✅ ฟังก์ชันแสดงผลวันที่ - ปรับให้ถูกต้อง
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
+    
     const date = new Date(dateString);
-    return date.toLocaleDateString('th-TH');
+    
+    // ตรวจสอบว่าเป็นปี ค.ศ. หรือ พ.ศ.
+    // ถ้าปี > 2500 แสดงว่าเป็น พ.ศ. ให้แปลงเป็น ค.ศ. ก่อน
+    const year = date.getFullYear();
+    
+    let displayYear = year;
+    if (year > 2500) {
+      // เป็น พ.ศ. → แปลงเป็น ค.ศ. สำหรับการแสดงผล
+      displayYear = year - 543;
+      date.setFullYear(displayYear);
+    }
+    
+    // แสดงผลเป็นภาษาไทย (พ.ศ.)
+    return date.toLocaleDateString('th-TH', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+  };
+
+  // ✅ ฟังก์ชันคำนวณอายุ - ปรับให้ถูกต้อง
+  const calculateAge = (birthDateString: string) => {
+    if (!birthDateString) return '-';
+    
+    const birthDate = new Date(birthDateString);
+    const today = new Date();
+    
+    // ตรวจสอบว่าเป็นปี พ.ศ. หรือ ค.ศ.
+    let birthYear = birthDate.getFullYear();
+    if (birthYear > 2500) {
+      // เป็น พ.ศ. → แปลงเป็น ค.ศ.
+      birthYear = birthYear - 543;
+      birthDate.setFullYear(birthYear);
+    }
+    
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    return age >= 0 ? age : '-';
   };
 
   if (loading) {
@@ -137,6 +181,11 @@ export default function PatientDetailPage() {
               <div>
                 <p className="text-sm text-gray-500">วันเกิด</p>
                 <p className="font-semibold">{formatDate(patient.birth_date)}</p>
+              </div>
+              
+              <div>
+                <p className="text-sm text-gray-500">อายุ</p>
+                <p className="font-semibold">{calculateAge(patient.birth_date)} ปี</p>
               </div>
               
               <div>
