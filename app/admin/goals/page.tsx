@@ -1,9 +1,7 @@
 // app/admin/goals/page.tsx
 'use client';
 
-// ✅ ปิด Static Generation สำหรับหน้านี้ (สำคัญมาก!)
-//export const dynamic = 'force-dynamic';
-//export const revalidate = 0;
+// ✅ ไม่ใช้ export const dynamic/revalidate กับ client component
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -80,7 +78,7 @@ export default function AdminGoalsPage() {
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // ✅ ใช้ useEffect สำหรับทุก логиที่เกี่ยวกับเบราว์เซอร์ (รวมถึงการดึงค่าจาก URL)
+  // ✅ ใช้ useEffect สำหรับทุก логиที่เกี่ยวกับเบราว์เซอร์
   useEffect(() => {
     const userData = checkSession();
     
@@ -98,7 +96,7 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadPatients();
 
-    // ✅ ดึง patient_id จาก URL โดยใช้ window.location (ปลอดภัยสำหรับ Server-side rendering)
+    // ✅ ดึง patient_id จาก URL โดยใช้ window.location (แทน useSearchParams)
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const patientId = urlParams.get('patient_id');
@@ -127,7 +125,7 @@ export default function AdminGoalsPage() {
         setPatientPamLevel(pamLevel);
 
         // ✅ 1. ดึง activities จากฐานข้อมูลตาม PAM Level
-        const { data: activitiesData, error: activitiesError } = await supabase
+        const {  activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
           .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
@@ -141,8 +139,8 @@ export default function AdminGoalsPage() {
 
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน (active)
-        const { data: activeGoals, error: goalsError } = await supabase
+        // ✅ 2. ดึง goals ปัจจุบัน (active เท่านั้น)
+        const {  activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
           .eq('user_id', patientId)
@@ -168,7 +166,7 @@ export default function AdminGoalsPage() {
         setEditedGoals(edits);
 
         // ✅ 4. ดึงประวัติ goals (archived)
-        const { data: archivedGoals } = await supabase
+        const {  archivedGoals } = await supabase
           .from('goals')
           .select('*')
           .eq('user_id', patientId)
@@ -207,7 +205,7 @@ export default function AdminGoalsPage() {
         setGoalHistory(history);
       }
     } catch (error) {
-      console.error('Error loading patient data:', error);
+      console.error('Error loading patient ', error);
     }
   };
 
@@ -244,7 +242,7 @@ export default function AdminGoalsPage() {
       setSaving(true);
 
       try {
-        // ✅ 1. เก็บ goals เดิมเป็นประวัติ (archived)
+        // ✅ 1. เก็บ goals เดิมเป็นประวัติ (archived) - เฉพาะที่สถานะ active
         if (goals.length > 0) {
           const { error: archiveError } = await supabase
             .from('goals')
