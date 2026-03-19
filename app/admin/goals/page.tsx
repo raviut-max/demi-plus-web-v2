@@ -1,12 +1,10 @@
 // app/admin/goals/page.tsx
 'use client';
 
-// ✅ ไม่ใช้ export const dynamic/revalidate กับ client component
-
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Target, Trophy, History, Calendar } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
+import { ArrowLeft, LogOut, Save, Target, Trophy, Plus } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -65,6 +63,7 @@ interface GoalHistory {
 
 export default function AdminGoalsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -78,7 +77,6 @@ export default function AdminGoalsPage() {
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
-  // ✅ ใช้ useEffect สำหรับทุก логиที่เกี่ยวกับเบราว์เซอร์
   useEffect(() => {
     const userData = checkSession();
     
@@ -96,7 +94,7 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadPatients();
 
-    // ✅ ดึง patient_id จาก URL โดยใช้ window.location (แทน useSearchParams)
+    // ✅ ดึง patient_id จาก URL โดยใช้ window.location
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const patientId = urlParams.get('patient_id');
@@ -125,7 +123,7 @@ export default function AdminGoalsPage() {
         setPatientPamLevel(pamLevel);
 
         // ✅ 1. ดึง activities จากฐานข้อมูลตาม PAM Level
-        const {  activitiesData, error: activitiesError } = await supabase
+        const { data: activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
           .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
@@ -140,7 +138,7 @@ export default function AdminGoalsPage() {
         setActivities(activitiesData || []);
 
         // ✅ 2. ดึง goals ปัจจุบัน (active เท่านั้น)
-        const {  activeGoals, error: goalsError } = await supabase
+        const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
           .eq('user_id', patientId)
@@ -166,7 +164,7 @@ export default function AdminGoalsPage() {
         setEditedGoals(edits);
 
         // ✅ 4. ดึงประวัติ goals (archived)
-        const {  archivedGoals } = await supabase
+        const { data: archivedGoals } = await supabase
           .from('goals')
           .select('*')
           .eq('user_id', patientId)
@@ -205,7 +203,7 @@ export default function AdminGoalsPage() {
         setGoalHistory(history);
       }
     } catch (error) {
-      console.error('Error loading patient ', error);
+      console.error('Error loading patient data:', error);
     }
   };
 
@@ -219,6 +217,75 @@ export default function AdminGoalsPage() {
       setPatientPamLevel('');
       setEditedGoals({});
       setGoalHistory([]);
+    }
+  };
+
+  // ✅ ฟังก์ชันสร้างเป้าหมายเริ่มต้น
+  const handleCreateDefaultGoals = async () => {
+    if (!selectedPatient || !patientPamLevel) {
+      alert('กรุณาเลือกผู้ป่วย');
+      return;
+    }
+
+    if (confirm(`ต้องการสร้างเป้าหมายเริ่มต้นสำหรับผู้ป่วยระดับ ${patientPamLevel} หรือไม่?`)) {
+      setSaving(true);
+
+      try {
+        // 1. ลบ goals เดิมทั้งหมด (ถ้ามี)
+        await supabase
+          .from('goals')
+          .delete()
+          .eq('user_id', selectedPatient)
+          .eq('goal_type', 'weekly_activity');
+
+        // 2. ดึง activities จากฐานข้อมูล
+        const { data: activitiesData, error: activitiesError } = await supabase
+          .from('activities')
+          .select('*')
+          .or(`pam_level.eq.${patientPamLevel},pam_level.eq.ALL`)
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true });
+
+        if (activitiesError || !activitiesData || activitiesData.length === 0) {
+          alert('ไม่พบกิจกรรมในฐานข้อมูล กรุณาตรวจสอบตาราง activities');
+          return;
+        }
+
+        // 3. สร้าง goals ใหม่
+        const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
+        const today = new Date().toISOString().split('T')[0];
+
+        const newGoals = activitiesData.map(activity => ({
+          user_id: selectedPatient,
+          goal_type: 'weekly_activity',
+          goal_name: activity.activity_code,
+          goal_name_th: activity.activity_name_th,
+          target_days: defaultDays,
+          target_value: activity.target_value ? parseFloat(activity.target_value) : null,
+          target_unit: activity.unit || null,
+          activity_id: activity.id,
+          start_date: today,
+          status: 'active',
+          priority: 1,
+          is_core_goal: true,
+          created_by: user?.id,
+        }));
+
+        const { error } = await supabase.from('goals').insert(newGoals);
+
+        if (error) {
+          alert('เกิดข้อผิดพลาด: ' + error.message);
+          return;
+        }
+
+        alert(`✅ สร้างเป้าหมายสำเร็จ: ${newGoals.length} กิจกรรม`);
+        loadPatientData(selectedPatient);
+      } catch (error) {
+        console.error('Error creating default goals:', error);
+        alert('เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
+      } finally {
+        setSaving(false);
+      }
     }
   };
 
@@ -368,13 +435,14 @@ export default function AdminGoalsPage() {
               <Target className="w-5 h-5 text-blue-600" />
               เลือกผู้ป่วย
             </h2>
-            {selectedPatient && goals.length > 0 && (
+            {selectedPatient && goals.length === 0 && (
               <button
-                onClick={() => setShowHistory(!showHistory)}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 text-sm"
+                onClick={handleCreateDefaultGoals}
+                disabled={saving}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
               >
-                <History className="w-4 h-4" />
-                {showHistory ? 'ซ่อนประวัติ' : 'ดูเป้าหมายปัจจุบัน'}
+                <Plus className="w-4 h-4" />
+                {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
               </button>
             )}
           </div>
@@ -396,22 +464,36 @@ export default function AdminGoalsPage() {
           <>
             {/* Info Banner */}
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-              <p className="text-sm text-blue-800">
-                <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
-                <strong> จำนวนกิจกรรม:</strong> {activities.length} กิจกรรม
-                {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
-                {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
-                {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
-              </p>
-              {goalHistory[0]?.is_current && (
-                <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />
-                  เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
-                </p>
-              )}
-              <p className="text-xs text-blue-600 mt-1">
-                💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
-              </p>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <p className="text-sm text-blue-800">
+                    <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
+                    <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
+                    {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
+                    {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
+                    {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
+                  </p>
+                  {goalHistory[0]?.is_current && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
+                    </p>
+                  )}
+                  <p className="text-xs text-blue-600 mt-1">
+                    💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
+                  </p>
+                </div>
+                
+                {/* ✅ ปุ่มสร้างเป้าหมายเริ่มต้น (แสดงเมื่อไม่มี goals) */}
+                {goals.length === 0 && (
+                  <button
+                    onClick={handleCreateDefaultGoals}
+                    disabled={saving}
+                    className="shrink-0 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
+                  >
+                    🎯 สร้างเป้าหมาย
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Long-term Goals (Core Performance Goals) */}
@@ -620,76 +702,28 @@ export default function AdminGoalsPage() {
               </div>
             )}
 
-            {/* Goal History Modal */}
-            {showHistory && (
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <History className="w-5 h-5 text-purple-600" />
-                    ประวัติเป้าหมาย
-                  </h2>
-                  <button
-                    onClick={() => setShowHistory(false)}
-                    className="text-gray-500 hover:text-gray-700"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  {goalHistory.map((history, index) => (
-                    <div key={history.id} className={`p-4 rounded-xl border-2 ${
-                      history.is_current ? 'border-green-500 bg-green-50' : 'border-gray-200'
-                    }`}>
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <p className="font-semibold text-gray-800">
-                            {history.is_current ? '📌 เป้าหมายปัจจุบัน' : `รอบที่ ${index}`}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            เริ่มใช้: {formatDate(history.start_date)}
-                          </p>
-                        </div>
-                        {history.is_current && (
-                          <span className="px-3 py-1 bg-green-500 text-white text-xs font-semibold rounded-full">
-                            ใช้งานอยู่
-                          </span>
-                        )}
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-3">
-                        {history.goals.map((goal: Goal) => (
-                          <div key={goal.id} className="text-sm">
-                            <p className="font-medium text-gray-700">{goal.goal_name_th}</p>
-                            <p className="text-xs text-gray-500">{goal.target_days} วัน/สัปดาห์</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {/* Save Button */}
+            {goals.length > 0 && (
+              <div className="flex gap-4">
+                <button
+                  onClick={handleSaveNewRound}
+                  disabled={saving || activities.length === 0}
+                  className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      กำลังบันทึก...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-5 h-5" />
+                      บันทึกเป้าหมายรอบใหม่
+                    </>
+                  )}
+                </button>
               </div>
             )}
-
-            {/* Save Button */}
-            <div className="flex gap-4">
-              <button
-                onClick={handleSaveNewRound}
-                disabled={saving || activities.length === 0}
-                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {saving ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    กำลังบันทึก...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-5 h-5" />
-                    บันทึกเป้าหมายรอบใหม่
-                  </>
-                )}
-              </button>
-            </div>
           </>
         )}
       </div>
