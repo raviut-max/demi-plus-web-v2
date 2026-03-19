@@ -370,7 +370,7 @@ export default function AdminGoalsPage() {
               <Target className="w-5 h-5 text-blue-600" />
               เลือกผู้ป่วย
             </h2>
-            {selectedPatient && goals.length === 0 && (
+            {selectedPatient && (
               <button
                 onClick={handleCreateDefaultGoals}
                 disabled={saving}
@@ -634,7 +634,7 @@ export default function AdminGoalsPage() {
 
             {/* แสดงข้อความเมื่อไม่มี activities */}
             {activities.length === 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-6 text-center">
                 <div className="text-6xl mb-4">📋</div>
                 <h3 className="text-lg font-bold text-gray-800 mb-2">
                   ไม่พบกิจกรรมสำหรับผู้ป่วยระดับ {patientPamLevel}
@@ -646,7 +646,7 @@ export default function AdminGoalsPage() {
                   onClick={handleCreateDefaultGoals}
                   className="px-6 py-3 bg-green-500 text-white font-semibold rounded-xl hover:bg-green-600 transition-colors"
                 >
-                  สร้างกิจกรรมเริ่มต้น
+                  🎯 สร้างเป้าหมายเริ่มต้น
                 </button>
               </div>
             )}
