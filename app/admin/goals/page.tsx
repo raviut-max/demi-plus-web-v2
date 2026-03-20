@@ -370,7 +370,7 @@ export default function AdminGoalsPage() {
               <Target className="w-5 h-5 text-blue-600" />
               เลือกผู้ป่วย
             </h2>
-            {selectedPatient && (
+            {selectedPatient && goals.length === 0 && (
               <button
                 onClick={handleCreateDefaultGoals}
                 disabled={saving}
@@ -403,7 +403,7 @@ export default function AdminGoalsPage() {
                 <div className="flex-1">
                   <p className="text-sm text-blue-800">
                     <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
-                    <strong> จำนวนกิจกรรม:</strong> {activities.length} กิจกรรม
+                    <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
                     {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
                     {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
                     {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
@@ -629,25 +629,6 @@ export default function AdminGoalsPage() {
                     );
                   })}
                 </div>
-              </div>
-            )}
-
-            {/* แสดงข้อความเมื่อไม่มี activities */}
-            {activities.length === 0 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-6 mb-6 text-center">
-                <div className="text-6xl mb-4">📋</div>
-                <h3 className="text-lg font-bold text-gray-800 mb-2">
-                  ไม่พบกิจกรรมสำหรับผู้ป่วยระดับ {patientPamLevel}
-                </h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  กรุณาตรวจสอบว่ามี activities ในฐานข้อมูลสำหรับ PAM Level นี้หรือไม่
-                </p>
-                <button
-                  onClick={handleCreateDefaultGoals}
-                  className="px-6 py-3 bg-green-500 text-white font-semibold rounded-xl hover:bg-green-600 transition-colors"
-                >
-                  🎯 สร้างเป้าหมายเริ่มต้น
-                </button>
               </div>
             )}
 
