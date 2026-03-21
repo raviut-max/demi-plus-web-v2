@@ -256,7 +256,7 @@ export default function RecordPage() {
 
   return (
     <div className="max-w-md mx-auto px-4 py-6 relative">
-      <StarBackground />
+      
       
       {/* Header */}
       <div className="flex items-center justify-between mb-6 relative z-10">
