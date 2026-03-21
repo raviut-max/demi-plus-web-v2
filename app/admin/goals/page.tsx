@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, getProfile, getActivities, saveRecord, getTodayRecords } from '@/lib/supabase/queries';
-import { StarBackground } from '@/components/star-background';
 import Image from 'next/image';
 
 // ✅ ตัวเลือกประเภทของหวาน
