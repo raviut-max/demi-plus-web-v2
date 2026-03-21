@@ -505,7 +505,7 @@ export default function AdminGoalsPage() {
               </div>
             )}
 
-            {/* Exercise Activities - ✅ เพิ่ม input นาที/วัน */}
+            {/* ✅ Exercise Activities - แก้ไข: แสดง input นาที/วัน เสมอ */}
             {exerciseActivities.length > 0 && (
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -527,7 +527,7 @@ export default function AdminGoalsPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-4">
-                          {/* ✅ Input สำหรับเวลาออกกำลังกาย (นาที/วัน) */}
+                          {/* ✅ Input สำหรับเวลาออกกำลังกาย (นาที/วัน) - แสดงเสมอ */}
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
                             <input
