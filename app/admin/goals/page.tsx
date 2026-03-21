@@ -309,7 +309,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม\n\nเป้าหมายเดิมถูกเก็บเป็นประวัติแล้ว`);
+        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
         loadPatientData(selectedPatient);
       } catch (error) {
         console.error('Error saving new round:', error);
@@ -505,7 +505,7 @@ export default function AdminGoalsPage() {
               </div>
             )}
 
-            {/* Exercise Activities */}
+            {/* Exercise Activities - ✅ เพิ่ม input นาที/วัน */}
             {exerciseActivities.length > 0 && (
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -527,20 +527,20 @@ export default function AdminGoalsPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-4">
-                          {activity.target_value && (
-                            <div>
-                              <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
-                              <input
-                                type="number"
-                                min="5"
-                                max="120"
-                                step="5"
-                                value={editedGoals[activity.activity_code]?.target_value || existingGoal?.target_value?.toString() || activity.target_value || '10'}
-                                onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_value', e.target.value)}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
-                              />
-                            </div>
-                          )}
+                          {/* ✅ Input สำหรับเวลาออกกำลังกาย (นาที/วัน) */}
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
+                            <input
+                              type="number"
+                              min="5"
+                              max="120"
+                              step="5"
+                              value={editedGoals[activity.activity_code]?.target_value?.toString() || existingGoal?.target_value?.toString() || '10'}
+                              onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_value', e.target.value)}
+                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
+                            />
+                          </div>
+                          
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
                             <select
