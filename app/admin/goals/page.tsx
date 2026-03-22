@@ -47,6 +47,8 @@ interface Goal {
   activity_id: string | null;
   status: string;
   created_at: string;
+  primary_goal_note?: string;
+  weekly_goal_note?: string;
 }
 
 interface GoalHistory {
@@ -72,6 +74,8 @@ export default function AdminGoalsPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState<string>('');
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
+  const [primaryGoalNote, setPrimaryGoalNote] = useState<string>(''); // ✅ คอมเมนต์เป้าหมายหลัก
+  const [weeklyNote, setWeeklyNote] = useState<string>(''); // ✅ คอมเมนต์รายสัปดาห์ (รวม)
 
   useEffect(() => {
     // ✅ FIX: กัน Vercel build (ไม่มี window)
@@ -230,6 +234,24 @@ export default function AdminGoalsPage() {
           console.error('Error loading primary goal:', err);
           setPrimaryGoal('');
         }
+
+        // ✅ 6. โหลดคอมเมนต์จาก goals (ใช้ goal แรกเป็นตัวแทน)
+        if (uniqueGoals && uniqueGoals.length > 0) {
+          const firstGoal = uniqueGoals[0];
+          if (firstGoal.primary_goal_note) {
+            setPrimaryGoalNote(firstGoal.primary_goal_note);
+          } else {
+            setPrimaryGoalNote('');
+          }
+          if (firstGoal.weekly_goal_note) {
+            setWeeklyNote(firstGoal.weekly_goal_note);
+          } else {
+            setWeeklyNote('');
+          }
+        } else {
+          setPrimaryGoalNote('');
+          setWeeklyNote('');
+        }
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
@@ -247,6 +269,8 @@ export default function AdminGoalsPage() {
       setEditedGoals({});
       setGoalHistory([]);
       setPrimaryGoal('');
+      setPrimaryGoalNote('');
+      setWeeklyNote('');
     }
   };
 
@@ -398,7 +422,7 @@ export default function AdminGoalsPage() {
           }
         }
 
-        // ✅ 2. สร้าง goals ใหม่จาก activities
+        // ✅ 2. สร้าง goals ใหม่จาก activities + บันทึกคอมเมนต์
         const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
         const today = new Date().toISOString().split('T')[0];
 
@@ -421,6 +445,9 @@ export default function AdminGoalsPage() {
             priority: 1,
             is_core_goal: true,
             created_by: user?.id,
+            // ✅ บันทึกคอมเมนต์ (ใส่ทุก activity)
+            primary_goal_note: primaryGoalNote || null,
+            weekly_goal_note: weeklyNote || null,
           };
         });
 
@@ -628,6 +655,23 @@ export default function AdminGoalsPage() {
                 ))}
               </div>
               
+              {/* ✅ คอมเมนต์เป้าหมายหลัก */}
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  📝 เป้าหมาย(หลัก) - หมายเหตุเพิ่มเติม
+                </label>
+                <textarea
+                  value={primaryGoalNote}
+                  onChange={(e) => setPrimaryGoalNote(e.target.value)}
+                  placeholder="กรอกหมายเหตุหรือคำแนะนำสำหรับเป้าหมายหลัก..."
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                  rows={3}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  💡 หมายเหตุนี้จะถูกบันทึกกับเป้าหมายหลักของผู้ป่วย
+                </p>
+              </div>
+              
               {savingPrimaryGoal && (
                 <p className="text-sm text-gray-500 mt-3 text-center">
                   กำลังบันทึก...
@@ -818,6 +862,23 @@ export default function AdminGoalsPage() {
                 </div>
               </div>
             )}
+
+            {/* ✅ คอมเมนต์หมายเหตุรายสัปดาห์ (รวม) - วางใต้ทั้งหมด */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+              <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                📝 หมายเหตุ(สัปดาห์) - คำแนะนำเพิ่มเติม
+              </h2>
+              <textarea
+                value={weeklyNote}
+                onChange={(e) => setWeeklyNote(e.target.value)}
+                placeholder="กรอกหมายเหตุหรือคำแนะนำสำหรับเป้าหมายรายสัปดาห์ทั้งหมด..."
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                rows={4}
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                💡 หมายเหตุนี้จะถูกบันทึกกับทุกกิจกรรมในสัปดาห์นี้ และจะแสดงเมื่อผู้ป่วยบันทึกกิจกรรมรายวัน
+              </p>
+            </div>
 
             {/* Save Button */}
             {goals.length > 0 && (
