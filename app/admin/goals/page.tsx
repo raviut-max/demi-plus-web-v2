@@ -2,7 +2,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // ✅ ลบ useSearchParams ออก
 import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
 import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client'; // ✅ ใช้ client กลาง
@@ -16,7 +16,6 @@ const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
 
 // ✅ Long-term Goals 4 ข้อ (Core Performance Goals)
 const LONG_TERM_GOALS = [
-  
   { code: 'weight', name_th: 'น้ำหนักลด (Weight Reduction)', description: 'ลดลงอย่างน้อย 5-10% และลด Visceral Fat' },
   { code: 'glucose', name_th: 'น้ำตาลลง (Glucose Control)', description: 'ควบคุมระดับน้ำตาลในเลือดให้เข้าสู่เกณฑ์ปกติ' },
   { code: 'medication', name_th: 'ลดยาได้ (Medication De-escalation)', description: 'ปรับลดหรือหยุดยาภายใต้การกำกับของแพทย์' },
@@ -58,8 +57,7 @@ interface GoalHistory {
 }
 
 export default function AdminGoalsPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const router = useRouter(); // ✅ ลบ searchParams ออก
   
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -95,7 +93,7 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadPatients();
 
-    // ✅ ดึง patient_id จาก URL
+    // ✅ ดึง patient_id จาก URL โดยใช้ window.location (แทน useSearchParams)
     const urlParams = new URLSearchParams(window.location.search);
     const patientId = urlParams.get('patient_id');
     if (patientId) {
@@ -208,7 +206,7 @@ export default function AdminGoalsPage() {
 
         setGoalHistory(history);
 
-        // ✅ 5. โหลด primary goal จาก profile (เพิ่ม error handling)
+        // ✅ 5. โหลด primary goal จาก profile
         try {
           const { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -216,7 +214,6 @@ export default function AdminGoalsPage() {
             .eq('id', patientId)
             .single();
 
-          // PGRST116 = not found (ไม่ถือว่าผิด)
           if (profileError && profileError.code !== 'PGRST116') {
             console.warn('Warning loading primary goal:', profileError);
           }
@@ -246,7 +243,7 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันบันทึก primary goal (เพิ่ม error handling)
+  // ✅ ฟังก์ชันบันทึก primary goal
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     
@@ -264,7 +261,6 @@ export default function AdminGoalsPage() {
       if (error) {
         console.error('Error updating primary goal:', error);
         
-        // ✅ แสดงข้อความที่อ่านง่าย
         if (error.code === '42P01') {
           alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
         } else if (error.code === '42703') {
