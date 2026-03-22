@@ -76,8 +76,8 @@ export default function AdminGoalsPage() {
   const [editedGoals, setEditedGoals] = useState<Record<string, { target_days: number; target_value?: string }>>({});
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [primaryGoal, setPrimaryGoal] = useState<string>(''); // ✅ เพิ่ม state สำหรับเป้าหมายหลัก
-  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); // ✅ state สำหรับกำลังบันทึก
+  const [primaryGoal, setPrimaryGoal] = useState<string>('');
+  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
 
   useEffect(() => {
     const userData = checkSession();
@@ -96,7 +96,6 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadPatients();
 
-    // ✅ ดึง patient_id จาก URL โดยใช้ window.location
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const patientId = urlParams.get('patient_id');
@@ -124,7 +123,7 @@ export default function AdminGoalsPage() {
         const pamLevel = patient.pam_level || 'L2';
         setPatientPamLevel(pamLevel);
 
-        // ✅ 1. ดึง activities จากฐานข้อมูลตาม PAM Level
+        // ✅ 1. ดึง activities
         const { data: activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
@@ -137,10 +136,9 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน (active เท่านั้น)
+        // ✅ 2. ดึง goals ปัจจุบัน
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -154,7 +152,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        // ✅ กรองเอาเฉพาะ goals ล่าสุดของแต่ละ goal_name (ป้องกัน duplicate)
+        // ✅ กรอง duplicate goals
         const uniqueGoalsMap = new Map<string, Goal>();
         (activeGoals || []).forEach((goal: Goal) => {
           if (!uniqueGoalsMap.has(goal.goal_name)) {
@@ -163,10 +161,9 @@ export default function AdminGoalsPage() {
         });
         const uniqueGoals = Array.from(uniqueGoalsMap.values());
 
-        console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
-        // ✅ 3. โหลดค่าที่แก้ไขแล้ว (จาก goals ที่มีอยู่)
+        // ✅ 3. โหลดค่าที่แก้ไขแล้ว
         const edits: Record<string, { target_days: number; target_value?: string }> = {};
         uniqueGoals.forEach((goal: Goal) => {
           edits[goal.goal_name] = {
@@ -176,9 +173,7 @@ export default function AdminGoalsPage() {
         });
         setEditedGoals(edits);
 
-        console.log('📝 Edited goals:', edits);
-
-        // ✅ 4. ดึงประวัติ goals (archived)
+        // ✅ 4. ดึงประวัติ goals
         const { data: archivedGoals } = await supabase
           .from('goals')
           .select('*')
@@ -187,7 +182,6 @@ export default function AdminGoalsPage() {
           .eq('status', 'archived')
           .order('created_at', { ascending: false });
 
-        // จัดกลุ่มประวัติตามวันที่สร้าง
         const historyMap = new Map<string, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
           const dateKey = goal.created_at.split('T')[0];
@@ -204,7 +198,6 @@ export default function AdminGoalsPage() {
           is_current: false,
         }));
 
-        // เพิ่ม current goals เข้าไปด้วย
         if (uniqueGoals && uniqueGoals.length > 0) {
           const currentStartDate = uniqueGoals[0].created_at.split('T')[0];
           history.unshift({
@@ -217,14 +210,24 @@ export default function AdminGoalsPage() {
 
         setGoalHistory(history);
 
-        // ✅ 5. โหลด primary goal จาก profile
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('primary_goal_code')
-          .eq('id', patientId)
-          .single();
+        // ✅ 5. โหลด primary goal จาก profile (เพิ่ม error handling)
+        try {
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('primary_goal_code')
+            .eq('id', patientId)
+            .single();
 
-        setPrimaryGoal(profileData?.primary_goal_code || '');
+          // PGRST116 = not found (ไม่ถือว่าผิด)
+          if (profileError && profileError.code !== 'PGRST116') {
+            console.warn('Warning loading primary goal:', profileError);
+          }
+          
+          setPrimaryGoal(profileData?.primary_goal_code || '');
+        } catch (err) {
+          console.error('Error loading primary goal:', err);
+          setPrimaryGoal('');
+        }
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
@@ -245,7 +248,7 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันบันทึก primary goal
+  // ✅ ฟังก์ชันบันทึก primary goal (เพิ่ม error handling)
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     
@@ -262,7 +265,15 @@ export default function AdminGoalsPage() {
 
       if (error) {
         console.error('Error updating primary goal:', error);
-        alert('เกิดข้อผิดพลาดในการบันทึกเป้าหมายหลัก');
+        
+        // ✅ แสดงข้อความที่อ่านง่าย
+        if (error.code === '42P01') {
+          alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
+        } else if (error.code === '42703') {
+          alert('ไม่พบคอลัมน์ primary_goal_code กรุณาติดต่อผู้ดูแลระบบ');
+        } else {
+          alert('เกิดข้อผิดพลาด: ' + error.message);
+        }
         return;
       }
 
@@ -276,7 +287,6 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันสร้างเป้าหมายเริ่มต้น
   const handleCreateDefaultGoals = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
@@ -287,14 +297,12 @@ export default function AdminGoalsPage() {
       setSaving(true);
 
       try {
-        // 1. ลบ goals เดิมทั้งหมด (ถ้ามี)
         await supabase
           .from('goals')
           .delete()
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity');
 
-        // 2. ดึง activities จากฐานข้อมูล
         const { data: activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
@@ -307,7 +315,6 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        // 3. สร้าง goals ใหม่
         const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
         const today = new Date().toISOString().split('T')[0];
 
@@ -346,7 +353,6 @@ export default function AdminGoalsPage() {
   };
 
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
-    console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
       ...prev,
       [goalName]: {
@@ -366,7 +372,6 @@ export default function AdminGoalsPage() {
       setSaving(true);
 
       try {
-        // ✅ 1. เก็บ goals เดิมเป็นประวัติ (archived) - เฉพาะที่สถานะ active
         if (goals.length > 0) {
           const { error: archiveError } = await supabase
             .from('goals')
@@ -380,12 +385,9 @@ export default function AdminGoalsPage() {
 
           if (archiveError) {
             console.error('Error archiving goals:', archiveError);
-          } else {
-            console.log('✅ Archived old goals');
           }
         }
 
-        // ✅ 2. สร้าง goals ใหม่จาก activities
         const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
         const today = new Date().toISOString().split('T')[0];
 
@@ -398,7 +400,6 @@ export default function AdminGoalsPage() {
             goal_name: activity.activity_code,
             goal_name_th: activity.activity_name_th,
             target_days: edit.target_days,
-            // ✅ บันทึก target_value ที่แก้ไข (ถ้ามี) หรือใช้ค่า default
             target_value: edit.target_value ? parseFloat(edit.target_value) : 
                          (activity.target_value ? parseFloat(activity.target_value) : null),
             target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
@@ -411,8 +412,6 @@ export default function AdminGoalsPage() {
           };
         });
 
-        console.log('💾 Saving goals:', newGoals);
-
         const { error } = await supabase.from('goals').insert(newGoals);
 
         if (error) {
@@ -420,9 +419,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม\n\nเป้าหมายเดิมถูกเก็บเป็นประวัติแล้ว`);
-        
-        // ✅ 3. โหลดข้อมูลใหม่ทันทีหลังบันทึก
+        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
         await loadPatientData(selectedPatient);
         
       } catch (error) {
@@ -439,7 +436,6 @@ export default function AdminGoalsPage() {
     router.push('/admin/login');
   };
 
-  // ✅ แยก activities ตาม type
   const foodActivities = activities.filter(a => a.activity_type === 'food');
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
@@ -549,7 +545,6 @@ export default function AdminGoalsPage() {
                   </p>
                 </div>
                 
-                {/* ✅ ปุ่มสร้างเป้าหมายเริ่มต้น (แสดงเมื่อไม่มี goals) */}
                 {goals.length === 0 && (
                   <button
                     onClick={handleCreateDefaultGoals}
@@ -562,7 +557,7 @@ export default function AdminGoalsPage() {
               </div>
             </div>
 
-            {/* ✅ Long-term Goals (Core Performance Goals) - Radio Button Cards */}
+            {/* ✅ Long-term Goals - Radio Button Cards */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
               <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <Trophy className="w-5 h-5 text-purple-600" />
@@ -581,7 +576,6 @@ export default function AdminGoalsPage() {
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      {/* Radio Button Custom */}
                       <div className="mt-1">
                         {primaryGoal === goal.code ? (
                           <CheckCircle2 className="w-6 h-6 text-purple-600" />
@@ -590,7 +584,6 @@ export default function AdminGoalsPage() {
                         )}
                       </div>
                       
-                      {/* Content */}
                       <div className="flex-1">
                         <p className={`font-bold mb-1 ${
                           primaryGoal === goal.code ? 'text-purple-900' : 'text-gray-800'
@@ -605,7 +598,6 @@ export default function AdminGoalsPage() {
                       </div>
                     </div>
                     
-                    {/* Hidden Radio Input */}
                     <input
                       type="radio"
                       name="primaryGoal"
@@ -632,7 +624,6 @@ export default function AdminGoalsPage() {
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   🍚 เป้าหมายรายสัปดาห์ - อาหาร
                 </h2>
-
                 <div className="space-y-4">
                   {foodActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -686,7 +677,6 @@ export default function AdminGoalsPage() {
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   🧘 เป้าหมายรายสัปดาห์ - ออกกำลังกาย
                 </h2>
-
                 <div className="space-y-4">
                   {exerciseActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -740,7 +730,6 @@ export default function AdminGoalsPage() {
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   📊 เป้าหมายรายสัปดาห์ - วัดและบันทึก
                 </h2>
-
                 <div className="space-y-4">
                   {measurementActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -780,7 +769,6 @@ export default function AdminGoalsPage() {
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                   🌙 เป้าหมายรายสัปดาห์ - พักผ่อน
                 </h2>
-
                 <div className="space-y-4">
                   {restActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -838,7 +826,6 @@ export default function AdminGoalsPage() {
             )}
           </>
         )}
-        
       </div>
     </div>
   );
