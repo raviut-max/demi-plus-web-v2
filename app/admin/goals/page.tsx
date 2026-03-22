@@ -838,6 +838,7 @@ export default function AdminGoalsPage() {
             )}
           </>
         )}
+        
       </div>
     </div>
   );
