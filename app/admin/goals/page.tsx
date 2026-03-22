@@ -2,10 +2,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation'; // ✅ ลบ useSearchParams ออก
+import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client'; // ✅ ใช้ client กลาง
+import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle, History, Calendar } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client'; // ✅ ใช้ client กลาง (ไม่สร้างใหม่)
 
 // ✅ Default days ตาม PAM Level
 const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
@@ -57,7 +57,7 @@ interface GoalHistory {
 }
 
 export default function AdminGoalsPage() {
-  const router = useRouter(); // ✅ ลบ searchParams ออก
+  const router = useRouter();
   
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -119,7 +119,7 @@ export default function AdminGoalsPage() {
         const pamLevel = patient.pam_level || 'L2';
         setPatientPamLevel(pamLevel);
 
-        // ✅ 1. ดึง activities
+        // ✅ 1. ดึง activities จากฐานข้อมูลตาม PAM Level
         const { data: activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
@@ -132,9 +132,10 @@ export default function AdminGoalsPage() {
           return;
         }
 
+        console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน
+        // ✅ 2. ดึง goals ปัจจุบัน (active เท่านั้น)
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -148,7 +149,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        // ✅ กรอง duplicate goals
+        // ✅ กรอง duplicate goals (เอาเฉพาะล่าสุดของแต่ละ goal_name)
         const uniqueGoalsMap = new Map<string, Goal>();
         (activeGoals || []).forEach((goal: Goal) => {
           if (!uniqueGoalsMap.has(goal.goal_name)) {
@@ -157,9 +158,10 @@ export default function AdminGoalsPage() {
         });
         const uniqueGoals = Array.from(uniqueGoalsMap.values());
 
+        console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
-        // ✅ 3. โหลดค่าที่แก้ไขแล้ว
+        // ✅ 3. โหลดค่าที่แก้ไขแล้ว (จาก goals ที่มีอยู่)
         const edits: Record<string, { target_days: number; target_value?: string }> = {};
         uniqueGoals.forEach((goal: Goal) => {
           edits[goal.goal_name] = {
@@ -169,7 +171,9 @@ export default function AdminGoalsPage() {
         });
         setEditedGoals(edits);
 
-        // ✅ 4. ดึงประวัติ goals
+        console.log('📝 Edited goals:', edits);
+
+        // ✅ 4. ดึงประวัติ goals (archived)
         const { data: archivedGoals } = await supabase
           .from('goals')
           .select('*')
@@ -178,6 +182,7 @@ export default function AdminGoalsPage() {
           .eq('status', 'archived')
           .order('created_at', { ascending: false });
 
+        // จัดกลุ่มประวัติตามวันที่สร้าง
         const historyMap = new Map<string, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
           const dateKey = goal.created_at.split('T')[0];
@@ -194,6 +199,7 @@ export default function AdminGoalsPage() {
           is_current: false,
         }));
 
+        // เพิ่ม current goals เข้าไปด้วย
         if (uniqueGoals && uniqueGoals.length > 0) {
           const currentStartDate = uniqueGoals[0].created_at.split('T')[0];
           history.unshift({
@@ -206,7 +212,7 @@ export default function AdminGoalsPage() {
 
         setGoalHistory(history);
 
-        // ✅ 5. โหลด primary goal จาก profile
+        // ✅ 5. โหลด primary goal จาก profile (เพิ่ม error handling)
         try {
           const { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -214,6 +220,7 @@ export default function AdminGoalsPage() {
             .eq('id', patientId)
             .single();
 
+          // PGRST116 = not found (ไม่ถือว่าผิด)
           if (profileError && profileError.code !== 'PGRST116') {
             console.warn('Warning loading primary goal:', profileError);
           }
@@ -243,7 +250,7 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันบันทึก primary goal
+  // ✅ ฟังก์ชันบันทึก primary goal (เพิ่ม error handling)
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     
@@ -261,6 +268,7 @@ export default function AdminGoalsPage() {
       if (error) {
         console.error('Error updating primary goal:', error);
         
+        // ✅ แสดงข้อความที่อ่านง่าย
         if (error.code === '42P01') {
           alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
         } else if (error.code === '42703') {
@@ -281,6 +289,7 @@ export default function AdminGoalsPage() {
     }
   };
 
+  // ✅ ฟังก์ชันสร้างเป้าหมายเริ่มต้น
   const handleCreateDefaultGoals = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
@@ -291,12 +300,14 @@ export default function AdminGoalsPage() {
       setSaving(true);
 
       try {
+        // 1. ลบ goals เดิมทั้งหมด (ถ้ามี)
         await supabase
           .from('goals')
           .delete()
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity');
 
+        // 2. ดึง activities จากฐานข้อมูล
         const { data: activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
@@ -309,6 +320,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
+        // 3. สร้าง goals ใหม่
         const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
         const today = new Date().toISOString().split('T')[0];
 
@@ -347,6 +359,7 @@ export default function AdminGoalsPage() {
   };
 
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
+    console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
       ...prev,
       [goalName]: {
@@ -366,6 +379,7 @@ export default function AdminGoalsPage() {
       setSaving(true);
 
       try {
+        // ✅ 1. เก็บ goals เดิมเป็นประวัติ (archived) - เฉพาะที่สถานะ active
         if (goals.length > 0) {
           const { error: archiveError } = await supabase
             .from('goals')
@@ -379,9 +393,12 @@ export default function AdminGoalsPage() {
 
           if (archiveError) {
             console.error('Error archiving goals:', archiveError);
+          } else {
+            console.log('✅ Archived old goals');
           }
         }
 
+        // ✅ 2. สร้าง goals ใหม่จาก activities
         const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
         const today = new Date().toISOString().split('T')[0];
 
@@ -394,6 +411,7 @@ export default function AdminGoalsPage() {
             goal_name: activity.activity_code,
             goal_name_th: activity.activity_name_th,
             target_days: edit.target_days,
+            // ✅ บันทึก target_value ที่แก้ไข (ถ้ามี) หรือใช้ค่า default
             target_value: edit.target_value ? parseFloat(edit.target_value) : 
                          (activity.target_value ? parseFloat(activity.target_value) : null),
             target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
@@ -406,6 +424,8 @@ export default function AdminGoalsPage() {
           };
         });
 
+        console.log('💾 Saving goals:', newGoals);
+
         const { error } = await supabase.from('goals').insert(newGoals);
 
         if (error) {
@@ -414,6 +434,8 @@ export default function AdminGoalsPage() {
         }
 
         alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
+        
+        // ✅ 3. โหลดข้อมูลใหม่ทันทีหลังบันทึก
         await loadPatientData(selectedPatient);
         
       } catch (error) {
@@ -430,6 +452,7 @@ export default function AdminGoalsPage() {
     router.push('/admin/login');
   };
 
+  // ✅ แยก activities ตาม type
   const foodActivities = activities.filter(a => a.activity_type === 'food');
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
