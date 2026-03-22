@@ -2,9 +2,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Target, Trophy, Plus } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
+import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -54,8 +54,16 @@ interface Goal {
   created_at: string;
 }
 
+interface GoalHistory {
+  id: string;
+  goals: Goal[];
+  start_date: string;
+  is_current: boolean;
+}
+
 export default function AdminGoalsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -66,6 +74,10 @@ export default function AdminGoalsPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [editedGoals, setEditedGoals] = useState<Record<string, { target_days: number; target_value?: string }>>({});
+  const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [primaryGoal, setPrimaryGoal] = useState<string>(''); // ✅ เพิ่ม state สำหรับเป้าหมายหลัก
+  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); // ✅ state สำหรับกำลังบันทึก
 
   useEffect(() => {
     const userData = checkSession();
@@ -142,18 +154,77 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        console.log('🎯 Loaded goals:', activeGoals?.length || 0);
-        setGoals(activeGoals || []);
+        // ✅ กรองเอาเฉพาะ goals ล่าสุดของแต่ละ goal_name (ป้องกัน duplicate)
+        const uniqueGoalsMap = new Map<string, Goal>();
+        (activeGoals || []).forEach((goal: Goal) => {
+          if (!uniqueGoalsMap.has(goal.goal_name)) {
+            uniqueGoalsMap.set(goal.goal_name, goal);
+          }
+        });
+        const uniqueGoals = Array.from(uniqueGoalsMap.values());
+
+        console.log('🎯 Loaded goals:', uniqueGoals.length);
+        setGoals(uniqueGoals);
 
         // ✅ 3. โหลดค่าที่แก้ไขแล้ว (จาก goals ที่มีอยู่)
         const edits: Record<string, { target_days: number; target_value?: string }> = {};
-        (activeGoals || []).forEach((goal: Goal) => {
+        uniqueGoals.forEach((goal: Goal) => {
           edits[goal.goal_name] = {
             target_days: goal.target_days,
-            target_value: goal.target_value?.toString() || '',
+            target_value: goal.target_value?.toString() ?? '',
           };
         });
         setEditedGoals(edits);
+
+        console.log('📝 Edited goals:', edits);
+
+        // ✅ 4. ดึงประวัติ goals (archived)
+        const { data: archivedGoals } = await supabase
+          .from('goals')
+          .select('*')
+          .eq('user_id', patientId)
+          .eq('goal_type', 'weekly_activity')
+          .eq('status', 'archived')
+          .order('created_at', { ascending: false });
+
+        // จัดกลุ่มประวัติตามวันที่สร้าง
+        const historyMap = new Map<string, Goal[]>();
+        (archivedGoals || []).forEach((goal: Goal) => {
+          const dateKey = goal.created_at.split('T')[0];
+          if (!historyMap.has(dateKey)) {
+            historyMap.set(dateKey, []);
+          }
+          historyMap.get(dateKey)!.push(goal);
+        });
+
+        const history = Array.from(historyMap.entries()).map(([date, goalsList]) => ({
+          id: date,
+          goals: goalsList,
+          start_date: date,
+          is_current: false,
+        }));
+
+        // เพิ่ม current goals เข้าไปด้วย
+        if (uniqueGoals && uniqueGoals.length > 0) {
+          const currentStartDate = uniqueGoals[0].created_at.split('T')[0];
+          history.unshift({
+            id: 'current',
+            goals: uniqueGoals,
+            start_date: currentStartDate,
+            is_current: true,
+          });
+        }
+
+        setGoalHistory(history);
+
+        // ✅ 5. โหลด primary goal จาก profile
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('primary_goal_code')
+          .eq('id', patientId)
+          .single();
+
+        setPrimaryGoal(profileData?.primary_goal_code || '');
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
@@ -169,6 +240,39 @@ export default function AdminGoalsPage() {
       setGoals([]);
       setPatientPamLevel('');
       setEditedGoals({});
+      setGoalHistory([]);
+      setPrimaryGoal('');
+    }
+  };
+
+  // ✅ ฟังก์ชันบันทึก primary goal
+  const handlePrimaryGoalChange = async (goalCode: string) => {
+    if (!selectedPatient) return;
+    
+    setSavingPrimaryGoal(true);
+    
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          primary_goal_code: goalCode,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedPatient);
+
+      if (error) {
+        console.error('Error updating primary goal:', error);
+        alert('เกิดข้อผิดพลาดในการบันทึกเป้าหมายหลัก');
+        return;
+      }
+
+      setPrimaryGoal(goalCode);
+      console.log('✅ Primary goal updated:', goalCode);
+    } catch (err) {
+      console.error('Update primary goal error:', err);
+      alert('เกิดข้อผิดพลาดในการบันทึก');
+    } finally {
+      setSavingPrimaryGoal(false);
     }
   };
 
@@ -242,6 +346,7 @@ export default function AdminGoalsPage() {
   };
 
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
+    console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
       ...prev,
       [goalName]: {
@@ -275,6 +380,8 @@ export default function AdminGoalsPage() {
 
           if (archiveError) {
             console.error('Error archiving goals:', archiveError);
+          } else {
+            console.log('✅ Archived old goals');
           }
         }
 
@@ -291,8 +398,10 @@ export default function AdminGoalsPage() {
             goal_name: activity.activity_code,
             goal_name_th: activity.activity_name_th,
             target_days: edit.target_days,
-            target_value: activity.target_value ? (edit.target_value ? parseFloat(edit.target_value) : parseFloat(activity.target_value)) : null,
-            target_unit: activity.unit || null,
+            // ✅ บันทึก target_value ที่แก้ไข (ถ้ามี) หรือใช้ค่า default
+            target_value: edit.target_value ? parseFloat(edit.target_value) : 
+                         (activity.target_value ? parseFloat(activity.target_value) : null),
+            target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
             activity_id: activity.id,
             start_date: today,
             status: 'active',
@@ -302,6 +411,8 @@ export default function AdminGoalsPage() {
           };
         });
 
+        console.log('💾 Saving goals:', newGoals);
+
         const { error } = await supabase.from('goals').insert(newGoals);
 
         if (error) {
@@ -309,8 +420,11 @@ export default function AdminGoalsPage() {
           return;
         }
 
-        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
-        loadPatientData(selectedPatient);
+        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม\n\nเป้าหมายเดิมถูกเก็บเป็นประวัติแล้ว`);
+        
+        // ✅ 3. โหลดข้อมูลใหม่ทันทีหลังบันทึก
+        await loadPatientData(selectedPatient);
+        
       } catch (error) {
         console.error('Error saving new round:', error);
         alert('เกิดข้อผิดพลาดในการบันทึก');
@@ -330,6 +444,14 @@ export default function AdminGoalsPage() {
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
   const restActivities = activities.filter(a => a.activity_type === 'rest');
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('th-TH', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  };
 
   if (loading) {
     return (
@@ -417,6 +539,11 @@ export default function AdminGoalsPage() {
                     {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
                     {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
                   </p>
+                  {goalHistory[0]?.is_current && (
+                    <p className="text-xs text-blue-600 mt-1">
+                      📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
+                    </p>
+                  )}
                   <p className="text-xs text-blue-600 mt-1">
                     💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
                   </p>
@@ -435,20 +562,68 @@ export default function AdminGoalsPage() {
               </div>
             </div>
 
-            {/* Long-term Goals (Core Performance Goals) */}
+            {/* ✅ Long-term Goals (Core Performance Goals) - Radio Button Cards */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
               <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <Trophy className="w-5 h-5 text-purple-600" />
                 เป้าหมายหลัก 4 ประการ (Core Performance Goals)
+                <span className="text-sm font-normal text-gray-500 ml-2">- เลือก 1 ข้อที่เป็นเป้าหมายหลักของผู้ป่วย</span>
               </h2>
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {LONG_TERM_GOALS.map((goal, index) => (
-                  <div key={index} className="p-4 rounded-xl border-2 border-purple-200 bg-gradient-to-br from-purple-50 to-pink-50">
-                    <p className="font-bold text-gray-800 mb-1">{index + 1}. {goal.name_th}</p>
-                    <p className="text-sm text-gray-600">{goal.description}</p>
-                  </div>
+                {LONG_TERM_GOALS.map((goal) => (
+                  <label
+                    key={goal.code}
+                    className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      primaryGoal === goal.code
+                        ? 'border-purple-500 bg-purple-50 shadow-md'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      {/* Radio Button Custom */}
+                      <div className="mt-1">
+                        {primaryGoal === goal.code ? (
+                          <CheckCircle2 className="w-6 h-6 text-purple-600" />
+                        ) : (
+                          <Circle className="w-6 h-6 text-gray-400" />
+                        )}
+                      </div>
+                      
+                      {/* Content */}
+                      <div className="flex-1">
+                        <p className={`font-bold mb-1 ${
+                          primaryGoal === goal.code ? 'text-purple-900' : 'text-gray-800'
+                        }`}>
+                          {goal.name_th}
+                        </p>
+                        <p className={`text-sm ${
+                          primaryGoal === goal.code ? 'text-purple-700' : 'text-gray-600'
+                        }`}>
+                          {goal.description}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {/* Hidden Radio Input */}
+                    <input
+                      type="radio"
+                      name="primaryGoal"
+                      value={goal.code}
+                      checked={primaryGoal === goal.code}
+                      onChange={(e) => handlePrimaryGoalChange(e.target.value)}
+                      disabled={savingPrimaryGoal}
+                      className="hidden"
+                    />
+                  </label>
                 ))}
               </div>
+              
+              {savingPrimaryGoal && (
+                <p className="text-sm text-gray-500 mt-3 text-center">
+                  กำลังบันทึก...
+                </p>
+              )}
             </div>
 
             {/* Food Activities */}
@@ -505,7 +680,7 @@ export default function AdminGoalsPage() {
               </div>
             )}
 
-            {/* ✅ Exercise Activities - แก้ไข: แสดง input นาที/วัน เสมอ */}
+            {/* Exercise Activities */}
             {exerciseActivities.length > 0 && (
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -527,7 +702,6 @@ export default function AdminGoalsPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-4">
-                          {/* ✅ Input สำหรับเวลาออกกำลังกาย (นาที/วัน) - แสดงเสมอ */}
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
                             <input
@@ -535,12 +709,11 @@ export default function AdminGoalsPage() {
                               min="5"
                               max="120"
                               step="5"
-                              value={editedGoals[activity.activity_code]?.target_value?.toString() || existingGoal?.target_value?.toString() || '10'}
+                              value={editedGoals[activity.activity_code]?.target_value || existingGoal?.target_value?.toString() || activity.target_value || '10'}
                               onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_value', e.target.value)}
                               className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
                             />
                           </div>
-                          
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
                             <select
