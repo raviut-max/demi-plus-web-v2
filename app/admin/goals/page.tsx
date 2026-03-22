@@ -5,12 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getPatientList, getPatientGoals } from '@/lib/supabase/queries';
 import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from '@/lib/supabase/client'; // ✅ ใช้ client กลาง
 
 // ✅ Default days ตาม PAM Level
 const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
@@ -80,6 +75,9 @@ export default function AdminGoalsPage() {
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
 
   useEffect(() => {
+    // ✅ FIX: กัน Vercel build (ไม่มี window)
+    if (typeof window === 'undefined') return;
+
     const userData = checkSession();
     
     if (!userData) {
@@ -96,12 +94,11 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadPatients();
 
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const patientId = urlParams.get('patient_id');
-      if (patientId) {
-        setSelectedPatient(patientId);
-      }
+    // ✅ ดึง patient_id จาก URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const patientId = urlParams.get('patient_id');
+    if (patientId) {
+      setSelectedPatient(patientId);
     }
   }, [router]);
 
@@ -136,6 +133,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
+        console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
         // ✅ 2. ดึง goals ปัจจุบัน
@@ -161,6 +159,7 @@ export default function AdminGoalsPage() {
         });
         const uniqueGoals = Array.from(uniqueGoalsMap.values());
 
+        console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
         // ✅ 3. โหลดค่าที่แก้ไขแล้ว
@@ -210,7 +209,7 @@ export default function AdminGoalsPage() {
 
         setGoalHistory(history);
 
-        // ✅ 5. โหลด primary goal จาก profile (เพิ่ม error handling)
+        // ✅ 5. โหลด primary goal จาก profile
         try {
           const { data: profileData, error: profileError } = await supabase
             .from('profiles')
@@ -218,7 +217,6 @@ export default function AdminGoalsPage() {
             .eq('id', patientId)
             .single();
 
-          // PGRST116 = not found (ไม่ถือว่าผิด)
           if (profileError && profileError.code !== 'PGRST116') {
             console.warn('Warning loading primary goal:', profileError);
           }
@@ -248,7 +246,7 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันบันทึก primary goal (เพิ่ม error handling)
+  // ✅ ฟังก์ชันบันทึก primary goal
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     
@@ -266,7 +264,6 @@ export default function AdminGoalsPage() {
       if (error) {
         console.error('Error updating primary goal:', error);
         
-        // ✅ แสดงข้อความที่อ่านง่าย
         if (error.code === '42P01') {
           alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
         } else if (error.code === '42703') {
@@ -353,6 +350,7 @@ export default function AdminGoalsPage() {
   };
 
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
+    console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
       ...prev,
       [goalName]: {
@@ -385,6 +383,8 @@ export default function AdminGoalsPage() {
 
           if (archiveError) {
             console.error('Error archiving goals:', archiveError);
+          } else {
+            console.log('✅ Archived old goals');
           }
         }
 
@@ -411,6 +411,8 @@ export default function AdminGoalsPage() {
             created_by: user?.id,
           };
         });
+
+        console.log('💾 Saving goals:', newGoals);
 
         const { error } = await supabase.from('goals').insert(newGoals);
 
