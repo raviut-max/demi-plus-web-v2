@@ -16,6 +16,7 @@ const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
 
 // ✅ Long-term Goals 4 ข้อ (Core Performance Goals)
 const LONG_TERM_GOALS = [
+  
   { code: 'weight', name_th: 'น้ำหนักลด (Weight Reduction)', description: 'ลดลงอย่างน้อย 5-10% และลด Visceral Fat' },
   { code: 'glucose', name_th: 'น้ำตาลลง (Glucose Control)', description: 'ควบคุมระดับน้ำตาลในเลือดให้เข้าสู่เกณฑ์ปกติ' },
   { code: 'medication', name_th: 'ลดยาได้ (Medication De-escalation)', description: 'ปรับลดหรือหยุดยาภายใต้การกำกับของแพทย์' },
