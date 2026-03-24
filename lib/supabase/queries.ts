@@ -1546,3 +1546,225 @@ export async function getKnowledge(pamLevel: string = 'ALL') {
     return [];
   }
 }
+
+// =====================================================
+// ✅ ฟังก์ชันนับจำนวนรอบการบันทึกเป้าหมาย (ใหม่)
+// =====================================================
+export async function getGoalRoundCount(userId: string) {
+  try {
+    const { count, error } = await supabase
+      .from('goals')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'archived');
+
+    if (error) {
+      console.error('Error counting goal rounds:', error);
+      return 1;
+    }
+
+    // จำนวนรอบ = จำนวน archived + 1 (รอบปัจจุบัน)
+    return (count || 0) + 1;
+  } catch (err) {
+    console.error('Get goal round count error:', err);
+    return 1;
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงรอบล่าสุดที่บันทึก (ใหม่)
+// =====================================================
+export async function getLatestGoalRound(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('goals')
+      .select('round_number, created_at')
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity')
+      .order('round_number', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('Error fetching latest goal round:', error);
+      return null;
+    }
+
+    return data?.[0] || null;
+  } catch (err) {
+    console.error('Get latest goal round error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันบันทึกเป้าหมายรอบใหม่ (แก้ไขแล้ว - เพิ่ม debug)
+// =====================================================
+export async function saveGoalsNewRound(data: {
+  user_id: string;
+  goals: Array<{
+    goal_name: string;
+    goal_name_th: string;
+    target_days: number;
+    target_value?: number;
+    target_unit?: string;
+    activity_id?: string;
+    primary_goal_note?: string;
+    weekly_goal_note?: string;
+  }>;
+  created_by: string;
+}) {
+  try {
+    console.log('💾 [saveGoalsNewRound] Starting...', data.user_id);
+    const today = new Date().toISOString().split('T')[0];
+    console.log('[saveGoalsNewRound] Today:', today);
+
+    // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
+    const { data: existingTodayGoals, error: fetchError } = await supabase
+      .from('goals')
+      .select('id, goal_name, created_at')
+      .eq('user_id', data.user_id)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active')
+      .gte('created_at', today + 'T00:00:00')
+      .lte('created_at', today + 'T23:59:59');
+
+    if (fetchError) {
+      console.error('Error fetching existing goals:', fetchError);
+    }
+
+    console.log('📋 [saveGoalsNewRound] Existing goals today:', existingTodayGoals?.length || 0);
+    if (existingTodayGoals && existingTodayGoals.length > 0) {
+      console.log('🗑️ [saveGoalsNewRound] Goals to delete:', existingTodayGoals.map(g => ({ id: g.id, name: g.goal_name })));
+    }
+
+    let nextRound: number;
+
+    if (existingTodayGoals && existingTodayGoals.length > 0) {
+      // ✅ วันนี้มี goals แล้ว → ใช้ round เดิม (จะลบแล้วบันทึกใหม่)
+      nextRound = existingTodayGoals[0].round_number || 1;
+      console.log('📅 [saveGoalsNewRound] Same day - using existing round:', nextRound);
+
+      // ✅ 2. ลบ goals ของวันนี้ก่อน (เพื่อแทนที่ด้วยข้อมูลใหม่)
+      const { error: deleteError } = await supabase
+        .from('goals')
+        .delete()
+        .eq('user_id', data.user_id)
+        .eq('goal_type', 'weekly_activity')
+        .eq('status', 'active')
+        .gte('created_at', today + 'T00:00:00')
+        .lte('created_at', today + 'T23:59:59');
+
+      if (deleteError) {
+        console.error('❌ [saveGoalsNewRound] Error deleting today goals:', deleteError);
+      } else {
+        console.log('✅ [saveGoalsNewRound] Successfully deleted', existingTodayGoals.length, 'goals for today');
+        
+        // ✅ ตรวจสอบว่าลบจริงหรือไม่
+        const { data: afterDelete } = await supabase
+          .from('goals')
+          .select('id')
+          .eq('user_id', data.user_id)
+          .eq('goal_type', 'weekly_activity')
+          .eq('status', 'active')
+          .gte('created_at', today + 'T00:00:00')
+          .lte('created_at', today + 'T23:59:59');
+        
+        console.log('🔍 [saveGoalsNewRound] After delete - remaining goals:', afterDelete?.length || 0);
+      }
+    } else {
+      // ✅ วันใหม่ → archive ของเก่า + นับรอบใหม่
+      
+      console.log('🆕 [saveGoalsNewRound] New day - archiving old goals');
+      
+      // 2.1 Archive goals เดิม (เฉพาะ active goals ที่ไม่ใช่ของวันนี้)
+      const { data: goalsToArchive } = await supabase
+        .from('goals')
+        .select('id, goal_name')
+        .eq('user_id', data.user_id)
+        .eq('goal_type', 'weekly_activity')
+        .eq('status', 'active');
+
+      console.log('📦 [saveGoalsNewRound] Goals to archive:', goalsToArchive?.length || 0);
+      if (goalsToArchive && goalsToArchive.length > 0) {
+        console.log('📦 [saveGoalsNewRound] Archiving:', goalsToArchive.map(g => ({ id: g.id, name: g.goal_name })));
+      }
+
+      const { error: archiveError } = await supabase
+        .from('goals')
+        .update({
+          is_current: false,
+          status: 'archived',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', data.user_id)
+        .eq('goal_type', 'weekly_activity')
+        .eq('status', 'active');
+
+      if (archiveError) {
+        console.error('❌ [saveGoalsNewRound] Error archiving goals:', archiveError);
+      } else {
+        console.log('✅ [saveGoalsNewRound] Archived', goalsToArchive?.length || 0, 'old goals');
+      }
+
+      // 2.2 นับจำนวนรอบที่ไม่ซ้ำ (distinct round_number)
+      const { data: allRounds } = await supabase
+        .from('goals')
+        .select('round_number')
+        .eq('user_id', data.user_id)
+        .eq('goal_type', 'weekly_activity');
+
+      const uniqueRounds = new Set(allRounds?.map(g => g.round_number) || []);
+      nextRound = uniqueRounds.size + 1;
+      
+      console.log('🆕 [saveGoalsNewRound] New day - next round:', nextRound);
+    }
+
+    // ✅ 3. สร้าง goals ใหม่
+    const newGoals = data.goals.map(goal => ({
+      user_id: data.user_id,
+      goal_type: 'weekly_activity' as const,
+      goal_name: goal.goal_name,
+      goal_name_th: goal.goal_name_th,
+      target_days: goal.target_days,
+      target_value: goal.target_value || null,
+      target_unit: goal.target_unit || null,
+      activity_id: goal.activity_id || null,
+      status: 'active' as const,
+      is_current: true,
+      round_number: nextRound,
+      start_date: today,
+      priority: 1,
+      is_core_goal: true,
+      created_by: data.created_by,
+      primary_goal_note: goal.primary_goal_note || null,
+      weekly_goal_note: goal.weekly_goal_note || null,
+      last_recorded_date: today,
+    }));
+
+    console.log('📝 [saveGoalsNewRound] Creating', newGoals.length, 'new goals');
+    console.log('📝 [saveGoalsNewRound] New goals:', newGoals.map(g => ({ name: g.goal_name, days: g.target_days })));
+
+    const { error: insertError, data: insertedData } = await supabase
+      .from('goals')
+      .insert(newGoals)
+      .select();
+
+    if (insertError) {
+      console.error('❌ [saveGoalsNewRound] Error creating new goals:', insertError);
+      return { success: false, error: insertError.message };
+    }
+
+    console.log('✅ [saveGoalsNewRound] Created new goals successfully');
+    console.log('✅ [saveGoalsNewRound] Inserted IDs:', insertedData?.map(g => g.id));
+
+    return {
+      success: true,
+      round_number: nextRound,
+      goals_count: newGoals.length,
+    };
+  } catch (err) {
+    console.error('❌ [saveGoalsNewRound] Error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการบันทึกเป้าหมาย' };
+  }
+}

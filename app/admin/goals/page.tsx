@@ -81,9 +81,9 @@ export default function AdminGoalsPage() {
   const [weeklyNote, setWeeklyNote] = useState('');
   
   // ✅ State สำหรับ Round Number (ใหม่)
-  const [currentRound, setCurrentRound] = useState<number>(1);
-  const [lastRecordedDate, setLastRecordedDate] = useState<string>('');
-  const [isSameDay, setIsSameDay] = useState<boolean>(false);
+  const [currentRound, setCurrentRound] = useState(1);
+  const [lastRecordedDate, setLastRecordedDate] = useState('');
+  const [isSameDay, setIsSameDay] = useState(false);
 
   // ✅ State สำหรับค้นหาผู้ป่วย
   const [searchHN, setSearchHN] = useState('');
@@ -138,12 +138,10 @@ export default function AdminGoalsPage() {
       setShowSearchDropdown(false);
       return;
     }
-
     const filtered = patients.filter(patient => 
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase()) ||
       patient.full_name?.toLowerCase().includes(value.toLowerCase())
     ).slice(0, 10);
-
     setFilteredPatients(filtered);
     setShowSearchDropdown(true);
   };
@@ -156,12 +154,10 @@ export default function AdminGoalsPage() {
       setShowSearchDropdown(false);
       return;
     }
-
     const filtered = patients.filter(patient => 
       patient.full_name?.toLowerCase().includes(value.toLowerCase()) ||
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase())
     ).slice(0, 10);
-
     setFilteredPatients(filtered);
     setShowSearchDropdown(true);
   };
@@ -198,7 +194,7 @@ export default function AdminGoalsPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน
+        // ✅ 2. ดึง goals ปัจจุบัน 
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -344,9 +340,8 @@ export default function AdminGoalsPage() {
 
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
-    
     setSavingPrimaryGoal(true);
-    
+
     try {
       const { error } = await supabase
         .from('profiles')
@@ -455,76 +450,193 @@ export default function AdminGoalsPage() {
     }));
   };
 
-  // ✅ ฟังก์ชันบันทึกเป้าหมายรอบใหม่ (ปรับปรุงแล้ว)
   const handleSaveNewRound = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
 
-    // ✅ แสดงข้อความแจ้งเตือน
+    const today = new Date().toISOString().split('T')[0];
+    console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
+
+    // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
+    const { data: existingToday, error: fetchError } = await supabase
+      .from('goals')
+      .select('id, goal_name, round_number, created_at')
+      .eq('user_id', selectedPatient)
+      .eq('goal_type', 'weekly_activity')
+      .eq('is_current', true)
+      .gte('created_at', today + 'T00:00:00')
+      .lte('created_at', today + 'T23:59:59');
+
+    if (fetchError) {
+      console.error('❌ [DEBUG] Error fetching:', fetchError);
+    }
+
+    console.log('📋 [DEBUG] Existing goals today:', existingToday?.length || 0);
+    if (existingToday && existingToday.length > 0) {
+      console.log('📋 [DEBUG] Goals to delete:', existingToday.map(g => ({
+        id: g.id,
+        name: g.goal_name,
+        round: g.round_number
+      })));
+    }
+
     let confirmMessage = 'ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\n';
     
-    if (isSameDay) {
-      confirmMessage += `⚠️ คุณได้บันทึกเป้าหมายไปแล้ววันนี้ (รอบที่ ${currentRound})\n\n`;
-      confirmMessage += 'การบันทึกครั้งนี้จะทับข้อมูลเดิมของวันนี้\n\n';
+    if (existingToday && existingToday.length > 0) {
+      confirmMessage += `⚠️ คุณได้บันทึกเป้าหมายไปแล้ววันนี้ (${existingToday.length} กิจกรรม)\n\n`;
+      confirmMessage += 'การบันทึกครั้งนี้จะลบข้อมูลเดิมของวันนี้และบันทึกใหม่\n\n';
       confirmMessage += 'ต้องการบันทึกทับหรือไม่?';
     } else {
-      confirmMessage += `📊 รอบปัจจุบัน: ${currentRound}\n`;
-      confirmMessage += `📅 บันทึกครั้งล่าสุด: ${lastRecordedDate ? new Date(lastRecordedDate).toLocaleDateString('th-TH') : 'ยังไม่เคยบันทึก'}\n\n`;
       confirmMessage += 'ระบบจะเก็บเป้าหมายเดิมเป็นประวัติ และสร้างเป้าหมายใหม่แทน';
     }
 
     if (!confirm(confirmMessage)) {
+      console.log('❌ [DEBUG] User cancelled');
       return;
     }
 
     setSaving(true);
 
     try {
-      // ✅ ใช้ฟังก์ชัน saveGoalsNewRound จาก queries.ts
-      const result = await saveGoalsNewRound({
-        user_id: selectedPatient,
-        goals: activities.map(activity => {
-          const edit = editedGoals[activity.activity_code] || { target_days: DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5 };
+      // ✅ 2. ลบ goals ของวันนี้ก่อน (ถ้ามี)
+      if (existingToday && existingToday.length > 0) {
+        console.log('🗑️ [DEBUG] Deleting goals...');
+        console.log('🗑️ [DEBUG] Goal IDs:', existingToday.map(g => g.id));
+        
+        const { error: deleteError } = await supabase
+          .from('goals')
+          .delete()
+          .eq('user_id', selectedPatient)
+          .eq('goal_type', 'weekly_activity')
+          .eq('is_current', true)
+          .gte('created_at', today + 'T00:00:00')
+          .lte('created_at', today + 'T23:59:59');
+
+        if (deleteError) {
+          console.error('❌ [DEBUG] Delete error:', deleteError);
+        } else {
+          console.log('✅ [DEBUG] Deleted successfully');
           
-          return {
-            goal_name: activity.activity_code,
-            goal_name_th: activity.activity_name_th,
-            target_days: edit.target_days,
-            target_value: edit.target_value ? parseFloat(edit.target_value) : 
-                         (activity.target_value ? parseFloat(activity.target_value) : null),
-            target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
-            activity_id: activity.id,
-            primary_goal_note: primaryGoalNote || undefined,
-            weekly_goal_note: weeklyNote || undefined,
-          };
-        }),
-        created_by: user?.id || '',
+          // ✅ ตรวจสอบว่าลบจริงหรือไม่
+          const { data: afterDelete } = await supabase
+            .from('goals')
+            .select('id')
+            .eq('user_id', selectedPatient)
+            .eq('goal_type', 'weekly_activity')
+            .eq('is_current', true)
+            .gte('created_at', today + 'T00:00:00')
+            .lte('created_at', today + 'T23:59:59');
+          
+          console.log('🔍 [DEBUG] After delete - remaining:', afterDelete?.length || 0);
+        }
+      }
+
+      // ✅ 3. Archive goals เดิม (เฉพาะของวันก่อนหน้า)
+      if (!existingToday || existingToday.length === 0) {
+        console.log('📦 [DEBUG] Archiving old goals...');
+        
+        const { data: goalsToArchive } = await supabase
+          .from('goals')
+          .select('id, goal_name, round_number')
+          .eq('user_id', selectedPatient)
+          .eq('goal_type', 'weekly_activity')
+          .eq('is_current', true);
+
+        console.log('📦 [DEBUG] Goals to archive:', goalsToArchive?.length || 0);
+        
+        if (goalsToArchive && goalsToArchive.length > 0) {
+          const { error: archiveError } = await supabase
+            .from('goals')
+            .update({ 
+              is_current: false,
+              status: 'archived',
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', selectedPatient)
+            .eq('goal_type', 'weekly_activity')
+            .eq('is_current', true);
+
+          if (archiveError) {
+            console.error('❌ [DEBUG] Archive error:', archiveError);
+          } else {
+            console.log('✅ [DEBUG] Archived successfully');
+          }
+        }
+      }
+
+      // ✅ 4. นับ round_number ใหม่ (นับจากวันที่ไม่ซ้ำ)
+      console.log('🔢 [DEBUG] Calculating new round number...');
+      
+      let newRoundNumber: number;
+
+      if (existingToday && existingToday.length > 0) {
+        // วันนี้บันทึกไปแล้ว → ใช้ round เดิม
+        newRoundNumber = existingToday[0].round_number || 1;
+        console.log('📅 [DEBUG] Same day - using existing round:', newRoundNumber);
+      } else {
+        // วันใหม่ → archive ของเก่า + นับรอบใหม่
+        const { data: allGoals } = await supabase
+          .from('goals')
+          .select('created_at')
+          .eq('user_id', selectedPatient)
+          .eq('goal_type', 'weekly_activity');
+
+        // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
+        const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
+        newRoundNumber = uniqueDates.size;  // ✅ แก้ไข: ไม่ต้องบวก 1
+        
+        console.log('🔢 [DEBUG] Unique dates:', Array.from(uniqueDates));
+        console.log('🔢 [DEBUG] New round number:', newRoundNumber);
+      }
+
+      // ✅ 5. สร้าง goals ใหม่
+      const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
+
+      const newGoals = activities.map(activity => {
+        const edit = editedGoals[activity.activity_code] || { target_days: defaultDays };
+        
+        return {
+          user_id: selectedPatient,
+          goal_type: 'weekly_activity' as const,
+          goal_name: activity.activity_code,
+          goal_name_th: activity.activity_name_th,
+          target_days: edit.target_days,
+          target_value: edit.target_value ? parseFloat(edit.target_value) : 
+                       (activity.target_value ? parseFloat(activity.target_value) : null),
+          target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
+          activity_id: activity.id,
+          start_date: today,
+          status: 'active',
+          is_current: true,
+          priority: 1,
+          is_core_goal: true,
+          created_by: user?.id,
+          round_number: newRoundNumber,
+          primary_goal_note: primaryGoalNote || null,
+          weekly_goal_note: weeklyNote || null,
+        };
       });
 
-      if (!result.success) {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
+      console.log('💾 [DEBUG] Saving goals:', newGoals.length);
+      console.log('💾 [DEBUG] Round number:', newRoundNumber);
+
+      const { error } = await supabase.from('goals').insert(newGoals);
+
+      if (error) {
+        console.error('❌ [DEBUG] Insert error:', error);
+        alert('เกิดข้อผิดพลาด: ' + error.message);
         return;
       }
 
-      // ✅ แสดงผลลัพธ์
-      let successMessage = `✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${result.goals_count} กิจกรรม\n\n`;
-      
-      if (isSameDay) {
-        successMessage += `📝 บันทึกทับรอบที่ ${currentRound} (วันเดิม)`;
-      } else {
-        successMessage += `🎯 รอบที่: ${result.round_number}\n`;
-        successMessage += `📅 วันที่บันทึก: ${new Date().toLocaleDateString('th-TH')}`;
-      }
+      console.log('✅ [DEBUG] Saved successfully');
+      alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม\nรอบที่: ${newRoundNumber}`);
 
-      alert(successMessage);
-      
-      // ✅ โหลดข้อมูลใหม่
       await loadPatientData(selectedPatient);
       
     } catch (error) {
-      console.error('Error saving new round:', error);
+      console.error('❌ [DEBUG] Error:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
@@ -797,7 +909,6 @@ export default function AdminGoalsPage() {
                 })}
               </div>
 
-              {/* คอมเมนต์เป้าหมายหลัก */}
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
                   📝 เป้าหมาย(หลัก) - หมายเหตุเพิ่มเติม
