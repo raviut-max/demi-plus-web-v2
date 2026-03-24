@@ -631,7 +631,7 @@ export default function AdminGoalsPage() {
       }
 
       console.log('✅ [DEBUG] Saved successfully');
-      alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม\nรอบที่: ${newRoundNumber}`);
+      alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
 
       await loadPatientData(selectedPatient);
       
