@@ -3,9 +3,9 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList } from '@/lib/supabase/queries';
+import { checkSession, logout, getPatientList, getGoalRoundCount, getLatestGoalRound, saveGoalsNewRound } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle, Search, User } from 'lucide-react';
+import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle, Search, User, History, Calendar } from 'lucide-react';
 
 // ✅ Default days ตาม PAM Level
 const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
@@ -47,6 +47,8 @@ interface Goal {
   activity_id: string | null;
   status: string;
   created_at: string;
+  round_number?: number;
+  last_recorded_date?: string;
   primary_goal_note?: string;
   weekly_goal_note?: string;
 }
@@ -56,6 +58,7 @@ interface GoalHistory {
   goals: Goal[];
   start_date: string;
   is_current: boolean;
+  round_number?: number;
 }
 
 export default function AdminGoalsPage() {
@@ -72,11 +75,16 @@ export default function AdminGoalsPage() {
   const [editedGoals, setEditedGoals] = useState<Record<string, { target_days: number; target_value?: string }>>({});
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [primaryGoal, setPrimaryGoal] = useState<string>('');
+  const [primaryGoal, setPrimaryGoal] = useState('');
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
-  const [primaryGoalNote, setPrimaryGoalNote] = useState<string>('');
-  const [weeklyNote, setWeeklyNote] = useState<string>('');
+  const [primaryGoalNote, setPrimaryGoalNote] = useState('');
+  const [weeklyNote, setWeeklyNote] = useState('');
   
+  // ✅ State สำหรับ Round Number (ใหม่)
+  const [currentRound, setCurrentRound] = useState<number>(1);
+  const [lastRecordedDate, setLastRecordedDate] = useState<string>('');
+  const [isSameDay, setIsSameDay] = useState<boolean>(false);
+
   // ✅ State สำหรับค้นหาผู้ป่วย
   const [searchHN, setSearchHN] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -125,7 +133,6 @@ export default function AdminGoalsPage() {
   const handleSearchHN = (value: string) => {
     setSearchHN(value);
     setSearchType('hn');
-    
     if (value.trim() === '') {
       setFilteredPatients([]);
       setShowSearchDropdown(false);
@@ -135,7 +142,7 @@ export default function AdminGoalsPage() {
     const filtered = patients.filter(patient => 
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase()) ||
       patient.full_name?.toLowerCase().includes(value.toLowerCase())
-    ).slice(0, 10); // แสดงสูงสุด 10 รายการ
+    ).slice(0, 10);
 
     setFilteredPatients(filtered);
     setShowSearchDropdown(true);
@@ -144,7 +151,6 @@ export default function AdminGoalsPage() {
   const handleSearchName = (value: string) => {
     setSearchName(value);
     setSearchType('name');
-    
     if (value.trim() === '') {
       setFilteredPatients([]);
       setShowSearchDropdown(false);
@@ -154,7 +160,7 @@ export default function AdminGoalsPage() {
     const filtered = patients.filter(patient => 
       patient.full_name?.toLowerCase().includes(value.toLowerCase()) ||
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase())
-    ).slice(0, 10); // แสดงสูงสุด 10 รายการ
+    ).slice(0, 10);
 
     setFilteredPatients(filtered);
     setShowSearchDropdown(true);
@@ -176,6 +182,7 @@ export default function AdminGoalsPage() {
         const pamLevel = patient.pam_level || 'L2';
         setPatientPamLevel(pamLevel);
 
+        // ✅ 1. ดึง activities
         const { data: activitiesData, error: activitiesError } = await supabase
           .from('activities')
           .select('*')
@@ -191,12 +198,14 @@ export default function AdminGoalsPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
+        // ✅ 2. ดึง goals ปัจจุบัน
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
           .eq('user_id', patientId)
           .eq('goal_type', 'weekly_activity')
           .eq('status', 'active')
+          .eq('is_current', true)
           .order('created_at', { ascending: false });
 
         if (goalsError) {
@@ -204,6 +213,7 @@ export default function AdminGoalsPage() {
           return;
         }
 
+        // ✅ กรอง duplicate goals
         const uniqueGoalsMap = new Map<string, Goal>();
         (activeGoals || []).forEach((goal: Goal) => {
           if (!uniqueGoalsMap.has(goal.goal_name)) {
@@ -215,6 +225,7 @@ export default function AdminGoalsPage() {
         console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
+        // ✅ 3. โหลดค่าที่แก้ไขแล้ว
         const edits: Record<string, { target_days: number; target_value?: string }> = {};
         uniqueGoals.forEach((goal: Goal) => {
           edits[goal.goal_name] = {
@@ -224,54 +235,55 @@ export default function AdminGoalsPage() {
         });
         setEditedGoals(edits);
 
-        console.log('📝 Edited goals:', edits);
-
+        // ✅ 4. ดึงประวัติ goals (archived)
         const { data: archivedGoals } = await supabase
           .from('goals')
           .select('*')
           .eq('user_id', patientId)
           .eq('goal_type', 'weekly_activity')
           .eq('status', 'archived')
+          .order('round_number', { ascending: false })
           .order('created_at', { ascending: false });
 
-        const historyMap = new Map<string, Goal[]>();
+        // จัดกลุ่มประวัติตาม round_number
+        const roundsMap = new Map<number, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
-          const dateKey = goal.created_at.split('T')[0];
-          if (!historyMap.has(dateKey)) {
-            historyMap.set(dateKey, []);
+          const round = goal.round_number || 1;
+          if (!roundsMap.has(round)) {
+            roundsMap.set(round, []);
           }
-          historyMap.get(dateKey)!.push(goal);
+          roundsMap.get(round)!.push(goal);
         });
 
-        const history = Array.from(historyMap.entries()).map(([date, goalsList]) => ({
-          id: date,
+        const history = Array.from(roundsMap.entries()).map(([round, goalsList]) => ({
+          id: `round-${round}`,
           goals: goalsList,
-          start_date: date,
+          start_date: goalsList[0]?.created_at,
           is_current: false,
+          round_number: round,
         }));
 
+        // เพิ่ม current goals เข้าไปด้วย
         if (uniqueGoals && uniqueGoals.length > 0) {
-          const currentStartDate = uniqueGoals[0].created_at.split('T')[0];
+          const currentRoundNum = uniqueGoals[0].round_number || 1;
           history.unshift({
             id: 'current',
             goals: uniqueGoals,
-            start_date: currentStartDate,
+            start_date: uniqueGoals[0].created_at,
             is_current: true,
+            round_number: currentRoundNum,
           });
         }
 
         setGoalHistory(history);
 
+        // ✅ 5. โหลด primary goal
         try {
-          const { data: profileData, error: profileError } = await supabase
+          const { data: profileData } = await supabase
             .from('profiles')
             .select('primary_goal_code')
             .eq('id', patientId)
             .single();
-
-          if (profileError && profileError.code !== 'PGRST116') {
-            console.warn('Warning loading primary goal:', profileError);
-          }
           
           setPrimaryGoal(profileData?.primary_goal_code || '');
         } catch (err) {
@@ -279,22 +291,32 @@ export default function AdminGoalsPage() {
           setPrimaryGoal('');
         }
 
+        // ✅ 6. โหลดหมายเหตุ
         if (uniqueGoals && uniqueGoals.length > 0) {
           const firstGoal = uniqueGoals[0];
-          if (firstGoal.primary_goal_note) {
-            setPrimaryGoalNote(firstGoal.primary_goal_note);
-          } else {
-            setPrimaryGoalNote('');
-          }
-          if (firstGoal.weekly_goal_note) {
-            setWeeklyNote(firstGoal.weekly_goal_note);
-          } else {
-            setWeeklyNote('');
-          }
+          setPrimaryGoalNote(firstGoal.primary_goal_note || '');
+          setWeeklyNote(firstGoal.weekly_goal_note || '');
         } else {
           setPrimaryGoalNote('');
           setWeeklyNote('');
         }
+
+        // ✅ 7. โหลด Round Number และวันที่บันทึกครั้งล่าสุด
+        const roundCount = await getGoalRoundCount(patientId);
+        setCurrentRound(roundCount);
+
+        const latestRound = await getLatestGoalRound(patientId);
+        if (latestRound) {
+          setLastRecordedDate(latestRound.created_at);
+          
+          // ✅ ตรวจสอบว่าบันทึกในวันเดิมหรือไม่
+          const today = new Date().toISOString().split('T')[0];
+          const lastDate = new Date(latestRound.created_at).toISOString().split('T')[0];
+          setIsSameDay(today === lastDate);
+          
+          console.log('📅 Last recorded:', lastDate, '| Today:', today, '| Same day:', today === lastDate);
+        }
+
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
@@ -314,6 +336,9 @@ export default function AdminGoalsPage() {
       setPrimaryGoal('');
       setPrimaryGoalNote('');
       setWeeklyNote('');
+      setCurrentRound(1);
+      setLastRecordedDate('');
+      setIsSameDay(false);
     }
   };
 
@@ -430,43 +455,40 @@ export default function AdminGoalsPage() {
     }));
   };
 
+  // ✅ ฟังก์ชันบันทึกเป้าหมายรอบใหม่ (ปรับปรุงแล้ว)
   const handleSaveNewRound = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
 
-    if (confirm('ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\nระบบจะเก็บเป้าหมายเดิมเป็นประวัติ และสร้างเป้าหมายใหม่แทน')) {
-      setSaving(true);
+    // ✅ แสดงข้อความแจ้งเตือน
+    let confirmMessage = 'ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\n';
+    
+    if (isSameDay) {
+      confirmMessage += `⚠️ คุณได้บันทึกเป้าหมายไปแล้ววันนี้ (รอบที่ ${currentRound})\n\n`;
+      confirmMessage += 'การบันทึกครั้งนี้จะทับข้อมูลเดิมของวันนี้\n\n';
+      confirmMessage += 'ต้องการบันทึกทับหรือไม่?';
+    } else {
+      confirmMessage += `📊 รอบปัจจุบัน: ${currentRound}\n`;
+      confirmMessage += `📅 บันทึกครั้งล่าสุด: ${lastRecordedDate ? new Date(lastRecordedDate).toLocaleDateString('th-TH') : 'ยังไม่เคยบันทึก'}\n\n`;
+      confirmMessage += 'ระบบจะเก็บเป้าหมายเดิมเป็นประวัติ และสร้างเป้าหมายใหม่แทน';
+    }
 
-      try {
-        if (goals.length > 0) {
-          const { error: archiveError } = await supabase
-            .from('goals')
-            .update({ 
-              status: 'archived',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', selectedPatient)
-            .eq('goal_type', 'weekly_activity')
-            .eq('status', 'active');
+    if (!confirm(confirmMessage)) {
+      return;
+    }
 
-          if (archiveError) {
-            console.error('Error archiving goals:', archiveError);
-          } else {
-            console.log('✅ Archived old goals');
-          }
-        }
+    setSaving(true);
 
-        const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
-        const today = new Date().toISOString().split('T')[0];
-
-        const newGoals = activities.map(activity => {
-          const edit = editedGoals[activity.activity_code] || { target_days: defaultDays };
+    try {
+      // ✅ ใช้ฟังก์ชัน saveGoalsNewRound จาก queries.ts
+      const result = await saveGoalsNewRound({
+        user_id: selectedPatient,
+        goals: activities.map(activity => {
+          const edit = editedGoals[activity.activity_code] || { target_days: DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5 };
           
           return {
-            user_id: selectedPatient,
-            goal_type: 'weekly_activity' as const,
             goal_name: activity.activity_code,
             goal_name_th: activity.activity_name_th,
             target_days: edit.target_days,
@@ -474,35 +496,38 @@ export default function AdminGoalsPage() {
                          (activity.target_value ? parseFloat(activity.target_value) : null),
             target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
             activity_id: activity.id,
-            start_date: today,
-            status: 'active',
-            priority: 1,
-            is_core_goal: true,
-            created_by: user?.id,
-            primary_goal_note: primaryGoalNote || null,
-            weekly_goal_note: weeklyNote || null,
+            primary_goal_note: primaryGoalNote || undefined,
+            weekly_goal_note: weeklyNote || undefined,
           };
-        });
+        }),
+        created_by: user?.id || '',
+      });
 
-        console.log('💾 Saving goals:', newGoals);
-
-        const { error } = await supabase.from('goals').insert(newGoals);
-
-        if (error) {
-          alert('เกิดข้อผิดพลาด: ' + error.message);
-          return;
-        }
-
-        alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
-        
-        await loadPatientData(selectedPatient);
-        
-      } catch (error) {
-        console.error('Error saving new round:', error);
-        alert('เกิดข้อผิดพลาดในการบันทึก');
-      } finally {
-        setSaving(false);
+      if (!result.success) {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+        return;
       }
+
+      // ✅ แสดงผลลัพธ์
+      let successMessage = `✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${result.goals_count} กิจกรรม\n\n`;
+      
+      if (isSameDay) {
+        successMessage += `📝 บันทึกทับรอบที่ ${currentRound} (วันเดิม)`;
+      } else {
+        successMessage += `🎯 รอบที่: ${result.round_number}\n`;
+        successMessage += `📅 วันที่บันทึก: ${new Date().toLocaleDateString('th-TH')}`;
+      }
+
+      alert(successMessage);
+      
+      // ✅ โหลดข้อมูลใหม่
+      await loadPatientData(selectedPatient);
+      
+    } catch (error) {
+      console.error('Error saving new round:', error);
+      alert('เกิดข้อผิดพลาดในการบันทึก');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -526,19 +551,16 @@ export default function AdminGoalsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-600">กำลังโหลด...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
+      <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -554,7 +576,7 @@ export default function AdminGoalsPage() {
             </div>
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
             >
               <LogOut className="w-4 h-4" />
               ออกจากระบบ
@@ -565,8 +587,8 @@ export default function AdminGoalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* ✅ Select Patient with Search */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+        {/* Select Patient */}
+        <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
               <Target className="w-5 h-5 text-blue-600" />
@@ -584,7 +606,7 @@ export default function AdminGoalsPage() {
             )}
           </div>
 
-          {/* ✅ Search by HN */}
+          {/* Search by HN */}
           <div className="mb-4">
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               🔍 ค้นหาด้วย HN (Hospital Number)
@@ -601,7 +623,7 @@ export default function AdminGoalsPage() {
             </div>
           </div>
 
-          {/* ✅ Search by Name */}
+          {/* Search by Name */}
           <div className="mb-4">
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               👤 ค้นหาด้วยชื่อผู้ป่วย
@@ -618,7 +640,7 @@ export default function AdminGoalsPage() {
             </div>
           </div>
 
-          {/* ✅ Search Results Dropdown */}
+          {/* Search Results Dropdown */}
           {showSearchDropdown && filteredPatients.length > 0 && (
             <div className="mb-4 border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
               {filteredPatients.map((patient) => (
@@ -645,14 +667,7 @@ export default function AdminGoalsPage() {
             </div>
           )}
 
-          {/* ✅ No Results */}
-          {showSearchDropdown && filteredPatients.length === 0 && (searchHN || searchName) && (
-            <div className="mb-4 p-4 text-center text-gray-500 border border-gray-200 rounded-lg">
-              ไม่พบผู้ป่วยที่ตรงกับคำค้นหา
-            </div>
-          )}
-
-          {/* ✅ Dropdown แบบเดิม (สำรอง) */}
+          {/* Dropdown แบบเดิม (สำรอง) */}
           <div className="mt-4 pt-4 border-t border-gray-200">
             <label className="block text-sm font-semibold text-gray-700 mb-2">
               หรือเลือกจากรายการทั้งหมด
@@ -685,6 +700,26 @@ export default function AdminGoalsPage() {
                     {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
                     {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
                   </p>
+                  
+                  {/* ✅ แสดง Round Number และวันที่บันทึก */}
+                  <div className="mt-2 flex items-center gap-4">
+                    <div className="flex items-center gap-1 text-xs text-blue-600">
+                      <History className="w-3 h-3" />
+                      <span>รอบที่: <strong>{currentRound}</strong></span>
+                    </div>
+                    {lastRecordedDate && (
+                      <div className="flex items-center gap-1 text-xs text-blue-600">
+                        <Calendar className="w-3 h-3" />
+                        <span>บันทึกครั้งล่าสุด: <strong>{formatDate(lastRecordedDate)}</strong></span>
+                      </div>
+                    )}
+                    {isSameDay && (
+                      <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                        ⚠️ บันทึกวันนี้แล้ว
+                      </span>
+                    )}
+                  </div>
+                  
                   {goalHistory[0]?.is_current && (
                     <p className="text-xs text-blue-600 mt-1">
                       📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
@@ -708,7 +743,7 @@ export default function AdminGoalsPage() {
             </div>
 
             {/* Long-term Goals */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+            <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
               <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <Trophy className="w-5 h-5 text-purple-600" />
                 เป้าหมายหลัก 4 ประการ (Core Performance Goals)
@@ -716,51 +751,52 @@ export default function AdminGoalsPage() {
               </h2>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {LONG_TERM_GOALS.map((goal) => (
-                  <label
-                    key={goal.code}
-                    className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                      primaryGoal === goal.code
-                        ? 'border-purple-500 bg-purple-50 shadow-md'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-1">
-                        {primaryGoal === goal.code ? (
-                          <CheckCircle2 className="w-6 h-6 text-purple-600" />
-                        ) : (
-                          <Circle className="w-6 h-6 text-gray-400" />
-                        )}
+                {LONG_TERM_GOALS.map((goal) => {
+                  const isSelected = primaryGoal === goal.code;
+                  return (
+                    <label
+                      key={goal.code}
+                      className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-purple-500 bg-purple-50 shadow-md'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          {isSelected ? (
+                            <CheckCircle2 className="w-6 h-6 text-purple-600" />
+                          ) : (
+                            <Circle className="w-6 h-6 text-gray-400" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <p className={`font-bold mb-1 ${
+                            isSelected ? 'text-purple-900' : 'text-gray-800'
+                          }`}>
+                            {goal.name_th}
+                          </p>
+                          <p className={`text-sm ${
+                            isSelected ? 'text-purple-700' : 'text-gray-600'
+                          }`}>
+                            {goal.description}
+                          </p>
+                        </div>
                       </div>
-                      
-                      <div className="flex-1">
-                        <p className={`font-bold mb-1 ${
-                          primaryGoal === goal.code ? 'text-purple-900' : 'text-gray-800'
-                        }`}>
-                          {goal.name_th}
-                        </p>
-                        <p className={`text-sm ${
-                          primaryGoal === goal.code ? 'text-purple-700' : 'text-gray-600'
-                        }`}>
-                          {goal.description}
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <input
-                      type="radio"
-                      name="primaryGoal"
-                      value={goal.code}
-                      checked={primaryGoal === goal.code}
-                      onChange={(e) => handlePrimaryGoalChange(e.target.value)}
-                      disabled={savingPrimaryGoal}
-                      className="hidden"
-                    />
-                  </label>
-                ))}
+                      <input
+                        type="radio"
+                        name="primaryGoal"
+                        value={goal.code}
+                        checked={isSelected}
+                        onChange={(e) => handlePrimaryGoalChange(e.target.value)}
+                        disabled={savingPrimaryGoal}
+                        className="hidden"
+                      />
+                    </label>
+                  );
+                })}
               </div>
-              
+
               {/* คอมเมนต์เป้าหมายหลัก */}
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -787,10 +823,8 @@ export default function AdminGoalsPage() {
 
             {/* Food Activities */}
             {foodActivities.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  🍚 เป้าหมายรายสัปดาห์ - อาหาร
-                </h2>
+              <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">🍚 เป้าหมายรายสัปดาห์ - อาหาร</h2>
                 <div className="space-y-4">
                   {foodActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -840,10 +874,8 @@ export default function AdminGoalsPage() {
 
             {/* Exercise Activities */}
             {exerciseActivities.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  🧘 เป้าหมายรายสัปดาห์ - ออกกำลังกาย
-                </h2>
+              <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">🧘 เป้าหมายรายสัปดาห์ - ออกกำลังกาย</h2>
                 <div className="space-y-4">
                   {exerciseActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -893,10 +925,8 @@ export default function AdminGoalsPage() {
 
             {/* Measurement Activities */}
             {measurementActivities.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  📊 เป้าหมายรายสัปดาห์ - วัดและบันทึก
-                </h2>
+              <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">📊 เป้าหมายรายสัปดาห์ - วัดและบันทึก</h2>
                 <div className="space-y-4">
                   {measurementActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -932,10 +962,8 @@ export default function AdminGoalsPage() {
 
             {/* Rest Activities (L4 only) */}
             {patientPamLevel === 'L4' && restActivities.length > 0 && (
-              <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-                <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  🌙 เป้าหมายรายสัปดาห์ - พักผ่อน
-                </h2>
+              <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
+                <h2 className="text-xl font-bold text-gray-800 mb-4">🌙 เป้าหมายรายสัปดาห์ - พักผ่อน</h2>
                 <div className="space-y-4">
                   {restActivities.map((activity) => {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
@@ -970,7 +998,7 @@ export default function AdminGoalsPage() {
             )}
 
             {/* คอมเมนต์หมายเหตุรายสัปดาห์ (รวม) */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+            <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
               <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                 📝 หมายเหตุ(สัปดาห์) - คำแนะนำเพิ่มเติม
               </h2>
@@ -1002,7 +1030,7 @@ export default function AdminGoalsPage() {
                   ) : (
                     <>
                       <Save className="w-5 h-5" />
-                      บันทึกเป้าหมายรอบใหม่
+                      {isSameDay ? `บันทึกทับรอบที่ ${currentRound} (วันเดิม)` : `บันทึกเป้าหมายรอบที่ ${currentRound + 1}`}
                     </>
                   )}
                 </button>
