@@ -17,7 +17,6 @@ export async function login(idCard: string, password: string) {
       return null;
     }
 
-    // ตรวจสอบว่าเป็น Staff หรือ Patient
     let full_name_th = 'ผู้ใช้';
     let hospital_number = '';
     let pam_level = 'L2';
@@ -37,11 +36,14 @@ export async function login(idCard: string, password: string) {
       // Patient → ดึงข้อมูลจาก profiles table
       const { data: profile } = await supabase
         .from('profiles')
-        .select('full_name, hospital_number, pam_level, pam_score, zone, current_step')
+        .select('first_name, last_name, hospital_number, pam_level, pam_score, zone, current_step')
         .eq('id', data.id)
         .single();
 
-      full_name_th = profile?.full_name || 'ผู้ใช้';
+      // ✅ รวมชื่อ-นามสกุล
+      full_name_th = profile?.first_name && profile?.last_name 
+        ? `${profile.first_name} ${profile.last_name}` 
+        : 'ผู้ใช้';
       hospital_number = profile?.hospital_number || '';
       pam_level = profile?.pam_level || 'L2';
       zone = profile?.zone || 'Green Zone';
@@ -90,7 +92,6 @@ export function checkSession() {
     const loginDate = new Date(loginTime);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - loginDate.getTime()) / (1000 * 60 * 60 * 24));
-    
     if (diffDays > 7) {
       logout();
       return null;
@@ -111,22 +112,41 @@ export async function getProfile(userId: string) {
     .single();
 
   if (error) return null;
+
+  // ✅ รวมชื่อ-นามสกุล สำหรับ backward compatibility
+  if (data) {
+    data.full_name = data.first_name && data.last_name 
+      ? `${data.first_name} ${data.last_name}` 
+      : '';
+  }
+
   return data;
 }
 
 // =====================================================
-// ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin) - ✅ แก้ไขแล้ว
+// ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin)
 // =====================================================
 export async function getPatientList(search?: string, pamLevel?: string) {
   try {
     let query = supabase
       .from('profiles')
-      .select(`*, users!profiles_id_fkey ( id_card, role, is_active, created_at )`)
-      .eq('is_active', true)  // ✅ กรองเฉพาะผู้ป่วยที่ยัง active
+      .select(`
+        *,
+        users!profiles_id_fkey (
+          id_card,
+          role,
+          is_active,
+          created_at
+        )
+      `)
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (search) {
-      query = query.or(`full_name.ilike.%${search}%,hospital_number.ilike.%${search}%`);
+      // ✅ ค้นหาจาก first_name, last_name, hospital_number
+      query = query.or(
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+      );
     }
 
     if (pamLevel) {
@@ -140,8 +160,16 @@ export async function getPatientList(search?: string, pamLevel?: string) {
       return [];
     }
 
-    console.log('📊 Patient List Data:', data);
-    return data || [];
+    // ✅ รวมชื่อ-นามสกุล สำหรับแต่ละ patient
+    const patientsWithData = data?.map(patient => ({
+      ...patient,
+      full_name: patient.first_name && patient.last_name 
+        ? `${patient.first_name} ${patient.last_name}` 
+        : '',
+    })) || [];
+
+    console.log('📊 Patient List Data:', patientsWithData.length);
+    return patientsWithData;
   } catch (err) {
     console.error('Get patient list error:', err);
     return [];
@@ -154,8 +182,7 @@ export async function getPatientList(search?: string, pamLevel?: string) {
 export async function restorePatient(patientId: string) {
   try {
     console.log('♻️ Restoring patient:', patientId);
-    
-    // 1. เปิดการใช้งานใน profiles table
+
     const { error: profileError } = await supabase
       .from('profiles')
       .update({ 
@@ -170,7 +197,6 @@ export async function restorePatient(patientId: string) {
       return { success: false, error: profileError.message };
     }
 
-    // 2. เปิดการใช้งานใน users table
     const { error: userError } = await supabase
       .from('users')
       .update({ is_active: true })
@@ -196,7 +222,14 @@ export async function getDeletedPatients() {
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select(`*, users!profiles_id_fkey ( id_card, role, is_active )`)
+      .select(`
+        *,
+        users!profiles_id_fkey (
+          id_card,
+          role,
+          is_active
+        )
+      `)
       .eq('is_active', false)
       .order('updated_at', { ascending: false });
 
@@ -205,7 +238,15 @@ export async function getDeletedPatients() {
       return [];
     }
 
-    return data || [];
+    // ✅ รวมชื่อ-นามสกุล
+    const patientsWithData = data?.map(patient => ({
+      ...patient,
+      full_name: patient.first_name && patient.last_name 
+        ? `${patient.first_name} ${patient.last_name}` 
+        : '',
+    })) || [];
+
+    return patientsWithData;
   } catch (err) {
     console.error('Get deleted patients error:', err);
     return [];
@@ -213,12 +254,14 @@ export async function getDeletedPatients() {
 }
 
 // =====================================================
-// ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin) - ฉบับสมบูรณ์
+// ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin) - ✅ แก้ไขแล้ว
 // =====================================================
 export async function registerPatient(data: {
   id_card: string;
   password: string;
-  full_name: string;
+  first_name: string;        // ✅ แยกชื่อ
+  last_name: string;         // ✅ แยกนามสกุล
+  full_name?: string;        // ✅ สำหรับ backward compatibility
   hospital_number: string;
   birth_date: string;
   gender: string;
@@ -231,15 +274,24 @@ export async function registerPatient(data: {
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   emergency_contact_relationship?: string;
-  address_line1?: string;
-  district?: string;
-  province?: string;
-  postal_code?: string;
+  
+  // ✅ ที่อยู่แยกส่วน (แก้ไขแล้ว)
+  house_number?: string;     // ✅ เลขที่
+  address_line1?: string;    // ✅ ที่อยู่เพิ่มเติม
+  soi?: string;              // ✅ ซอย
+  road?: string;             // ✅ ถนน
+  village_no?: string;       // ✅ หมู่ที่
+  village_name?: string;     // ✅ หมู่บ้าน
+  subdistrict?: string;      // ✅ ตำบล
+  district?: string;         // ✅ อำเภอ/เขต
+  province?: string;         // ✅ จังหวัด
+  postal_code?: string;      // ✅ รหัสไปรษณีย์
+  subdistrict_health_center?: string;  // ✅ รพสต
+  
   diabetes_type?: string;
   diagnosis_date?: string;
   hba1c_level?: number;
-  blood_type?: string;
-  allergies?: string;
+  notes?: string;            // ✅ เปลี่ยนจาก allergies
   occupation?: string;
   education_level?: string;
   created_by: string;
@@ -263,12 +315,17 @@ export async function registerPatient(data: {
       return { success: false, error: userError.message };
     }
 
-    // 2. สร้าง profile
+    // 2. รวมชื่อ-นามสกุล สำหรับ full_name (backward compatibility)
+    const fullName = data.full_name || `${data.first_name} ${data.last_name}`;
+
+    // 3. สร้าง profile
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .insert({
         id: user.id,
-        full_name: data.full_name,
+        first_name: data.first_name,                    // ✅ แยกชื่อ
+        last_name: data.last_name,                      // ✅ แยกนามสกุล
+        full_name: fullName,                            // ✅ สำหรับ backward compatibility
         hospital_number: data.hospital_number,
         birth_date: data.birth_date,
         gender: data.gender,
@@ -281,15 +338,24 @@ export async function registerPatient(data: {
         emergency_contact_name: data.emergency_contact_name,
         emergency_contact_phone: data.emergency_contact_phone,
         emergency_contact_relationship: data.emergency_contact_relationship,
-        address_line1: data.address_line1,
-        district: data.district,
-        province: data.province,
-        postal_code: data.postal_code,
+        
+        // ✅ ที่อยู่แยกส่วน (แก้ไขแล้ว)
+        house_number: data.house_number,                // ✅ แยก house_number
+        address_line1: data.address_line1,              // ✅ แยก address_line1
+        soi: data.soi,                                  // ✅ แยก soi
+        road: data.road,                                // ✅ แยก road
+        village_no: data.village_no,                    // ✅ แยก village_no
+        village_name: data.village_name,                // ✅ แยก village_name
+        subdistrict: data.subdistrict,                  // ✅ แยก subdistrict
+        district: data.district,                        // ✅ แยก district
+        province: data.province,                        // ✅ แยก province
+        postal_code: data.postal_code,                  // ✅ แยก postal_code
+        subdistrict_health_center: data.subdistrict_health_center,  // ✅ รพสต
+        
         diabetes_type: data.diabetes_type,
         diagnosis_date: data.diagnosis_date,
         hba1c_level: data.hba1c_level,
-        blood_type: data.blood_type,
-        allergies: data.allergies,
+        notes: data.notes,                              // ✅ เปลี่ยนจาก allergies
         occupation: data.occupation,
         education_level: data.education_level,
         pam_level: 'L1',
@@ -311,6 +377,52 @@ export async function registerPatient(data: {
   } catch (err) {
     console.error('Register patient error:', err);
     return { success: false, error: 'เกิดข้อผิดพลาดในการลงทะเบียน' };
+  }
+}
+
+// =====================================================
+// ฟังก์ชันดึงข้อมูลผู้ป่วยรายคน (Admin)
+// =====================================================
+export async function getPatientDetail(userId: string) {
+  try {
+    console.log('🔍 Fetching patient detail for ID:', userId);
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (profileError) {
+      console.error('❌ Error fetching profile:', profileError);
+      return null;
+    }
+
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id_card, role, is_active, created_at')
+      .eq('id', userId)
+      .single();
+
+    if (userError) {
+      console.error('❌ Error fetching user:', userError);
+      return null;
+    }
+
+    // ✅ รวมชื่อ-นามสกุล
+    const result = {
+      ...profile,
+      full_name: profile.first_name && profile.last_name 
+        ? `${profile.first_name} ${profile.last_name}` 
+        : '',
+      users: userData
+    };
+
+    console.log('✅ Patient detail fetched successfully:', result);
+    return result;
+  } catch (err) {
+    console.error('❌ Get patient detail error:', err);
+    return null;
   }
 }
 
@@ -364,7 +476,6 @@ export async function saveScreening(data: {
   }>;
 }) {
   try {
-    // 1. สร้าง screening record
     const { data: screening, error: screeningError } = await supabase
       .from('screenings')
       .insert({
@@ -390,7 +501,6 @@ export async function saveScreening(data: {
       return { success: false, error: screeningError.message };
     }
 
-    // 2. บันทึก responses
     const responses = data.responses.map(r => ({
       screening_id: screening.id,
       question_id: r.question_id,
@@ -409,7 +519,6 @@ export async function saveScreening(data: {
       return { success: false, error: responsesError.message };
     }
 
-    // 3. อัพเดท profile pam_level และ zone
     if (data.pam_level_result) {
       const levelMap: Record<string, string> = {
         'Deny': 'L1',
@@ -466,58 +575,23 @@ export async function getCoaches() {
 }
 
 // =====================================================
-// ฟังก์ชันดึงข้อมูลผู้ป่วยรายคน (Admin)
-// =====================================================
-export async function getPatientDetail(userId: string) {
-  try {
-    console.log('🔍 Fetching patient detail for ID:', userId);
-    
-    // 1. ดึงข้อมูล profile ก่อน (ไม่ join)
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
-    if (profileError) {
-      console.error('❌ Error fetching profile:', profileError);
-      return null;
-    }
-
-    // 2. ดึงข้อมูล user แยกต่างหาก
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('id_card, role, is_active, created_at')
-      .eq('id', userId)
-      .single();
-
-    if (userError) {
-      console.error('❌ Error fetching user:', userError);
-      return null;
-    }
-
-    // 3. รวมข้อมูลเข้าด้วยกัน
-    const result = {
-      ...profile,
-      users: userData
-    };
-
-    console.log('✅ Patient detail fetched successfully:', result);
-    return result;
-  } catch (err) {
-    console.error('❌ Get patient detail error:', err);
-    return null;
-  }
-}
-
-// =====================================================
 // ฟังก์ชันดึงนัดหมายทั้งหมด (Admin)
 // =====================================================
 export async function getAppointments(userId?: string) {
   try {
     let query = supabase
       .from('appointments')
-      .select(`*, users ( full_name, hospital_number ), doctors ( full_name_th, specialization_th )`)
+      .select(`
+        *,
+        users (
+          full_name,
+          hospital_number
+        ),
+        doctors (
+          full_name_th,
+          specialization_th
+        )
+      `)
       .order('appointment_date', { ascending: true });
 
     if (userId) {
@@ -583,31 +657,27 @@ export async function createAppointment(data: {
 }
 
 // =====================================================
-// ฟังก์ชันดึงสถิติ Dashboard (Admin) - ✅ แก้ไขแล้ว
+// ฟังก์ชันดึงสถิติ Dashboard (Admin)
 // =====================================================
 export async function getDashboardStats() {
   try {
-    // จำนวนผู้ป่วยทั้งหมด (เฉพาะ active)
     const { count: totalPatients } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);  // ✅ เพิ่มบรรทัดนี้
+      .eq('is_active', true);
 
-    // จำนวนบันทึกวันนี้
     const today = new Date().toISOString().split('T')[0];
     const { count: todayRecords } = await supabase
       .from('records')
       .select('*', { count: 'exact', head: true })
       .eq('record_date', today);
 
-    // จำนวนนัดหมายวันนี้
     const { count: todayAppointments } = await supabase
       .from('appointments')
       .select('*', { count: 'exact', head: true })
       .gte('appointment_date', today)
       .lte('appointment_date', today + 'T23:59:59');
 
-    // จำนวนรอประเมิน (PAM Level = L1 หรือยังไม่ได้ทำ Screening)
     const { count: pendingAssessments } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
@@ -637,9 +707,18 @@ export async function getStaffList(role?: string) {
   try {
     let query = supabase
       .from('users')
-      .select(`*, doctors ( id, full_name_th, specialization_th, is_active, is_verified )`)
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          is_active,
+          is_verified
+        )
+      `)
       .in('role', ['admin', 'doctor', 'helper'])
-      .eq('is_active', true)  // ✅ เพิ่ม: กรองเฉพาะเจ้าหน้าที่ที่ยัง active
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (role) {
@@ -674,7 +753,6 @@ export async function addStaff(data: {
   created_by: string;
 }) {
   try {
-    // 1. สร้าง user account
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert({
@@ -692,7 +770,6 @@ export async function addStaff(data: {
       return { success: false, error: userError.message };
     }
 
-    // 2. สร้าง doctor profile (สำหรับ doctor และ helper)
     if (data.role === 'doctor' || data.role === 'helper') {
       const { error: doctorError } = await supabase
         .from('doctors')
@@ -757,13 +834,11 @@ export async function updateStaff(userId: string, data: {
 // =====================================================
 export async function deactivateStaff(userId: string) {
   try {
-    // 1. ปิดการใช้งานใน doctors table
     await supabase
       .from('doctors')
       .update({ is_active: false })
       .eq('user_id', userId);
 
-    // 2. ปิดการใช้งานใน users table
     const { error } = await supabase
       .from('users')
       .update({ is_active: false })
@@ -788,7 +863,18 @@ export async function getStaffDetail(userId: string) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email, is_active, is_verified )`)
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          phone,
+          email,
+          is_active,
+          is_verified
+        )
+      `)
       .eq('id', userId)
       .single();
 
@@ -811,7 +897,16 @@ export async function getScreeningHistory(patientId: string) {
   try {
     const { data: screenings, error } = await supabase
       .from('screenings')
-      .select(`*, screening_responses ( question_id, question_number, question_type, selected_option, score )`)
+      .select(`
+        *,
+        screening_responses (
+          question_id,
+          question_number,
+          question_type,
+          selected_option,
+          score
+        )
+      `)
       .eq('user_id', patientId)
       .order('screening_date', { ascending: false });
 
@@ -857,8 +952,7 @@ export async function getAllScreeningQuestions() {
 export async function deletePatient(patientId: string) {
   try {
     console.log('🗑️ Deleting patient:', patientId);
-    
-    // 1. ปิดการใช้งานใน profiles table
+
     const { error: profileError } = await supabase
       .from('profiles')
       .update({ 
@@ -873,7 +967,6 @@ export async function deletePatient(patientId: string) {
       return { success: false, error: profileError.message };
     }
 
-    // 2. ปิดการใช้งานใน users table
     const { error: userError } = await supabase
       .from('users')
       .update({ is_active: false })
@@ -898,32 +991,25 @@ export async function deletePatient(patientId: string) {
 export async function permanentlyDeletePatient(patientId: string) {
   try {
     console.log('🗑️ Permanently deleting patient:', patientId);
-    
-    // 1. ลบ screening responses ก่อน (foreign key constraint)
-    await supabase
-      .from('screening_responses')
-      .delete()
-      .in('screening_id', 
-        (await supabase
-          .from('screenings')
-          .select('id')
-          .eq('user_id', patientId)
-        ).data?.map((s: any) => s.id) || []
-      );
 
-    // 2. ลบ screening records
-    await supabase
+    const screenings = await supabase
       .from('screenings')
-      .delete()
+      .select('id')
       .eq('user_id', patientId);
 
-    // 3. ลบ appointments
-    await supabase
-      .from('appointments')
-      .delete()
-      .eq('user_id', patientId);
+    if (screenings.data && screenings.data.length > 0) {
+      await supabase
+        .from('screening_responses')
+        .delete()
+        .in(
+          'screening_id',
+          screenings.data.map((s: any) => s.id)
+        );
+    }
 
-    // 4. ลบ profile
+    await supabase.from('screenings').delete().eq('user_id', patientId);
+    await supabase.from('appointments').delete().eq('user_id', patientId);
+
     const { error: profileError } = await supabase
       .from('profiles')
       .delete()
@@ -934,7 +1020,6 @@ export async function permanentlyDeletePatient(patientId: string) {
       return { success: false, error: profileError.message };
     }
 
-    // 5. ลบ user
     const { error: userError } = await supabase
       .from('users')
       .delete()
@@ -959,18 +1044,10 @@ export async function permanentlyDeletePatient(patientId: string) {
 export async function permanentlyDeleteStaff(staffId: string) {
   try {
     console.log('🗑️ Permanently deleting staff:', staffId);
-    
-    // 1. ลบจาก doctors table ก่อน (foreign key constraint)
-    await supabase
-      .from('doctors')
-      .delete()
-      .eq('user_id', staffId);
 
-    // 2. ลบจาก users table
-    const { error } = await supabase
-      .from('users')
-      .delete()
-      .eq('id', staffId);
+    await supabase.from('doctors').delete().eq('user_id', staffId);
+
+    const { error } = await supabase.from('users').delete().eq('id', staffId);
 
     if (error) {
       console.error('Error deleting staff:', error);
@@ -991,18 +1068,10 @@ export async function permanentlyDeleteStaff(staffId: string) {
 export async function restoreStaff(staffId: string) {
   try {
     console.log('♻️ Restoring staff:', staffId);
-    
-    // 1. เปิดการใช้งานใน doctors table
-    await supabase
-      .from('doctors')
-      .update({ is_active: true })
-      .eq('user_id', staffId);
 
-    // 2. เปิดการใช้งานใน users table
-    const { error } = await supabase
-      .from('users')
-      .update({ is_active: true })
-      .eq('id', staffId);
+    await supabase.from('doctors').update({ is_active: true }).eq('user_id', staffId);
+
+    const { error } = await supabase.from('users').update({ is_active: true }).eq('id', staffId);
 
     if (error) {
       console.error('Error restoring staff:', error);
@@ -1024,10 +1093,19 @@ export async function getDeactivatedStaff() {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email )`)
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          phone,
+          email
+        )
+      `)
       .in('role', ['admin', 'doctor', 'helper'])
       .eq('is_active', false)
-      .order('created_at', { ascending: false });  // ✅ เปลี่ยนจาก updated_at เป็น created_at
+      .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Error fetching deactivated staff:', error);
@@ -1044,15 +1122,6 @@ export async function getDeactivatedStaff() {
 // =====================================================
 // ฟังก์ชันสร้างเป้าหมายเริ่มต้นตาม PAM Level
 // =====================================================
-/**
-สร้าง Default Goals หลังจากทำ Screening
-L1: ไม่สร้าง goals (ต้องดูแลใกล้ชิดก่อน)
-L2, L3: กฎทอง 5 ข้อ (5 วัน/สัปดาห์)
-L4: แชมป์ 8 กิจกรรม (5 วัน/สัปดาห์)
-@param userId - UUID ของผู้ป่วย
-@param pamLevel - ระดับ PAM (L1, L2, L3, L4)
-@param createdBy - UUID ของหมอ/admin ที่ทำ screening
-*/
 export async function createDefaultGoals(
   userId: string,
   pamLevel: string,
@@ -1060,8 +1129,7 @@ export async function createDefaultGoals(
 ) {
   try {
     console.log('🎯 Creating default goals for user:', userId, 'PAM Level:', pamLevel);
-    
-    // L1: ไม่สร้าง goals (ต้องดูแลใกล้ชิดก่อน)
+
     if (pamLevel === 'L1') {
       console.log('⚠️ L1 Patient: No default goals created');
       return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
@@ -1070,11 +1138,7 @@ export async function createDefaultGoals(
     const today = new Date().toISOString().split('T')[0];
     const goals = [];
 
-    // ===========================================
-    // L2 และ L3: กฎทอง 5 ข้อ (5 วัน/สัปดาห์)
-    // ===========================================
     if (pamLevel === 'L2' || pamLevel === 'L3') {
-      // ดึง activities จากฐานข้อมูล
       const { data: activities, error: activitiesError } = await supabase
         .from('activities')
         .select('id, activity_code, activity_name_th, description_th, activity_type')
@@ -1091,13 +1155,11 @@ export async function createDefaultGoals(
         console.error('Error fetching activities:', activitiesError);
       }
 
-      // สร้าง goals จาก activities ที่มี
       if (activities && activities.length > 0) {
         activities.forEach(activity => {
           let targetValue = null;
           let targetUnit = null;
 
-          // กำหนด target_value สำหรับ exercise_walk (15 นาที)
           if (activity.activity_code === 'exercise_walk') {
             targetValue = 15;
             targetUnit = 'minutes';
@@ -1126,25 +1188,18 @@ export async function createDefaultGoals(
       console.log(`✅ L2/L3: Created ${goals.length} default goals`);
     }
 
-    // ===========================================
-    // L4: แชมป์ 8 กิจกรรม (5 วัน/สัปดาห์)
-    // ===========================================
     if (pamLevel === 'L4') {
-      // ดึง activities จากฐานข้อมูล
       const { data: activities, error: activitiesError } = await supabase
         .from('activities')
         .select('id, activity_code, activity_name_th, description_th, activity_type')
         .in('activity_code', [
-          // อาหาร (3)
           'carb_control',
           'protein_intake',
           'water_intake',
-          // ออกกำลังกาย (4)
           'stretching',
           'cardio',
           'strengthening',
           'hiit',
-          // พักผ่อน (1)
           'sleep'
         ])
         .eq('is_active', true);
@@ -1153,13 +1208,11 @@ export async function createDefaultGoals(
         console.error('Error fetching activities:', activitiesError);
       }
 
-      // สร้าง goals จาก activities ที่มี
       if (activities && activities.length > 0) {
         activities.forEach(activity => {
           let targetValue = null;
           let targetUnit = null;
 
-          // กำหนด target_value สำหรับ activity บางตัว
           if (activity.activity_code === 'water_intake') {
             targetValue = 1;
             targetUnit = 'liters';
@@ -1188,9 +1241,6 @@ export async function createDefaultGoals(
       console.log(`✅ L4: Created ${goals.length} default goals`);
     }
 
-    // ===========================================
-    // บันทึก goals ลงฐานข้อมูล
-    // ===========================================
     if (goals.length > 0) {
       const { error } = await supabase.from('goals').insert(goals);
 
@@ -1236,7 +1286,7 @@ export async function getPatientGoals(userId: string) {
 }
 
 // =====================================================
-// ✅ ฟังก์ชันอัปเดตเวลาออกกำลังกายใน Goals (ใหม่)
+// ฟังก์ชันอัปเดตเวลาออกกำลังกายใน Goals
 // =====================================================
 export async function updateExerciseGoal(
   userId: string,
@@ -1270,7 +1320,7 @@ export async function updateExerciseGoal(
 }
 
 // =====================================================
-// ✅ ฟังก์ชันบันทึกเวลาออกกำลังกายที่ทำได้จริง (ใหม่)
+// ฟังก์ชันบันทึกเวลาออกกำลังกายที่ทำได้จริง
 // =====================================================
 export async function saveExerciseRecord(data: {
   user_id: string;
@@ -1311,7 +1361,7 @@ export async function saveExerciseRecord(data: {
 // =====================================================
 export async function getActivities(pamLevel: string) {
   console.log('Fetching activities for pamLevel:', pamLevel);
-  
+
   const { data, error } = await supabase
     .from('activities')
     .select('*')
@@ -1329,7 +1379,7 @@ export async function getActivities(pamLevel: string) {
 }
 
 // =====================================================
-// ฟังก์ชันบันทึกกิจกรรม (ใช้ upsert) - ✅ แก้ไขแล้ว
+// ฟังก์ชันบันทึกกิจกรรม (ใช้ upsert)
 // =====================================================
 export async function saveRecord(data: {
   user_id: string;
@@ -1339,7 +1389,7 @@ export async function saveRecord(data: {
   weight?: number;
   blood_sugar?: number;
   sweet_type?: string[];
-  exercise_minutes?: number;  // ✅ เพิ่ม field
+  exercise_minutes?: number;
 }) {
   try {
     const { data: result, error } = await supabase
@@ -1353,7 +1403,7 @@ export async function saveRecord(data: {
         ...(data.weight !== undefined && { weight: data.weight }),
         ...(data.blood_sugar !== undefined && { blood_sugar: data.blood_sugar }),
         ...(data.sweet_type !== undefined && { sweet_type: data.sweet_type }),
-        ...(data.exercise_minutes !== undefined && { exercise_minutes: data.exercise_minutes }),  // ✅ เพิ่ม
+        ...(data.exercise_minutes !== undefined && { exercise_minutes: data.exercise_minutes }),
       }, {
         onConflict: 'user_id,activity_id,record_date',
       })
@@ -1372,12 +1422,12 @@ export async function saveRecord(data: {
 }
 
 // =====================================================
-// ฟังก์ชันดึงบันทึกวันนี้ - ✅ แก้ไขแล้ว
+// ฟังก์ชันดึงบันทึกวันนี้
 // =====================================================
 export async function getTodayRecords(userId: string) {
   try {
     const today = new Date().toISOString().split('T')[0];
-    
+
     const { data, error } = await supabase
       .from('records')
       .select(`
@@ -1388,7 +1438,7 @@ export async function getTodayRecords(userId: string) {
         sweet_type, 
         weight, 
         blood_sugar,
-        exercise_minutes  -- ✅ เพิ่ม field นี้
+        exercise_minutes
       `)
       .eq('user_id', userId)
       .eq('record_date', today);
@@ -1461,7 +1511,7 @@ export async function getProgress(userId: string, days: number = 7) {
 export async function getGoals(userId: string) {
   try {
     console.log('Fetching goals for userId:', userId);
-    
+
     const { data, error } = await supabase
       .from('goals')
       .select('*')
@@ -1525,7 +1575,7 @@ export async function getNextAppointment(userId: string) {
 export async function getKnowledge(pamLevel: string = 'ALL') {
   try {
     console.log('📚 [getKnowledge] Fetching for pamLevel:', pamLevel);
-    
+
     const { data, error } = await supabase
       .from('knowledge')
       .select('*')
@@ -1548,7 +1598,7 @@ export async function getKnowledge(pamLevel: string = 'ALL') {
 }
 
 // =====================================================
-// ✅ ฟังก์ชันนับจำนวนรอบการบันทึกเป้าหมาย (ใหม่)
+// ฟังก์ชันนับจำนวนรอบการบันทึกเป้าหมาย
 // =====================================================
 export async function getGoalRoundCount(userId: string) {
   try {
@@ -1564,7 +1614,6 @@ export async function getGoalRoundCount(userId: string) {
       return 1;
     }
 
-    // จำนวนรอบ = จำนวน archived + 1 (รอบปัจจุบัน)
     return (count || 0) + 1;
   } catch (err) {
     console.error('Get goal round count error:', err);
@@ -1573,7 +1622,7 @@ export async function getGoalRoundCount(userId: string) {
 }
 
 // =====================================================
-// ✅ ฟังก์ชันดึงรอบล่าสุดที่บันทึก (ใหม่)
+// ฟังก์ชันดึงรอบล่าสุดที่บันทึก
 // =====================================================
 export async function getLatestGoalRound(userId: string) {
   try {
@@ -1598,7 +1647,7 @@ export async function getLatestGoalRound(userId: string) {
 }
 
 // =====================================================
-// ✅ ฟังก์ชันบันทึกเป้าหมายรอบใหม่ (แก้ไขแล้ว - เพิ่ม debug)
+// ฟังก์ชันบันทึกเป้าหมายรอบใหม่
 // =====================================================
 export async function saveGoalsNewRound(data: {
   user_id: string;
@@ -1616,10 +1665,10 @@ export async function saveGoalsNewRound(data: {
 }) {
   try {
     console.log('💾 [saveGoalsNewRound] Starting...', data.user_id);
+
     const today = new Date().toISOString().split('T')[0];
     console.log('[saveGoalsNewRound] Today:', today);
 
-    // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
     const { data: existingTodayGoals, error: fetchError } = await supabase
       .from('goals')
       .select('id, goal_name, created_at')
@@ -1634,18 +1683,13 @@ export async function saveGoalsNewRound(data: {
     }
 
     console.log('📋 [saveGoalsNewRound] Existing goals today:', existingTodayGoals?.length || 0);
-    if (existingTodayGoals && existingTodayGoals.length > 0) {
-      console.log('🗑️ [saveGoalsNewRound] Goals to delete:', existingTodayGoals.map(g => ({ id: g.id, name: g.goal_name })));
-    }
 
     let nextRound: number;
 
     if (existingTodayGoals && existingTodayGoals.length > 0) {
-      // ✅ วันนี้มี goals แล้ว → ใช้ round เดิม (จะลบแล้วบันทึกใหม่)
       nextRound = existingTodayGoals[0].round_number || 1;
       console.log('📅 [saveGoalsNewRound] Same day - using existing round:', nextRound);
 
-      // ✅ 2. ลบ goals ของวันนี้ก่อน (เพื่อแทนที่ด้วยข้อมูลใหม่)
       const { error: deleteError } = await supabase
         .from('goals')
         .delete()
@@ -1659,25 +1703,10 @@ export async function saveGoalsNewRound(data: {
         console.error('❌ [saveGoalsNewRound] Error deleting today goals:', deleteError);
       } else {
         console.log('✅ [saveGoalsNewRound] Successfully deleted', existingTodayGoals.length, 'goals for today');
-        
-        // ✅ ตรวจสอบว่าลบจริงหรือไม่
-        const { data: afterDelete } = await supabase
-          .from('goals')
-          .select('id')
-          .eq('user_id', data.user_id)
-          .eq('goal_type', 'weekly_activity')
-          .eq('status', 'active')
-          .gte('created_at', today + 'T00:00:00')
-          .lte('created_at', today + 'T23:59:59');
-        
-        console.log('🔍 [saveGoalsNewRound] After delete - remaining goals:', afterDelete?.length || 0);
       }
     } else {
-      // ✅ วันใหม่ → archive ของเก่า + นับรอบใหม่
-      
       console.log('🆕 [saveGoalsNewRound] New day - archiving old goals');
-      
-      // 2.1 Archive goals เดิม (เฉพาะ active goals ที่ไม่ใช่ของวันนี้)
+
       const { data: goalsToArchive } = await supabase
         .from('goals')
         .select('id, goal_name')
@@ -1686,28 +1715,26 @@ export async function saveGoalsNewRound(data: {
         .eq('status', 'active');
 
       console.log('📦 [saveGoalsNewRound] Goals to archive:', goalsToArchive?.length || 0);
+
       if (goalsToArchive && goalsToArchive.length > 0) {
-        console.log('📦 [saveGoalsNewRound] Archiving:', goalsToArchive.map(g => ({ id: g.id, name: g.goal_name })));
+        const { error: archiveError } = await supabase
+          .from('goals')
+          .update({
+            is_current: false,
+            status: 'archived',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', data.user_id)
+          .eq('goal_type', 'weekly_activity')
+          .eq('status', 'active');
+
+        if (archiveError) {
+          console.error('❌ [saveGoalsNewRound] Error archiving goals:', archiveError);
+        } else {
+          console.log('✅ [saveGoalsNewRound] Archived', goalsToArchive?.length || 0, 'old goals');
+        }
       }
 
-      const { error: archiveError } = await supabase
-        .from('goals')
-        .update({
-          is_current: false,
-          status: 'archived',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', data.user_id)
-        .eq('goal_type', 'weekly_activity')
-        .eq('status', 'active');
-
-      if (archiveError) {
-        console.error('❌ [saveGoalsNewRound] Error archiving goals:', archiveError);
-      } else {
-        console.log('✅ [saveGoalsNewRound] Archived', goalsToArchive?.length || 0, 'old goals');
-      }
-
-      // 2.2 นับจำนวนรอบที่ไม่ซ้ำ (distinct round_number)
       const { data: allRounds } = await supabase
         .from('goals')
         .select('round_number')
@@ -1716,11 +1743,10 @@ export async function saveGoalsNewRound(data: {
 
       const uniqueRounds = new Set(allRounds?.map(g => g.round_number) || []);
       nextRound = uniqueRounds.size + 1;
-      
+
       console.log('🆕 [saveGoalsNewRound] New day - next round:', nextRound);
     }
 
-    // ✅ 3. สร้าง goals ใหม่
     const newGoals = data.goals.map(goal => ({
       user_id: data.user_id,
       goal_type: 'weekly_activity' as const,
@@ -1743,7 +1769,6 @@ export async function saveGoalsNewRound(data: {
     }));
 
     console.log('📝 [saveGoalsNewRound] Creating', newGoals.length, 'new goals');
-    console.log('📝 [saveGoalsNewRound] New goals:', newGoals.map(g => ({ name: g.goal_name, days: g.target_days })));
 
     const { error: insertError, data: insertedData } = await supabase
       .from('goals')

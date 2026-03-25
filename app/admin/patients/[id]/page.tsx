@@ -1,9 +1,10 @@
+// app/admin/patients/[id]/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, logout, getPatientDetail } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Edit, FileText, Activity, MapPin, Phone, User } from 'lucide-react';
+import { ArrowLeft, LogOut, Edit, FileText, Activity, MapPin, Phone, User, Hospital } from 'lucide-react';
 
 export default function PatientDetailPage() {
   const router = useRouter();
@@ -48,24 +49,10 @@ export default function PatientDetailPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันแสดงผลวันที่ - ปรับให้ถูกต้อง
+  // ✅ ฟังก์ชันแสดงผลวันที่
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
-    
     const date = new Date(dateString);
-    
-    // ตรวจสอบว่าเป็นปี ค.ศ. หรือ พ.ศ.
-    // ถ้าปี > 2500 แสดงว่าเป็น พ.ศ. ให้แปลงเป็น ค.ศ. ก่อน
-    const year = date.getFullYear();
-    
-    let displayYear = year;
-    if (year > 2500) {
-      // เป็น พ.ศ. → แปลงเป็น ค.ศ. สำหรับการแสดงผล
-      displayYear = year - 543;
-      date.setFullYear(displayYear);
-    }
-    
-    // แสดงผลเป็นภาษาไทย (พ.ศ.)
     return date.toLocaleDateString('th-TH', {
       year: 'numeric',
       month: '2-digit',
@@ -73,20 +60,11 @@ export default function PatientDetailPage() {
     });
   };
 
-  // ✅ ฟังก์ชันคำนวณอายุ - ปรับให้ถูกต้อง
+  // ✅ ฟังก์ชันคำนวณอายุ
   const calculateAge = (birthDateString: string) => {
     if (!birthDateString) return '-';
-    
     const birthDate = new Date(birthDateString);
     const today = new Date();
-    
-    // ตรวจสอบว่าเป็นปี พ.ศ. หรือ ค.ศ.
-    let birthYear = birthDate.getFullYear();
-    if (birthYear > 2500) {
-      // เป็น พ.ศ. → แปลงเป็น ค.ศ.
-      birthYear = birthYear - 543;
-      birthDate.setFullYear(birthYear);
-    }
     
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -98,13 +76,37 @@ export default function PatientDetailPage() {
     return age >= 0 ? age : '-';
   };
 
+  // ✅ ฟังก์ชันแสดงชื่อผู้ป่วย (รวม first_name + last_name)
+  const getPatientName = () => {
+    if (patient?.first_name && patient?.last_name) {
+      return `${patient.first_name} ${patient.last_name}`;
+    }
+    return patient?.full_name || 'ไม่ระบุชื่อ';
+  };
+
+  // ✅ ฟังก์ชันแสดงที่อยู่เต็มรูปแบบ (แก้ไขแล้ว - เพิ่ม address_line1)
+  const getFullAddress = () => {
+    if (!patient) return '-';
+    const parts = [
+      patient.house_number,
+      patient.address_line1,  // ✅ เพิ่ม address_line1
+      patient.village_no ? `หมู่ ${patient.village_no}` : '',
+      patient.village_name,
+      patient.soi,
+      patient.road,
+      patient.subdistrict,
+      patient.district,
+      patient.province,
+      patient.postal_code,
+    ].filter(Boolean);
+
+    return parts.length > 0 ? parts.join(' ') : '-';
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-600">กำลังโหลด...</p>
       </div>
     );
   }
@@ -118,25 +120,25 @@ export default function PatientDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <button
                 onClick={() => router.push('/admin/patients')}
                 className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
               >
-                <ArrowLeft className="w-4 h-4" />
-                กลับรายการผู้ป่วย
+                <ArrowLeft className="w-5 h-5" />
+                <span>กลับรายการผู้ป่วย</span>
               </button>
-              <h1 className="text-2xl font-bold text-gray-800">รายละเอียดผู้ป่วย</h1>
-              <p className="text-sm text-gray-600">
-                HN: {patient.hospital_number} | {patient.full_name}
+              <h1 className="text-3xl font-bold text-gray-800">รายละเอียดผู้ป่วย</h1>
+              <p className="text-gray-600">
+                HN: {patient.hospital_number} | {getPatientName()}
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -173,9 +175,15 @@ export default function PatientDetailPage() {
                 <p className="font-semibold">{patient.hospital_number || '-'}</p>
               </div>
               
+              {/* ✅ แสดงชื่อ-นามสกุล แยกกัน */}
               <div>
                 <p className="text-sm text-gray-500">ชื่อ-นามสกุล</p>
-                <p className="font-semibold">{patient.full_name || '-'}</p>
+                <p className="font-semibold">{getPatientName()}</p>
+                {patient.first_name && patient.last_name && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    ชื่อ: {patient.first_name} | นามสกุล: {patient.last_name}
+                  </p>
+                )}
               </div>
               
               <div>
@@ -192,8 +200,7 @@ export default function PatientDetailPage() {
                 <p className="text-sm text-gray-500">เพศ</p>
                 <p className="font-semibold">
                   {patient.gender === 'male' ? 'ชาย' : 
-                   patient.gender === 'female' ? 'หญิง' : 
-                   patient.gender === 'other' ? 'อื่นๆ' : '-'}
+                   patient.gender === 'female' ? 'หญิง' : '-'}
                 </p>
               </div>
               
@@ -261,14 +268,12 @@ export default function PatientDetailPage() {
                 <p className="font-semibold">{patient.hba1c_level || '-'}</p>
               </div>
               
-              <div>
-                <p className="text-sm text-gray-500">หมู่เลือด</p>
-                <p className="font-semibold">{patient.blood_type || '-'}</p>
-              </div>
+              {/* ❌ ลบหมู่เลือดออก (ไม่มีใน Schema แล้ว) */}
               
+              {/* ✅ แสดงหมายเหตุ (แทน allergies) */}
               <div>
-                <p className="text-sm text-gray-500">การแพ้ยา/อาหาร</p>
-                <p className="font-semibold">{patient.allergies || '-'}</p>
+                <p className="text-sm text-gray-500">หมายเหตุ (คำแนะนำเพิ่มเติม)</p>
+                <p className="font-semibold">{patient.notes || '-'}</p>
               </div>
               
               <div>
@@ -283,7 +288,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ที่อยู่ */}
+          {/* ที่อยู่ - ✅ แก้ไขแล้ว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <MapPin className="w-5 h-5 text-purple-600" />
@@ -291,32 +296,90 @@ export default function PatientDetailPage() {
             </div>
             
             <div className="space-y-3">
+              {/* ✅ แสดงที่อยู่แบบแยกส่วน */}
               <div>
-                <p className="text-sm text-gray-500">ที่อยู่บรรทัดที่ 1</p>
-                <p className="font-semibold">{patient.address_line1 || '-'}</p>
+                <p className="text-sm text-gray-500">ที่อยู่เต็ม</p>
+                <p className="font-semibold">{getFullAddress()}</p>
               </div>
               
-              {patient.address_line2 && (
+              {/* ✅ แสดง address_line1 แยก (ถ้ามี) */}
+              {patient.address_line1 && (
                 <div>
-                  <p className="text-sm text-gray-500">ที่อยู่บรรทัดที่ 2</p>
-                  <p className="font-semibold">{patient.address_line2}</p>
+                  <p className="text-sm text-gray-500">ที่อยู่เพิ่มเติม</p>
+                  <p className="font-semibold">{patient.address_line1}</p>
                 </div>
               )}
               
-              <div>
-                <p className="text-sm text-gray-500">เขต/อำเภอ</p>
-                <p className="font-semibold">{patient.district || '-'}</p>
+              {/* แสดงรายละเอียดที่อยู่แยกส่วน (สำหรับตรวจสอบ) */}
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                {patient.house_number && (
+                  <div>
+                    <p className="text-xs text-gray-400">เลขที่</p>
+                    <p className="font-medium">{patient.house_number}</p>
+                  </div>
+                )}
+                {patient.village_no && (
+                  <div>
+                    <p className="text-xs text-gray-400">หมู่ที่</p>
+                    <p className="font-medium">{patient.village_no}</p>
+                  </div>
+                )}
+                {patient.village_name && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-gray-400">หมู่บ้าน</p>
+                    <p className="font-medium">{patient.village_name}</p>
+                  </div>
+                )}
+                {patient.soi && (
+                  <div>
+                    <p className="text-xs text-gray-400">ซอย</p>
+                    <p className="font-medium">{patient.soi}</p>
+                  </div>
+                )}
+                {patient.road && (
+                  <div>
+                    <p className="text-xs text-gray-400">ถนน</p>
+                    <p className="font-medium">{patient.road}</p>
+                  </div>
+                )}
+                {patient.subdistrict && (
+                  <div>
+                    <p className="text-xs text-gray-400">ตำบล</p>
+                    <p className="font-medium">{patient.subdistrict}</p>
+                  </div>
+                )}
+                {patient.district && (
+                  <div>
+                    <p className="text-xs text-gray-400">อำเภอ/เขต</p>
+                    <p className="font-medium">{patient.district}</p>
+                  </div>
+                )}
+                {patient.province && (
+                  <div>
+                    <p className="text-xs text-gray-400">จังหวัด</p>
+                    <p className="font-medium">{patient.province}</p>
+                  </div>
+                )}
+                {patient.postal_code && (
+                  <div>
+                    <p className="text-xs text-gray-400">รหัสไปรษณีย์</p>
+                    <p className="font-medium">{patient.postal_code}</p>
+                  </div>
+                )}
               </div>
               
-              <div>
-                <p className="text-sm text-gray-500">จังหวัด</p>
-                <p className="font-semibold">{patient.province || '-'}</p>
-              </div>
-              
-              <div>
-                <p className="text-sm text-gray-500">รหัสไปรษณีย์</p>
-                <p className="font-semibold">{patient.postal_code || '-'}</p>
-              </div>
+              {/* ✅ แสดง รพสต */}
+              {patient.subdistrict_health_center && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <div className="flex items-center gap-2">
+                    <Hospital className="w-4 h-4 text-red-500" />
+                    <div>
+                      <p className="text-xs text-gray-500">โรงพยาบาลส่งเสริมสุขภาพตำบล (รพสต)</p>
+                      <p className="font-semibold text-red-600">{patient.subdistrict_health_center}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -355,8 +418,8 @@ export default function PatientDetailPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className={`p-4 rounded-lg border-2 ${
                 patient.pam_level === 'L1' ? 'bg-red-50 border-red-500' :
-                patient.pam_level === 'L2' ? 'bg-blue-50 border-blue-500' :
-                patient.pam_level === 'L3' ? 'bg-yellow-50 border-yellow-500' :
+                patient.pam_level === 'L2' ? 'bg-yellow-50 border-yellow-500' :
+                patient.pam_level === 'L3' ? 'bg-blue-50 border-blue-500' :
                 'bg-green-50 border-green-500'
               }`}>
                 <p className="text-sm text-gray-600 mb-1">PAM Level</p>

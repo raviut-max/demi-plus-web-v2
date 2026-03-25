@@ -1,15 +1,40 @@
+// app/admin/patients/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, deletePatient, restorePatient, getDeletedPatients, permanentlyDeletePatient } from '@/lib/supabase/queries';
-import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw } from 'lucide-react';
+import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital } from 'lucide-react';
+
+// ✅ Interface ที่แก้ไขแล้ว
+interface Patient {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;  // สำหรับ backward compatibility
+  hospital_number: string;
+  pam_level: string;
+  zone?: string;
+  current_step?: string;
+  phone?: string;
+  created_at: string;
+  updated_at?: string;
+  is_active: boolean;
+  status?: string;
+  subdistrict_health_center?: string;  // ✅ เพิ่ม รพสต
+  users?: {
+    id_card: string;
+    role: string;
+    is_active: boolean;
+    created_at: string;
+  };
+}
 
 export default function PatientListPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [patients, setPatients] = useState<any[]>([]);
-  const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [deletedPatients, setDeletedPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pamLevelFilter, setPamLevelFilter] = useState('all');
@@ -66,7 +91,7 @@ export default function PatientListPage() {
       const result = await deletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยสำเร็จ!');
-        loadPatients(); // Refresh list
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -85,8 +110,8 @@ export default function PatientListPage() {
       const result = await restorePatient(patientId);
       if (result.success) {
         alert('กู้คืนผู้ป่วยสำเร็จ!');
-        loadDeletedPatients(); // Refresh deleted list
-        loadPatients(); // Refresh active list
+        loadDeletedPatients();
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -101,7 +126,6 @@ export default function PatientListPage() {
       return;
     }
 
-    // ยืนยันอีกครั้ง
     if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้\n\nพิมพ์ "YES" เพื่อยืนยันการลบถาวร')) {
       return;
     }
@@ -110,8 +134,8 @@ export default function PatientListPage() {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยถาวรสำเร็จ!');
-        loadDeletedPatients(); // Refresh deleted list
-        loadPatients(); // Refresh active list
+        loadDeletedPatients();
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -126,12 +150,19 @@ export default function PatientListPage() {
     loadDeletedPatients();
   };
 
+  // ✅ แก้ไขฟังก์ชันกรองให้ค้นหาจาก first_name และ last_name
   const filteredPatients = patients.filter(patient => {
-    const matchesSearch = 
-      patient.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    // ✅ รวมชื่อ-นามสกุลสำหรับแสดงและค้นหา
+    const fullName = patient.first_name && patient.last_name 
+      ? `${patient.first_name} ${patient.last_name}`
+      : patient.full_name || '';
+
+    const matchesSearch =
+      fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       patient.hospital_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      patient.users?.id_card?.includes(searchTerm);
-    
+      patient.users?.id_card?.includes(searchTerm) ||
+      patient.subdistrict_health_center?.toLowerCase().includes(searchTerm.toLowerCase());
+
     const matchesPamLevel = pamLevelFilter === 'all' || patient.pam_level === pamLevelFilter;
 
     return matchesSearch && matchesPamLevel;
@@ -153,56 +184,63 @@ export default function PatientListPage() {
     return 'text-gray-600';
   };
 
+  // ✅ ฟังก์ชันแสดงชื่อผู้ป่วย
+  const getPatientName = (patient: Patient) => {
+    if (patient.first_name && patient.last_name) {
+      return `${patient.first_name} ${patient.last_name}`;
+    }
+    return patient.full_name || 'ไม่ระบุชื่อ';
+  };
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-600">กำลังโหลด...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <button
                 onClick={() => router.push('/admin/dashboard')}
                 className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
               >
+                <Users className="w-5 h-5" />
                 ← กลับ Dashboard
               </button>
-              <h1 className="text-2xl font-bold text-gray-800">จัดการผู้ป่วย</h1>
-              <p className="text-sm text-gray-600">ดูและจัดการข้อมูลผู้ป่วยทั้งหมด</p>
+              <h1 className="text-3xl font-bold text-gray-800">จัดการผู้ป่วย</h1>
+              <p className="text-gray-600">ดูและจัดการข้อมูลผู้ป่วยทั้งหมด</p>
             </div>
-            <div className="flex items-center gap-4">
-              <button
-                onClick={handleOpenDeletedModal}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
-              >
-                <Archive className="w-4 h-4" />
-                ผู้ป่วยที่ถูกลบ ({deletedPatients.length})
-              </button>
-              <button
-                onClick={() => router.push('/admin/patients/new')}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                ลงทะเบียนผู้ป่วยใหม่
-              </button>
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
-              >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
-              </button>
-            </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+            >
+              <LogOut className="w-4 h-4" />
+              ออกจากระบบ
+            </button>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              onClick={handleOpenDeletedModal}
+              className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+            >
+              <Archive className="w-4 h-4" />
+              ผู้ป่วยที่ถูกลบ ({deletedPatients.length})
+            </button>
+            <button
+              onClick={() => router.push('/admin/patients/new')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              ลงทะเบียนผู้ป่วยใหม่
+            </button>
           </div>
         </div>
       </div>
@@ -217,7 +255,7 @@ export default function PatientListPage() {
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input
                   type="text"
-                  placeholder="ค้นหาด้วย ชื่อ, HN, หรือ ID Card..."
+                  placeholder="ค้นหาด้วย ชื่อ, HN, ID Card, หรือ รพสต..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -316,6 +354,7 @@ export default function PatientListPage() {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">HN</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">รพสต</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Step</th>
@@ -326,7 +365,7 @@ export default function PatientListPage() {
               <tbody className="divide-y divide-gray-200">
                 {filteredPatients.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
                     </td>
@@ -345,7 +384,9 @@ export default function PatientListPage() {
                             <Users className="w-4 h-4 text-blue-600" />
                           </div>
                           <div>
-                            <p className="font-medium text-gray-800">{patient.full_name}</p>
+                            <p className="font-medium text-gray-800">
+                              {getPatientName(patient)}
+                            </p>
                           </div>
                         </div>
                       </td>
@@ -355,12 +396,20 @@ export default function PatientListPage() {
                         </span>
                       </td>
                       <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <Hospital className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">
+                            {patient.subdistrict_health_center || '-'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPamLevelColor(patient.pam_level)}`}>
                           {patient.pam_level}
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`text-sm font-medium ${getZoneColor(patient.zone)}`}>
+                        <span className={`text-sm font-medium ${getZoneColor(patient.zone || '')}`}>
                           {patient.zone || 'Green Zone'}
                         </span>
                       </td>
@@ -387,7 +436,7 @@ export default function PatientListPage() {
                             <Edit className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDeletePatient(patient.id, patient.full_name)}
+                            onClick={() => handleDeletePatient(patient.id, getPatientName(patient))}
                             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             title="ลบ"
                           >
@@ -444,7 +493,9 @@ export default function PatientListPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-gray-800">{patient.full_name}</h3>
+                            <h3 className="font-semibold text-gray-800">
+                              {getPatientName(patient)}
+                            </h3>
                             <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-mono">
                               {patient.hospital_number}
                             </span>
@@ -457,7 +508,7 @@ export default function PatientListPage() {
                           <div className="text-sm text-gray-600 space-y-1">
                             <p>ID Card: {patient.users?.id_card || '-'}</p>
                             <p>Zone: {patient.zone || '-'}</p>
-                            <p>ถูกลบเมื่อ: {new Date(patient.updated_at).toLocaleString('th-TH')}</p>
+                            <p>ถูกลบเมื่อ: {new Date(patient.updated_at || patient.created_at).toLocaleString('th-TH')}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 ml-4">
@@ -469,7 +520,7 @@ export default function PatientListPage() {
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleRestorePatient(patient.id, patient.full_name)}
+                            onClick={() => handleRestorePatient(patient.id, getPatientName(patient))}
                             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
                             title="กู้คืนผู้ป่วย"
                           >
@@ -477,7 +528,7 @@ export default function PatientListPage() {
                             กู้คืน
                           </button>
                           <button
-                            onClick={() => handlePermanentlyDeletePatient(patient.id, patient.full_name)}
+                            onClick={() => handlePermanentlyDeletePatient(patient.id, getPatientName(patient))}
                             className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
                             title="ลบถาวร"
                           >
