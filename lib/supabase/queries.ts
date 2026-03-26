@@ -259,9 +259,8 @@ export async function getDeletedPatients() {
 export async function registerPatient(data: {
   id_card: string;
   password: string;
-  first_name: string;        // ✅ แยกชื่อ
-  last_name: string;         // ✅ แยกนามสกุล
-  full_name?: string;        // ✅ สำหรับ backward compatibility
+  first_name: string;
+  last_name: string;
   hospital_number: string;
   birth_date: string;
   gender: string;
@@ -274,24 +273,22 @@ export async function registerPatient(data: {
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   emergency_contact_relationship?: string;
-  
-  // ✅ ที่อยู่แยกส่วน (แก้ไขแล้ว)
-  house_number?: string;     // ✅ เลขที่
-  address_line1?: string;    // ✅ ที่อยู่เพิ่มเติม
-  soi?: string;              // ✅ ซอย
-  road?: string;             // ✅ ถนน
-  village_no?: string;       // ✅ หมู่ที่
-  village_name?: string;     // ✅ หมู่บ้าน
-  subdistrict?: string;      // ✅ ตำบล
-  district?: string;         // ✅ อำเภอ/เขต
-  province?: string;         // ✅ จังหวัด
-  postal_code?: string;      // ✅ รหัสไปรษณีย์
-  subdistrict_health_center?: string;  // ✅ รพสต
-  
+  // ที่อยู่แยกส่วน
+  house_number?: string;
+  address_line1?: string;
+  soi?: string;
+  road?: string;
+  village_no?: string;
+  village_name?: string;
+  subdistrict?: string;
+  district?: string;
+  province?: string;
+  postal_code?: string;
+  subdistrict_health_center?: string;
   diabetes_type?: string;
   diagnosis_date?: string;
   hba1c_level?: number;
-  notes?: string;            // ✅ เปลี่ยนจาก allergies
+  notes?: string;
   occupation?: string;
   education_level?: string;
   created_by: string;
@@ -315,17 +312,14 @@ export async function registerPatient(data: {
       return { success: false, error: userError.message };
     }
 
-    // 2. รวมชื่อ-นามสกุล สำหรับ full_name (backward compatibility)
-    const fullName = data.full_name || `${data.first_name} ${data.last_name}`;
-
-    // 3. สร้าง profile
+    // 2. สร้าง profile (✅ ลบ full_name ออก)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .insert({
         id: user.id,
-        first_name: data.first_name,                    // ✅ แยกชื่อ
-        last_name: data.last_name,                      // ✅ แยกนามสกุล
-        full_name: fullName,                            // ✅ สำหรับ backward compatibility
+        first_name: data.first_name,
+        last_name: data.last_name,
+        // ✅ ลบ full_name: fullName ออก เพราะไม่มีคอลัมน์นี้
         hospital_number: data.hospital_number,
         birth_date: data.birth_date,
         gender: data.gender,
@@ -339,27 +333,27 @@ export async function registerPatient(data: {
         emergency_contact_phone: data.emergency_contact_phone,
         emergency_contact_relationship: data.emergency_contact_relationship,
         
-        // ✅ ที่อยู่แยกส่วน (แก้ไขแล้ว)
-        house_number: data.house_number,                // ✅ แยก house_number
-        address_line1: data.address_line1,              // ✅ แยก address_line1
-        soi: data.soi,                                  // ✅ แยก soi
-        road: data.road,                                // ✅ แยก road
-        village_no: data.village_no,                    // ✅ แยก village_no
-        village_name: data.village_name,                // ✅ แยก village_name
-        subdistrict: data.subdistrict,                  // ✅ แยก subdistrict
-        district: data.district,                        // ✅ แยก district
-        province: data.province,                        // ✅ แยก province
-        postal_code: data.postal_code,                  // ✅ แยก postal_code
-        subdistrict_health_center: data.subdistrict_health_center,  // ✅ รพสต
+        // ที่อยู่แยกส่วน
+        house_number: data.house_number,
+        address_line1: data.address_line1,
+        soi: data.soi,
+        road: data.road,
+        village_no: data.village_no,
+        village_name: data.village_name,
+        subdistrict: data.subdistrict,
+        district: data.district,
+        province: data.province,
+        postal_code: data.postal_code,
+        subdistrict_health_center: data.subdistrict_health_center,
         
         diabetes_type: data.diabetes_type,
         diagnosis_date: data.diagnosis_date,
         hba1c_level: data.hba1c_level,
-        notes: data.notes,                              // ✅ เปลี่ยนจาก allergies
+        notes: data.notes,
         occupation: data.occupation,
         education_level: data.education_level,
         pam_level: 'L1',
-        zone: 'Green Zone',
+        zone: 'Red Zone',
         current_step: 'Starter',
         is_active: true,
         status: 'active',
@@ -369,6 +363,7 @@ export async function registerPatient(data: {
 
     if (profileError) {
       console.error('Error creating profile:', profileError);
+      // ลบ user ที่สร้างไว้ถ้า profile insert ไม่สำเร็จ
       await supabase.from('users').delete().eq('id', user.id);
       return { success: false, error: profileError.message };
     }

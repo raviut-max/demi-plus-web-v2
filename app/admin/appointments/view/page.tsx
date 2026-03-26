@@ -1,3 +1,4 @@
+// app/admin/appointments/view/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -18,16 +19,15 @@ export default function ViewAppointmentsPage() {
   const [patients, setPatients] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Filters
   const [filterDate, setFilterDate] = useState('');
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterPatient, setFilterPatient] = useState('');
-  const [filterStatus, setFilterStatus] = useState('scheduled');
+  const [filterStatus, setFilterStatus] = useState('all');
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -46,36 +46,46 @@ export default function ViewAppointmentsPage() {
   const loadData = async () => {
     try {
       console.log('📡 Loading appointments...');
-      
+
       // ดึงข้อมูลนัดหมาย
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
-        .order('appointment_date', { ascending: true });
+        .order('appointment_date', { ascending: false });
 
       if (aptError) throw aptError;
-
       console.log('📋 Raw appointments:', aptData?.length);
 
-      // ดึงรายละเอียด
+      // ดึงรายละเอียดผู้ป่วยและแพทย์
       const appointmentsWithDetails = await Promise.all(
         (aptData || []).map(async (apt: any) => {
+          // ดึงข้อมูลผู้ป่วย
           const { data: userData } = await supabase
             .from('profiles')
-            .select('full_name, hospital_number')
+            .select('first_name, last_name, hospital_number')
             .eq('id', apt.user_id)
             .single();
 
-          const { data: doctorData } = await supabase
-            .from('doctors')
-            .select('full_name_th, specialization_th')
-            .eq('id', apt.doctor_id)
-            .single();
+          // ดึงข้อมูลแพทย์ - ✅ แก้ไขแล้ว (ใช้ user_id)
+          let doctorData = null;
+          if (apt.doctor_id) {
+            const { data: docData } = await supabase
+              .from('doctors')
+              .select('user_id, full_name_th, specialization_th')
+              .eq('user_id', apt.doctor_id)
+              .single();
+            doctorData = docData;
+          }
 
           return {
             ...apt,
-            users: userData,
-            doctors: doctorData,
+            users: userData ? {
+              full_name: userData.first_name && userData.last_name
+                ? `${userData.first_name} ${userData.last_name}`
+                : '-',
+              hospital_number: userData.hospital_number || '-'
+            } : null,
+            doctors: doctorData || null
           };
         })
       );
@@ -83,18 +93,19 @@ export default function ViewAppointmentsPage() {
       console.log('✅ Appointments with details:', appointmentsWithDetails.length);
       setAppointments(appointmentsWithDetails);
 
-      // ดึงรายการผู้ป่วยและแพทย์
+      // ดึงข้อมูลผู้ป่วยและแพทย์สำหรับ filter
       const [patientsData, allStaff] = await Promise.all([
         getPatientList(),
         getStaffList()
       ]);
 
       // กรองเอาเฉพาะ doctor และ helper (ไม่เอา admin)
-      const filteredStaff = allStaff.filter(staff => 
+      const filteredStaff = allStaff.filter(staff =>
         staff.role === 'doctor' || staff.role === 'helper'
       );
-
       console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
+      console.log('👨‍⚕️ Doctors data:', filteredStaff);
+
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
@@ -130,30 +141,27 @@ export default function ViewAppointmentsPage() {
     }
   };
 
-  // ✅ ตรวจสอบว่าเป็นนัดหมายที่ผ่านไปแล้วหรือยัง
+  // ตรวจสอบว่าเป็นนัดหมายที่ผ่านไปแล้วหรือยัง
   const isPastAppointment = (appointmentDate: string) => {
     const now = new Date();
     const aptDate = new Date(appointmentDate);
     return aptDate < now;
   };
 
-  // ✅ ตรวจสอบว่าสามารถเสร็จสิ้นได้หรือไม่
+  // ตรวจสอบว่าสามารถเสร็จสิ้นได้หรือไม่
   const canComplete = (apt: any) => {
     if (apt.status !== 'scheduled') return false;
-    
     const now = new Date();
     const aptDate = new Date(apt.appointment_date);
-    
-    // อนุญาตให้เสร็จสิ้นได้เมื่อถึงวันนัดหมายแล้ว (หรือผ่านไปแล้ว)
     return aptDate <= now;
   };
 
-  // ✅ ตรวจสอบว่าควรแสดงปุ่มแก้ไขหรือไม่
+  // ตรวจสอบว่าควรแสดงปุ่มแก้ไขหรือไม่
   const canEdit = (apt: any) => {
     return apt.status === 'scheduled';
   };
 
-  // ✅ ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
+  // ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
   const handleComplete = async (aptId: string) => {
     const apt = appointments.find(a => a.id === aptId);
     if (!apt) return;
@@ -161,7 +169,7 @@ export default function ViewAppointmentsPage() {
     const aptDate = new Date(apt.appointment_date);
     const now = new Date();
     const isPastOrOnTime = aptDate <= now;
-    
+
     // ถ้ายังไม่ถึงวันนัด ให้ถามยืนยันก่อน
     if (!isPastOrOnTime) {
       const timeDiff = aptDate.getTime() - now.getTime();
@@ -179,25 +187,23 @@ export default function ViewAppointmentsPage() {
       );
       
       if (!confirmEarly) {
-        return; // ยกเลิกการเสร็จสิ้น
+        return;
       }
     } else {
-      // ถึงวันนัดหรือผ่านไปแล้ว - ถามยืนยันปกติ
       const confirmComplete = confirm('ยืนยันว่านัดหมายนี้เสร็จสิ้นแล้ว?');
       if (!confirmComplete) {
         return;
       }
     }
-    
-    // บันทึกสถานะเสร็จสิ้น
+
     const { error } = await supabase
       .from('appointments')
-      .update({ 
+      .update({
         status: 'completed',
         updated_at: new Date().toISOString()
       })
       .eq('id', aptId);
-    
+
     if (error) {
       alert('เกิดข้อผิดพลาด: ' + error.message);
     } else {
@@ -206,17 +212,17 @@ export default function ViewAppointmentsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันจัดการผิดนัด
+  // ฟังก์ชันจัดการผิดนัด
   const handleNoShow = async (aptId: string) => {
     if (confirm('ยืนยันว่าผู้ป่วยผิดนัด (No-show)?\n\nผู้ป่วยจะไม่ได้รับการนัดหมายนี้อีก และอาจต้องนัดหมายใหม่')) {
       const { error } = await supabase
         .from('appointments')
-        .update({ 
+        .update({
           status: 'no_show',
           updated_at: new Date().toISOString()
         })
         .eq('id', aptId);
-      
+
       if (error) {
         alert('เกิดข้อผิดพลาด: ' + error.message);
       } else {
@@ -226,17 +232,17 @@ export default function ViewAppointmentsPage() {
     }
   };
 
-  // ✅ ฟังก์ชันจัดการยกเลิก
+  // ฟังก์ชันจัดการยกเลิก
   const handleCancel = async (aptId: string) => {
     if (confirm('ยืนยันการยกเลิกนัดหมายนี้?')) {
       const { error } = await supabase
         .from('appointments')
-        .update({ 
+        .update({
           status: 'cancelled',
           updated_at: new Date().toISOString()
         })
         .eq('id', aptId);
-      
+
       if (error) {
         alert('เกิดข้อผิดพลาด: ' + error.message);
       } else {
@@ -253,27 +259,36 @@ export default function ViewAppointmentsPage() {
     const month = String(aptDateObj.getMonth() + 1).padStart(2, '0');
     const day = String(aptDateObj.getDate()).padStart(2, '0');
     const aptDate = `${year}-${month}-${day}`;
-    
+
+    // Debug log
+    console.log('🔍 Filtering appointment:', {
+      apt_id: apt.id,
+      apt_doctor_id: apt.doctor_id,
+      filter_doctor: filterDoctor,
+      match: filterDoctor ? apt.doctor_id === filterDoctor : true
+    });
+
     // Filter by date
     if (filterDate && aptDate !== filterDate) {
       return false;
     }
-    
-    // Filter by doctor
+
+    // Filter by doctor - ✅ แก้ไขแล้ว
     if (filterDoctor && apt.doctor_id !== filterDoctor) {
+      console.log('❌ Filtered out by doctor');
       return false;
     }
-    
+
     // Filter by patient
     if (filterPatient && apt.user_id !== filterPatient) {
       return false;
     }
-    
+
     // Filter by status
     if (filterStatus !== 'all' && apt.status !== filterStatus) {
       return false;
     }
-    
+
     return true;
   });
 
@@ -294,7 +309,7 @@ export default function ViewAppointmentsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <p className="text-gray-600">กำลังโหลด...</p>
@@ -304,36 +319,36 @@ export default function ViewAppointmentsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex items-center justify-between mb-4">
             <div>
               <button
                 onClick={() => router.push('/admin/dashboard')}
                 className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
               >
-                <ArrowLeft className="w-4 h-4" />
-                กลับ Dashboard
+                <ArrowLeft className="w-5 h-5" />
+                <span>กลับ Dashboard</span>
               </button>
-              <h1 className="text-2xl font-bold text-gray-800">ดูนัดหมาย</h1>
-              <p className="text-sm text-gray-600">ตรวจสอบตารางนัดหมาย</p>
+              <h1 className="text-3xl font-bold text-gray-800">ดูนัดหมาย</h1>
+              <p className="text-gray-600">ตรวจสอบตารางนัดหมาย</p>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <button
                 onClick={() => router.push('/admin/appointments/new')}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
               >
                 <Plus className="w-4 h-4" />
-                <span className="hidden md:inline">สร้างนัดหมายใหม่</span>
+                สร้างนัดหมายใหม่
               </button>
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
               >
                 <LogOut className="w-4 h-4" />
-                <span className="hidden md:inline">ออกจากระบบ</span>
+                ออกจากระบบ
               </button>
             </div>
           </div>
@@ -399,7 +414,7 @@ export default function ViewAppointmentsPage() {
               />
             </div>
 
-            {/* Doctor Filter */}
+            {/* Doctor Filter - ✅ แก้ไขแล้ว */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">แพทย์</label>
               <select
@@ -412,9 +427,11 @@ export default function ViewAppointmentsPage() {
               >
                 <option value="">ทั้งหมด</option>
                 {doctors.map((doctor: any) => {
-                  const doctorId = doctor.id;
-                  const doctorName = doctor.doctors?.full_name_th || doctor.full_name_th || '-';
+                  const doctorId = doctor.id; // ✅ ใช้ id จาก users table
+                  const doctorName = doctor.doctors?.full_name_th || '-'; // ✅ เข้าถึงผ่าน doctors object
                   const doctorRole = doctor.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่';
+                  
+                  console.log('👨‍⚕️ Doctor option:', { doctorId, doctorName, doctorRole });
                   
                   return (
                     <option key={doctorId} value={doctorId}>
@@ -477,12 +494,12 @@ export default function ViewAppointmentsPage() {
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-6 py-4 text-left text-sm font-semibold">ผู้ป่วย</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold">แพทย์</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold">ประเภท</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold">วันที่/เวลา</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold">สถานะ</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold">จัดการ</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ผู้ป่วย</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">แพทย์</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ประเภท</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">วันที่/เวลา</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -500,22 +517,24 @@ export default function ViewAppointmentsPage() {
                 filteredAppointments.map((apt) => (
                   <tr key={apt.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <p className="font-medium">{apt.users?.full_name || '-'}</p>
+                      <p className="font-medium text-gray-800">{apt.users?.full_name || '-'}</p>
                       <p className="text-sm text-gray-500">{apt.users?.hospital_number}</p>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Stethoscope className="w-4 h-4 text-gray-400" />
-                        <span>{apt.doctors?.full_name_th || '-'}</span>
+                        <span className="text-gray-700">
+                          {apt.doctors?.full_name_th || '-'}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm">{apt.appointment_type}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">{apt.appointment_type}</td>
                     <td className="px-6 py-4 text-sm">
-                      <p>{new Date(apt.appointment_date).toLocaleDateString('th-TH')}</p>
+                      <p className="text-gray-800">{new Date(apt.appointment_date).toLocaleDateString('th-TH')}</p>
                       <p className="text-gray-500">
-                        {new Date(apt.appointment_date).toLocaleTimeString('th-TH', { 
-                          hour: '2-digit', 
-                          minute: '2-digit' 
+                        {new Date(apt.appointment_date).toLocaleTimeString('th-TH', {
+                          hour: '2-digit',
+                          minute: '2-digit'
                         })}
                       </p>
                     </td>
@@ -526,7 +545,6 @@ export default function ViewAppointmentsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
-                        {/* ปุ่มแก้ไข - แสดงเฉพาะ scheduled เท่านั้น */}
                         {canEdit(apt) && (
                           <button
                             onClick={() => router.push(`/admin/appointments/edit/${apt.id}`)}
@@ -536,8 +554,7 @@ export default function ViewAppointmentsPage() {
                             แก้ไข
                           </button>
                         )}
-                        
-                        {/* ปุ่มเสร็จสิ้น - แสดงเฉพาะ scheduled และถึงเวลาแล้ว หรือ ยังไม่ถึงแต่ต้องการเสร็จสิ้นก่อน */}
+
                         {apt.status === 'scheduled' && (
                           <button
                             onClick={() => handleComplete(apt.id)}
@@ -547,8 +564,7 @@ export default function ViewAppointmentsPage() {
                             เสร็จสิ้น
                           </button>
                         )}
-                        
-                        {/* ปุ่มผิดนัด (No-show) - แสดงเฉพาะ scheduled ที่ถึงเวลาแล้ว (ผ่านไปแล้ว) */}
+
                         {apt.status === 'scheduled' && isPastAppointment(apt.appointment_date) && (
                           <button
                             onClick={() => handleNoShow(apt.id)}
@@ -558,8 +574,7 @@ export default function ViewAppointmentsPage() {
                             ผิดนัด
                           </button>
                         )}
-                        
-                        {/* ปุ่มยกเลิก - แสดงเฉพาะ scheduled เท่านั้น */}
+
                         {apt.status === 'scheduled' && (
                           <button
                             onClick={() => handleCancel(apt.id)}
@@ -569,8 +584,7 @@ export default function ViewAppointmentsPage() {
                             ยกเลิก
                           </button>
                         )}
-                        
-                        {/* แสดงสถานะสำหรับ completed, cancelled, no_show */}
+
                         {(apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'no_show') && (
                           <span className="text-xs text-gray-500 italic">
                             ไม่สามารถแก้ไขได้
