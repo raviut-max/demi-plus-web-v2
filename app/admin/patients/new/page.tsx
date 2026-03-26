@@ -31,7 +31,7 @@ export default function NewPatientPage() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
-  // State สำหรับที่อยู่จาก ThaiAddressSelector
+  // ✅ State สำหรับที่อยู่จาก ThaiAddressSelector
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
@@ -41,7 +41,7 @@ export default function NewPatientPage() {
 
   const [formData, setFormData] = useState({
     // ข้อมูลบัญชี
-    id_card: '',
+    id_card: '',  // ✅ ต้องเป็น string ว่างเปล่า
     password: '',
     confirmPassword: '',
     
@@ -123,7 +123,7 @@ export default function NewPatientPage() {
     }
   };
 
-  // ฟังก์ชันสร้างรหัสผ่านจากวันเกิด (ปี พ.ศ.)
+  // ✅ ฟังก์ชันสร้างรหัสผ่านจากวันเกิด (ปี พ.ศ.)
   const generatePasswordFromBirthDate = (day: string, month: string, year: string) => {
     if (!day || !month || !year) return '';
     return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
@@ -136,7 +136,7 @@ export default function NewPatientPage() {
     });
   };
 
-  // Auto-generate password เมื่อกรอกวันเกิดครบ
+  // ✅ Auto-generate password เมื่อกรอกวันเกิดครบ
   useEffect(() => {
     if (formData.birth_day && formData.birth_month && formData.birth_year) {
       const autoPassword = generatePasswordFromBirthDate(
@@ -152,7 +152,7 @@ export default function NewPatientPage() {
     }
   }, [formData.birth_day, formData.birth_month, formData.birth_year]);
 
-  // Handler สำหรับรับข้อมูลจาก ThaiAddressSelector
+  // ✅ Handler สำหรับรับข้อมูลจาก ThaiAddressSelector
   const handleAddressChange = (data: {
     province: string;
     district: string;
@@ -162,75 +162,60 @@ export default function NewPatientPage() {
     setAddressData(data);
   };
 
-  // ✅ ฟังก์ชันแปลง error messages ให้เข้าใจง่าย
-  const getFriendlyErrorMessage = (error: any): string => {
-    if (error?.code === '23505') {
-      if (error.message?.includes('users_id_card_key')) {
-        return '❌ เลขบัตรประชาชนนี้มีผู้ใช้งานอยู่แล้ว\n\n💡 วิธีแก้ไข:\n- ตรวจสอบว่าผู้ป่วยมีในระบบแล้วหรือไม่\n- ค้นหาด้วยเลขบัตรประชาชน: ' + formData.id_card;
-      }
-      if (error.message?.includes('profiles_hospital_number_key')) {
-        return '❌ เลข HN (Hospital Number) ซ้ำกับผู้ป่วยคนอื่น\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลข HN ให้ถูกต้อง\n- หรือใช้เลข HN ใหม่ที่ไม่ซ้ำ';
-      }
-    }
-    
-    if (error?.message?.includes('users_id_card_key')) {
-      return '❌ เลขบัตรประชาชนนี้มีผู้ใช้งานอยู่แล้ว\n\n💡 วิธีแก้ไข:\n- ตรวจสอบว่าผู้ป่วยมีในระบบแล้วหรือไม่\n- ค้นหาด้วยเลขบัตรประชาชน: ' + formData.id_card;
-    }
-    
-    return '❌ เกิดข้อผิดพลาดในการลงทะเบียน\n\nกรุณาตรวจสอบข้อมูลที่กรอกและลองใหม่อีกครั้ง';
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     // Validate
     if (formData.password !== formData.confirmPassword) {
-      setError('❌ รหัสผ่านไม่ตรงกัน\n\n💡 วิธีแก้ไข:\n- กรุณากรอกรหัสผ่านให้ตรงกันทั้งสองช่อง');
+      setError('รหัสผ่านไม่ตรงกัน');
       return;
     }
 
     if (formData.id_card.length !== 13) {
-      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก\n\n💡 วิธีแก้ไข:\n- กรุณาตรวจสอบเลขบัตรประชาชนอีกครั้ง\n- ต้องมี 13 หลักเท่านั้น');
+      setError('เลขบัตรประชาชนต้อง 13 หลัก');
       return;
     }
 
     if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
-      setError('❌ กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบถ้วน\n\n💡 วิธีแก้ไข:\n- ตรวจสอบช่องที่มีเครื่องหมาย (*)\n- กรอกข้อมูลให้ครบทุกช่อง');
+      setError('กรุณากรอกข้อมูล必填ให้ครบถ้วน');
       return;
     }
 
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน\n\n💡 วิธีแก้ไข:\n- เลือกวัน เดือน ปี เกิดให้ครบทั้ง 3 ช่อง');
+      setError('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
     }
 
-    // ตรวจสอบที่อยู่
+    // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
-      setError('❌ กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน\n\n💡 วิธีแก้ไข:\n- เลือกจังหวัด\n- เลือกอำเภอ/เขต\n- เลือกตำบล');
+      setError('กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
       return;
     }
 
     setLoading(true);
 
     try {
-      // รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
+      // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
-      // รวมวันที่วินิจฉัยเป็น ค.ศ. (ถ้ามี)
+      // ✅ รวมวันที่วินิจฉัยเป็น ค.ศ. (ถ้ามี)
       let diagnosisDate = null;
       if (formData.diagnosis_day && formData.diagnosis_month && formData.diagnosis_year) {
         const diagnosisYearAD = parseInt(formData.diagnosis_year) - 543;
         diagnosisDate = `${diagnosisYearAD}-${formData.diagnosis_month.padStart(2, '0')}-${formData.diagnosis_day.padStart(2, '0')}`;
       }
 
+      // ✅ รวมชื่อ-นามสกุล
+      const fullName = `${formData.first_name} ${formData.last_name}`;
+
       const result = await registerPatient({
         id_card: formData.id_card,
         password: formData.password,
+        full_name: fullName,
         first_name: formData.first_name,
         last_name: formData.last_name,
-        // ✅ ไม่ส่ง full_name แล้ว
         hospital_number: formData.hospital_number,
         birth_date: birthDate,
         gender: formData.gender,
@@ -245,17 +230,17 @@ export default function NewPatientPage() {
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
         notes: formData.notes || undefined, 
         
-        // ที่อยู่ - ส่งแยกฟิลด์
+        // ✅ ที่อยู่ - ส่งแยกฟิลด์
         house_number: formData.house_number || undefined,
         address_line1: formData.address_line1 || undefined,
         soi: formData.soi || undefined,
         road: formData.road || undefined,
         village_no: formData.village_no || undefined,
         village_name: formData.village_name || undefined,
-        subdistrict: addressData.subdistrict || undefined,
-        district: addressData.district || undefined,
-        province: addressData.province || undefined,
-        postal_code: addressData.postalCode || undefined,
+        subdistrict: addressData.subdistrict || undefined,  // ✅ จาก ThaiAddressSelector
+        district: addressData.district || undefined,        // ✅ จาก ThaiAddressSelector
+        province: addressData.province || undefined,        // ✅ จาก ThaiAddressSelector
+        postal_code: addressData.postalCode || undefined,   // ✅ จาก ThaiAddressSelector
         subdistrict_health_center: formData.subdistrict_health_center || undefined,
         
         emergency_contact_name: formData.emergency_contact_name || undefined,
@@ -274,15 +259,11 @@ export default function NewPatientPage() {
           router.push('/admin/patients');
         }, 2000);
       } else {
-        // ✅ ใช้ฟังก์ชันแปลง error message
-        const friendlyError = getFriendlyErrorMessage(result.error);
-        setError(friendlyError);
+        setError(result.error || 'เกิดข้อผิดพลาด');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('Registration error:', err);
-      // ✅ ใช้ฟังก์ชันแปลง error message
-      const friendlyError = getFriendlyErrorMessage(err);
-      setError(friendlyError);
+      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
       setLoading(false);
     }
   };
@@ -354,7 +335,9 @@ export default function NewPatientPage() {
                 maxLength={13}
                 required
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="13 หลัก"
+                placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
+                autoComplete="off"  // ✅ ปิด auto-complete
+                autoCorrect="off"    // ✅ ปิด auto-correct
               />
             </div>
             <div>
@@ -878,18 +861,11 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* Error Message - ปรับปรุงแล้ว */}
+        {/* Error Message */}
         {error && (
-          <div className="bg-red-50 border-2 border-red-300 rounded-xl p-6 mb-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <h3 className="font-bold text-red-800 mb-2">⚠️ พบข้อผิดพลาด</h3>
-                <div className="text-red-700 whitespace-pre-line text-sm leading-relaxed">
-                  {error}
-                </div>
-              </div>
-            </div>
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+            <span className="text-red-700 text-sm">{error}</span>
           </div>
         )}
 
