@@ -41,7 +41,7 @@ export default function NewPatientPage() {
 
   const [formData, setFormData] = useState({
     // ข้อมูลบัญชี
-    id_card: '',  // ✅ ต้องเป็น string ว่างเปล่า
+    id_card: '',  // ✅ ต้องเป็น string ว่างเปล่า - ไม่มีค่า default
     password: '',
     confirmPassword: '',
     
@@ -213,7 +213,7 @@ export default function NewPatientPage() {
       const result = await registerPatient({
         id_card: formData.id_card,
         password: formData.password,
-        full_name: fullName,
+        //full_name: fullName,
         first_name: formData.first_name,
         last_name: formData.last_name,
         hospital_number: formData.hospital_number,
@@ -327,18 +327,23 @@ export default function NewPatientPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เลขบัตรประชาชน <span className="text-red-500">*</span>
               </label>
-              <input
-                type="text"
-                name="id_card"
-                value={formData.id_card}
-                onChange={handleChange}
-                maxLength={13}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
-                autoComplete="off"  // ✅ ปิด auto-complete
-                autoCorrect="off"    // ✅ ปิด auto-correct
-              />
+<input
+  type="text"
+  name="id_card"
+  value={formData.id_card}
+  onChange={handleChange}
+  maxLength={13}
+  required
+  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+  placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
+  autoComplete="off"        // ✅ ป้องกัน browser จำค่า
+  autoCorrect="off"         // ✅ ปิด auto-correct
+  spellCheck="false"        // ✅ ปิด spell check
+  readOnly={false}          // ✅ ตรวจสอบว่าไม่ได้อ่านอย่างเดียว
+/>
+<p className="text-xs text-gray-500 mt-1">
+  💡 กรอกเลขบัตรประชาชน 13 หลัก (ไม่มีช่องว่าง)
+</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">

@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus } from 'lucide-react';
+import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -46,17 +46,18 @@ export default function ViewAppointmentsPage() {
   const loadData = async () => {
     try {
       console.log('📡 Loading appointments...');
-
+      
       // ดึงข้อมูลนัดหมาย
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
-        .order('appointment_date', { ascending: false });
+        .order('appointment_date', { ascending: true });
 
       if (aptError) throw aptError;
+
       console.log('📋 Raw appointments:', aptData?.length);
 
-      // ดึงรายละเอียดผู้ป่วยและแพทย์
+      // ดึงรายละเอียดผู้ป่วยและแพทย์ + ตรวจสอบว่ามี followup แล้วหรือไม่
       const appointmentsWithDetails = await Promise.all(
         (aptData || []).map(async (apt: any) => {
           // ดึงข้อมูลผู้ป่วย
@@ -66,7 +67,7 @@ export default function ViewAppointmentsPage() {
             .eq('id', apt.user_id)
             .single();
 
-          // ดึงข้อมูลแพทย์ - ✅ แก้ไขแล้ว (ใช้ user_id)
+          // ดึงข้อมูลแพทย์
           let doctorData = null;
           if (apt.doctor_id) {
             const { data: docData } = await supabase
@@ -77,6 +78,13 @@ export default function ViewAppointmentsPage() {
             doctorData = docData;
           }
 
+          // ✅ ตรวจสอบว่ามีการบันทึกติดตามแล้วหรือไม่
+          const { data: followupData } = await supabase
+            .from('appointment_followups')
+            .select('id')
+            .eq('appointment_id', apt.id)
+            .maybeSingle();
+
           return {
             ...apt,
             users: userData ? {
@@ -85,7 +93,8 @@ export default function ViewAppointmentsPage() {
                 : '-',
               hospital_number: userData.hospital_number || '-'
             } : null,
-            doctors: doctorData || null
+            doctors: doctorData || null,
+            hasFollowup: !!followupData  // ✅ มี followup แล้วหรือไม่
           };
         })
       );
@@ -103,9 +112,8 @@ export default function ViewAppointmentsPage() {
       const filteredStaff = allStaff.filter(staff =>
         staff.role === 'doctor' || staff.role === 'helper'
       );
-      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
-      console.log('👨‍⚕️ Doctors data:', filteredStaff);
 
+      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
@@ -141,14 +149,14 @@ export default function ViewAppointmentsPage() {
     }
   };
 
-  // ตรวจสอบว่าเป็นนัดหมายที่ผ่านไปแล้วหรือยัง
+  // ✅ ตรวจสอบว่าเป็นนัดหมายที่ผ่านไปแล้วหรือยัง
   const isPastAppointment = (appointmentDate: string) => {
     const now = new Date();
     const aptDate = new Date(appointmentDate);
     return aptDate < now;
   };
 
-  // ตรวจสอบว่าสามารถเสร็จสิ้นได้หรือไม่
+  // ✅ ตรวจสอบว่าสามารถเสร็จสิ้นได้หรือไม่
   const canComplete = (apt: any) => {
     if (apt.status !== 'scheduled') return false;
     const now = new Date();
@@ -156,12 +164,27 @@ export default function ViewAppointmentsPage() {
     return aptDate <= now;
   };
 
-  // ตรวจสอบว่าควรแสดงปุ่มแก้ไขหรือไม่
+  // ✅ ตรวจสอบว่าควรแสดงปุ่มแก้ไขหรือไม่
   const canEdit = (apt: any) => {
     return apt.status === 'scheduled';
   };
 
-  // ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
+  // ✅ ตรวจสอบว่าควรแสดงปุ่มบันทึกติดตามหรือไม่
+  const canFollowup = (apt: any) => {
+    // กรณีที่ 1: เสร็จสิ้นแล้ว แต่ยังไม่ได้บันทึกติดตาม
+    if (apt.status === 'completed' && !apt.hasFollowup) {
+      return true;
+    }
+    
+    // กรณีที่ 2: ยังไม่เสร็จสิ้น แต่ถึงวันนัดแล้ว (ให้บันทึกเลยแล้วเสร็จสิ้นอัตโนมัติ)
+    if (apt.status === 'scheduled' && isPastAppointment(apt.appointment_date)) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // ✅ ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
   const handleComplete = async (aptId: string) => {
     const apt = appointments.find(a => a.id === aptId);
     if (!apt) return;
@@ -175,7 +198,7 @@ export default function ViewAppointmentsPage() {
       const timeDiff = aptDate.getTime() - now.getTime();
       const daysLeft = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
       const hoursLeft = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      
+
       const confirmEarly = confirm(
         `⚠️ คำเตือน: ยังไม่ถึงวันนัดหมาย!\n\n` +
         `เวลานัด: ${aptDate.toLocaleString('th-TH')}\n` +
@@ -185,7 +208,7 @@ export default function ViewAppointmentsPage() {
         `ผู้ป่วยอาจมาล่วงหน้าและต้องการเสร็จสิ้นก่อนกำหนด\n\n` +
         `คุณต้องการเสร็จสิ้นนัดหมายนี้จริงๆ หรือไม่?`
       );
-      
+
       if (!confirmEarly) {
         return;
       }
@@ -207,12 +230,12 @@ export default function ViewAppointmentsPage() {
     if (error) {
       alert('เกิดข้อผิดพลาด: ' + error.message);
     } else {
-      alert('บันทึกสำเร็จ!');
+      alert('✅ บันทึกสำเร็จ!');
       loadData();
     }
   };
 
-  // ฟังก์ชันจัดการผิดนัด
+  // ✅ ฟังก์ชันจัดการผิดนัด
   const handleNoShow = async (aptId: string) => {
     if (confirm('ยืนยันว่าผู้ป่วยผิดนัด (No-show)?\n\nผู้ป่วยจะไม่ได้รับการนัดหมายนี้อีก และอาจต้องนัดหมายใหม่')) {
       const { error } = await supabase
@@ -226,13 +249,13 @@ export default function ViewAppointmentsPage() {
       if (error) {
         alert('เกิดข้อผิดพลาด: ' + error.message);
       } else {
-        alert('บันทึกสถานะผิดนัดสำเร็จ!');
+        alert('✅ บันทึกสถานะผิดนัดสำเร็จ!');
         loadData();
       }
     }
   };
 
-  // ฟังก์ชันจัดการยกเลิก
+  // ✅ ฟังก์ชันจัดการยกเลิก
   const handleCancel = async (aptId: string) => {
     if (confirm('ยืนยันการยกเลิกนัดหมายนี้?')) {
       const { error } = await supabase
@@ -246,7 +269,7 @@ export default function ViewAppointmentsPage() {
       if (error) {
         alert('เกิดข้อผิดพลาด: ' + error.message);
       } else {
-        alert('ยกเลิกนัดหมายสำเร็จ!');
+        alert('✅ ยกเลิกนัดหมายสำเร็จ!');
         loadData();
       }
     }
@@ -260,22 +283,13 @@ export default function ViewAppointmentsPage() {
     const day = String(aptDateObj.getDate()).padStart(2, '0');
     const aptDate = `${year}-${month}-${day}`;
 
-    // Debug log
-    console.log('🔍 Filtering appointment:', {
-      apt_id: apt.id,
-      apt_doctor_id: apt.doctor_id,
-      filter_doctor: filterDoctor,
-      match: filterDoctor ? apt.doctor_id === filterDoctor : true
-    });
-
     // Filter by date
     if (filterDate && aptDate !== filterDate) {
       return false;
     }
 
-    // Filter by doctor - ✅ แก้ไขแล้ว
+    // Filter by doctor
     if (filterDoctor && apt.doctor_id !== filterDoctor) {
-      console.log('❌ Filtered out by doctor');
       return false;
     }
 
@@ -414,7 +428,7 @@ export default function ViewAppointmentsPage() {
               />
             </div>
 
-            {/* Doctor Filter - ✅ แก้ไขแล้ว */}
+            {/* Doctor Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">แพทย์</label>
               <select
@@ -427,12 +441,9 @@ export default function ViewAppointmentsPage() {
               >
                 <option value="">ทั้งหมด</option>
                 {doctors.map((doctor: any) => {
-                  const doctorId = doctor.id; // ✅ ใช้ id จาก users table
-                  const doctorName = doctor.doctors?.full_name_th || '-'; // ✅ เข้าถึงผ่าน doctors object
+                  const doctorId = doctor.id;
+                  const doctorName = doctor.doctors?.full_name_th || doctor.full_name_th || '-';
                   const doctorRole = doctor.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่';
-                  
-                  console.log('👨‍⚕️ Doctor option:', { doctorId, doctorName, doctorRole });
-                  
                   return (
                     <option key={doctorId} value={doctorId}>
                       {doctorName} ({doctorRole})
@@ -542,9 +553,17 @@ export default function ViewAppointmentsPage() {
                       <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(apt.status)}`}>
                         {getStatusText(apt.status)}
                       </span>
+                      {/* ✅ แสดงสถานะว่าบันทึกติดตามแล้วหรือไม่ */}
+                      {apt.hasFollowup && (
+                        <div className="mt-1 flex items-center gap-1 text-xs text-green-600">
+                          <CheckCircle className="w-3 h-3" />
+                          <span>บันทึกติดตามแล้ว</span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
+                        {/* ปุ่มแก้ไข - แสดงเฉพาะ scheduled เท่านั้น */}
                         {canEdit(apt) && (
                           <button
                             onClick={() => router.push(`/admin/appointments/edit/${apt.id}`)}
@@ -555,6 +574,7 @@ export default function ViewAppointmentsPage() {
                           </button>
                         )}
 
+                        {/* ปุ่มเสร็จสิ้น - แสดงเฉพาะ scheduled */}
                         {apt.status === 'scheduled' && (
                           <button
                             onClick={() => handleComplete(apt.id)}
@@ -565,6 +585,31 @@ export default function ViewAppointmentsPage() {
                           </button>
                         )}
 
+                        {/* ✅ ปุ่มบันทึกติดตาม - แสดงเมื่อถึงเงื่อนไข */}
+                        {canFollowup(apt) && (
+                          <button
+                            onClick={() => router.push(`/admin/appointments/followup/${apt.id}`)}
+                            className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
+                            title="บันทึกผลการติดตาม"
+                          >
+                            <FileText className="w-3 h-3" />
+                            บันทึกติดตาม
+                          </button>
+                        )}
+
+                        {/* ✅ แสดงปุ่มดูประวัติ - สำหรับนัดหมายที่บันทึกติดตามแล้ว */}
+                        {apt.status === 'completed' && apt.hasFollowup && (
+                          <button
+                            onClick={() => router.push(`/admin/patients/${apt.user_id}/followup-history`)}
+                            className="px-3 py-1 bg-purple-100 text-purple-700 text-xs rounded-lg hover:bg-purple-200 transition-all flex items-center gap-1"
+                            title="ดูประวัติการติดตาม"
+                          >
+                            <FileText className="w-3 h-3" />
+                            ดูประวัติ
+                          </button>
+                        )}
+
+                        {/* ปุ่มผิดนัด (No-show) - แสดงเฉพาะ scheduled ที่ถึงเวลาแล้ว */}
                         {apt.status === 'scheduled' && isPastAppointment(apt.appointment_date) && (
                           <button
                             onClick={() => handleNoShow(apt.id)}
@@ -575,6 +620,7 @@ export default function ViewAppointmentsPage() {
                           </button>
                         )}
 
+                        {/* ปุ่มยกเลิก - แสดงเฉพาะ scheduled เท่านั้น */}
                         {apt.status === 'scheduled' && (
                           <button
                             onClick={() => handleCancel(apt.id)}
@@ -585,6 +631,7 @@ export default function ViewAppointmentsPage() {
                           </button>
                         )}
 
+                        {/* แสดงสถานะสำหรับ completed, cancelled, no_show */}
                         {(apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'no_show') && (
                           <span className="text-xs text-gray-500 italic">
                             ไม่สามารถแก้ไขได้

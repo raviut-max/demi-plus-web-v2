@@ -24,7 +24,6 @@ export async function login(idCard: string, password: string) {
     let current_step = 'Starter';
 
     if (['admin', 'doctor', 'helper'].includes(data.role)) {
-      // Staff → ดึงข้อมูลจาก doctors table
       const { data: doctor } = await supabase
         .from('doctors')
         .select('full_name_th, specialization_th')
@@ -33,14 +32,12 @@ export async function login(idCard: string, password: string) {
 
       full_name_th = doctor?.full_name_th || 'ผู้ดูแลระบบ';
     } else {
-      // Patient → ดึงข้อมูลจาก profiles table
       const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, last_name, hospital_number, pam_level, pam_score, zone, current_step')
         .eq('id', data.id)
         .single();
 
-      // ✅ รวมชื่อ-นามสกุล
       full_name_th = profile?.first_name && profile?.last_name 
         ? `${profile.first_name} ${profile.last_name}` 
         : 'ผู้ใช้';
@@ -92,6 +89,7 @@ export function checkSession() {
     const loginDate = new Date(loginTime);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - loginDate.getTime()) / (1000 * 60 * 60 * 24));
+    
     if (diffDays > 7) {
       logout();
       return null;
@@ -113,10 +111,9 @@ export async function getProfile(userId: string) {
 
   if (error) return null;
 
-  // ✅ รวมชื่อ-นามสกุล สำหรับ backward compatibility
   if (data) {
-    data.full_name = data.first_name && data.last_name 
-      ? `${data.first_name} ${data.last_name}` 
+    data.full_name = data.first_name && data.last_name
+      ? `${data.first_name} ${data.last_name}`
       : '';
   }
 
@@ -130,20 +127,11 @@ export async function getPatientList(search?: string, pamLevel?: string) {
   try {
     let query = supabase
       .from('profiles')
-      .select(`
-        *,
-        users!profiles_id_fkey (
-          id_card,
-          role,
-          is_active,
-          created_at
-        )
-      `)
+      .select(`*, users!profiles_id_fkey ( id_card, role, is_active, created_at )`)
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (search) {
-      // ✅ ค้นหาจาก first_name, last_name, hospital_number
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
@@ -160,7 +148,6 @@ export async function getPatientList(search?: string, pamLevel?: string) {
       return [];
     }
 
-    // ✅ รวมชื่อ-นามสกุล สำหรับแต่ละ patient
     const patientsWithData = data?.map(patient => ({
       ...patient,
       full_name: patient.first_name && patient.last_name 
@@ -216,20 +203,13 @@ export async function restorePatient(patientId: string) {
 }
 
 // =====================================================
-// ฟังก์ชันดึงรายการผู้ป่วยที่ถูกลบแล้ว (Inactive Patients)
+// ฟังก์ชันดึงรายการผู้ป่วยที่ถูกลบแล้ว
 // =====================================================
 export async function getDeletedPatients() {
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select(`
-        *,
-        users!profiles_id_fkey (
-          id_card,
-          role,
-          is_active
-        )
-      `)
+      .select(`*, users!profiles_id_fkey ( id_card, role, is_active )`)
       .eq('is_active', false)
       .order('updated_at', { ascending: false });
 
@@ -238,7 +218,6 @@ export async function getDeletedPatients() {
       return [];
     }
 
-    // ✅ รวมชื่อ-นามสกุล
     const patientsWithData = data?.map(patient => ({
       ...patient,
       full_name: patient.first_name && patient.last_name 
@@ -254,7 +233,7 @@ export async function getDeletedPatients() {
 }
 
 // =====================================================
-// ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin) - ✅ แก้ไขแล้ว
+// ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin)
 // =====================================================
 export async function registerPatient(data: {
   id_card: string;
@@ -273,7 +252,6 @@ export async function registerPatient(data: {
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   emergency_contact_relationship?: string;
-  // ที่อยู่แยกส่วน
   house_number?: string;
   address_line1?: string;
   soi?: string;
@@ -294,7 +272,6 @@ export async function registerPatient(data: {
   created_by: string;
 }) {
   try {
-    // 1. สร้าง user account
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert({
@@ -312,14 +289,12 @@ export async function registerPatient(data: {
       return { success: false, error: userError.message };
     }
 
-    // 2. สร้าง profile (✅ ลบ full_name ออก)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .insert({
         id: user.id,
         first_name: data.first_name,
         last_name: data.last_name,
-        // ✅ ลบ full_name: fullName ออก เพราะไม่มีคอลัมน์นี้
         hospital_number: data.hospital_number,
         birth_date: data.birth_date,
         gender: data.gender,
@@ -332,8 +307,6 @@ export async function registerPatient(data: {
         emergency_contact_name: data.emergency_contact_name,
         emergency_contact_phone: data.emergency_contact_phone,
         emergency_contact_relationship: data.emergency_contact_relationship,
-        
-        // ที่อยู่แยกส่วน
         house_number: data.house_number,
         address_line1: data.address_line1,
         soi: data.soi,
@@ -345,7 +318,6 @@ export async function registerPatient(data: {
         province: data.province,
         postal_code: data.postal_code,
         subdistrict_health_center: data.subdistrict_health_center,
-        
         diabetes_type: data.diabetes_type,
         diagnosis_date: data.diagnosis_date,
         hba1c_level: data.hba1c_level,
@@ -363,7 +335,6 @@ export async function registerPatient(data: {
 
     if (profileError) {
       console.error('Error creating profile:', profileError);
-      // ลบ user ที่สร้างไว้ถ้า profile insert ไม่สำเร็จ
       await supabase.from('users').delete().eq('id', user.id);
       return { success: false, error: profileError.message };
     }
@@ -404,7 +375,6 @@ export async function getPatientDetail(userId: string) {
       return null;
     }
 
-    // ✅ รวมชื่อ-นามสกุล
     const result = {
       ...profile,
       full_name: profile.first_name && profile.last_name 
@@ -576,17 +546,7 @@ export async function getAppointments(userId?: string) {
   try {
     let query = supabase
       .from('appointments')
-      .select(`
-        *,
-        users (
-          full_name,
-          hospital_number
-        ),
-        doctors (
-          full_name_th,
-          specialization_th
-        )
-      `)
+      .select(`*, users ( full_name, hospital_number ), doctors ( full_name_th, specialization_th )`)
       .order('appointment_date', { ascending: true });
 
     if (userId) {
@@ -662,6 +622,7 @@ export async function getDashboardStats() {
       .eq('is_active', true);
 
     const today = new Date().toISOString().split('T')[0];
+
     const { count: todayRecords } = await supabase
       .from('records')
       .select('*', { count: 'exact', head: true })
@@ -702,16 +663,7 @@ export async function getStaffList(role?: string) {
   try {
     let query = supabase
       .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          is_verified
-        )
-      `)
+      .select(`*, doctors ( id, full_name_th, specialization_th, is_active, is_verified )`)
       .in('role', ['admin', 'doctor', 'helper'])
       .eq('is_active', true)
       .order('created_at', { ascending: false });
@@ -858,18 +810,7 @@ export async function getStaffDetail(userId: string) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          phone,
-          email,
-          is_active,
-          is_verified
-        )
-      `)
+      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email, is_active, is_verified )`)
       .eq('id', userId)
       .single();
 
@@ -892,16 +833,7 @@ export async function getScreeningHistory(patientId: string) {
   try {
     const { data: screenings, error } = await supabase
       .from('screenings')
-      .select(`
-        *,
-        screening_responses (
-          question_id,
-          question_number,
-          question_type,
-          selected_option,
-          score
-        )
-      `)
+      .select(`*, screening_responses ( question_id, question_number, question_type, selected_option, score )`)
       .eq('user_id', patientId)
       .order('screening_date', { ascending: false });
 
@@ -918,7 +850,7 @@ export async function getScreeningHistory(patientId: string) {
 }
 
 // =====================================================
-// ฟังก์ชันดึงคำถามทั้งหมด (สำหรับแสดงคู่กับคำตอบ)
+// ฟังก์ชันดึงคำถามทั้งหมด
 // =====================================================
 export async function getAllScreeningQuestions() {
   try {
@@ -1088,16 +1020,7 @@ export async function getDeactivatedStaff() {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          phone,
-          email
-        )
-      `)
+      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email )`)
       .in('role', ['admin', 'doctor', 'helper'])
       .eq('is_active', false)
       .order('created_at', { ascending: false });
@@ -1115,7 +1038,7 @@ export async function getDeactivatedStaff() {
 }
 
 // =====================================================
-// ฟังก์ชันสร้างเป้าหมายเริ่มต้นตาม PAM Level
+// ฟังก์ชันสร้างเป้าหมายเริ่มต้นตาม PAM Level (แก้ไขแล้ว)
 // =====================================================
 export async function createDefaultGoals(
   userId: string,
@@ -1124,10 +1047,32 @@ export async function createDefaultGoals(
 ) {
   try {
     console.log('🎯 Creating default goals for user:', userId, 'PAM Level:', pamLevel);
-
+    
     if (pamLevel === 'L1') {
       console.log('⚠️ L1 Patient: No default goals created');
       return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
+    }
+
+    // ✅ ตรวจสอบว่ามี goals สำหรับ round ปัจจุบันแล้วหรือยัง
+    const { data: existingGoals, error: checkError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active');
+
+    if (checkError) {
+      console.error('Error checking existing goals:', checkError);
+    }
+
+    if (existingGoals && existingGoals.length > 0) {
+      console.log('⚠️ Goals already exist for this patient:', existingGoals.length, 'goals');
+      return { 
+        success: true, 
+        message: 'มีเป้าหมายอยู่แล้ว', 
+        count: existingGoals.length,
+        alreadyExists: true
+      };
     }
 
     const today = new Date().toISOString().split('T')[0];
@@ -1484,14 +1429,7 @@ export async function getProgress(userId: string, days: number = 7) {
 
   const { data, error } = await supabase
     .from('records')
-    .select(`
-      *,
-      activities (
-        activity_code,
-        activity_name_th,
-        activity_type
-      )
-    `)
+    .select(`*, activities ( activity_code, activity_name_th, activity_type )`)
     .eq('user_id', userId)
     .gte('record_date', startDate.toISOString())
     .order('record_date', { ascending: false });
@@ -1660,7 +1598,6 @@ export async function saveGoalsNewRound(data: {
 }) {
   try {
     console.log('💾 [saveGoalsNewRound] Starting...', data.user_id);
-
     const today = new Date().toISOString().split('T')[0];
     console.log('[saveGoalsNewRound] Today:', today);
 
@@ -1786,5 +1723,386 @@ export async function saveGoalsNewRound(data: {
   } catch (err) {
     console.error('❌ [saveGoalsNewRound] Error:', err);
     return { success: false, error: 'เกิดข้อผิดพลาดในการบันทึกเป้าหมาย' };
+  }
+}
+
+// =====================================================
+// ฟังก์ชันบันทึกการติดตามนัดหมาย
+// =====================================================
+export async function saveAppointmentFollowup(data: {
+  appointment_id: string;
+  user_id: string;
+  followup_date: string;
+  followup_round: number;
+  blood_sugar_dtx?: number;
+  blood_pressure_sys?: number;
+  blood_pressure_dia?: number;
+  pulse?: number;
+  weight?: number;
+  waist_circumference?: number;
+  food_amount_status?: 'completed' | 'not_completed' | 'not_in_plan';
+  food_type_status?: 'completed' | 'not_completed' | 'not_in_plan';
+  movement_status?: 'completed' | 'not_completed' | 'not_in_plan';
+  confidence_score?: number;
+  notes?: string;
+  life_schedule_image_url?: string;
+  followup_status?: 'excellent' | 'good' | 'fair' | 'needs_improvement' | 'monitoring';
+  conducted_by: string;
+}) {
+  try {
+    const { data: followup, error } = await supabase
+      .from('appointment_followups')
+      .upsert({
+        appointment_id: data.appointment_id,
+        user_id: data.user_id,
+        followup_date: data.followup_date,
+        followup_round: data.followup_round,
+        blood_sugar_dtx: data.blood_sugar_dtx,
+        blood_pressure_sys: data.blood_pressure_sys,
+        blood_pressure_dia: data.blood_pressure_dia,
+        pulse: data.pulse,
+        weight: data.weight,
+        waist_circumference: data.waist_circumference,
+        food_amount_status: data.food_amount_status,
+        food_type_status: data.food_type_status,
+        movement_status: data.movement_status,
+        confidence_score: data.confidence_score,
+        notes: data.notes,
+        life_schedule_image_url: data.life_schedule_image_url,
+        followup_status: data.followup_status,
+        conducted_by: data.conducted_by,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'appointment_id,followup_round',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error saving followup:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, followup };
+  } catch (err) {
+    console.error('Save followup error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการบันทึก' };
+  }
+}
+
+// =====================================================
+// ฟังก์ชันดึงประวัติการติดตามนัดหมายของผู้ป่วย
+// =====================================================
+export async function getPatientFollowupHistory(userId: string, limit?: number) {
+  try {
+    console.log('📋 Fetching followup history for user:', userId);
+
+    let query = supabase
+      .from('appointment_followups')
+      .select(`
+        *,
+        appointments (
+          appointment_date,
+          appointment_type
+        )
+      `)
+      .eq('user_id', userId)
+      .order('followup_date', { ascending: false })
+      .order('followup_round', { ascending: false });
+
+    if (limit) {
+      query = query.limit(limit);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ Error fetching followup history:', error);
+      return [];
+    }
+
+    console.log('✅ Followup history fetched:', data?.length || 0, 'records');
+    return data || [];
+  } catch (err) {
+    console.error('❌ Get followup history error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// ฟังก์ชันดึงการติดตามตาม appointment_id
+// =====================================================
+export async function getFollowupByAppointmentId(appointmentId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointment_followups')
+      .select('*')
+      .eq('appointment_id', appointmentId)
+      .order('followup_round', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching followup:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Get followup error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// ฟังก์ชันนับจำนวนรอบการติดตาม
+// =====================================================
+export async function getFollowupRoundCount(userId: string) {
+  try {
+    const { count, error } = await supabase
+      .from('appointment_followups')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error counting followups:', error);
+      return 1;
+    }
+
+    return (count || 0) + 1;
+  } catch (err) {
+    console.error('Get followup round count error:', err);
+    return 1;
+  }
+}
+
+// =====================================================
+// ฟังก์ชันบันทึกการติดตามนัดหมาย (แบบสมบูรณ์)
+// =====================================================
+export async function saveAppointmentFollowupComplete(data: {
+  appointment_id: string;
+  user_id: string;
+  followup_date: string;
+  followup_round: number;
+  weight?: number | null;
+  waist_circumference?: number | null;
+  blood_pressure_sys?: number | null;
+  blood_pressure_dia?: number | null;
+  blood_sugar_dtx?: number | null;
+  life_schedule_image_url?: string | null;
+  adaptation_summary?: string | null;
+  adaptation_obstacles?: string | null;
+  adaptation_opportunities?: string | null;
+  adaptation_other?: string | null;
+  food_amount_status?: 'completed' | 'not_completed' | 'not_in_plan' | null;
+  food_type_status?: 'completed' | 'not_completed' | 'not_in_plan' | null;
+  movement_status?: 'completed' | 'not_completed' | 'not_in_plan' | null;
+  food_amount_note?: string | null;
+  food_type_note?: string | null;
+  movement_note?: string | null;
+  confidence_score?: number | null;
+  confidence_improvement_plan?: string | null;
+  summary?: string | null;
+  recommendations?: string | null;
+  followup_status?: 'excellent' | 'good' | 'fair' | 'needs_improvement' | 'monitoring' | null;
+  conducted_by: string;
+}) {
+  try {
+    console.log('💾 [saveAppointmentFollowupComplete] Starting...');
+    console.log('📝 Data to save:', data);
+
+    if (!data.conducted_by) {
+      throw new Error('conducted_by is required');
+    }
+
+    const { data: followup, error } = await supabase
+      .from('appointment_followups')
+      .insert({
+        appointment_id: data.appointment_id,
+        user_id: data.user_id,
+        followup_date: data.followup_date,
+        followup_round: data.followup_round,
+        weight: data.weight || null,
+        waist_circumference: data.waist_circumference || null,
+        blood_pressure_sys: data.blood_pressure_sys || null,
+        blood_pressure_dia: data.blood_pressure_dia || null,
+        blood_sugar_dtx: data.blood_sugar_dtx || null,
+        life_schedule_image_url: data.life_schedule_image_url || null,
+        adaptation_summary: data.adaptation_summary || null,
+        adaptation_obstacles: data.adaptation_obstacles || null,
+        adaptation_opportunities: data.adaptation_opportunities || null,
+        adaptation_other: data.adaptation_other || null,
+        food_amount_status: data.food_amount_status || null,
+        food_type_status: data.food_type_status || null,
+        movement_status: data.movement_status || null,
+        food_amount_note: data.food_amount_note || null,
+        food_type_note: data.food_type_note || null,
+        movement_note: data.movement_note || null,
+        confidence_score: data.confidence_score || null,
+        confidence_improvement_plan: data.confidence_improvement_plan || null,
+        summary: data.summary || null,
+        recommendations: data.recommendations || null,
+        followup_status: data.followup_status || null,
+        conducted_by: data.conducted_by,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ [saveAppointmentFollowupComplete] Error:', error);
+      return { success: false, error: error.message, details: error };
+    }
+
+    console.log('✅ [saveAppointmentFollowupComplete] Success:', followup);
+    return { success: true, followup };
+  } catch (err: any) {
+    console.error('❌ [saveAppointmentFollowupComplete] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงนัดหมายครั้งถัดไปของผู้ป่วย (สำหรับการ์ด)
+// =====================================================
+// ✅ แก้ไขฟังก์ชัน getNextPatientAppointment
+export async function getNextPatientAppointment(patientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')  // ❌ ลบ doctors ออก
+      .eq('user_id', patientId)
+      .in('status', ['scheduled', 'confirmed'])
+      .gte('appointment_date', new Date().toISOString())
+      .order('appointment_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching next appointment:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Get next appointment error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงการประเมินล่าสุดของผู้ป่วย (สำหรับการ์ด)
+// =====================================================
+export async function getLatestScreening(patientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('screenings')
+      .select('*')
+      .eq('user_id', patientId)
+      .order('screening_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching latest screening:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Get latest screening error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงการติดตามล่าสุดของผู้ป่วย (สำหรับการ์ด)
+// =====================================================
+export async function getLatestFollowup(patientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointment_followups')
+      .select('*')
+      .eq('user_id', patientId)
+      .order('followup_date', { ascending: false })
+      .order('followup_round', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching latest followup:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Get latest followup error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงสถิติเป้าหมายของผู้ป่วย (สำหรับการ์ด)
+// =====================================================
+// ✅ แก้ไขฟังก์ชัน getPatientGoalsStats
+export async function getPatientGoalsStats(patientId: string) {
+  try {
+    const { count: total } = await supabase
+      .from('goals')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', patientId)
+      .eq('status', 'active');
+
+    return {
+      total: total || 0,
+      completed: 0,  // ✅ ตั้งเป็น 0 ไปก่อน
+    };
+  } catch (err) {
+    return { total: 0, completed: 0 };
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงจำนวนการประเมินทั้งหมด (สำหรับการ์ด)
+// =====================================================
+export async function getScreeningCount(patientId: string) {
+  try {
+    const { count, error } = await supabase
+      .from('screenings')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', patientId);
+
+    if (error) {
+      console.error('Error counting screenings:', error);
+      return 0;
+    }
+
+    return count || 0;
+  } catch (err) {
+    console.error('Get screening count error:', err);
+    return 0;
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันดึงจำนวนเป้าหมายทั้งหมด (สำหรับการ์ด)
+// =====================================================
+export async function getGoalsCount(patientId: string) {
+  try {
+    const { count, error } = await supabase
+      .from('goals')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', patientId);
+
+    if (error) {
+      console.error('Error counting goals:', error);
+      return 0;
+    }
+
+    return count || 0;
+  } catch (err) {
+    console.error('Get goals count error:', err);
+    return 0;
   }
 }

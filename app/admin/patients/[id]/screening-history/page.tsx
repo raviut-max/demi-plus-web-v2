@@ -1,15 +1,26 @@
+// app/admin/patients/[id]/screening-history/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getScreeningHistory, getAllScreeningQuestions } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, FileText, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { 
+  checkSession, 
+  logout, 
+  getPatientDetail, 
+  getScreeningHistory,
+  getAllScreeningQuestions
+} from '@/lib/supabase/queries';
+import { 
+  ArrowLeft, 
+  FileText, 
+  TrendingUp, 
+  Calendar,
+  Activity,
+  Heart,
+  Plus,
+  Eye
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 export default function ScreeningHistoryPage() {
   const router = useRouter();
@@ -17,51 +28,48 @@ export default function ScreeningHistoryPage() {
   const patientId = params.id as string;
   
   const [user, setUser] = useState<any>(null);
-  const [patient, setPatient] = useState<any>(null); // ✅ เพิ่ม state ผู้ป่วย
+  const [loading, setLoading] = useState(true);
+  const [patient, setPatient] = useState<any>(null);
   const [screenings, setScreenings] = useState<any[]>([]);
   const [questions, setQuestions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expandedScreening, setExpandedScreening] = useState<string | null>(null);
+  const [selectedScreening, setSelectedScreening] = useState<any>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
+      router.push('/admin/login');
+      return;
+    }
+
+    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+      alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
 
     setUser(userData);
     loadData();
-  }, [patientId]);
+  }, [router]);
 
   const loadData = async () => {
     try {
-      // ✅ Fetch ข้อมูลผู้ป่วย
-      const { data: patientData } = await supabase
-        .from('profiles')
-        .select(`
-          *,
-          users (
-            id_card
-          )
-        `)
-        .eq('id', patientId)
-        .single();
-
+      // โหลดข้อมูลผู้ป่วย
+      const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
 
-      // Fetch ข้อมูล screening
-      const [screeningsData, questionsData] = await Promise.all([
-        getScreeningHistory(patientId),
-        getAllScreeningQuestions()
-      ]);
-      
-      console.log('📊 Screenings Data:', screeningsData);
+      // โหลดประวัติ screening
+      const screeningsData = await getScreeningHistory(patientId);
       setScreenings(screeningsData);
+
+      // โหลดคำถามทั้งหมด
+      const questionsData = await getAllScreeningQuestions();
       setQuestions(questionsData);
+
+      console.log('📋 Screenings loaded:', screeningsData.length);
     } catch (error) {
       console.error('Error loading data:', error);
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
@@ -72,48 +80,53 @@ export default function ScreeningHistoryPage() {
     router.push('/admin/login');
   };
 
-  const toggleExpand = (screeningId: string) => {
-    setExpandedScreening(expandedScreening === screeningId ? null : screeningId);
+  const handleViewDetail = (screening: any) => {
+    setSelectedScreening(screening);
+    setShowDetailModal(true);
   };
 
-  const getQuestionText = (questionId: string, questionType: string, questionNumber: number) => {
-    const question = questions.find(q => 
-      q.id === questionId && 
-      q.question_type === questionType && 
-      q.question_number === questionNumber
-    );
-    return question?.question_text || `คำถามที่ ${questionNumber}`;
-  };
-
-  const getOptionText = (questionId: string, questionType: string, questionNumber: number, score: number) => {
-    const question = questions.find(q => 
-      q.id === questionId && 
-      q.question_type === questionType && 
-      q.question_number === questionNumber
-    );
-    
-    if (!question) return score;
-    
-    const optionKey = `option_${score}_text`;
-    return question[optionKey] || score;
-  };
-
-  // ✅ คำนวณคะแนนรวม PROMs จาก screening_responses
-  const calculatePROMSTotalFromResponses = (screening: any) => {
-    const promsResponses = screening.screening_responses?.filter((r: any) => r.question_type === 'proms') || [];
-    
-    if (promsResponses.length === 0) {
-      const q1 = screening.proms_q1_score || 0;
-      const q2 = screening.proms_q2_score || 0;
-      const q3 = screening.proms_q3_score || 0;
-      const q4 = screening.proms_q4_score || 0;
-      
-      const total = q1 + q2 + q3 + q4;
-      return total > 0 ? total : null;
+  const getPamLevelColor = (level: string) => {
+    switch (level) {
+      case 'L1': return 'bg-red-100 text-red-700 border-red-300';
+      case 'L2': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
+      case 'L3': return 'bg-blue-100 text-blue-700 border-blue-300';
+      case 'L4': return 'bg-green-100 text-green-700 border-green-300';
+      default: return 'bg-gray-100 text-gray-700 border-gray-300';
     }
-    
-    const total = promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
-    return total > 0 ? total : null;
+  };
+
+  const getZoneColor = (zone: string) => {
+    switch (zone) {
+      case 'Red Zone': return 'bg-red-100 text-red-700';
+      case 'Yellow Zone': return 'bg-yellow-100 text-yellow-700';
+      case 'Green Zone': return 'bg-green-100 text-green-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const getScreeningQuestions = (screening: any, type: string) => {
+    const responses = screening.screening_responses?.filter((r: any) => r.question_type === type) || [];
+    return responses.map((r: any) => {
+      const question = questions.find(q => q.id === r.question_id);
+      return {
+        question: question,
+        response: r,
+      };
+    });
+  };
+
+  // คำนวณสถิติ
+  const stats = {
+    total: screenings.length,
+    latest: screenings[0],
+    pamLevels: screenings.reduce((acc, s) => {
+      acc[s.pam_level_result] = (acc[s.pam_level_result] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>),
+    zones: screenings.reduce((acc, s) => {
+      acc[s.proms_zone] = (acc[s.proms_zone] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>),
   };
 
   if (loading) {
@@ -128,211 +141,384 @@ export default function ScreeningHistoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}`)}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            <span>กลับหน้าผู้ป่วย</span>
+          </button>
+          
           <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push(`/admin/patients/${patientId}`)}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                กลับ
-              </button>
-              <h1 className="text-2xl font-bold text-gray-800">ประวัติการประเมิน</h1>
-              
-              {/* ✅ แสดงข้อมูลผู้ป่วย */}
-              {patient && (
-                <div className="mt-2 flex items-center gap-4 text-sm">
-                  <span className="text-gray-600">
-                    <span className="font-semibold">HN:</span> {patient.hospital_number}
-                  </span>
-                  <span className="text-gray-600">
-                    <span className="font-semibold">ชื่อ:</span> {patient.full_name}
-                  </span>
-                  {patient.users && (
-                    <span className="text-gray-600">
-                      <span className="font-semibold">ID Card:</span> {patient.users.id_card}
-                    </span>
-                  )}
-                </div>
-              )}
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                ประวัติการประเมิน
+              </h1>
+              <p className="text-gray-600">
+                ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
+                HN: {patient?.hospital_number}
+              </p>
             </div>
+            
             <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              onClick={() => router.push(`/admin/patients/${patientId}/screening`)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
             >
-              <LogOut className="w-4 h-4" />
-              ออกจากระบบ
+              <Plus className="w-4 h-4" />
+              ประเมินใหม่
             </button>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        {screenings.length === 0 ? (
-          <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-            <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-            <p className="text-gray-600 mb-4">ยังไม่มีประวัติการประเมิน</p>
-            <button
-              onClick={() => router.push(`/admin/screening?patient=${patientId}`)}
-              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-            >
-              ทำแบบประเมินครั้งแรก
-            </button>
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
+                <FileText className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">ประเมินทั้งหมด</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="space-y-4">
-            {screenings.map((screening) => (
-              <div key={screening.id} className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                {/* Header - สรุป */}
-                <div 
-                  className="p-6 cursor-pointer hover:bg-gray-50 transition-colors"
-                  onClick={() => toggleExpand(screening.id)}
+          
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
+                <Activity className="w-6 h-6 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">PAM Level ปัจจุบัน</p>
+                <p className="text-2xl font-bold text-gray-800">{patient?.pam_level || 'L1'}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                <Heart className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Zone ปัจจุบัน</p>
+                <p className="text-lg font-bold text-gray-800">{patient?.zone || 'Green Zone'}</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
+                <TrendingUp className="w-6 h-6 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">คะแนน PAM</p>
+                <p className="text-2xl font-bold text-gray-800">{patient?.pam_score || 0}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Timeline/Schedule View */}
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mb-6">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <Calendar className="w-6 h-6 text-blue-600" />
+              ไทม์ไลน์การประเมิน
+            </h2>
+          </div>
+          
+          <div className="p-6">
+            {screenings.length === 0 ? (
+              <div className="text-center py-12">
+                <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                <p className="text-gray-500 mb-4">ยังไม่มีการประเมิน</p>
+                <button
+                  onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
+                  className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
                 >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 mb-2">
-                        <Calendar className="w-5 h-5 text-blue-600" />
-                        {new Date(screening.screening_date).toLocaleDateString('th-TH', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </h3>
-                      <p className="text-sm text-gray-500">ประเภท: {screening.screening_type}</p>
-                    </div>
-                    
-                    <div className="flex items-center gap-4">
-                      <div className="flex gap-2">
-                        {screening.pam_level_result && (
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            screening.pam_level_result === 'Deny' ? 'bg-red-100 text-red-700' :
-                            screening.pam_level_result === 'General' ? 'bg-yellow-100 text-yellow-700' :
-                            screening.pam_level_result === 'Intensive' ? 'bg-blue-100 text-blue-700' :
-                            'bg-green-100 text-green-700'
-                          }`}>
+                  เริ่มการประเมินครั้งแรก
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {screenings.map((screening, index) => (
+                  <div 
+                    key={screening.id} 
+                    className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="text-lg font-bold text-gray-800">
+                            ครั้งที่ {screenings.length - index}
+                          </span>
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getPamLevelColor(screening.pam_level_result)}`}>
                             {screening.pam_level_result}
                           </span>
-                        )}
-                        {screening.proms_zone && (
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            screening.proms_zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
-                            screening.proms_zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-green-100 text-green-700'
-                          }`}>
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getZoneColor(screening.proms_zone)}`}>
                             {screening.proms_zone}
                           </span>
-                        )}
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <p className="text-gray-500">วันที่ประเมิน</p>
+                            <p className="font-medium text-gray-800">
+                              {new Date(screening.screening_date).toLocaleDateString('th-TH', {
+                                year: 'numeric',
+                                month: 'long',
+                                day: 'numeric'
+                              })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">คะแนน PAM</p>
+                            <p className="font-medium text-purple-600">{screening.pam_total_score} / 20</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">คะแนน PROMs</p>
+                            <p className="font-medium text-green-600">{screening.proms_q1_score + screening.proms_q2_score + screening.proms_q3_score + screening.proms_q4_score} / 24</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500">ผู้ประเมิน</p>
+                            <p className="font-medium text-gray-800">
+                              {screening.users?.full_name_th || '-'}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                       
-                      <button className="text-gray-400 hover:text-gray-600">
-                        {expandedScreening === screening.id ? (
-                          <ChevronUp className="w-5 h-5" />
-                        ) : (
-                          <ChevronDown className="w-5 h-5" />
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2 ml-4">
+                        <button
+                          onClick={() => handleViewDetail(screening)}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          title="ดูรายละเอียด"
+                        >
+                          <Eye className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
-                  {/* คะแนนรวม */}
-                  <div className="grid grid-cols-3 gap-4 mt-4">
-                    <div className="bg-blue-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500">คะแนน PAM</p>
-                      <p className="text-xl font-bold text-blue-600">
-                        {screening.pam_total_score || '-'}
+        {/* Trend Chart (Simple) */}
+        {screenings.length > 1 && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                <TrendingUp className="w-6 h-6 text-blue-600" />
+                แนวโน้มคะแนน PAM
+              </h2>
+            </div>
+            
+            <div className="p-6">
+              <div className="h-64 flex items-end gap-4">
+                {screenings.slice().reverse().map((screening, index) => {
+                  const percentage = (screening.pam_total_score / 20) * 100;
+                  return (
+                    <div key={screening.id} className="flex-1 flex flex-col items-center">
+                      <div className="w-full bg-gray-200 rounded-t-lg relative" style={{ height: '200px' }}>
+                        <div
+                          className={`absolute bottom-0 w-full rounded-t-lg transition-all ${
+                            percentage >= 75 ? 'bg-green-500' :
+                            percentage >= 50 ? 'bg-blue-500' :
+                            percentage >= 25 ? 'bg-yellow-500' :
+                            'bg-red-500'
+                          }`}
+                          style={{ height: `${percentage}%` }}
+                        >
+                          <div className="absolute top-2 left-0 right-0 text-center text-white text-xs font-bold">
+                            {screening.pam_total_score}
+                          </div>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-600 mt-2 text-center">
+                        ครั้งที่ {index+1}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {new Date(screening.screening_date).toLocaleDateString('th-TH', {
+                          month: 'short',
+                          day: 'numeric'
+                        })}
                       </p>
                     </div>
-                    <div className="bg-purple-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500">คะแนน PROMs</p>
-                      <p className="text-xl font-bold text-purple-600">
-                        {calculatePROMSTotalFromResponses(screening) || '-'}
-                      </p>
-                    </div>
-                    <div className="bg-green-50 p-3 rounded-lg">
-                      <p className="text-xs text-gray-500">ความมั่นใจ</p>
-                      <p className="text-xl font-bold text-green-600">
-                        {screening.confidence_score || '-'}/10
-                      </p>
-                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Detail Modal */}
+      {showDetailModal && selectedScreening && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto my-8">
+            <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                  <FileText className="w-6 h-6 text-blue-600" />
+                  รายละเอียดการประเมิน
+                </h2>
+                <button
+                  onClick={() => setShowDetailModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                {new Date(selectedScreening.screening_date).toLocaleDateString('th-TH', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })}
+              </p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* สรุปผลการประเมิน */}
+              <div className={`p-6 rounded-xl border-2 ${
+                selectedScreening.proms_zone === 'Red Zone' ? 'bg-red-50 border-red-500' :
+                selectedScreening.proms_zone === 'Yellow Zone' ? 'bg-yellow-50 border-yellow-500' :
+                'bg-green-50 border-green-500'
+              }`}>
+                <h3 className="text-xl font-bold mb-4">📊 สรุปผลการประเมิน</h3>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div className="bg-white bg-opacity-50 p-4 rounded-lg">
+                    <p className="text-sm opacity-75">คะแนน PAM</p>
+                    <p className="text-3xl font-bold">{selectedScreening.pam_total_score} / 20</p>
+                  </div>
+                  <div className="bg-white bg-opacity-50 p-4 rounded-lg">
+                    <p className="text-sm opacity-75">คะแนน PROMs</p>
+                    <p className="text-3xl font-bold">
+                      {selectedScreening.proms_q1_score + selectedScreening.proms_q2_score + selectedScreening.proms_q3_score + selectedScreening.proms_q4_score} / 24
+                    </p>
+                  </div>
+                  <div className="bg-white bg-opacity-50 p-4 rounded-lg">
+                    <p className="text-sm opacity-75">PAM Level</p>
+                    <p className="text-2xl font-bold">{selectedScreening.pam_level_result}</p>
+                  </div>
+                  <div className="bg-white bg-opacity-50 p-4 rounded-lg">
+                    <p className="text-sm opacity-75">Zone</p>
+                    <p className="text-xl font-bold">{selectedScreening.proms_zone}</p>
                   </div>
                 </div>
+              </div>
 
-                {/* รายละเอียด - แสดงเมื่อ expand */}
-                {expandedScreening === screening.id && (
-                  <div className="border-t border-gray-200 p-6 bg-gray-50">
-                    <h4 className="font-bold text-gray-800 mb-4">รายละเอียดคำตอบ</h4>
-                    
-                    {/* PAM Responses */}
-                    <div className="mb-6">
-                      <h5 className="font-semibold text-blue-700 mb-3">แบบประเมิน PAM</h5>
-                      <div className="space-y-3">
-                        {screening.screening_responses
-                          .filter((r: any) => r.question_type === 'pam')
-                          .sort((a: any, b: any) => a.question_number - b.question_number)
-                          .map((response: any, index: number) => (
-                            <div key={index} className="bg-white p-4 rounded-lg border border-gray-200">
-                              <p className="text-sm font-medium text-gray-800 mb-2">
-                                {response.question_number}. {getQuestionText(response.question_id, 'pam', response.question_number)}
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-600">คำตอบ:</span>
-                                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm font-semibold">
-                                  {getOptionText(response.question_id, 'pam', response.question_number, response.score)}
-                                </span>
-                                <span className="text-sm text-gray-500">(คะแนน: {response.score})</span>
-                              </div>
-                            </div>
-                          ))}
+              {/* คำถาม PAM */}
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-purple-600" />
+                  แบบประเมิน PAM (ไม้บรรทัดวัดใจ)
+                </h3>
+                <div className="space-y-4">
+                  {getScreeningQuestions(selectedScreening, 'pam').map((item: any, index: number) => (
+                    <div key={item.question?.id || index} className="border border-gray-200 rounded-lg p-4">
+                      <p className="font-medium text-gray-800 mb-3">
+                        {index + 1}. {item.question?.question_text}
+                      </p>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[1, 2, 3, 4].map((score) => (
+                          <div
+                            key={score}
+                            className={`px-3 py-2 rounded-lg border-2 text-center text-sm ${
+                              item.response?.score === score
+                                ? 'border-purple-500 bg-purple-50 text-purple-700 font-semibold'
+                                : 'border-gray-200 bg-gray-50'
+                            }`}
+                          >
+                            <div className="text-xs mb-1">{item.question?.[`option_${score}_text`]}</div>
+                            <div className="text-lg font-bold">{score}</div>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
 
-                    {/* PROMs Responses */}
-                    <div className="mb-6">
-                      <h5 className="font-semibold text-purple-700 mb-3">แบบประเมิน PROMs</h5>
-                      <div className="space-y-3">
-                        {screening.screening_responses
-                          .filter((r: any) => r.question_type === 'proms')
-                          .sort((a: any, b: any) => a.question_number - b.question_number)
-                          .map((response: any, index: number) => (
-                            <div key={index} className="bg-white p-4 rounded-lg border border-gray-200">
-                              <p className="text-sm font-medium text-gray-800 mb-2">
-                                {response.question_number}. {getQuestionText(response.question_id, 'proms', response.question_number)}
-                              </p>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-gray-600">คำตอบ:</span>
-                                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-semibold">
-                                  {getOptionText(response.question_id, 'proms', response.question_number, response.score)}
-                                </span>
-                                <span className="text-sm text-gray-500">(คะแนน: {response.score})</span>
-                              </div>
-                            </div>
-                          ))}
+              {/* คำถาม PROMs */}
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <Heart className="w-5 h-5 text-green-600" />
+                  แบบประเมิน PROMs
+                </h3>
+                <div className="space-y-4">
+                  {getScreeningQuestions(selectedScreening, 'proms').map((item: any, index: number) => (
+                    <div key={item.question?.id || index} className="border border-gray-200 rounded-lg p-4">
+                      <p className="font-medium text-gray-800 mb-3">
+                        {index + 1}. {item.question?.question_text}
+                      </p>
+                      <div className="grid grid-cols-6 gap-2">
+                        {[1, 2, 3, 4, 5, 6].map((score) => (
+                          <div
+                            key={score}
+                            className={`px-2 py-2 rounded-lg border-2 text-center text-xs ${
+                              item.response?.score === score
+                                ? 'border-green-500 bg-green-50 text-green-700 font-semibold'
+                                : 'border-gray-200 bg-gray-50'
+                            }`}
+                          >
+                            <div className="mb-1">{item.question?.[`option_${score}_text`]}</div>
+                            <div className="text-lg font-bold">{score}</div>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  ))}
+                </div>
+              </div>
 
-                    {/* Confidence */}
-                    {screening.confidence_improvement_plan && (
-                      <div>
-                        <h5 className="font-semibold text-green-700 mb-3">แผนการปรับปรุง</h5>
-                        <p className="text-sm text-gray-700 bg-white p-4 rounded-lg border border-gray-200">
-                          {screening.confidence_improvement_plan}
+              {/* ความมั่นใจ */}
+              {selectedScreening.confidence_score && (
+                <div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-4">ความมั่นใจในการดูแลตนเอง</h3>
+                  <div className="bg-gradient-to-r from-red-50 via-yellow-50 to-green-50 p-6 rounded-lg">
+                    <div className="text-center mb-4">
+                      <p className="text-4xl font-bold text-blue-600 mb-2">{selectedScreening.confidence_score} / 10</p>
+                      <p className="text-sm text-gray-600">คะแนนความมั่นใจ</p>
+                    </div>
+                    {selectedScreening.confidence_improvement_plan && (
+                      <div className="mt-4">
+                        <p className="text-sm font-medium text-gray-700 mb-2">แผนการปรับปรุง:</p>
+                        <p className="text-gray-800 bg-white bg-opacity-50 p-3 rounded-lg">
+                          {selectedScreening.confidence_improvement_plan}
                         </p>
                       </div>
                     )}
                   </div>
-                )}
-              </div>
-            ))}
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0">
+              <button
+                onClick={() => setShowDetailModal(false)}
+                className="w-full px-4 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all font-bold"
+              >
+                ปิด
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

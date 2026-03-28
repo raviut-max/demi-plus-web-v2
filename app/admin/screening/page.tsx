@@ -1,3 +1,5 @@
+// app/admin/screening/page.tsx
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -343,8 +345,8 @@ export default function ScreeningPage() {
         );
 
         if (confirmGoToGoals) {
-          // ✅ ไปหน้า Goals พร้อม patient_id
-          router.push(`/admin/goals?patient_id=${selectedPatient}`);
+           // ✅ ไปหน้าตั้งเป้าหมาย (ระบุผู้ป่วยแล้ว)
+            router.push(`/admin/patients/${selectedPatient}/goals/setup`);
         } else {
           // ✅ อยู่หน้า Screening ต่อไป
           // Reset form
