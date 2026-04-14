@@ -1,5 +1,6 @@
 // app/admin/patients/[id]/appointments/page.tsx
 'use client';
+
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
@@ -69,19 +70,27 @@ export default function PatientAppointmentsPage() {
 
   const loadData = async () => {
     try {
-      // โหลดข้อมูลผู้ป่วย
+      console.log('📥 Loading patient detail for ID:', patientId);
       const patientData = await getPatientDetail(patientId);
+      console.log('✅ Patient detail loaded:', patientData);
       setPatient(patientData);
 
-      // โหลดนัดหมายทั้งหมด
+      console.log('📥 Loading appointments for patient:', patientId);
       const appointmentsData = await getAppointments(patientId);
+      console.log('✅ Appointments loaded:', appointmentsData?.length || 0);
       setAppointments(appointmentsData);
 
-      // โหลดรายการแพทย์
+      console.log('📥 Loading doctors list...');
       const doctorsData = await getCoaches();
+      console.log('✅ Doctors loaded:', doctorsData?.length || 0);
+      console.log('👨‍⚕️ Doctors data:', doctorsData);
       setDoctors(doctorsData);
+      
+      if (doctorsData?.length === 0) {
+        console.warn('⚠️ No doctors found in database!');
+      }
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -93,91 +102,64 @@ export default function PatientAppointmentsPage() {
     router.push('/admin/login');
   };
 
-const handleCreateAppointment = async () => {
-  if (!formData.doctor_id) {
-    alert('กรุณาเลือกแพทย์');
-    return;
-  }
-  if (!formData.appointment_date || !formData.appointment_time) {
-    alert('กรุณาระบุวันที่และเวลานัดหมาย');
-    return;
-  }
-
-  // 🔍 DEBUG: ตรวจสอบ doctor ที่เลือก
-  console.log('🔍 Selected doctor_id:', formData.doctor_id);
-  
-  // 🔍 ตรวจสอบว่า doctor_id มีในตาราง doctors
-  const {  doctorData, error: doctorError } = await supabase
-    .from('doctors')
-    .select('id, user_id, full_name_th, specialization_th, is_active')
-    .eq('id', formData.doctor_id)
-    .single();
-  
-  console.log('🔍 Doctor ', doctorData);
-  console.log('🔍 Doctor error:', doctorError);
-  
-  // ✅ ตรวจสอบว่ามี error จาก query หรือไม่
-  if (doctorError) {
-    console.error('❌ Doctor query error:', doctorError);
-    alert('เกิดข้อผิดพลาดในการดึงข้อมูลแพทย์: ' + doctorError.message);
-    return;
-  }
-  
-  // ✅ ตรวจสอบว่าได้ข้อมูลหรือไม่
-  if (!doctorData) {
-    console.error('❌ No doctor data found for ID:', formData.doctor_id);
-    
-    // 🔍 ทดสอบ query ใหม่โดยไม่ใช้ .single()
-    const {  allDoctors } = await supabase
-      .from('doctors')
-      .select('id, full_name_th')
-      .eq('is_active', true);
-    
-    console.log('🔍 All active doctors:', allDoctors);
-    
-    alert('ไม่พบข้อมูลแพทย์ที่เลือกในตาราง doctors\nกรุณาเลือกแพทย์ใหม่');
-    return;
-  }
-  
-  // ✅ ตรวจสอบว่า doctor active หรือไม่
-  if (!doctorData.is_active) {
-    alert(`แพทย์ "${doctorData.full_name_th}" ไม่ active`);
-    return;
-  }
-
-  try {
-    const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
-
-    console.log('📝 Creating appointment:', {
-      user_id: patientId,
-      doctor_id: formData.doctor_id,
-      appointment_date: appointmentDateTime
-    });
-
-    const result = await createAppointment({
-      user_id: patientId,
-      doctor_id: formData.doctor_id,
-      appointment_type: formData.appointment_type,
-      appointment_date: appointmentDateTime,
-      location_type: formData.location_type,
-      location_detail: formData.location_detail,
-      notes: formData.notes,
-      created_by: user.id,
-    });
-
-    if (result.success) {
-      alert('✅ สร้างนัดหมายสำเร็จ!');
-      setShowCreateModal(false);
-      loadData();
-      resetForm();
-    } else {
-      alert('เกิดข้อผิดพลาด: ' + result.error);
+  const handleCreateAppointment = async () => {
+    if (!formData.doctor_id) {
+      alert('กรุณาเลือกแพทย์');
+      return;
     }
-  } catch (error) {
-    console.error('❌ Error creating appointment:', error);
-    alert('เกิดข้อผิดพลาดในการสร้างนัดหมาย: ' + (error as Error).message);
-  }
-};
+    if (!formData.appointment_date || !formData.appointment_time) {
+      alert('กรุณาระบุวันที่และเวลานัดหมาย');
+      return;
+    }
+
+    // 🔍 DEBUG: ตรวจสอบ doctor ที่เลือก
+    console.log('🔍 Selected doctor_id:', formData.doctor_id);
+    console.log('🔍 All doctors:', doctors);
+    
+    // 🔍 ค้นหาหมอที่เลือก
+    const selectedDoctor = doctors.find(d => d.id === formData.doctor_id);
+    console.log('🔍 Found doctor:', selectedDoctor);
+    
+    if (!selectedDoctor) {
+      console.error('❌ Doctor not found in local state');
+      alert('ไม่พบข้อมูลแพทย์ที่เลือกในตาราง doctors\nกรุณาเลือกแพทย์ใหม่');
+      return;
+    }
+
+    try {
+      const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
+
+      console.log('📝 Creating appointment:', {
+        user_id: patientId,
+        doctor_id: formData.doctor_id,
+        appointment_date: appointmentDateTime
+      });
+
+      const result = await createAppointment({
+        user_id: patientId,
+        doctor_id: formData.doctor_id,
+        appointment_type: formData.appointment_type,
+        appointment_date: appointmentDateTime,
+        location_type: formData.location_type,
+        location_detail: formData.location_detail,
+        notes: formData.notes,
+        created_by: user.id,
+      });
+
+      if (result.success) {
+        alert('✅ สร้างนัดหมายสำเร็จ!');
+        setShowCreateModal(false);
+        loadData();
+        resetForm();
+      } else {
+        console.error('❌ Create appointment error:', result.error);
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error) {
+      console.error('❌ Error creating appointment:', error);
+      alert('เกิดข้อผิดพลาดในการสร้างนัดหมาย: ' + (error as Error).message);
+    }
+  };
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
@@ -321,7 +303,7 @@ const handleCreateAppointment = async () => {
       case 'followup':
         return '🔄 ติดตามผล';
       case 'consultation':
-        return '👨‍️ ปรึกษาแพทย์';
+        return '👨‍⚕️ ปรึกษาแพทย์';
       case 'screening':
         return '📋 คัดกรอง';
       case 'education':
@@ -604,15 +586,43 @@ const handleCreateAppointment = async () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   แพทย์ผู้ทำการรักษา *
                 </label>
+                
+                {/* 🔍 DEBUG: แสดงจำนวนหมอที่โหลดได้ */}
+                <p className="text-xs text-gray-500 mb-2">
+                  พบแพทย์: {doctors.length} คน
+                </p>
+                
+                {/* 🔍 DEBUG: แสดงรายการหมอทั้งหมด */}
+                {doctors.length === 0 && (
+                  <p className="text-xs text-red-500 mb-2">
+                    ⚠️ ไม่พบข้อมูลแพทย์! กรุณาตรวจสอบ RLS Policy
+                  </p>
+                )}
+                
+                {doctors.length > 0 && (
+                  <p className="text-xs text-gray-400 mb-2">
+                    Doctor IDs: {doctors.map(d => d.id?.substring(0, 8)).join(', ')}
+                  </p>
+                )}
+                
                 <select
                   value={formData.doctor_id}
-                  onChange={(e) => setFormData({...formData, doctor_id: e.target.value})}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    console.log('👨‍️ Selected doctor ID:', selectedId);
+                    
+                    // 🔍 DEBUG: ค้นหาหมอที่เลือก
+                    const selectedDoctor = doctors.find(d => d.id === selectedId);
+                    console.log('🔍 Found doctor:', selectedDoctor);
+                    
+                    setFormData({...formData, doctor_id: selectedId});
+                  }}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- เลือกแพทย์ --</option>
                   {doctors.map((doctor) => (
                     <option key={doctor.id} value={doctor.id}>
-                      {doctor.full_name_th} ({doctor.specialization_th})
+                      {doctor.full_name_th} ({doctor.specialization_th}) - ID: {doctor.id?.substring(0, 8)}...
                     </option>
                   ))}
                 </select>
