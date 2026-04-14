@@ -109,18 +109,37 @@ const handleCreateAppointment = async () => {
   // 🔍 ตรวจสอบว่า doctor_id มีในตาราง doctors
   const {  doctorData, error: doctorError } = await supabase
     .from('doctors')
-    .select('id, user_id, full_name_th, is_active')
+    .select('id, user_id, full_name_th, specialization_th, is_active')
     .eq('id', formData.doctor_id)
     .single();
   
-  console.log('🔍 Doctor data:', doctorData);
+  console.log('🔍 Doctor ', doctorData);
   console.log('🔍 Doctor error:', doctorError);
   
-  if (!doctorData) {
-    alert('ไม่พบข้อมูลแพทย์ที่เลือกในตาราง doctors');
+  // ✅ ตรวจสอบว่ามี error จาก query หรือไม่
+  if (doctorError) {
+    console.error('❌ Doctor query error:', doctorError);
+    alert('เกิดข้อผิดพลาดในการดึงข้อมูลแพทย์: ' + doctorError.message);
     return;
   }
   
+  // ✅ ตรวจสอบว่าได้ข้อมูลหรือไม่
+  if (!doctorData) {
+    console.error('❌ No doctor data found for ID:', formData.doctor_id);
+    
+    // 🔍 ทดสอบ query ใหม่โดยไม่ใช้ .single()
+    const {  allDoctors } = await supabase
+      .from('doctors')
+      .select('id, full_name_th')
+      .eq('is_active', true);
+    
+    console.log('🔍 All active doctors:', allDoctors);
+    
+    alert('ไม่พบข้อมูลแพทย์ที่เลือกในตาราง doctors\nกรุณาเลือกแพทย์ใหม่');
+    return;
+  }
+  
+  // ✅ ตรวจสอบว่า doctor active หรือไม่
   if (!doctorData.is_active) {
     alert(`แพทย์ "${doctorData.full_name_th}" ไม่ active`);
     return;
@@ -129,15 +148,15 @@ const handleCreateAppointment = async () => {
   try {
     const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
 
-    console.log('📝 Creating appointment with:', {
+    console.log('📝 Creating appointment:', {
       user_id: patientId,
-      doctor_id: formData.doctor_id,  // ✅ ต้องเป็น doctors.id
+      doctor_id: formData.doctor_id,
       appointment_date: appointmentDateTime
     });
 
     const result = await createAppointment({
       user_id: patientId,
-      doctor_id: formData.doctor_id,  // ✅ ใช้ doctors.id
+      doctor_id: formData.doctor_id,
       appointment_type: formData.appointment_type,
       appointment_date: appointmentDateTime,
       location_type: formData.location_type,
