@@ -93,43 +93,72 @@ export default function PatientAppointmentsPage() {
     router.push('/admin/login');
   };
 
-  const handleCreateAppointment = async () => {
-    if (!formData.doctor_id) {
-      alert('กรุณาเลือกแพทย์');
-      return;
-    }
-    if (!formData.appointment_date || !formData.appointment_time) {
-      alert('กรุณาระบุวันที่และเวลานัดหมาย');
-      return;
-    }
+const handleCreateAppointment = async () => {
+  if (!formData.doctor_id) {
+    alert('กรุณาเลือกแพทย์');
+    return;
+  }
+  if (!formData.appointment_date || !formData.appointment_time) {
+    alert('กรุณาระบุวันที่และเวลานัดหมาย');
+    return;
+  }
 
-    try {
-      const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
+  // 🔍 DEBUG: ตรวจสอบ doctor ที่เลือก
+  console.log('🔍 Selected doctor_id:', formData.doctor_id);
+  
+  // 🔍 ตรวจสอบว่า doctor_id มีในตาราง doctors
+  const {  doctorData, error: doctorError } = await supabase
+    .from('doctors')
+    .select('id, user_id, full_name_th, is_active')
+    .eq('id', formData.doctor_id)
+    .single();
+  
+  console.log('🔍 Doctor data:', doctorData);
+  console.log('🔍 Doctor error:', doctorError);
+  
+  if (!doctorData) {
+    alert('ไม่พบข้อมูลแพทย์ที่เลือกในตาราง doctors');
+    return;
+  }
+  
+  if (!doctorData.is_active) {
+    alert(`แพทย์ "${doctorData.full_name_th}" ไม่ active`);
+    return;
+  }
 
-      const result = await createAppointment({
-        user_id: patientId,
-        doctor_id: formData.doctor_id,
-        appointment_type: formData.appointment_type,
-        appointment_date: appointmentDateTime,
-        location_type: formData.location_type,
-        location_detail: formData.location_detail,
-        notes: formData.notes,
-        created_by: user.id,
-      });
+  try {
+    const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
 
-      if (result.success) {
-        alert('✅ สร้างนัดหมายสำเร็จ!');
-        setShowCreateModal(false);
-        loadData();
-        resetForm();
-      } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
-      }
-    } catch (error) {
-      console.error('Error creating appointment:', error);
-      alert('เกิดข้อผิดพลาดในการสร้างนัดหมาย');
+    console.log('📝 Creating appointment with:', {
+      user_id: patientId,
+      doctor_id: formData.doctor_id,  // ✅ ต้องเป็น doctors.id
+      appointment_date: appointmentDateTime
+    });
+
+    const result = await createAppointment({
+      user_id: patientId,
+      doctor_id: formData.doctor_id,  // ✅ ใช้ doctors.id
+      appointment_type: formData.appointment_type,
+      appointment_date: appointmentDateTime,
+      location_type: formData.location_type,
+      location_detail: formData.location_detail,
+      notes: formData.notes,
+      created_by: user.id,
+    });
+
+    if (result.success) {
+      alert('✅ สร้างนัดหมายสำเร็จ!');
+      setShowCreateModal(false);
+      loadData();
+      resetForm();
+    } else {
+      alert('เกิดข้อผิดพลาด: ' + result.error);
     }
-  };
+  } catch (error) {
+    console.error('❌ Error creating appointment:', error);
+    alert('เกิดข้อผิดพลาดในการสร้างนัดหมาย: ' + (error as Error).message);
+  }
+};
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
