@@ -1053,7 +1053,7 @@ export async function createDefaultGoals(
       return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
     }
 
-    // ✅ ตรวจสอบว่ามี goals สำหรับ round ปัจจุบันแล้วหรือยัง
+    // ✅ 1. ตรวจสอบว่ามี goals อยู่แล้วหรือไม่
     const { data: existingGoals, error: checkError } = await supabase
       .from('goals')
       .select('*')
@@ -1065,16 +1065,49 @@ export async function createDefaultGoals(
       console.error('Error checking existing goals:', checkError);
     }
 
+    // ✅ 2. ถ้ามี goals อยู่แล้ว → ตรวจสอบว่าตรงกับ PAM Level หรือไม่
     if (existingGoals && existingGoals.length > 0) {
-      console.log('⚠️ Goals already exist for this patient:', existingGoals.length, 'goals');
-      return { 
-        success: true, 
-        message: 'มีเป้าหมายอยู่แล้ว', 
-        count: existingGoals.length,
-        alreadyExists: true
-      };
+      const goalNames = existingGoals.map(g => g.goal_name);
+      
+      // ✅ ตรวจสอบว่าเป็น L4 แต่ได้ goals ของ L2/L3 หรือไม่
+      const isL4ButHasL2L3Goals = pamLevel === 'L4' && 
+        goalNames.some(name => ['stop_sweet', 'reduce_rice', 'protein_vegetable', 'exercise_walk', 'record_weight_sugar'].includes(name));
+      
+      // ✅ ตรวจสอบว่าเป็น L2/L3 แต่ได้ goals ของ L4 หรือไม่
+      const isL2L3ButHasL4Goals = (pamLevel === 'L2' || pamLevel === 'L3') && 
+        goalNames.some(name => ['carb_control', 'protein_intake', 'water_intake', 'stretching', 'cardio', 'strengthening', 'hiit', 'sleep'].includes(name));
+
+      if (isL4ButHasL2L3Goals || isL2L3ButHasL4Goals) {
+        console.log('⚠️ PAM Level changed! Archiving old goals and creating new ones...');
+        
+        // ✅ Archive goals เก่า
+        const { error: archiveError } = await supabase
+          .from('goals')
+          .update({ 
+            status: 'archived',
+            is_current: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId)
+          .eq('goal_type', 'weekly_activity')
+          .eq('status', 'active');
+
+        if (archiveError) {
+          console.error('Error archiving old goals:', archiveError);
+        }
+      } else {
+        // ✅ Goals ตรงกับ PAM Level แล้ว → ไม่ต้องสร้างใหม่
+        console.log('✅ Goals already exist and match PAM Level:', existingGoals.length, 'goals');
+        return { 
+          success: true, 
+          message: 'มีเป้าหมายอยู่แล้วและตรงกับ PAM Level', 
+          count: existingGoals.length,
+          alreadyExists: true
+        };
+      }
     }
 
+    // ✅ 3. สร้าง goals ใหม่
     const today = new Date().toISOString().split('T')[0];
     const goals = [];
 

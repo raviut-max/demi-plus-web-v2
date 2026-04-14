@@ -1,23 +1,22 @@
 // app/admin/patients/[id]/appointments/page.tsx
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  getPatientDetail, 
+import {
+  checkSession,
+  logout,
+  getPatientDetail,
   getAppointments,
   createAppointment,
   getCoaches
 } from '@/lib/supabase/queries';
-import { 
-  ArrowLeft, 
-  Calendar, 
-  Plus, 
-  Clock, 
-  User, 
-  MapPin, 
+import {
+  ArrowLeft,
+  Calendar,
+  Plus,
+  Clock,
+  User,
+  MapPin,
   FileText,
   CheckCircle,
   XCircle,
@@ -40,7 +39,7 @@ export default function PatientAppointmentsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
-
+  
   // Form state สำหรับสร้าง/แก้ไขนัดหมาย
   const [formData, setFormData] = useState({
     doctor_id: '',
@@ -58,7 +57,6 @@ export default function PatientAppointmentsPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -100,7 +98,6 @@ export default function PatientAppointmentsPage() {
       alert('กรุณาเลือกแพทย์');
       return;
     }
-
     if (!formData.appointment_date || !formData.appointment_time) {
       alert('กรุณาระบุวันที่และเวลานัดหมาย');
       return;
@@ -136,7 +133,6 @@ export default function PatientAppointmentsPage() {
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
-
     try {
       const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
 
@@ -167,7 +163,6 @@ export default function PatientAppointmentsPage() {
 
   const handleDeleteAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการลบนัดหมายนี้หรือไม่?')) return;
-
     try {
       const { error } = await supabase
         .from('appointments')
@@ -186,7 +181,6 @@ export default function PatientAppointmentsPage() {
 
   const handleCancelAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการยกเลิกนัดหมายนี้หรือไม่?')) return;
-
     try {
       const { error } = await supabase
         .from('appointments')
@@ -208,7 +202,6 @@ export default function PatientAppointmentsPage() {
 
   const handleCompleteAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการทำเครื่องหมายว่านัดหมายนี้เสร็จสิ้นแล้วหรือไม่?')) return;
-
     try {
       const { error } = await supabase
         .from('appointments')
@@ -233,7 +226,6 @@ export default function PatientAppointmentsPage() {
     const dateTime = new Date(appointment.appointment_date);
     const date = dateTime.toISOString().split('T')[0];
     const time = dateTime.toTimeString().split(' ')[0].substring(0, 5);
-
     setFormData({
       doctor_id: appointment.doctor_id || '',
       appointment_type: appointment.appointment_type || 'followup',
@@ -262,57 +254,54 @@ export default function PatientAppointmentsPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'scheduled':
-        return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">📅 รอนัดหมาย</span>;
+        return '📅 รอนัดหมาย';
       case 'confirmed':
-        return <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">✅ ยืนยันแล้ว</span>;
+        return '✅ ยืนยันแล้ว';
       case 'completed':
-        return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">✓ เสร็จสิ้น</span>;
+        return '✓ เสร็จสิ้น';
       case 'cancelled':
-        return <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-semibold">✗ ยกเลิก</span>;
+        return '✗ ยกเลิก';
       case 'no_show':
-        return <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-semibold">⚠️ ไม่มาตามนัด</span>;
+        return '⚠️ ไม่มาตามนัด';
       default:
-        return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">{status}</span>;
+        return status;
     }
   };
 
   const getTypeBadge = (type: string) => {
     switch (type) {
       case 'followup':
-        return <span className="text-blue-600">🔄 ติดตามผล</span>;
+        return '🔄 ติดตามผล';
       case 'consultation':
-        return <span className="text-purple-600">👨‍⚕️ ปรึกษาแพทย์</span>;
+        return '👨‍️ ปรึกษาแพทย์';
       case 'screening':
-        return <span className="text-green-600">📋 คัดกรอง</span>;
+        return '📋 คัดกรอง';
       case 'education':
-        return <span className="text-orange-600">📚 ให้ความรู้</span>;
+        return '📚 ให้ความรู้';
       default:
-        return <span className="text-gray-600">{type}</span>;
+        return type;
     }
   };
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}`)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            <ArrowLeft className="w-5 h-5" />
-            <span>กลับหน้าผู้ป่วย</span>
+            <ArrowLeft className="w-4 h-4" />
+            กลับหน้าผู้ป่วย
           </button>
           
           <div className="flex items-center justify-between">
@@ -701,7 +690,6 @@ export default function PatientAppointmentsPage() {
             </div>
             
             <div className="p-6 space-y-4">
-              {/* Same form fields as create modal */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   แพทย์ผู้ทำการรักษา *
