@@ -542,27 +542,33 @@ export async function getCoaches() {
 // =====================================================
 // ฟังก์ชันดึงนัดหมายทั้งหมด (Admin)
 // =====================================================
-export async function getAppointments(userId?: string) {
+// ✅ แก้ไขแล้ว - ระบุ relationship ให้ชัดเจน
+export async function getAppointments(patientId: string) {
   try {
-    let query = supabase
+    console.log('📅 [getAppointments] Fetching for patient:', patientId);
+    
+    const { data, error } = await supabase
       .from('appointments')
-      .select(`*, users ( full_name, hospital_number ), doctors ( full_name_th, specialization_th )`)
+      .select(`
+        *,
+        doctors:doctor_id (
+          id,
+          full_name_th,
+          specialization_th
+        )
+      `)
+      .eq('user_id', patientId)
       .order('appointment_date', { ascending: true });
 
-    if (userId) {
-      query = query.eq('user_id', userId);
-    }
-
-    const { data, error } = await query;
-
     if (error) {
-      console.error('Error fetching appointments:', error);
+      console.error('❌ [getAppointments] Error:', error);
       return [];
     }
 
+    console.log('✅ [getAppointments] Found:', data?.length || 0, 'appointments');
     return data || [];
   } catch (err) {
-    console.error('Get appointments error:', err);
+    console.error('❌ [getAppointments] Error:', err);
     return [];
   }
 }

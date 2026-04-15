@@ -44,21 +44,30 @@ export default function PatientAppointmentsPage() {
     loadData();
   }, [router]);
 
-  const loadData = async () => {
-    try {
-      const patientData = await getPatientDetail(patientId);
-      setPatient(patientData);
-      const appointmentsData = await getAppointments(patientId);
-      setAppointments(appointmentsData);
-      const doctorsData = await getCoaches();
-      setDoctors(doctorsData);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-    } finally {
-      setLoading(false);
-    }
-  };
+const loadData = async () => {
+  try {
+    console.log('📥 Loading patient detail for ID:', patientId);
+    const patientData = await getPatientDetail(patientId);
+    console.log('✅ Patient detail loaded:', patientData);
+    setPatient(patientData);
+
+    console.log('📥 Loading appointments for patient:', patientId);
+    const appointmentsData = await getAppointments(patientId);
+    console.log('✅ Appointments loaded:', appointmentsData);
+    console.log('📊 Appointments count:', appointmentsData?.length || 0);
+    setAppointments(appointmentsData);
+
+    console.log('📥 Loading doctors list...');
+    const doctorsData = await getCoaches();
+    console.log('✅ Doctors loaded:', doctorsData?.length || 0);
+    setDoctors(doctorsData);
+  } catch (error) {
+    console.error('❌ Error loading data:', error);
+    alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleCreateAppointment = async () => {
     if (!formData.doctor_id) {
