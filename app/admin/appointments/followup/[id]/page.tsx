@@ -180,42 +180,36 @@ export default function FollowupPage() {
     });
   };
 
- const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0];
-  if (!file) {
-    alert('กรุณาเลือกไฟล์รูปภาพ');
-    return;
-  }
-
-  // ✅ ตรวจสอบประเภทไฟล์
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
-  if (!allowedTypes.includes(file.type)) {
-    alert('กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
-    return;
-  }
-
-  // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
-  const maxSize = 5 * 1024 * 1024; // 5MB
-  if (file.size > maxSize) {
-    alert('ไฟล์มีขนาดใหญ่เกิน 5MB');
-    return;
-  }
+  if (!file) return;
 
   try {
     console.log('📤 Starting image upload...');
     console.log('File:', file.name, 'Size:', file.size, 'Type:', file.type);
 
-    // ✅ สร้างชื่อไฟล์ที่เป็นเอกลักษณ์
+    // ✅ ตรวจสอบขนาดไฟล์
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert('❌ ไฟล์มีขนาดใหญ่เกิน 5MB');
+      return;
+    }
+
+    // ✅ ตรวจสอบประเภทไฟล์
+    if (!file.type.startsWith('image/')) {
+      alert('❌ กรุณาเลือกไฟล์รูปภาพ');
+      return;
+    }
+
+    // ✅ สร้างชื่อไฟล์
     const fileExt = file.name.split('.').pop();
-    const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 15);
-    const fileName = `${appointment?.user_id}_${followupRound}_${timestamp}_${randomStr}.${fileExt}`;
+    const fileName = `${appointment?.user_id}_${followupRound}_${Date.now()}.${fileExt}`;
 
     console.log('📁 Uploading to:', `life-schedule-images/${fileName}`);
 
-    // ✅ อัปโหลดไฟล์ไปยัง Supabase Storage
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('life-schedule-images')
+    // ✅ อัปโหลดไฟล์ (ใช้ชื่อ Bucket ให้ตรงกับใน Dashboard)
+    const { error: uploadError } = await supabase.storage
+      .from('life-schedule-images')  // ⚠️ ต้องตรงกับชื่อใน Supabase
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
@@ -227,9 +221,9 @@ export default function FollowupPage() {
       throw uploadError;
     }
 
-    console.log('✅ Upload successful:', uploadData);
+    console.log('✅ Upload successful');
 
-    // ✅ ดึง Public URL (หรือใช้ Signed URL ก็ได้)
+    // ✅ ดึง Public URL
     const { data: urlData } = supabase.storage
       .from('life-schedule-images')
       .getPublicUrl(fileName);
@@ -260,7 +254,6 @@ export default function FollowupPage() {
     alert(`❌ ${errorMessage}`);
   }
 };
-
   // ✅ Auto-generate summary จากข้อมูลที่ทำสำเร็จ
   useEffect(() => {
     const successes: string[] = [];
