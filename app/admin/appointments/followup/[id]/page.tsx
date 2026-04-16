@@ -182,76 +182,135 @@ export default function FollowupPage() {
 
 const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0];
-  if (!file) return;
+  
+  // 🔍 DEBUG: ตรวจสอบไฟล์ที่เลือก
+  console.log('📤 ========== START IMAGE UPLOAD ==========');
+  console.log('📁 File selected:', {
+    name: file?.name,
+    size: file?.size,
+    type: file?.type,
+    lastModified: file?.lastModified
+  });
+  
+  if (!file) {
+    console.error('❌ No file selected');
+    alert('กรุณาเลือกไฟล์รูปภาพ');
+    return;
+  }
 
   try {
-    console.log('📤 Starting image upload...');
-    console.log('File:', file.name, 'Size:', file.size, 'Type:', file.type);
-
-    // ✅ ตรวจสอบขนาดไฟล์
+    // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      alert('❌ ไฟล์มีขนาดใหญ่เกิน 5MB');
+      console.error('❌ File too large:', file.size, 'bytes');
+      alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
       return;
     }
+    console.log('✅ File size OK:', (file.size / 1024).toFixed(2), 'KB');
 
     // ✅ ตรวจสอบประเภทไฟล์
     if (!file.type.startsWith('image/')) {
-      alert('❌ กรุณาเลือกไฟล์รูปภาพ');
+      console.error('❌ Invalid file type:', file.type);
+      alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
       return;
     }
+    console.log('✅ File type OK:', file.type);
 
-    // ✅ สร้างชื่อไฟล์
+    // ✅ สร้างชื่อไฟล์ที่เป็นเอกลักษณ์
     const fileExt = file.name.split('.').pop();
-    const fileName = `${appointment?.user_id}_${followupRound}_${Date.now()}.${fileExt}`;
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 15);
+    const fileName = `${appointment?.user_id}_${followupRound}_${timestamp}_${randomStr}.${fileExt}`;
+    
+    console.log('📝 Generated filename:', fileName);
+    console.log('🪣 Bucket name:', 'life-schedule-images');
+    console.log('📁 Full path:', `life-schedule-images/${fileName}`);
 
-    console.log('📁 Uploading to:', `life-schedule-images/${fileName}`);
-
-    // ✅ อัปโหลดไฟล์ (ใช้ชื่อ Bucket ให้ตรงกับใน Dashboard)
-    const { error: uploadError } = await supabase.storage
-      .from('life-schedule-images')  // ⚠️ ต้องตรงกับชื่อใน Supabase
+    // ✅ อัปโหลดไฟล์ไปยัง Supabase Storage
+    console.log('⬆️ Starting upload...');
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('life-schedule-images')
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
         contentType: file.type,
       });
 
+    // 🔍 DEBUG: ตรวจสอบผลลัพธ์การอัปโหลด
+    console.log('📊 Upload response:', {
+      uploadData,
+      uploadError,
+      hasError: !!uploadError
+    });
+
     if (uploadError) {
       console.error('❌ Upload error:', uploadError);
+      console.error('❌ Error details:', {
+        message: uploadError.message,
+        statusCode: uploadError.statusCode,
+        name: uploadError.name
+      });
       throw uploadError;
     }
 
-    console.log('✅ Upload successful');
+    console.log('✅ Upload successful!');
+    console.log('📁 Uploaded path:', uploadData?.path);
+    console.log('🔗 Full path:', uploadData?.fullPath);
 
     // ✅ ดึง Public URL
-    const { data: urlData } = supabase.storage
+    console.log('🔗 Generating public URL...');
+    const { data: urlData, error: urlError } = supabase.storage
       .from('life-schedule-images')
       .getPublicUrl(fileName);
 
-    console.log('🔗 Public URL:', urlData.publicUrl);
+    console.log('📊 URL response:', {
+      urlData,
+      urlError,
+      publicUrl: urlData?.publicUrl
+    });
+
+    if (urlError) {
+      console.error('❌ URL error:', urlError);
+      throw urlError;
+    }
 
     // ✅ บันทึก URL ลง formData
+    console.log('💾 Saving URL to formData...');
     setFormData({
       ...formData,
       life_schedule_image_url: urlData.publicUrl,
     });
 
+    console.log('✅ FormData updated:', {
+      life_schedule_image_url: urlData.publicUrl
+    });
+
+    console.log('🎉 ========== UPLOAD COMPLETE ==========');
     alert('✅ อัปโหลดรูปภาพสำเร็จ!');
     
   } catch (err: any) {
-    console.error('💥 Error uploading image:', err);
+    console.error('💥 ========== UPLOAD FAILED ==========');
+    console.error('❌ Error uploading image:', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      statusCode: err.statusCode,
+      name: err.name,
+      stack: err.stack
+    });
     
     let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
     
     if (err.message?.includes('Bucket')) {
-      errorMessage = 'ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
+      errorMessage = '❌ ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
     } else if (err.message?.includes('Duplicate')) {
-      errorMessage = 'ไฟล์นี้มีอยู่แล้วในระบบ';
+      errorMessage = '❌ ไฟล์นี้มีอยู่แล้วในระบบ';
+    } else if (err.message?.includes('policy')) {
+      errorMessage = '❌ ไม่มีสิทธิ์อัปโหลดไฟล์ กรุณาตรวจสอบ Policy';
     } else if (err.message) {
-      errorMessage = err.message;
+      errorMessage = `❌ ${err.message}`;
     }
     
-    alert(`❌ ${errorMessage}`);
+    alert(errorMessage);
   }
 };
   // ✅ Auto-generate summary จากข้อมูลที่ทำสำเร็จ
@@ -281,107 +340,132 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     }
   }, [formData.food_amount_status, formData.food_type_status, formData.movement_status]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setError(null);
-
-    try {
-      // ✅ ขั้นตอนที่ 1: ตรวจสอบ session ปัจจุบัน
-      const currentUser = checkSession();
-      if (!currentUser || !currentUser.id) {
-        throw new Error('กรุณาเข้าสู่ระบบใหม่');
-      }
-
-      console.log('👤 Current user:', currentUser);
-      console.log('🔑 User role:', currentUser.role);
-
-      // ✅ ขั้นตอนที่ 2: ตรวจสอบสิทธิ์จาก database จริง
-      const { data: userRoleData, error: roleError } = await supabase
-        .from('users')
-        .select('role, is_active')
-        .eq('id', currentUser.id)
-        .single();
-
-      if (roleError || !userRoleData) {
-        console.error('Error fetching user role:', roleError);
-        throw new Error('ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้ได้');
-      }
-
-      if (!userRoleData.is_active) {
-        throw new Error('บัญชีผู้ใช้ถูกระงับการใช้งาน');
-      }
-
-      const allowedRoles = ['admin', 'doctor', 'helper'];
-      if (!allowedRoles.includes(userRoleData.role)) {
-        throw new Error(`ไม่มีสิทธิ์บันทึกข้อมูล (บทบาทปัจจุบัน: ${userRoleData.role})`);
-      }
-
-      console.log('✅ Role verified:', userRoleData.role);
-
-      // ✅ ขั้นตอนที่ 3: เตรียมข้อมูลสำหรับบันทึก
-      const followupData = {
-        appointment_id: appointmentId,
-        user_id: appointment.user_id,
-        followup_date: appointment.appointment_date,
-        followup_round: followupRound,
-        weight: formData.weight ? parseFloat(formData.weight) : null,
-        waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
-        blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
-        blood_pressure_dia: formData.blood_pressure_dia ? parseInt(formData.blood_pressure_dia) : null,
-        blood_sugar_dtx: formData.blood_sugar_dtx ? parseFloat(formData.blood_sugar_dtx) : null,
-        life_schedule_image_url: formData.life_schedule_image_url || null,
-        adaptation_summary: formData.adaptation_summary || null,
-        adaptation_obstacles: formData.adaptation_obstacles || null,
-        adaptation_opportunities: formData.adaptation_opportunities || null,
-        adaptation_other: formData.adaptation_other || null,
-        food_amount_status: formData.food_amount_status as any || null,
-        food_type_status: formData.food_type_status as any || null,
-        movement_status: formData.movement_status as any || null,
-        food_amount_note: formData.food_amount_note || null,
-        food_type_note: formData.food_type_note || null,
-        movement_note: formData.movement_note || null,
-        confidence_score: parseInt(formData.confidence_score.toString()),
-        confidence_improvement_plan: formData.confidence_improvement_plan || null,
-        summary: formData.summary || null,
-        recommendations: formData.recommendations || null,
-        followup_status: formData.followup_status as any || null,
-        conducted_by: currentUser.id,
-      };
-
-      console.log('💾 Saving followup with data:', followupData);
-
-      // ✅ ขั้นตอนที่ 4: บันทึกข้อมูล
-      const { success, error: saveError, followup } = await saveAppointmentFollowupComplete(followupData);
-
-      if (!success) {
-        throw new Error(saveError || 'ไม่สามารถบันทึกข้อมูลได้');
-      }
-
-      console.log('✅ Followup saved successfully:', followup);
-
-      // ✅ ขั้นตอนที่ 5: อัปเดตสถานะนัดหมายเป็น completed
-      const { error: updateError } = await supabase
-        .from('appointments')
-        .update({ 
-          status: 'completed', 
-          updated_at: new Date().toISOString() 
-        })
-        .eq('id', appointmentId);
-
-      if (updateError) {
-        console.warn('⚠️ Failed to update appointment status:', updateError);
-      }
-
-      alert('✅ บันทึกผลการติดตามสำเร็จ!');
-      router.push(`/admin/patients/${appointment.user_id}/followup-history`);
-    } catch (err: any) {
-      console.error('💥 Error saving followup:', err);
-      setError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-    } finally {
-      setSaving(false);
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setSaving(true);
+  setError(null);
+  
+  console.log('💾 ========== START SAVE FOLLOWUP ==========');
+  console.log('📝 FormData:', formData);
+  console.log('🖼️ Image URL:', formData.life_schedule_image_url);
+  
+  try {
+    // ✅ ขั้นตอนที่ 1: ตรวจสอบ session ปัจจุบัน
+    const currentUser = checkSession();
+    console.log('👤 Current user:', currentUser);
+    
+    if (!currentUser || !currentUser.id) {
+      throw new Error('กรุณาเข้าสู่ระบบใหม่');
     }
-  };
+    
+    // ✅ ขั้นตอนที่ 2: ตรวจสอบสิทธิ์จาก database
+    const { data: userRoleData, error: roleError } = await supabase
+      .from('users')
+      .select('role, is_active')
+      .eq('id', currentUser.id)
+      .single();
+
+    console.log('🔑 User role check:', {
+      userRoleData,
+      roleError,
+      isValid: !roleError && userRoleData?.is_active
+    });
+
+    if (roleError || !userRoleData) {
+      console.error('❌ Error fetching user role:', roleError);
+      throw new Error('ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้ได้');
+    }
+
+    if (!userRoleData.is_active) {
+      throw new Error('บัญชีผู้ใช้ถูกระงับการใช้งาน');
+    }
+
+    const allowedRoles = ['admin', 'doctor', 'helper'];
+    if (!allowedRoles.includes(userRoleData.role)) {
+      throw new Error(`ไม่มีสิทธิ์บันทึกข้อมูล (บทบาทปัจจุบัน: ${userRoleData.role})`);
+    }
+
+    console.log('✅ Role verified:', userRoleData.role);
+
+    // ✅ ขั้นตอนที่ 3: เตรียมข้อมูลสำหรับบันทึก
+    const followupData = {
+      appointment_id: appointmentId,
+      user_id: appointment.user_id,
+      followup_date: appointment.appointment_date,
+      followup_round: followupRound,
+      weight: formData.weight ? parseFloat(formData.weight) : null,
+      waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
+      blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
+      blood_pressure_dia: formData.blood_pressure_dia ? parseInt(formData.blood_pressure_dia) : null,
+      blood_sugar_dtx: formData.blood_sugar_dtx ? parseFloat(formData.blood_sugar_dtx) : null,
+      life_schedule_image_url: formData.life_schedule_image_url || null,
+      adaptation_summary: formData.adaptation_summary || null,
+      adaptation_obstacles: formData.adaptation_obstacles || null,
+      adaptation_opportunities: formData.adaptation_opportunities || null,
+      adaptation_other: formData.adaptation_other || null,
+      food_amount_status: formData.food_amount_status as any || null,
+      food_type_status: formData.food_type_status as any || null,
+      movement_status: formData.movement_status as any || null,
+      food_amount_note: formData.food_amount_note || null,
+      food_type_note: formData.food_type_note || null,
+      movement_note: formData.movement_note || null,
+      confidence_score: parseInt(formData.confidence_score.toString()),
+      confidence_improvement_plan: formData.confidence_improvement_plan || null,
+      summary: formData.summary || null,
+      recommendations: formData.recommendations || null,
+      followup_status: formData.followup_status as any || null,
+      conducted_by: currentUser.id,
+    };
+
+    console.log('💾 Followup data to save:', followupData);
+
+    // ✅ ขั้นตอนที่ 4: บันทึกข้อมูล
+    const { success, error: saveError, followup } = await saveAppointmentFollowupComplete(followupData);
+
+    console.log('📊 Save response:', {
+      success,
+      error: saveError,
+      followup
+    });
+
+    if (!success) {
+      console.error('❌ Save failed:', saveError);
+      throw new Error(saveError || 'ไม่สามารถบันทึกข้อมูลได้');
+    }
+
+    console.log('✅ Followup saved successfully:', followup);
+
+    // ✅ ขั้นตอนที่ 5: อัปเดตสถานะนัดหมาย
+    const { error: updateError } = await supabase
+      .from('appointments')
+      .update({ 
+        status: 'completed', 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', appointmentId);
+
+    if (updateError) {
+      console.warn('⚠️ Failed to update appointment status:', updateError);
+    } else {
+      console.log('✅ Appointment status updated to completed');
+    }
+
+    console.log('🎉 ========== SAVE COMPLETE ==========');
+    alert('✅ บันทึกผลการติดตามสำเร็จ!');
+    router.push(`/admin/patients/${appointment.user_id}/followup-history`);
+    
+  } catch (err: any) {
+    console.error('💥 ========== SAVE FAILED ==========');
+    console.error('❌ Error saving followup:', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      stack: err.stack
+    });
+    setError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+  } finally {
+    setSaving(false);
+  }
+};
 
   if (loading) {
     return (
