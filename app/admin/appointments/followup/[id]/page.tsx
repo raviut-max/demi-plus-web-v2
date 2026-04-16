@@ -180,35 +180,86 @@ export default function FollowupPage() {
     });
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  if (!file) {
+    alert('กรุณาเลือกไฟล์รูปภาพ');
+    return;
+  }
 
-    try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${appointmentId}_${followupRound}_${Date.now()}.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('life-schedule-images')
-        .upload(fileName, file);
+  // ✅ ตรวจสอบประเภทไฟล์
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    alert('กรุณาอัปโหลดไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
+    return;
+  }
 
-      if (uploadError) throw uploadError;
+  // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
+  const maxSize = 5 * 1024 * 1024; // 5MB
+  if (file.size > maxSize) {
+    alert('ไฟล์มีขนาดใหญ่เกิน 5MB');
+    return;
+  }
 
-      const { data: urlData } = supabase.storage
-        .from('life-schedule-images')
-        .getPublicUrl(fileName);
+  try {
+    console.log('📤 Starting image upload...');
+    console.log('File:', file.name, 'Size:', file.size, 'Type:', file.type);
 
-      setFormData({
-        ...formData,
-        life_schedule_image_url: urlData.publicUrl,
+    // ✅ สร้างชื่อไฟล์ที่เป็นเอกลักษณ์
+    const fileExt = file.name.split('.').pop();
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 15);
+    const fileName = `${appointment?.user_id}_${followupRound}_${timestamp}_${randomStr}.${fileExt}`;
+
+    console.log('📁 Uploading to:', `life-schedule-images/${fileName}`);
+
+    // ✅ อัปโหลดไฟล์ไปยัง Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('life-schedule-images')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type,
       });
 
-      alert('✅ อัปโหลดรูปภาพสำเร็จ!');
-    } catch (err) {
-      console.error('Error uploading image:', err);
-      alert('❌ เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ');
+    if (uploadError) {
+      console.error('❌ Upload error:', uploadError);
+      throw uploadError;
     }
-  };
+
+    console.log('✅ Upload successful:', uploadData);
+
+    // ✅ ดึง Public URL (หรือใช้ Signed URL ก็ได้)
+    const { data: urlData } = supabase.storage
+      .from('life-schedule-images')
+      .getPublicUrl(fileName);
+
+    console.log('🔗 Public URL:', urlData.publicUrl);
+
+    // ✅ บันทึก URL ลง formData
+    setFormData({
+      ...formData,
+      life_schedule_image_url: urlData.publicUrl,
+    });
+
+    alert('✅ อัปโหลดรูปภาพสำเร็จ!');
+    
+  } catch (err: any) {
+    console.error('💥 Error uploading image:', err);
+    
+    let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
+    
+    if (err.message?.includes('Bucket')) {
+      errorMessage = 'ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
+    } else if (err.message?.includes('Duplicate')) {
+      errorMessage = 'ไฟล์นี้มีอยู่แล้วในระบบ';
+    } else if (err.message) {
+      errorMessage = err.message;
+    }
+    
+    alert(`❌ ${errorMessage}`);
+  }
+};
 
   // ✅ Auto-generate summary จากข้อมูลที่ทำสำเร็จ
   useEffect(() => {
