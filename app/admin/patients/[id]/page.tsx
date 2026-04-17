@@ -1,4 +1,9 @@
 // app/admin/patients/[id]/page.tsx
+// 📄 รายละเอียด: หน้าแสดงข้อมูลผู้ป่วยแบบละเอียด (Admin View)
+// 📍 ตำแหน่ง: /admin/patients/[id]
+// 👥 ผู้ใช้งาน: Admin, Doctor, Helper
+// 🔄 อัปเดตล่าสุด: 2026-04-16
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -26,7 +31,10 @@ import {
   Hospital,
   Calendar,
   Target,
-  TrendingUp
+  TrendingUp,
+  Image as ImageIcon,  // ✅ ไอคอนสำหรับหน้าติดตามสถานะ
+  ClipboardList,
+  Archive
 } from 'lucide-react';
 
 export default function PatientDetailPage() {
@@ -34,11 +42,12 @@ export default function PatientDetailPage() {
   const params = useParams();
   const patientId = params.id as string;
 
+  //  State สำหรับข้อมูลผู้ใช้และผู้ป่วย
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
 
-  // ✅ State สำหรับการ์ดสรุป
+  // 📊 State สำหรับการ์ดสรุปข้อมูลสำคัญ
   const [nextAppointment, setNextAppointment] = useState<any>(null);
   const [latestScreening, setLatestScreening] = useState<any>(null);
   const [latestFollowup, setLatestFollowup] = useState<any>(null);
@@ -47,13 +56,15 @@ export default function PatientDetailPage() {
   const [goalsCount, setGoalsCount] = useState(0);
   const [cardsLoading, setCardsLoading] = useState(true);
 
+  // =====================================================
+  // 🔐 ตรวจสอบ Session และสิทธิ์ผู้ใช้
+  // =====================================================
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -64,25 +75,33 @@ export default function PatientDetailPage() {
     loadPatientData();
   }, [router]);
 
+  // =====================================================
+  // 📥 โหลดข้อมูลผู้ป่วย
+  // =====================================================
   const loadPatientData = async () => {
     try {
+      console.log('🔍 Loading patient data for ID:', patientId);
       const data = await getPatientDetail(patientId);
       setPatient(data);
-
+      
       // ✅ โหลดข้อมูลการ์ดสรุป
       await loadSummaryCards();
+      
+      console.log('✅ Patient data loaded successfully');
     } catch (error) {
-      console.error('Error loading patient data:', error);
+      console.error('❌ Error loading patient data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันโหลดข้อมูลการ์ดสรุป
+  // =====================================================
+  // 📊 โหลดข้อมูลการ์ดสรุป (4 การ์ดด้านบน)
+  // =====================================================
   const loadSummaryCards = async () => {
     try {
       console.log('📊 Loading summary cards for patient:', patientId);
-
+      
       const [
         nextApt,
         latestScreen,
@@ -108,18 +127,23 @@ export default function PatientDetailPage() {
 
       console.log('✅ Summary cards loaded');
     } catch (err) {
-      console.error('Error loading summary cards:', err);
+      console.error('❌ Error loading summary cards:', err);
     } finally {
       setCardsLoading(false);
     }
   };
 
+  // =====================================================
+  // 🚪 ออกจากระบบ
+  // =====================================================
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันแสดงผลวันที่
+  // =====================================================
+  // 📅 จัดรูปแบบวันที่ (DD/MM/YYYY)
+  // =====================================================
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -130,22 +154,24 @@ export default function PatientDetailPage() {
     });
   };
 
-  // ✅ ฟังก์ชันคำนวณอายุ
+  // =====================================================
+  // 🎂 คำนวณอายุจากวันเกิด
+  // =====================================================
   const calculateAge = (birthDateString: string) => {
     if (!birthDateString) return '-';
     const birthDate = new Date(birthDateString);
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDiff = today.getMonth() - birthDate.getMonth();
-
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-
     return age >= 0 ? age : '-';
   };
 
-  // ✅ ฟังก์ชันแสดงชื่อผู้ป่วย (รวม first_name + last_name)
+  // =====================================================
+  // 👤 แสดงชื่อผู้ป่วย (รวม first_name + last_name)
+  // =====================================================
   const getPatientName = () => {
     if (patient?.first_name && patient?.last_name) {
       return `${patient.first_name} ${patient.last_name}`;
@@ -153,7 +179,9 @@ export default function PatientDetailPage() {
     return patient?.full_name || 'ไม่ระบุชื่อ';
   };
 
-  // ✅ ฟังก์ชันแสดงที่อยู่เต็มรูปแบบ
+  // =====================================================
+  // 🏠 แสดงที่อยู่เต็มรูปแบบ
+  // =====================================================
   const getFullAddress = () => {
     if (!patient) return '-';
     const parts = [
@@ -171,39 +199,59 @@ export default function PatientDetailPage() {
     return parts.length > 0 ? parts.join(' ') : '-';
   };
 
+  // =====================================================
+  // ⏳ แสดงหน้าโหลด
+  // =====================================================
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  // =====================================================
+  // ⚠️ กรณีไม่พบข้อมูลผู้ป่วย
+  // =====================================================
+  if (!patient) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
+          <h1 className="text-2xl font-bold text-gray-800 mb-4">ไม่พบข้อมูลผู้ป่วย</h1>
+          <button
+            onClick={() => router.push('/admin/patients')}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          >
+            ← กลับรายการผู้ป่วย
+          </button>
         </div>
       </div>
     );
   }
 
-  if (!patient) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-600">ไม่พบข้อมูลผู้ป่วย</p>
-      </div>
-    );
-  }
-
+  // =====================================================
+  // 🎨 แสดงหน้าข้อมูลผู้ป่วย
+  // =====================================================
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
-      {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+    <div className="min-h-screen bg-gray-50">
+      
+      {/* =====================================================
+          Header - ส่วนหัวของหน้า
+          ===================================================== */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          
+          {/* ปุ่มกลับ */}
           <button
             onClick={() => router.push('/admin/patients')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            <ArrowLeft className="w-5 h-5" />
-            <span>กลับรายการผู้ป่วย</span>
+            <ArrowLeft className="w-4 h-4" />
+            กลับรายการผู้ป่วย
           </button>
-
-          <div className="flex items-center justify-between">
+          
+          {/* ชื่อผู้ป่วยและ HN */}
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
                 รายละเอียดผู้ป่วย
@@ -213,7 +261,9 @@ export default function PatientDetailPage() {
               </p>
             </div>
 
-            <div className="flex gap-2">
+            {/* ปุ่มจัดการ */}
+            <div className="flex flex-wrap gap-2">
+              {/* ✅ ปุ่มแก้ไขข้อมูล */}
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -222,6 +272,16 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
 
+              {/* ✅ ปุ่มติดตามสถานะ (ใหม่) */}
+              <button
+                onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+              >
+                <ImageIcon className="w-4 h-4" />
+                ติดตามสถานะ
+              </button>
+
+              {/* ✅ ปุ่มออกจากระบบ */}
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -234,14 +294,18 @@ export default function PatientDetailPage() {
         </div>
       </div>
 
-      {/* Main Content */}
+      {/* =====================================================
+          Main Content - เนื้อหาหลัก
+          ===================================================== */}
       <div className="max-w-7xl mx-auto px-4 py-8">
 
-        {/* ✅ การ์ดสรุปข้อมูลสำคัญ */}
+        {/* =====================================================
+            Summary Cards - การ์ดสรุปข้อมูลสำคัญ (4 การ์ด)
+            ===================================================== */}
         {!cardsLoading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 
-            {/* 📅 นัดหมายครั้งถัดไป */}
+            {/* 📅 การ์ดที่ 1: นัดหมายครั้งถัดไป */}
             <div
               className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
@@ -276,7 +340,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 📊 การประเมินล่าสุด */}
+            {/* 📊 การ์ดที่ 2: การประเมินล่าสุด */}
             <div
               className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
@@ -315,7 +379,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 🏥 Follow-up ล่าสุด */}
+            {/* 🏥 การ์ดที่ 3: Follow-up ล่าสุด */}
             <div
               className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
@@ -356,7 +420,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 🎯 เป้าหมาย */}
+            {/* 🎯 การ์ดที่ 4: เป้าหมาย */}
             <div
               className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
@@ -390,8 +454,10 @@ export default function PatientDetailPage() {
           </div>
         )}
 
-        {/* ✅ ปุ่มดูประวัติเพิ่มเติม */}
-        <div className="flex gap-3 mb-6">
+        {/* =====================================================
+            Quick Actions - ปุ่มดูประวัติเพิ่มเติม
+            ===================================================== */}
+        <div className="flex flex-wrap gap-3 mb-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all text-gray-700"
@@ -415,12 +481,25 @@ export default function PatientDetailPage() {
             <Calendar className="w-4 h-4" />
             ดูประวัตินัดหมาย
           </button>
+
+          {/* ✅ ปุ่มติดตามสถานะ (ใหม่) */}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-all text-purple-700"
+          >
+            <ImageIcon className="w-4 h-4" />
+            ติดตามสถานะ
+          </button>
         </div>
 
-        {/* Main Grid */}
+        {/* =====================================================
+            Patient Info Grid - ตารางข้อมูลผู้ป่วย (3 คอลัมน์)
+            ===================================================== */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* ข้อมูลส่วนตัว */}
+          {/* =====================================================
+              คอลัมน์ที่ 1: ข้อมูลส่วนตัว
+              ===================================================== */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <User className="w-5 h-5 text-blue-600" />
@@ -478,7 +557,9 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ข้อมูลสุขภาพ */}
+          {/* =====================================================
+              คอลัมน์ที่ 2: ข้อมูลสุขภาพ
+              ===================================================== */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <Activity className="w-5 h-5 text-green-600" />
@@ -542,7 +623,9 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ที่อยู่ */}
+          {/* =====================================================
+              คอลัมน์ที่ 3: ที่อยู่
+              ===================================================== */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <MapPin className="w-5 h-5 text-purple-600" />
@@ -633,7 +716,9 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ผู้ติดต่อฉุกเฉิน */}
+          {/* =====================================================
+              แถวที่ 2: ผู้ติดต่อฉุกเฉิน
+              ===================================================== */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <Phone className="w-5 h-5 text-red-600" />
@@ -658,14 +743,17 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* สถานะการประเมิน */}
+          {/* =====================================================
+              แถวที่ 2: สถานะการประเมิน (กว้าง 2 คอลัมน์)
+              ===================================================== */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 lg:col-span-2">
             <div className="flex items-center gap-2 mb-4">
-              <FileText className="w-5 h-5 text-orange-600" />
+              <ClipboardList className="w-5 h-5 text-orange-600" />
               <h2 className="text-xl font-bold text-gray-800">สถานะการประเมิน</h2>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {/* PAM Level */}
               <div className={`p-4 rounded-lg border-2 ${
                 patient.pam_level === 'L1' ? 'bg-red-50 border-red-500' :
                 patient.pam_level === 'L2' ? 'bg-yellow-50 border-yellow-500' :
@@ -676,6 +764,7 @@ export default function PatientDetailPage() {
                 <p className="text-2xl font-bold">{patient.pam_level || 'L1'}</p>
               </div>
 
+              {/* Zone */}
               <div className={`p-4 rounded-lg border-2 ${
                 patient.zone === 'Red Zone' ? 'bg-red-50 border-red-500' :
                 patient.zone === 'Yellow Zone' ? 'bg-yellow-50 border-yellow-500' :
@@ -685,11 +774,13 @@ export default function PatientDetailPage() {
                 <p className="text-lg font-bold">{patient.zone || 'Green Zone'}</p>
               </div>
 
+              {/* Step */}
               <div className="p-4 rounded-lg border-2 bg-purple-50 border-purple-500">
                 <p className="text-sm text-gray-600 mb-1">Step</p>
                 <p className="text-lg font-bold">{patient.current_step || 'Starter'}</p>
               </div>
 
+              {/* PAM Score */}
               <div className="p-4 rounded-lg border-2 bg-orange-50 border-orange-500">
                 <p className="text-sm text-gray-600 mb-1">คะแนน PAM</p>
                 <p className="text-2xl font-bold">{patient.pam_score || 18}</p>
@@ -697,7 +788,9 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ข้อมูลเพิ่มเติม */}
+          {/* =====================================================
+              แถวที่ 3: ข้อมูลอื่นๆ
+              ===================================================== */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลอื่นๆ</h2>
 
