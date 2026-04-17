@@ -76,73 +76,87 @@ export default function PatientStatusTrackingPage() {
     }
   };
 
-  // 📤 อัปโหลดรูปภาพ (ตามคู่มือ)
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user) return;
+const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  
+  console.log('📤 ========== START IMAGE UPLOAD ==========');
+  
+  if (!file) {
+    alert('กรุณาเลือกไฟล์รูปภาพ');
+    return;
+  }
 
-    try {
-      setUploading(true);
+  try {
+    setUploading(true);
 
-      // 📏 ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        alert('❌ ไฟล์ต้องมีขนาดไม่เกิน 5MB');
-        return;
-      }
-
-      // 🖼️ ตรวจสอบประเภทไฟล์
-      if (!file.type.startsWith('image/')) {
-        alert('❌ กรุณาเลือกไฟล์รูปภาพ');
-        return;
-      }
-
-      // 📝 สร้างชื่อไฟล์: patientId-timestamp.ext
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${patientId}-${Date.now()}.${fileExt}`;
-
-      // ⬆️ อัปโหลดไฟล์
-      const { error: uploadError } = await supabase.storage
-        .from('patient-status-images')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // 🔗 สร้าง Signed URL (แนะนำ - ปลอดภัยกว่า)
-      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from('patient-status-images')
-        .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
-
-      if (signedUrlError) throw signedUrlError;
-
-      // 💾 บันทึก path ลงฐานข้อมูล
-      const { error: dbError } = await supabase
-        .from('patient_status_images')
-        .insert({
-          user_id: patientId,
-          image_path: fileName,  // เก็บ path
-          caption: caption || null,
-          created_by: user.id,
-        });
-
-      if (dbError) throw dbError;
-
-      alert('✅ อัปโหลดรูปภาพสำเร็จ!');
-      setCaption('');
-      await loadImages();
-      
-    } catch (error: any) {
-      console.error('❌ Error:', error);
-      alert(`❌ เกิดข้อผิดพลาด: ${error.message}`);
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+    // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB`);
+      return;
     }
-  };
+
+    // ✅ ตรวจสอบประเภทไฟล์
+    if (!file.type.startsWith('image/')) {
+      alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น');
+      return;
+    }
+
+    // ✅ สร้างชื่อไฟล์: patientId-timestamp.ext
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${patientId}-${Date.now()}.${fileExt}`;
+    
+    console.log('📝 Filename:', fileName);
+
+    // ⬆️ อัปโหลดไฟล์
+    const { error: uploadError } = await supabase.storage
+      .from('patient-status-images')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    console.log('✅ Upload successful!');
+
+    // 🔗 สร้าง Signed URL (ตามคู่มือ - ปลอดภัยกว่า)
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from('patient-status-images')
+      .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
+
+    if (signedUrlError) throw signedUrlError;
+
+    console.log('🔗 Signed URL:', signedUrlData.signedUrl);
+
+    // 💾 บันทึก path ลงฐานข้อมูล
+    const { error: dbError } = await supabase
+      .from('patient_status_images')
+      .insert({
+        user_id: patientId,
+        image_path: fileName,  // เก็บ path ไม่ใช่ URL
+        image_url: signedUrlData.signedUrl,  // เก็บ URL สำหรับแสดง
+        caption: caption || null,
+        created_by: user.id,
+      });
+
+    if (dbError) throw dbError;
+
+    console.log('✅ Saved to database!');
+    alert('✅ อัปโหลดรูปภาพสำเร็จ!');
+    setCaption('');
+    await loadImages();
+    
+  } catch (err: any) {
+    console.error('❌ Error:', err);
+    alert(`❌ เกิดข้อผิดพลาด: ${err.message}`);
+  } finally {
+    setUploading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+};
 
   // 🗑️ ลบรูปภาพ
   const handleDeleteImage = async (image: StatusImage) => {
