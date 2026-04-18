@@ -117,217 +117,87 @@ const loadImages = async () => {
 // 📤 ฟังก์ชันอัปโหลดรูปภาพ - เพิ่ม Debug ละเอียด
 // =====================================================
 const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-  console.log('📤 ========== START IMAGE UPLOAD ==========');
-  console.log('🕐 Timestamp:', new Date().toISOString());
-  
   const file = e.target.files?.[0];
   
-  console.log('📁 File event:', e);
-  console.log('📁 File selected:', {
-    name: file?.name,
-    size: file?.size,
-    sizeMB: file ? (file.size / 1024 / 1024).toFixed(2) : 0,
-    type: file?.type,
-    lastModified: file?.lastModified,
-    webkitRelativePath: (file as any)?.webkitRelativePath,
-  });
-
+  console.log('📤 ========== START IMAGE UPLOAD ==========');
+  
   if (!file) {
-    console.error('❌ No file selected');
     alert('กรุณาเลือกไฟล์รูปภาพ');
     return;
   }
 
   try {
     setUploading(true);
-    console.log('⚙️ Uploading state set to true');
 
-    // ✅ ขั้นตอนที่ 1: ตรวจสอบขนาดไฟล์
-    console.log('📏 Step 1: Checking file size...');
-    const maxSize = 5 * 1024 * 1024; // 5MB
-    console.log('📏 Max size:', maxSize, 'bytes (', maxSize / 1024 / 1024, 'MB)');
-    console.log('📏 Actual size:', file.size, 'bytes (', (file.size / 1024 / 1024).toFixed(2), 'MB)');
-    
+    // ✅ ตรวจสอบขนาดไฟล์
+    const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      console.error('❌ File too large:', file.size, 'bytes');
-      alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB`);
       return;
     }
-    console.log('✅ File size OK:', (file.size / 1024).toFixed(2), 'KB');
 
-    // ✅ ขั้นตอนที่ 2: ตรวจสอบประเภทไฟล์
-    console.log('🖼️ Step 2: Checking file type...');
-    console.log('🖼️ File type:', file.type);
-    console.log('🖼️ Starts with "image/"?', file.type.startsWith('image/'));
-    
+    // ✅ ตรวจสอบประเภทไฟล์
     if (!file.type.startsWith('image/')) {
-      console.error('❌ Invalid file type:', file.type);
-      alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
+      alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น');
       return;
     }
-    console.log('✅ File type OK:', file.type);
 
-    // ✅ ขั้นตอนที่ 3: สร้างชื่อไฟล์
-    console.log('📝 Step 3: Generating filename...');
+    // ✅ สร้างชื่อไฟล์
     const fileExt = file.name.split('.').pop();
     const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).substring(2, 15);
-    const fileName = `${patientId}_${timestamp}_${randomStr}.${fileExt}`;
+    const fileName = `${patientId}-${timestamp}.${fileExt}`;
     
-    console.log('📝 File extension:', fileExt);
-    console.log('📝 Timestamp:', timestamp);
-    console.log('📝 Random string:', randomStr);
-    console.log('📝 Generated filename:', fileName);
-    console.log('📝 Filename length:', fileName.length);
-    
-    console.log('🪣 Bucket name:', 'patient-status-images');
-    console.log('📁 Full path:', `patient-status-images/${fileName}`);
+    console.log('📝 Filename:', fileName);
 
-    // ✅ ขั้นตอนที่ 4: อัปโหลดไฟล์ไปยัง Supabase Storage
-    console.log('⬆️ Step 4: Starting upload to Supabase Storage...');
-    console.log('⬆️ Upload options:', {
-      cacheControl: '3600',
-      upsert: false,
-      contentType: file.type,
-    });
-
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    // ⬆️ อัปโหลดไฟล์
+    const { error: uploadError } = await supabase.storage
       .from('patient-status-images')
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
-        contentType: file.type,
       });
 
-    console.log('⬆️ Upload response:', {
-      uploadData: uploadData,
-      uploadError: uploadError,
-      hasError: !!uploadError,
-    });
-
-    if (uploadError) {
-      console.error('❌ Upload error:', uploadError);
-      console.error('❌ Upload error details:', {
-        message: uploadError.message,
-        statusCode: (uploadError as any).statusCode,
-        name: uploadError.name,
-        stack: (uploadError as any).stack,
-      });
-      throw uploadError;
-    }
+    if (uploadError) throw uploadError;
 
     console.log('✅ Upload successful!');
-    console.log('✅ Uploaded path:', uploadData?.path);
-    console.log('✅ Uploaded full path:', uploadData?.fullPath);
 
-    // ✅ ขั้นตอนที่ 5: สร้าง Public URL
-    console.log('🔗 Step 5: Generating public URL...');
-    const {  urlData } = supabase.storage
+    // 🔗 สร้าง Public URL (✅ แก้ไขแล้ว)
+    console.log('🔗 Generating public URL...');
+    const { publicUrl } = supabase.storage
       .from('patient-status-images')
       .getPublicUrl(fileName);
 
-    console.log('🔗 URL response:', {
-      urlData: urlData,
-      publicUrl: urlData?.publicUrl,
-      hasUrl: !!urlData?.publicUrl,
-    });
+    console.log('📊 Public URL:', publicUrl);
 
-    if (!urlData?.publicUrl) {
-      console.warn('⚠️ Warning: No public URL generated');
-    } else {
-      console.log('✅ Public URL generated successfully');
-      console.log('🔗 URL length:', urlData.publicUrl.length);
+    if (!publicUrl) {
+      throw new Error('ไม่สามารถสร้าง Public URL ได้');
     }
 
-    // ✅ ขั้นตอนที่ 6: บันทึกข้อมูลลงฐานข้อมูล
-    console.log('💾 Step 6: Saving to database...');
-    console.log('💾 Data to save:', {
-      user_id: patientId,
-      image_url: urlData.publicUrl,
-      image_path: fileName,
-      caption: caption || null,
-      created_by: user?.id,
-    });
-
-    const {  dbData, error: dbError } = await supabase
+    // 💾 บันทึกข้อมูลลงฐานข้อมูล
+    const { error: dbError } = await supabase
       .from('patient_status_images')
       .insert({
         user_id: patientId,
-        image_url: urlData.publicUrl,
+        image_url: publicUrl,  // ✅ ใช้ publicUrl โดยตรง
         image_path: fileName,
         caption: caption || null,
         created_by: user.id,
-      })
-      .select();
-
-    console.log('💾 Database response:', {
-      dbData: dbData,
-      dbError: dbError,
-      hasError: !!dbError,
-      insertedRows: dbData?.length || 0,
-    });
-
-    if (dbError) {
-      console.error('❌ Database error:', dbError);
-      console.error('❌ Database error details:', {
-        message: dbError.message,
-        code: dbError.code,
-        hint: dbError.hint,
-        details: dbError.details,
       });
-      throw dbError;
-    }
 
-    console.log('✅ Saved to database successfully!');
-    console.log('✅ Inserted record:', dbData?.[0]);
-    console.log('🎉 ========== UPLOAD COMPLETE ==========');
+    if (dbError) throw dbError;
 
     alert('✅ อัปโหลดรูปภาพสำเร็จ!');
     setCaption('');
-    
-    // ✅ ขั้นตอนที่ 7: โหลดรูปภาพใหม่
-    console.log('📥 Step 7: Reloading images...');
     await loadImages();
     
   } catch (err: any) {
-    console.error('💥 ========== UPLOAD FAILED ==========');
-    console.error('❌ Error uploading image:', err);
-    console.error('❌ Error type:', typeof err);
-    console.error('❌ Error details:', {
-      message: err.message,
-      statusCode: err.statusCode,
-      name: err.name,
-      stack: err.stack,
-      code: err.code,
-    });
-    
-    let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
-    
-    if (err.message?.includes('Bucket')) {
-      errorMessage = '❌ ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
-      console.error('💡 Hint: Bucket not found error');
-    } else if (err.message?.includes('Duplicate')) {
-      errorMessage = '❌ ไฟล์นี้มีอยู่แล้วในระบบ';
-      console.error('💡 Hint: Duplicate file error');
-    } else if (err.message?.includes('policy') || err.message?.includes('RLS')) {
-      errorMessage = '❌ ไม่มีสิทธิ์อัปโหลดไฟล์ กรุณาตรวจสอบ Policy';
-      console.error('💡 Hint: RLS/Policy error');
-    } else if (err.message?.includes('network')) {
-      errorMessage = '❌ เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย';
-      console.error('💡 Hint: Network error');
-    } else if (err.message) {
-      errorMessage = `❌ ${err.message}`;
-    }
-    
-    alert(errorMessage);
+    console.error('❌ Error:', err);
+    alert(`❌ เกิดข้อผิดพลาด: ${err.message}`);
   } finally {
-    console.log('⚙️ Finally block: Resetting uploading state');
     setUploading(false);
     if (fileInputRef.current) {
-      console.log('⚙️ Clearing file input');
       fileInputRef.current.value = '';
     }
-    console.log('🏁 ========== HANDLER COMPLETE ==========');
   }
 };
 
