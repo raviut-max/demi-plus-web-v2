@@ -118,12 +118,17 @@ const loadImages = async () => {
 // =====================================================
 const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0];
+  
   console.log('📤 ========== START IMAGE UPLOAD ==========');
-  console.log('📁 File selected:', {
-    name: file?.name,
-    size: file?.size,
-    type: file?.type,
-  });
+  console.log('🕐 Timestamp:', new Date().toISOString());
+  console.log('👤 Current user:', user);
+  console.log('🔑 User ID:', user?.id);
+  
+  if (!user || !user.id) {
+    console.error('❌ No authenticated user found!');
+    alert('❌ กรุณาเข้าสู่ระบบใหม่');
+    return;
+  }
 
   if (!file) {
     console.error('❌ No file selected');
@@ -133,9 +138,11 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
   try {
     setUploading(true);
+    console.log('⚙️ Uploading state set to true');
 
-    // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
-    const maxSize = 5 * 1024 * 1024;
+    // ✅ ขั้นตอนที่ 1: ตรวจสอบขนาดไฟล์
+    console.log('📏 Step 1: Checking file size...');
+    const maxSize = 5 * 1024 * 1024; // 5MB
     if (file.size > maxSize) {
       console.error('❌ File too large:', file.size, 'bytes');
       alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
@@ -143,7 +150,8 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     }
     console.log('✅ File size OK:', (file.size / 1024).toFixed(2), 'KB');
 
-    // ✅ ตรวจสอบประเภทไฟล์
+    // ✅ ขั้นตอนที่ 2: ตรวจสอบประเภทไฟล์
+    console.log('🖼️ Step 2: Checking file type...');
     if (!file.type.startsWith('image/')) {
       console.error('❌ Invalid file type:', file.type);
       alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
@@ -151,18 +159,22 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     }
     console.log('✅ File type OK:', file.type);
 
-    // ✅ สร้างชื่อไฟล์ที่เป็นเอกลักษณ์
+    // ✅ ขั้นตอนที่ 3: สร้างชื่อไฟล์
+    console.log('📝 Step 3: Generating filename...');
     const fileExt = file.name.split('.').pop();
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 15);
     const fileName = `${patientId}_${timestamp}_${randomStr}.${fileExt}`;
     
+    console.log('📝 File extension:', fileExt);
+    console.log('📝 Timestamp:', timestamp);
+    console.log('📝 Random string:', randomStr);
     console.log('📝 Generated filename:', fileName);
     console.log('🪣 Bucket name:', 'patient-status-images');
     console.log('📁 Full path:', `patient-status-images/${fileName}`);
 
-    // ✅ อัปโหลดไฟล์ไปยัง Supabase Storage
-    console.log('⬆️ Starting upload...');
+    // ✅ ขั้นตอนที่ 4: อัปโหลดไฟล์
+    console.log('⬆️ Step 4: Starting upload to Supabase Storage...');
     const { error: uploadError } = await supabase.storage
       .from('patient-status-images')
       .upload(fileName, file, {
@@ -178,8 +190,8 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
 
     console.log('✅ Upload successful!');
 
-    // ✅ ✅ ✅ แก้ไขตรงนี้ - ใช้ createSignedUrl แทน getPublicUrl
-    console.log('🔗 Generating signed URL...');
+    // ✅ ขั้นตอนที่ 5: สร้าง Signed URL (แทน Public URL)
+    console.log('🔗 Step 5: Generating signed URL...');
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from('patient-status-images')
       .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
@@ -196,37 +208,64 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       throw new Error('ไม่สามารถสร้าง Signed URL ได้');
     }
 
-    // ✅ บันทึกข้อมูลลงฐานข้อมูล
-    console.log('💾 Saving to database...');
-    const { error: dbError } = await supabase
+    // ✅ ขั้นตอนที่ 6: บันทึกข้อมูลลงฐานข้อมูล
+    console.log('💾 Step 6: Saving to database...');
+    console.log('💾 Data to insert:', {
+      user_id: patientId,
+      image_url: signedUrlData.signedUrl,
+      image_path: fileName,
+      caption: caption || null,
+      created_by: user.id,
+    });
+
+    const { data: insertData, error: dbError } = await supabase
       .from('patient_status_images')
       .insert({
         user_id: patientId,
-        image_url: signedUrlData.signedUrl,  // ✅ ใช้ signedUrl แทน publicUrl
+        image_url: signedUrlData.signedUrl,  // ✅ ใช้ signedUrl
         image_path: fileName,
         caption: caption || null,
         created_by: user.id,
-      });
+      })
+      .select();
+
+    console.log('💾 Database response:', {
+      data: insertData,
+      error: dbError,
+    });
 
     if (dbError) {
       console.error('❌ Database error:', dbError);
+      console.error('❌ Error details:', {
+        message: dbError.message,
+        code: dbError.code,
+        hint: dbError.hint,
+        details: dbError.details,
+      });
       throw dbError;
     }
 
     console.log('✅ Saved to database successfully!');
+    console.log('✅ Inserted record:', insertData?.[0]);
     console.log('🎉 ========== UPLOAD COMPLETE ==========');
 
     alert('✅ อัปโหลดรูปภาพสำเร็จ!');
     setCaption('');
+    
+    // ✅ ขั้นตอนที่ 7: โหลดรูปภาพใหม่
+    console.log('📥 Step 7: Reloading images...');
     await loadImages();
     
   } catch (err: any) {
     console.error('💥 ========== UPLOAD FAILED ==========');
     console.error('❌ Error uploading image:', err);
+    console.error('❌ Error type:', typeof err);
     console.error('❌ Error details:', {
       message: err.message,
       statusCode: err.statusCode,
       name: err.name,
+      stack: err.stack,
+      code: err.code,
     });
     
     let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
@@ -235,18 +274,23 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       errorMessage = '❌ ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
     } else if (err.message?.includes('Duplicate')) {
       errorMessage = '❌ ไฟล์นี้มีอยู่แล้วในระบบ';
-    } else if (err.message?.includes('policy')) {
+    } else if (err.message?.includes('policy') || err.message?.includes('RLS')) {
       errorMessage = '❌ ไม่มีสิทธิ์อัปโหลดไฟล์ กรุณาตรวจสอบ Policy';
-    } else if (err.message) { 
+    } else if (err.message?.includes('network')) {
+      errorMessage = '❌ เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย';
+    } else if (err.message) {
       errorMessage = `❌ ${err.message}`;
     }
     
     alert(errorMessage);
   } finally {
+    console.log('⚙️ Finally block: Resetting uploading state');
     setUploading(false);
     if (fileInputRef.current) {
+      console.log('⚙️ Clearing file input');
       fileInputRef.current.value = '';
     }
+    console.log('🏁 ========== HANDLER COMPLETE ==========');
   }
 };
 
