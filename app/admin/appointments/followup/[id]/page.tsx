@@ -15,7 +15,8 @@ export default function FollowupPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false); // ✅ เพิ่ม state สำหรับอัปโหลด
+  const [uploading, setUploading] = useState(false);
+  const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null); // ✅ เก็บชื่อไฟล์เพื่อลบในอนาคต
   const [appointment, setAppointment] = useState(null);
   const [patientProfile, setPatientProfile] = useState(null);
   const [followupRound, setFollowupRound] = useState(1);
@@ -177,11 +178,11 @@ export default function FollowupPage() {
     });
   };
 
-  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (แก้ไขแล้ว - ใช้ Signed URL)
+  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (แก้ไขแล้ว - ลบรูปเก่าอัตโนมัติ + แสดง Thumbnail)
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     
-    console.log('📤 ========== START IMAGE UPLOAD (FOLLOWUP) ==========');
+    console.log('📤 ========== START IMAGE UPLOAD ==========');
     console.log('📁 File selected:', {
       name: file?.name,
       size: file?.size,
@@ -197,6 +198,15 @@ export default function FollowupPage() {
     try {
       setUploading(true);
       console.log('⚙️ Uploading state set to true');
+
+      // ✅ ใหม่: ลบภาพเก่า (ถ้ามี) ก่อนอัปโหลดภาพใหม่
+      if (uploadedImagePath) {
+        console.log('🗑️ Deleting old image from storage:', uploadedImagePath);
+        await supabase.storage
+          .from('life-schedule-images')
+          .remove([uploadedImagePath]);
+        console.log('✅ Old image deleted');
+      }
 
       // ✅ ขั้นตอนที่ 1: ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
       console.log('📏 Step 1: Checking file size...');
@@ -231,7 +241,7 @@ export default function FollowupPage() {
 
       // ✅ ขั้นตอนที่ 4: อัปโหลดไฟล์
       console.log('⬆️ Step 4: Starting upload to Supabase Storage...');
-      const { error: uploadError } = await supabase.storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
         .from('life-schedule-images')
         .upload(fileName, file, {
           cacheControl: '3600',
@@ -246,7 +256,7 @@ export default function FollowupPage() {
 
       console.log('✅ Upload successful!');
 
-      // ✅ ขั้นตอนที่ 5: สร้าง Signed URL (แทน Public URL)
+      // ✅ ขั้นตอนที่ 5: สร้าง Signed URL
       console.log('🔗 Step 5: Generating signed URL...');
       const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from('life-schedule-images')
@@ -264,18 +274,19 @@ export default function FollowupPage() {
         throw new Error('ไม่สามารถสร้าง Signed URL ได้');
       }
 
-      // ✅ ขั้นตอนที่ 6: บันทึก URL ลง formData
+      // ✅ ขั้นตอนที่ 6: บันทึก URL ลง formData และเก็บชื่อไฟล์
       console.log('💾 Step 6: Saving URL to formData...');
       setFormData({
         ...formData,
         life_schedule_image_url: signedUrlData.signedUrl,
       });
 
-      console.log('✅ FormData updated:', {
-        life_schedule_image_url: signedUrlData.signedUrl
-      });
+      // ✅ ใหม่: เก็บชื่อไฟล์ไว้เพื่อลบในอนาคต
+      setUploadedImagePath(fileName);
 
+      console.log('✅ FormData updated');
       console.log('🎉 ========== UPLOAD COMPLETE ==========');
+
       alert('✅ อัปโหลดรูปภาพสำเร็จ!');
       
     } catch (err: any) {
@@ -337,6 +348,10 @@ export default function FollowupPage() {
     setSaving(true);
     setError(null);
 
+    console.log('💾 ========== START SAVE FOLLOWUP ==========');
+    console.log('📝 FormData:', formData);
+    console.log('🖼️ Image URL:', formData.life_schedule_image_url);
+
     try {
       // ✅ ขั้นตอนที่ 1: ตรวจสอบ session ปัจจุบัน
       const currentUser = checkSession();
@@ -360,7 +375,7 @@ export default function FollowupPage() {
       });
 
       if (roleError || !userRoleData) {
-        console.error('Error fetching user role:', roleError);
+        console.error('❌ Error fetching user role:', roleError);
         throw new Error('ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้ได้');
       }
 
@@ -441,6 +456,7 @@ export default function FollowupPage() {
       console.log('🎉 ========== SAVE COMPLETE ==========');
       alert('✅ บันทึกผลการติดตามสำเร็จ!');
       router.push(`/admin/patients/${appointment.user_id}/followup-history`);
+      
     } catch (err: any) {
       console.error('💥 ========== SAVE FAILED ==========');
       console.error('❌ Error saving followup:', err);
@@ -606,7 +622,7 @@ export default function FollowupPage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 ตารางชีวิตของฉัน
               </label>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <label className={`flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-all ${
                   uploading ? 'opacity-50 cursor-not-allowed' : ''
                 }`}>
@@ -621,16 +637,24 @@ export default function FollowupPage() {
                   />
                 </label>
                 
+                {/* ✅ แสดง Thumbnail เมื่อมีรูปภาพ */}
                 {formData.life_schedule_image_url && (
-                  <a
-                    href={formData.life_schedule_image_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline flex items-center gap-1"
-                  >
-                    <FileText className="w-4 h-4" />
-                    ดูรูปภาพ
-                  </a>
+                  <div className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
+                    <img 
+                      src={formData.life_schedule_image_url} 
+                      alt="Preview" 
+                      className="w-16 h-16 object-cover rounded border bg-white shadow-sm"
+                    />
+                    <a
+                      href={formData.life_schedule_image_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-sm flex items-center gap-1 font-medium"
+                    >
+                      <FileText className="w-4 h-4" />
+                      ดูรูปภาพเต็มขนาด
+                    </a>
+                  </div>
                 )}
               </div>
             </div>
