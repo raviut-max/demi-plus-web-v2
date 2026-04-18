@@ -118,10 +118,15 @@ const loadImages = async () => {
 // =====================================================
 const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0];
-  
   console.log('📤 ========== START IMAGE UPLOAD ==========');
-  
+  console.log('📁 File selected:', {
+    name: file?.name,
+    size: file?.size,
+    type: file?.type,
+  });
+
   if (!file) {
+    console.error('❌ No file selected');
     alert('กรุณาเลือกไฟล์รูปภาพ');
     return;
   }
@@ -129,70 +134,114 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
   try {
     setUploading(true);
 
-    // ✅ ตรวจสอบขนาดไฟล์
+    // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
-      alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB`);
+      console.error('❌ File too large:', file.size, 'bytes');
+      alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
       return;
     }
+    console.log('✅ File size OK:', (file.size / 1024).toFixed(2), 'KB');
 
     // ✅ ตรวจสอบประเภทไฟล์
     if (!file.type.startsWith('image/')) {
-      alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น');
+      console.error('❌ Invalid file type:', file.type);
+      alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
       return;
     }
+    console.log('✅ File type OK:', file.type);
 
-    // ✅ สร้างชื่อไฟล์
+    // ✅ สร้างชื่อไฟล์ที่เป็นเอกลักษณ์
     const fileExt = file.name.split('.').pop();
     const timestamp = Date.now();
-    const fileName = `${patientId}-${timestamp}.${fileExt}`;
+    const randomStr = Math.random().toString(36).substring(2, 15);
+    const fileName = `${patientId}_${timestamp}_${randomStr}.${fileExt}`;
     
-    console.log('📝 Filename:', fileName);
+    console.log('📝 Generated filename:', fileName);
+    console.log('🪣 Bucket name:', 'patient-status-images');
+    console.log('📁 Full path:', `patient-status-images/${fileName}`);
 
-    // ⬆️ อัปโหลดไฟล์
+    // ✅ อัปโหลดไฟล์ไปยัง Supabase Storage
+    console.log('⬆️ Starting upload...');
     const { error: uploadError } = await supabase.storage
       .from('patient-status-images')
       .upload(fileName, file, {
         cacheControl: '3600',
         upsert: false,
+        contentType: file.type,
       });
 
-    if (uploadError) throw uploadError;
+    if (uploadError) {
+      console.error('❌ Upload error:', uploadError);
+      throw uploadError;
+    }
 
     console.log('✅ Upload successful!');
 
-    // 🔗 สร้าง Public URL (✅ แก้ไขแล้ว)
-    console.log('🔗 Generating public URL...');
-    const { publicUrl } = supabase.storage
+    // ✅ ✅ ✅ แก้ไขตรงนี้ - ใช้ createSignedUrl แทน getPublicUrl
+    console.log('🔗 Generating signed URL...');
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from('patient-status-images')
-      .getPublicUrl(fileName);
+      .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
 
-    console.log('📊 Public URL:', publicUrl);
-
-    if (!publicUrl) {
-      throw new Error('ไม่สามารถสร้าง Public URL ได้');
+    if (signedUrlError) {
+      console.error('❌ Signed URL error:', signedUrlError);
+      throw signedUrlError;
     }
 
-    // 💾 บันทึกข้อมูลลงฐานข้อมูล
+    console.log('📊 Signed URL response:', signedUrlData);
+    console.log('🔗 Signed URL:', signedUrlData?.signedUrl);
+
+    if (!signedUrlData?.signedUrl) {
+      throw new Error('ไม่สามารถสร้าง Signed URL ได้');
+    }
+
+    // ✅ บันทึกข้อมูลลงฐานข้อมูล
+    console.log('💾 Saving to database...');
     const { error: dbError } = await supabase
       .from('patient_status_images')
       .insert({
         user_id: patientId,
-        image_url: publicUrl,  // ✅ ใช้ publicUrl โดยตรง
+        image_url: signedUrlData.signedUrl,  // ✅ ใช้ signedUrl แทน publicUrl
         image_path: fileName,
         caption: caption || null,
         created_by: user.id,
       });
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      console.error('❌ Database error:', dbError);
+      throw dbError;
+    }
+
+    console.log('✅ Saved to database successfully!');
+    console.log('🎉 ========== UPLOAD COMPLETE ==========');
 
     alert('✅ อัปโหลดรูปภาพสำเร็จ!');
     setCaption('');
     await loadImages();
     
   } catch (err: any) {
-    console.error('❌ Error:', err);
-    alert(`❌ เกิดข้อผิดพลาด: ${err.message}`);
+    console.error('💥 ========== UPLOAD FAILED ==========');
+    console.error('❌ Error uploading image:', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      statusCode: err.statusCode,
+      name: err.name,
+    });
+    
+    let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
+    
+    if (err.message?.includes('Bucket')) {
+      errorMessage = '❌ ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
+    } else if (err.message?.includes('Duplicate')) {
+      errorMessage = '❌ ไฟล์นี้มีอยู่แล้วในระบบ';
+    } else if (err.message?.includes('policy')) {
+      errorMessage = '❌ ไม่มีสิทธิ์อัปโหลดไฟล์ กรุณาตรวจสอบ Policy';
+    } else if (err.message) { 
+      errorMessage = `❌ ${err.message}`;
+    }
+    
+    alert(errorMessage);
   } finally {
     setUploading(false);
     if (fileInputRef.current) {
@@ -200,7 +249,6 @@ const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     }
   }
 };
-
 
   // 🗑️ ลบรูปภาพ
   const handleDeleteImage = async (image: StatusImage) => {
