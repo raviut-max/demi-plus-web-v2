@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, getPatientDetail, getPatientFollowupHistory } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function BaselinePage() {
@@ -15,11 +15,11 @@ export default function BaselinePage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null);
   const [patient, setPatient] = useState(null);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  
-  // ✅ State สำหรับรูปภาพที่เคยอัปโหลดไว้แล้ว
   const [uploadedImages, setUploadedImages] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
@@ -53,8 +53,8 @@ export default function BaselinePage() {
     summary: '',
     recommendations: '',
 
-    // 6. สถานะการติดตาม
-    followup_status: 'baseline',
+    // 6. สถานะการติดตาม (✅ แก้ไข: ใช้ 'fair' แทน 'baseline')
+    followup_status: 'fair',
   });
 
   // ✅ useEffect สำหรับตรวจสอบ session และโหลดข้อมูลเริ่มต้น
@@ -133,7 +133,7 @@ export default function BaselinePage() {
     });
   };
 
-  // ✅ ฟังก์ชันอัปโหลดรูปภาพ
+  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (เหมือนหน้า Followup)
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     
@@ -151,7 +151,20 @@ export default function BaselinePage() {
     }
 
     try {
-      // ✅ ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
+      setUploading(true);
+      console.log('⚙️ Uploading state set to true');
+
+      // ✅ ใหม่: ลบภาพเก่า (ถ้ามี) ก่อนอัปโหลดภาพใหม่
+      if (uploadedImagePath) {
+        console.log('🗑️ Deleting old image from storage:', uploadedImagePath);
+        await supabase.storage
+          .from('patient-status-images')
+          .remove([uploadedImagePath]);
+        console.log('✅ Old image deleted');
+      }
+
+      // ✅ ขั้นตอนที่ 1: ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
+      console.log('📏 Step 1: Checking file size...');
       const maxSize = 5 * 1024 * 1024;
       if (file.size > maxSize) {
         console.error('❌ File too large:', file.size, 'bytes');
@@ -160,7 +173,8 @@ export default function BaselinePage() {
       }
       console.log('✅ File size OK:', (file.size / 1024).toFixed(2), 'KB');
 
-      // ✅ ตรวจสอบประเภทไฟล์
+      // ✅ ขั้นตอนที่ 2: ตรวจสอบประเภทไฟล์
+      console.log('🖼️ Step 2: Checking file type...');
       if (!file.type.startsWith('image/')) {
         console.error('❌ Invalid file type:', file.type);
         alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
@@ -168,7 +182,8 @@ export default function BaselinePage() {
       }
       console.log('✅ File type OK:', file.type);
 
-      // ✅ สร้างชื่อไฟล์ที่เป็นเอกลักษณ์
+      // ✅ ขั้นตอนที่ 3: สร้างชื่อไฟล์
+      console.log('📝 Step 3: Generating filename...');
       const fileExt = file.name.split('.').pop();
       const timestamp = Date.now();
       const randomStr = Math.random().toString(36).substring(2, 15);
@@ -177,8 +192,8 @@ export default function BaselinePage() {
       console.log('📝 Generated filename:', fileName);
       console.log('🪣 Bucket name:', 'patient-status-images');
 
-      // ✅ อัปโหลดไฟล์
-      console.log('⬆️ Starting upload...');
+      // ✅ ขั้นตอนที่ 4: อัปโหลดไฟล์
+      console.log('⬆️ Step 4: Starting upload to Supabase Storage...');
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('patient-status-images')
         .upload(fileName, file, {
@@ -187,23 +202,44 @@ export default function BaselinePage() {
           contentType: file.type,
         });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('❌ Upload error:', uploadError);
+        throw uploadError;
+      }
 
       console.log('✅ Upload successful!');
 
-      // ✅ ดึง Public URL
-      console.log('🔗 Generating public URL...');
-      const { data: urlData } = supabase.storage
+      // ✅ ขั้นตอนที่ 5: สร้าง Signed URL
+      console.log('🔗 Step 5: Generating signed URL...');
+      const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from('patient-status-images')
-        .getPublicUrl(fileName);
+        .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
 
-      // ✅ บันทึก URL ลง formData
+      if (signedUrlError) {
+        console.error('❌ Signed URL error:', signedUrlError);
+        throw signedUrlError;
+      }
+
+      console.log('📊 Signed URL response:', signedUrlData);
+      console.log('🔗 Signed URL:', signedUrlData?.signedUrl);
+
+      if (!signedUrlData?.signedUrl) {
+        throw new Error('ไม่สามารถสร้าง Signed URL ได้');
+      }
+
+      // ✅ ขั้นตอนที่ 6: บันทึก URL ลง formData และเก็บชื่อไฟล์
+      console.log('💾 Step 6: Saving URL to formData...');
       setFormData({
         ...formData,
-        life_schedule_image_url: urlData.publicUrl,
+        life_schedule_image_url: signedUrlData.signedUrl,
       });
 
+      // ✅ ใหม่: เก็บชื่อไฟล์ไว้เพื่อลบในอนาคต
+      setUploadedImagePath(fileName);
+
       console.log('✅ FormData updated');
+      console.log('🎉 ========== UPLOAD COMPLETE ==========');
+
       alert('✅ อัปโหลดรูปภาพสำเร็จ!');
       
       // ✅ โหลดรูปภาพใหม่เพื่อแสดง thumbnail
@@ -212,8 +248,14 @@ export default function BaselinePage() {
     } catch (err: any) {
       console.error('💥 ========== UPLOAD FAILED ==========');
       console.error('❌ Error uploading image:', err);
+      console.error('❌ Error details:', {
+        message: err.message,
+        statusCode: err.statusCode,
+        name: err.name,
+      });
       
       let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
+      
       if (err.message?.includes('Bucket')) {
         errorMessage = '❌ ไม่พบ Storage Bucket';
       } else if (err.message?.includes('policy')) {
@@ -223,6 +265,9 @@ export default function BaselinePage() {
       }
       
       alert(errorMessage);
+    } finally {
+      console.log('⚙️ Finally block: Resetting uploading state');
+      setUploading(false);
     }
   };
 
@@ -254,7 +299,7 @@ export default function BaselinePage() {
     }
   };
 
-  // ✅ Auto-generate summary จากข้อมูลที่ทำสำเร็จ
+  // ✅ Auto-generate summary จากข้อมูลที่ทำสำเร็จ (เหมือนหน้า Followup)
   useEffect(() => {
     const successes: string[] = [];
     if (formData.food_amount_status === 'completed') {
@@ -317,10 +362,10 @@ export default function BaselinePage() {
 
       // ✅ ขั้นตอนที่ 3: เตรียมข้อมูลสำหรับบันทึก
       const baselineData = {
-        appointment_id: null,
+        appointment_id: null,  // ⭐ ไม่มีนัดหมาย (baseline)
         user_id: patientId,
-        followup_date: new Date().toISOString(),
-        followup_round: 0,
+        followup_date: new Date().toISOString(),  // ⭐ วันที่ปัจจุบัน
+        followup_round: 0,  // ⭐ ครั้งที่ 0 (baseline)
         weight: formData.weight ? parseFloat(formData.weight) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
@@ -341,7 +386,7 @@ export default function BaselinePage() {
         confidence_improvement_plan: formData.confidence_improvement_plan || null,
         summary: formData.summary || null,
         recommendations: formData.recommendations || null,
-        followup_status: formData.followup_status as any || null,
+        followup_status: formData.followup_status as any || null,  // ✅ ใช้ 'fair' (ไม่ใช่ 'baseline')
         conducted_by: currentUser.id,
       };
 
@@ -525,14 +570,17 @@ export default function BaselinePage() {
                 ตารางชีวิตของฉัน
               </label>
               <div className="flex items-center gap-4 flex-wrap">
-                <label className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-all">
+                <label className={`flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-all ${
+                  uploading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}>
                   <Upload className="w-5 h-5" />
-                  <span>อัปโหลดรูปภาพ/ใบงาน</span>
+                  <span>{uploading ? '⏳ กำลังอัปโหลด...' : 'อัปโหลดรูปภาพ/ใบงาน'}</span>
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleImageUpload}
                     className="hidden"
+                    disabled={uploading}
                   />
                 </label>
                 {formData.life_schedule_image_url && (
@@ -543,13 +591,13 @@ export default function BaselinePage() {
                     className="text-blue-600 hover:underline flex items-center gap-1"
                   >
                     <FileText className="w-4 h-4" />
-                    ดูรูปภาพที่อัปโหลด
+                    ดูรูปภาพ
                   </a>
                 )}
               </div>
             </div>
 
-            {/* ✅ แสดงรูปภาพที่เคยอัปโหลดไว้แล้ว */}
+            {/* ✅ แสดงรูปภาพที่เคยอัปโหลดไว้แล้ว (เหมือนหน้า Followup) */}
             {uploadedImages.length > 0 && (
               <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <label className="block text-sm font-medium text-blue-900 mb-3">
@@ -896,7 +944,6 @@ export default function BaselinePage() {
             onChange={handleChange}
             className="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="baseline">📋 ข้อมูลเริ่มต้น</option>
             <option value="excellent">ดีมาก</option>
             <option value="good">ดี</option>
             <option value="fair">พอใช้</option>
