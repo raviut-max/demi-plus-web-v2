@@ -232,6 +232,7 @@ export async function getDeletedPatients() {
   }
 }
 
+// @/lib/supabase/queries.ts
 // =====================================================
 // ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin)
 // =====================================================
@@ -269,9 +270,9 @@ export async function registerPatient(data: {
   notes?: string;
   occupation?: string;
   education_level?: string;
-  pam_level?: string;      // ✅ เพิ่ม
-  pam_score?: number;      // ✅ เพิ่ม
-  zone?: string;           // ✅ เพิ่ม
+  pam_level?: string;      // ✅ เพิ่ม parameter
+  pam_score?: number;      // ✅ เพิ่ม parameter
+  zone?: string;           // ✅ เพิ่ม parameter
   created_by: string;
 }) {
   try {
@@ -328,10 +329,10 @@ export async function registerPatient(data: {
         occupation: data.occupation,
         education_level: data.education_level,
         
-        // ✅ ใช้ค่าที่ส่งมา หรือ default สำหรับผู้ป่วยใหม่
+        // ✅ แก้ไขตรงนี้ - ใช้ค่าที่ส่งมา หรือ default เป็น L0/0/Zero Zone
         pam_level: data.pam_level || 'L0',      // ✅ เปลี่ยนจาก 'L1' เป็น 'L0'
-        pam_score: data.pam_score ?? 0,          // ✅ คะแนนเริ่มต้น 0
-        zone: data.zone || 'Zero Zone',          // ✅ โซนเริ่มต้น
+        pam_score: data.pam_score ?? 0,          // ✅ เพิ่ม pam_score
+        zone: data.zone || 'Zero Zone',          // ✅ เปลี่ยนจาก 'Red Zone' เป็น 'Zero Zone'
         
         current_step: 'Starter',
         is_active: true,
@@ -352,7 +353,6 @@ export async function registerPatient(data: {
     return { success: false, error: 'เกิดข้อผิดพลาดในการลงทะเบียน' };
   }
 }
-
 // =====================================================
 // ฟังก์ชันดึงข้อมูลผู้ป่วยรายคน (Admin)
 // =====================================================
