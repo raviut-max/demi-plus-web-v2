@@ -25,8 +25,7 @@ import {
   User,
   Hospital,
   Calendar,
-  Target,
-  TrendingUp
+  Target
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -35,20 +34,20 @@ export default function PatientDetailPage() {
   const params = useParams();
   const patientId = params.id as string;
 
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState(null);
+  const [patient, setPatient] = useState<any>(null);
   
-  // ✅ State สำหรับการ์ดสรุป
-  const [nextAppointment, setNextAppointment] = useState(null);
-  const [latestScreening, setLatestScreening] = useState(null);
-  const [latestFollowup, setLatestFollowup] = useState(null);
+  // State สำหรับการ์ดสรุป
+  const [nextAppointment, setNextAppointment] = useState<any>(null);
+  const [latestScreening, setLatestScreening] = useState<any>(null);
+  const [latestFollowup, setLatestFollowup] = useState<any>(null);
   const [goalsStats, setGoalsStats] = useState({ total: 0, completed: 0 });
   const [screeningCount, setScreeningCount] = useState(0);
   const [goalsCount, setGoalsCount] = useState(0);
   const [cardsLoading, setCardsLoading] = useState(true);
   
-  // ✅ State สำหรับตรวจสอบ baseline และนัดหมาย
+  // State สำหรับตรวจสอบ baseline และนัดหมาย
   const [hasBaseline, setHasBaseline] = useState(false);
   const [hasCompletedAppointment, setHasCompletedAppointment] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(true);
@@ -74,10 +73,10 @@ export default function PatientDetailPage() {
       const data = await getPatientDetail(patientId);
       setPatient(data);
       
-      // ✅ โหลดข้อมูลการ์ดสรุป
+      // โหลดข้อมูลการ์ดสรุป
       await loadSummaryCards();
       
-      // ✅ ตรวจสอบว่ามี baseline แล้วหรือไม่ และมีนัดหมายที่เสร็จสิ้นแล้วหรือไม่
+      // ตรวจสอบว่ามี baseline แล้วหรือไม่
       await checkBaselineAndAppointments();
     } catch (error) {
       console.error('Error loading patient ', error);
@@ -86,10 +85,8 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันโหลดข้อมูลการ์ดสรุป
   const loadSummaryCards = async () => {
     try {
-      console.log('📊 Loading summary cards for patient:', patientId);
       const [
         nextApt,
         latestScreen,
@@ -112,8 +109,6 @@ export default function PatientDetailPage() {
       setGoalsStats(goalsStat);
       setScreeningCount(screenCnt);
       setGoalsCount(goalsCnt);
-
-      console.log('✅ Summary cards loaded');
     } catch (err) {
       console.error('Error loading summary cards:', err);
     } finally {
@@ -121,12 +116,11 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบ baseline และนัดหมายที่เสร็จสิ้น
   const checkBaselineAndAppointments = async () => {
     try {
       console.log('🔍 Checking baseline and appointments for patient:', patientId);
       
-      // ✅ 1. ตรวจสอบว่ามี baseline (followup_round = 0) แล้วหรือไม่
+      // 1. ตรวจสอบว่ามี baseline (followup_round = 0) แล้วหรือไม่
       const { count: baselineCount, error: baselineError } = await supabase
         .from('appointment_followups')
         .select('*', { count: 'exact', head: true })
@@ -137,10 +131,12 @@ export default function PatientDetailPage() {
         console.error('Error checking baseline:', baselineError);
         setHasBaseline(false);
       } else {
-        setHasBaseline((baselineCount || 0) > 0);
+        const hasBaselineData = (baselineCount || 0) > 0;
+        setHasBaseline(hasBaselineData);
+        console.log('✅ Baseline check:', hasBaselineData ? 'มี baseline แล้ว' : 'ยังไม่มี baseline');
       }
 
-      // ✅ 2. ตรวจสอบว่ามีนัดหมายที่เสร็จสิ้นแล้ว (status = 'completed') หรือไม่
+      // 2. ตรวจสอบว่ามีนัดหมายที่เสร็จสิ้นแล้วหรือไม่
       const { count: completedCount, error: appointmentError } = await supabase
         .from('appointments')
         .select('*', { count: 'exact', head: true })
@@ -151,11 +147,10 @@ export default function PatientDetailPage() {
         console.error('Error checking appointments:', appointmentError);
         setHasCompletedAppointment(false);
       } else {
-        setHasCompletedAppointment((completedCount || 0) > 0);
+        const hasCompletedData = (completedCount || 0) > 0;
+        setHasCompletedAppointment(hasCompletedData);
+        console.log('✅ Completed appointments check:', hasCompletedData ? 'มีนัดหมายที่เสร็จสิ้นแล้ว' : 'ยังไม่มีนัดหมายที่เสร็จสิ้น');
       }
-
-      console.log('✅ Baseline check:', (baselineCount || 0) > 0 ? 'มี baseline แล้ว' : 'ยังไม่มี baseline');
-      console.log('✅ Completed appointments check:', (completedCount || 0) > 0 ? 'มีนัดหมายที่เสร็จสิ้นแล้ว' : 'ยังไม่มีนัดหมายที่เสร็จสิ้น');
     } catch (err) {
       console.error('Error in checkBaselineAndAppointments:', err);
       setHasBaseline(false);
@@ -170,7 +165,6 @@ export default function PatientDetailPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันแสดงผลวันที่
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -181,7 +175,6 @@ export default function PatientDetailPage() {
     });
   };
 
-  // ✅ ฟังก์ชันคำนวณอายุ
   const calculateAge = (birthDateString: string) => {
     if (!birthDateString) return '-';
     const birthDate = new Date(birthDateString);
@@ -191,11 +184,9 @@ export default function PatientDetailPage() {
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
-
     return age >= 0 ? age : '-';
   };
 
-  // ✅ ฟังก์ชันแสดงชื่อผู้ป่วย (รวม first_name + last_name)
   const getPatientName = () => {
     if (patient?.first_name && patient?.last_name) {
       return `${patient.first_name} ${patient.last_name}`;
@@ -203,7 +194,6 @@ export default function PatientDetailPage() {
     return patient?.full_name || 'ไม่ระบุชื่อ';
   };
 
-  // ✅ ฟังก์ชันแสดงที่อยู่เต็มรูปแบบ
   const getFullAddress = () => {
     if (!patient) return '-';
     const parts = [
@@ -269,7 +259,7 @@ export default function PatientDetailPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {/* ✅ ปุ่มแก้ไขข้อมูล */}
+              {/* ปุ่มแก้ไขข้อมูล */}
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -278,8 +268,8 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
 
-              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อไม่มีนัดหมายที่เสร็จสิ้นแล้ว */}
-              {!baselineLoading && !hasCompletedAppointment && (
+              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อไม่มี baseline */}
+              {!baselineLoading && !hasBaseline && (
                 <button
                   onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
                   className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -289,15 +279,15 @@ export default function PatientDetailPage() {
                 </button>
               )}
 
-              {/* ✅ แสดงสถานะถ้ามีนัดหมายที่เสร็จสิ้นแล้ว (แทนปุ่มบันทึกข้อมูลเริ่มต้น) */}
-              {!baselineLoading && hasCompletedAppointment && (
+              {/* ✅ แสดงสถานะถ้ามี baseline แล้ว */}
+              {!baselineLoading && hasBaseline && (
                 <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
-                  <Calendar className="w-4 h-4" />
-                  <span>มีประวัติการติดตามแล้ว</span>
+                  <FileText className="w-4 h-4" />
+                  <span>มีข้อมูลเริ่มต้นแล้ว</span>
                 </div>
               )}
 
-              {/* ✅ ปุ่มออกจากระบบ */}
+              {/* ปุ่มออกจากระบบ */}
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -312,12 +302,10 @@ export default function PatientDetailPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-
-        {/* ✅ การ์ดสรุปข้อมูลสำคัญ */}
+        {/* Summary Cards */}
         {!cardsLoading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-
-            {/* 📅 นัดหมายครั้งถัดไป */}
+            {/* นัดหมายครั้งถัดไป */}
             <div
               className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
@@ -352,7 +340,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 📊 การประเมินล่าสุด */}
+            {/* การประเมินล่าสุด */}
             <div
               className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
@@ -391,7 +379,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 🏥 Follow-up ล่าสุด */}
+            {/* Follow-up ล่าสุด */}
             <div
               className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
@@ -432,7 +420,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 🎯 เป้าหมาย */}
+            {/* เป้าหมาย */}
             <div
               className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
@@ -466,7 +454,7 @@ export default function PatientDetailPage() {
           </div>
         )}
 
-        {/* ✅ ปุ่มดูประวัติเพิ่มเติม */}
+        {/* ปุ่มดูประวัติเพิ่มเติม */}
         <div className="flex flex-wrap gap-3 mb-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
@@ -495,7 +483,6 @@ export default function PatientDetailPage() {
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
@@ -602,7 +589,7 @@ export default function PatientDetailPage() {
               </div>
 
               <div>
-                <p className="text-sm text-gray-500">หมายเหตุ (คำแนะนำเพิ่มเติม)</p>
+                <p className="text-sm text-gray-500">หมายเหตุ</p>
                 <p className="font-semibold">{patient.notes || '-'}</p>
               </div>
 
