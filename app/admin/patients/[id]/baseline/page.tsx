@@ -19,7 +19,7 @@ export default function BaselinePage() {
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   
-  // ✅ State สำหรับรูปภาพที่อัปโหลดไว้แล้ว
+  // ✅ State สำหรับรูปภาพที่เคยอัปโหลดไว้แล้ว
   const [uploadedImages, setUploadedImages] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
@@ -87,7 +87,7 @@ export default function BaselinePage() {
       const history = await getPatientFollowupHistory(patientId, 3);
       setPastFollowups(history);
 
-      // ✅ ขั้นตอนที่ 3: โหลดรูปภาพที่เคยอัปโหลดไว้แล้ว (จาก storage)
+      // ✅ ขั้นตอนที่ 3: โหลดรูปภาพที่เคยอัปโหลดไว้แล้ว
       await loadUploadedImages();
 
       console.log('✅ Patient loaded:', patientData);
@@ -107,13 +107,12 @@ export default function BaselinePage() {
     try {
       console.log('🖼️ Loading uploaded images for patient:', patientId);
       
-      // ดึงข้อมูลจากตาราง patient_status_images (ถ้ามี)
       const { data, error } = await supabase
         .from('patient_status_images')
         .select('*')
         .eq('user_id', patientId)
         .order('created_at', { ascending: false })
-        .limit(5);
+        .limit(10);
 
       if (error) {
         console.error('Error loading images:', error);
@@ -176,12 +175,12 @@ export default function BaselinePage() {
       const fileName = `${patientId}_baseline_${timestamp}_${randomStr}.${fileExt}`;
       
       console.log('📝 Generated filename:', fileName);
-      console.log('🪣 Bucket name:', 'life-schedule-images');
+      console.log('🪣 Bucket name:', 'patient-status-images');
 
       // ✅ อัปโหลดไฟล์
       console.log('⬆️ Starting upload...');
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('life-schedule-images')
+        .from('patient-status-images')
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false,
@@ -195,7 +194,7 @@ export default function BaselinePage() {
       // ✅ ดึง Public URL
       console.log('🔗 Generating public URL...');
       const { data: urlData } = supabase.storage
-        .from('life-schedule-images')
+        .from('patient-status-images')
         .getPublicUrl(fileName);
 
       // ✅ บันทึก URL ลง formData
@@ -206,6 +205,9 @@ export default function BaselinePage() {
 
       console.log('✅ FormData updated');
       alert('✅ อัปโหลดรูปภาพสำเร็จ!');
+      
+      // ✅ โหลดรูปภาพใหม่เพื่อแสดง thumbnail
+      await loadUploadedImages();
       
     } catch (err: any) {
       console.error('💥 ========== UPLOAD FAILED ==========');
@@ -315,10 +317,10 @@ export default function BaselinePage() {
 
       // ✅ ขั้นตอนที่ 3: เตรียมข้อมูลสำหรับบันทึก
       const baselineData = {
-        appointment_id: null,  // ⭐ ไม่มีนัดหมาย (baseline)
+        appointment_id: null,
         user_id: patientId,
-        followup_date: new Date().toISOString(),  // ⭐ วันที่ปัจจุบัน
-        followup_round: 0,  // ⭐ ครั้งที่ 0 (baseline)
+        followup_date: new Date().toISOString(),
+        followup_round: 0,
         weight: formData.weight ? parseFloat(formData.weight) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
@@ -541,7 +543,7 @@ export default function BaselinePage() {
                     className="text-blue-600 hover:underline flex items-center gap-1"
                   >
                     <FileText className="w-4 h-4" />
-                    ดูรูปภาพ
+                    ดูรูปภาพที่อัปโหลด
                   </a>
                 )}
               </div>
@@ -549,19 +551,31 @@ export default function BaselinePage() {
 
             {/* ✅ แสดงรูปภาพที่เคยอัปโหลดไว้แล้ว */}
             {uploadedImages.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  📸 รูปภาพที่เคยบันทึกไว้ ({uploadedImages.length})
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <label className="block text-sm font-medium text-blue-900 mb-3">
+                  📸 รูปภาพที่เคยบันทึกไว้ ({uploadedImages.length} รูป)
                 </label>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
                   {uploadedImages.map((image) => (
-                    <div key={image.id} className="relative group border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                    <div key={image.id} className="relative group border border-blue-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow bg-white">
                       <img
                         src={image.image_url}
                         alt={image.caption || 'Status image'}
                         className="w-full h-24 object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = 'https://via.placeholder.com/150x96?text=No+Image';
+                        }}
                       />
                       <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center">
+                        <a
+                          href={image.image_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="opacity-0 group-hover:opacity-100 p-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition-all mr-1"
+                          title="ดูรูปภาพเต็มขนาด"
+                        >
+                          <FileText className="w-4 h-4" />
+                        </a>
                         <button
                           type="button"
                           onClick={() => handleDeleteImage(image.id, image.image_path)}
@@ -573,8 +587,17 @@ export default function BaselinePage() {
                       </div>
                       <div className="p-2 bg-gray-50">
                         <p className="text-xs text-gray-600 truncate">
-                          {new Date(image.created_at).toLocaleDateString('th-TH')}
+                          {new Date(image.created_at).toLocaleDateString('th-TH', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: '2-digit'
+                          })}
                         </p>
+                        {image.caption && (
+                          <p className="text-xs text-gray-500 truncate mt-1">
+                            {image.caption}
+                          </p>
+                        )}
                       </div>
                     </div>
                   ))}
