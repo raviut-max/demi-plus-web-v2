@@ -279,8 +279,10 @@ export default function NewPatientPage() {
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
         
-        // ✅ สำคัญ: กำหนด pam_level เป็น 'L0' สำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
-        pam_level: 'L0',
+        // ✅ สำคัญ: กำหนดค่าเริ่มต้นสำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
+        pam_level: 'L0',           // ระดับ L0 = ยังไม่ได้ประเมิน
+        pam_score: 0,               // คะแนนเริ่มต้น 0
+        zone: 'Zero Zone',          // โซนเริ่มต้น
         
         created_by: user?.id,
       });

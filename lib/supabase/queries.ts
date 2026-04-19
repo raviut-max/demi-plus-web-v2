@@ -269,6 +269,9 @@ export async function registerPatient(data: {
   notes?: string;
   occupation?: string;
   education_level?: string;
+  pam_level?: string;      // ✅ เพิ่ม
+  pam_score?: number;      // ✅ เพิ่ม
+  zone?: string;           // ✅ เพิ่ม
   created_by: string;
 }) {
   try {
@@ -324,8 +327,12 @@ export async function registerPatient(data: {
         notes: data.notes,
         occupation: data.occupation,
         education_level: data.education_level,
-        pam_level: 'L1',
-        zone: 'Red Zone',
+        
+        // ✅ ใช้ค่าที่ส่งมา หรือ default สำหรับผู้ป่วยใหม่
+        pam_level: data.pam_level || 'L0',      // ✅ เปลี่ยนจาก 'L1' เป็น 'L0'
+        pam_score: data.pam_score ?? 0,          // ✅ คะแนนเริ่มต้น 0
+        zone: data.zone || 'Zero Zone',          // ✅ โซนเริ่มต้น
+        
         current_step: 'Starter',
         is_active: true,
         status: 'active',
