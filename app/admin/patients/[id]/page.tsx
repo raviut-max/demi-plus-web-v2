@@ -1,9 +1,4 @@
 // app/admin/patients/[id]/page.tsx
-// 📄 รายละเอียด: หน้าแสดงข้อมูลผู้ป่วยแบบละเอียด (Admin View)
-// 📍 ตำแหน่ง: /admin/patients/[id]
-// 👥 ผู้ใช้งาน: Admin, Doctor, Helper
-// 🔄 อัปเดตล่าสุด: 2026-04-16
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -32,7 +27,7 @@ import {
   Calendar,
   Target,
   TrendingUp,
-  Image as ImageIcon,  // ✅ ไอคอนสำหรับหน้าติดตามสถานะ
+  ImageIcon,
   ClipboardList,
   Archive
 } from 'lucide-react';
@@ -42,7 +37,7 @@ export default function PatientDetailPage() {
   const params = useParams();
   const patientId = params.id as string;
 
-  //  State สำหรับข้อมูลผู้ใช้และผู้ป่วย
+  // ✅ State สำหรับข้อมูลผู้ใช้และผู้ป่วย
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
@@ -272,7 +267,16 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
 
-              {/* ✅ ปุ่มติดตามสถานะ (ใหม่) */}
+              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น (ครั้งที่ 0) - ใหม่ */}
+              <button
+                onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+              >
+                <FileText className="w-4 h-4" />
+                บันทึกข้อมูลเริ่มต้น
+              </button>
+
+              {/* ✅ ปุ่มติดตามสถานะ */}
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
                 className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -482,13 +486,22 @@ export default function PatientDetailPage() {
             ดูประวัตินัดหมาย
           </button>
 
-          {/* ✅ ปุ่มติดตามสถานะ (ใหม่) */}
+          {/* ✅ ปุ่มติดตามสถานะ */}
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-all text-purple-700"
           >
             <ImageIcon className="w-4 h-4" />
             ติดตามสถานะ
+          </button>
+
+          {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น (ครั้งที่ 0) - ใหม่ */}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-all text-purple-700"
+          >
+            <FileText className="w-4 h-4" />
+            บันทึกข้อมูลเริ่มต้น
           </button>
         </div>
 
