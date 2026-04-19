@@ -11,14 +11,16 @@ export default function PatientAppointmentsPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  const [user, setUser] = useState<any>(null);
+
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState<any>(null);
+  const [patient, setPatient] = useState(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState(null);
+
   const [formData, setFormData] = useState({
     doctor_id: '',
     appointment_type: 'followup',
@@ -40,34 +42,40 @@ export default function PatientAppointmentsPage() {
       router.push('/admin/login');
       return;
     }
+
     setUser(userData);
     loadData();
   }, [router]);
 
-const loadData = async () => {
-  try {
-    console.log('📥 Loading patient detail for ID:', patientId);
-    const patientData = await getPatientDetail(patientId);
-    console.log('✅ Patient detail loaded:', patientData);
-    setPatient(patientData);
+  const loadData = async () => {
+    try {
+      console.log('📥 Loading patient detail for ID:', patientId);
+      const patientData = await getPatientDetail(patientId);
+      console.log('✅ Patient detail loaded:', patientData);
+      setPatient(patientData);
 
-    console.log('📥 Loading appointments for patient:', patientId);
-    const appointmentsData = await getAppointments(patientId);
-    console.log('✅ Appointments loaded:', appointmentsData);
-    console.log('📊 Appointments count:', appointmentsData?.length || 0);
-    setAppointments(appointmentsData);
+      console.log('📥 Loading appointments for patient:', patientId);
+      const appointmentsData = await getAppointments(patientId);
+      console.log('✅ Appointments loaded:', appointmentsData);
+      console.log('📊 Appointments count:', appointmentsData?.length || 0);
 
-    console.log('📥 Loading doctors list...');
-    const doctorsData = await getCoaches();
-    console.log('✅ Doctors loaded:', doctorsData?.length || 0);
-    setDoctors(doctorsData);
-  } catch (error) {
-    console.error('❌ Error loading data:', error);
-    alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-  } finally {
-    setLoading(false);
-  }
-};
+      // ✅ 1. เรียงลำดับนัดหมาย: ล่าสุดไว้บนสุด (Descending)
+      const sortedAppointments = appointmentsData.sort((a, b) => {
+        return new Date(b.appointment_date).getTime() - new Date(a.appointment_date).getTime();
+      });
+      setAppointments(sortedAppointments);
+
+      console.log('📥 Loading doctors list...');
+      const doctorsData = await getCoaches();
+      console.log('✅ Doctors loaded:', doctorsData?.length || 0);
+      setDoctors(doctorsData);
+    } catch (error) {
+      console.error('❌ Error loading data:', error);
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleCreateAppointment = async () => {
     if (!formData.doctor_id) {
@@ -215,7 +223,7 @@ const loadData = async () => {
   const getTypeBadge = (type: string) => {
     switch (type) {
       case 'followup': return '🔄 ติดตามผล';
-      case 'consultation': return '👨‍⚕️ ปรึกษาแพทย์';
+      case 'consultation': return '👨‍️ ปรึกษาแพทย์';
       case 'screening': return '📋 คัดกรอง';
       case 'education': return '📚 ให้ความรู้';
       default: return type;
@@ -232,7 +240,8 @@ const loadData = async () => {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push(`/admin/patients/${patientId}`)} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
-            <ArrowLeft className="w-4 h-4" /> กลับหน้าผู้ป่วย
+            <ArrowLeft className="w-4 h-4" />
+            กลับหน้าผู้ป่วย
           </button>
           <div className="flex items-center justify-between">
             <div>
@@ -240,7 +249,8 @@ const loadData = async () => {
               <p className="text-gray-600">ผู้ป่วย: {patient?.first_name} {patient?.last_name} | HN: {patient?.hospital_number}</p>
             </div>
             <button onClick={() => { resetForm(); setShowCreateModal(true); }} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all">
-              <Plus className="w-4 h-4" /> สร้างนัดหมายใหม่
+              <Plus className="w-4 h-4" />
+              สร้างนัดหมายใหม่
             </button>
           </div>
         </div>
@@ -302,21 +312,71 @@ const loadData = async () => {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {appointments.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500"><Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" /><p>ยังไม่มีนัดหมาย</p><button onClick={() => { resetForm(); setShowCreateModal(true); }} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">สร้างนัดหมายแรก</button></td></tr>
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                      <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>ยังไม่มีนัดหมาย</p>
+                      <button onClick={() => { resetForm(); setShowCreateModal(true); }} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">สร้างนัดหมายแรก</button>
+                    </td>
+                  </tr>
                 ) : (
                   appointments.map((appointment) => (
                     <tr key={appointment.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4"><div className="flex items-center gap-2"><Calendar className="w-4 h-4 text-gray-400" /><div><p className="font-medium text-gray-800">{new Date(appointment.appointment_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p><p className="text-sm text-gray-500">{new Date(appointment.appointment_date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</p></div></div></td>
-                      <td className="px-6 py-4">{getTypeBadge(appointment.appointment_type)}</td>
-                      <td className="px-6 py-4"><div className="flex items-center gap-2"><User className="w-4 h-4 text-gray-400" /><span className="text-gray-700">{appointment.doctors?.full_name_th || '-'}</span></div></td>
-                      <td className="px-6 py-4"><div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-gray-400" /><span className="text-gray-700">{appointment.location_type === 'clinic' ? 'คลินิก' : appointment.location_type === 'online' ? 'ออนไลน์' : appointment.location_type === 'home' ? 'บ้าน' : appointment.location_detail || '-'}</span></div></td>
-                      <td className="px-6 py-4">{getStatusBadge(appointment.status)}</td>
-                      <td className="px-6 py-4"><div className="max-w-xs truncate text-gray-600 text-sm">{appointment.notes || '-'}</div></td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          {appointment.status === 'scheduled' && (<><button onClick={() => handleCompleteAppointment(appointment.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"><CheckCircle className="w-4 h-4" /></button><button onClick={() => handleCancelAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"><XCircle className="w-4 h-4" /></button></>)}
-                          <button onClick={() => openEditModal(appointment)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Edit className="w-4 h-4" /></button>
-                          <button onClick={() => handleDeleteAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 className="w-4 h-4" /></button>
+                          <Calendar className="w-4 h-4 text-gray-400" />
+                          <div>
+                            <p className="font-medium text-gray-800">{new Date(appointment.appointment_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                            <p className="text-sm text-gray-500">{new Date(appointment.appointment_date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">{getTypeBadge(appointment.appointment_type)}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <User className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-700">{appointment.doctors?.full_name_th || '-'}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-700">{appointment.location_type === 'clinic' ? 'คลินิก' : appointment.location_type === 'online' ? 'ออนไลน์' : appointment.location_type === 'home' ? 'บ้าน' : appointment.location_detail || '-'}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">{getStatusBadge(appointment.status)}</td>
+                      <td className="px-6 py-4">
+                        <div className="max-w-xs truncate text-gray-600 text-sm">{appointment.notes || '-'}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {/* ✅ 2. ซ่อนปุ่มจัดการถ้าสถานะเป็น 'completed' */}
+                          {appointment.status !== 'completed' && (
+                            <>
+                              {appointment.status === 'scheduled' && (
+                                <>
+                                  <button onClick={() => handleCompleteAppointment(appointment.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="ทำเครื่องหมายว่าเสร็จสิ้น">
+                                    <CheckCircle className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={() => handleCancelAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ยกเลิกนัดหมาย">
+                                    <XCircle className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+                              <button onClick={() => openEditModal(appointment)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="แก้ไข">
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button onClick={() => handleDeleteAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ลบ">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
+                          {/* แสดงข้อความถ้าเสร็จสิ้นแล้ว */}
+                          {appointment.status === 'completed' && (
+                            <span className="text-gray-400 text-sm flex items-center gap-1">
+                              <CheckCircle className="w-4 h-4" /> เสร็จสิ้น
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -342,7 +402,9 @@ const loadData = async () => {
                 {doctors.length === 0 && <p className="text-xs text-red-500 mb-2">⚠️ ไม่พบข้อมูลแพทย์! กรุณาตรวจสอบ RLS Policy</p>}
                 <select value={formData.doctor_id} onChange={(e) => setFormData({...formData, doctor_id: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                   <option value="">-- เลือกแพทย์ --</option>
-                  {doctors.map((doctor) => (<option key={doctor.id} value={doctor.id}>{doctor.full_name_th} ({doctor.specialization_th})</option>))}
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>{doctor.full_name_th} ({doctor.specialization_th})</option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -404,7 +466,9 @@ const loadData = async () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">แพทย์ผู้ทำการรักษา *</label>
                 <select value={formData.doctor_id} onChange={(e) => setFormData({...formData, doctor_id: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                   <option value="">-- เลือกแพทย์ --</option>
-                  {doctors.map((doctor) => (<option key={doctor.id} value={doctor.id}>{doctor.full_name_th} ({doctor.specialization_th})</option>))}
+                  {doctors.map((doctor) => (
+                    <option key={doctor.id} value={doctor.id}>{doctor.full_name_th} ({doctor.specialization_th})</option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -412,7 +476,7 @@ const loadData = async () => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">ประเภทนัดหมาย *</label>
                   <select value={formData.appointment_type} onChange={(e) => setFormData({...formData, appointment_type: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                     <option value="followup">🔄 ติดตามผล</option>
-                    <option value="consultation">👨‍️ ปรึกษาแพทย์</option>
+                    <option value="consultation">👨‍⚕️ ปรึกษาแพทย์</option>
                     <option value="screening">📋 คัดกรอง</option>
                     <option value="education">📚 ให้ความรู้</option>
                   </select>
