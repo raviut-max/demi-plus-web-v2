@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, getPatientDetail, getPatientFollowupHistory } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar } from 'lucide-react';
+import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function BaselinePage() {
@@ -18,6 +18,9 @@ export default function BaselinePage() {
   const [patient, setPatient] = useState(null);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+  
+  // ✅ State สำหรับรูปภาพที่อัปโหลดไว้แล้ว
+  const [uploadedImages, setUploadedImages] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
     // 1. ข้อมูลสุขภาพ
@@ -84,6 +87,9 @@ export default function BaselinePage() {
       const history = await getPatientFollowupHistory(patientId, 3);
       setPastFollowups(history);
 
+      // ✅ ขั้นตอนที่ 3: โหลดรูปภาพที่เคยอัปโหลดไว้แล้ว (จาก storage)
+      await loadUploadedImages();
+
       console.log('✅ Patient loaded:', patientData);
     } catch (err: any) {
       console.error('💥 Exception in loadPatientData:', err);
@@ -96,6 +102,31 @@ export default function BaselinePage() {
     }
   };
 
+  // ✅ ฟังก์ชันโหลดรูปภาพที่เคยอัปโหลดไว้แล้ว
+  const loadUploadedImages = async () => {
+    try {
+      console.log('🖼️ Loading uploaded images for patient:', patientId);
+      
+      // ดึงข้อมูลจากตาราง patient_status_images (ถ้ามี)
+      const { data, error } = await supabase
+        .from('patient_status_images')
+        .select('*')
+        .eq('user_id', patientId)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (error) {
+        console.error('Error loading images:', error);
+        return;
+      }
+
+      console.log('✅ Loaded images:', data?.length || 0);
+      setUploadedImages(data || []);
+    } catch (err) {
+      console.error('Error in loadUploadedImages:', err);
+    }
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({
       ...formData,
@@ -103,7 +134,7 @@ export default function BaselinePage() {
     });
   };
 
-  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (ใช้ bucket เดียวกับ Followup)
+  // ✅ ฟังก์ชันอัปโหลดรูปภาพ
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     
@@ -190,6 +221,34 @@ export default function BaselinePage() {
       }
       
       alert(errorMessage);
+    }
+  };
+
+  // ✅ ฟังก์ชันลบรูปภาพ
+  const handleDeleteImage = async (imageId: string, imagePath: string) => {
+    if (!confirm('คุณต้องการลบรูปภาพนี้หรือไม่?')) return;
+
+    try {
+      // ลบไฟล์จาก Storage
+      await supabase.storage
+        .from('patient-status-images')
+        .remove([imagePath]);
+
+      // ลบข้อมูลจาก Database
+      const { error } = await supabase
+        .from('patient_status_images')
+        .delete()
+        .eq('id', imageId);
+
+      if (error) throw error;
+
+      alert('✅ ลบริูปภาพสำเร็จ!');
+      
+      // โหลดรูปภาพใหม่
+      await loadUploadedImages();
+    } catch (err: any) {
+      console.error('❌ Error deleting image:', err);
+      alert(`❌ เกิดข้อผิดพลาด: ${err.message}`);
     }
   };
 
@@ -463,7 +522,7 @@ export default function BaselinePage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 ตารางชีวิตของฉัน
               </label>
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <label className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-all">
                   <Upload className="w-5 h-5" />
                   <span>อัปโหลดรูปภาพ/ใบงาน</span>
@@ -487,6 +546,41 @@ export default function BaselinePage() {
                 )}
               </div>
             </div>
+
+            {/* ✅ แสดงรูปภาพที่เคยอัปโหลดไว้แล้ว */}
+            {uploadedImages.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  📸 รูปภาพที่เคยบันทึกไว้ ({uploadedImages.length})
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {uploadedImages.map((image) => (
+                    <div key={image.id} className="relative group border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                      <img
+                        src={image.image_url}
+                        alt={image.caption || 'Status image'}
+                        className="w-full h-24 object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteImage(image.id, image.image_path)}
+                          className="opacity-0 group-hover:opacity-100 p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition-all"
+                          title="ลบรูปภาพ"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="p-2 bg-gray-50">
+                        <p className="text-xs text-gray-600 truncate">
+                          {new Date(image.created_at).toLocaleDateString('th-TH')}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
