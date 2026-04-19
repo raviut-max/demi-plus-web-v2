@@ -74,7 +74,7 @@ export default function PatientAppointmentsPage() {
       console.log('✅ Doctors loaded:', doctorsData?.length || 0);
       setDoctors(doctorsData);
     } catch (error) {
-      console.error('❌ Error loading data:', error);
+      console.error('❌ Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -171,19 +171,6 @@ export default function PatientAppointmentsPage() {
     } catch (error) {
       console.error('Error updating appointment:', error);
       alert('เกิดข้อผิดพลาดในการอัปเดตนัดหมาย');
-    }
-  };
-
-  const handleDeleteAppointment = async (appointmentId: string) => {
-    if (!confirm('คุณต้องการลบนัดหมายนี้หรือไม่?')) return;
-    try {
-      const { error } = await supabase.from('appointments').delete().eq('id', appointmentId);
-      if (error) throw error;
-      alert('✅ ลบนัดหมายสำเร็จ!');
-      loadData();
-    } catch (error) {
-      console.error('Error deleting appointment:', error);
-      alert('เกิดข้อผิดพลาดในการลบนัดหมาย');
     }
   };
 
@@ -388,7 +375,7 @@ export default function PatientAppointmentsPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2 flex-wrap">
-                            {/* ✅ แสดงปุ่ม "บันทึกติดตาม" เฉพาะเมื่อเสร็จสิ้นแล้วแต่ยังไม่มี followup */}
+                            {/* ✅ แสดงเฉพาะปุ่ม "บันทึกติดตาม" (สีม่วง) เมื่อเสร็จสิ้นแล้วแต่ยังไม่มี followup */}
                             {needsFollowup && (
                               <button
                                 onClick={() => router.push(`/admin/appointments/followup/${appointment.id}`)}
@@ -400,8 +387,8 @@ export default function PatientAppointmentsPage() {
                               </button>
                             )}
 
-                            {/* ซ่อนปุ่มจัดการถ้าเสร็จสิ้นแล้วและมี followup แล้ว */}
-                            {!isCompleted || !hasFollowup ? (
+                            {/* แสดงปุ่มจัดการปกติ เฉพาะเมื่อไม่เสร็จสิ้น */}
+                            {!isCompleted && (
                               <>
                                 {appointment.status === 'scheduled' && (
                                   <>
@@ -416,11 +403,11 @@ export default function PatientAppointmentsPage() {
                                 <button onClick={() => openEditModal(appointment)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="แก้ไข">
                                   <Edit className="w-4 h-4" />
                                 </button>
-                                <button onClick={() => handleDeleteAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ลบ">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
                               </>
-                            ) : (
+                            )}
+
+                            {/* แสดงข้อความถ้าเสร็จสิ้นแล้วและมี followup แล้ว */}
+                            {isCompleted && hasFollowup && (
                               <span className="text-gray-400 text-sm flex items-center gap-1">
                                 <CheckCircle className="w-4 h-4" /> เสร็จสมบูรณ์
                               </span>
@@ -461,7 +448,7 @@ export default function PatientAppointmentsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-2">ประเภทนัดหมาย *</label>
                   <select value={formData.appointment_type} onChange={(e) => setFormData({...formData, appointment_type: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                     <option value="followup">🔄 ติดตามผล</option>
-                    <option value="consultation">👨‍⚕️ ปรึกษาแพทย์</option>
+                    <option value="consultation">👨‍️ ปรึกษาแพทย์</option>
                     <option value="screening">📋 คัดกรอง</option>
                     <option value="education">📚 ให้ความรู้</option>
                   </select>
