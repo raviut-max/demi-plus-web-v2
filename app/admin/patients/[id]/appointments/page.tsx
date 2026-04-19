@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches } from '@/lib/supabase/queries';
-import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2 } from 'lucide-react';
+import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function PatientAppointmentsPage() {
@@ -20,6 +20,7 @@ export default function PatientAppointmentsPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [appointmentsWithFollowup, setAppointmentsWithFollowup] = useState<Set<string>>(new Set());
 
   const [formData, setFormData] = useState({
     doctor_id: '',
@@ -65,6 +66,9 @@ export default function PatientAppointmentsPage() {
       });
       setAppointments(sortedAppointments);
 
+      // ✅ 2. โหลดข้อมูลว่า appointment ไหนมี followup แล้ว
+      await loadFollowupStatus(sortedAppointments);
+
       console.log('📥 Loading doctors list...');
       const doctorsData = await getCoaches();
       console.log('✅ Doctors loaded:', doctorsData?.length || 0);
@@ -74,6 +78,28 @@ export default function PatientAppointmentsPage() {
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadFollowupStatus = async (appointmentsList: any[]) => {
+    try {
+      const followupSet = new Set<string>();
+      
+      for (const apt of appointmentsList) {
+        const { count } = await supabase
+          .from('appointment_followups')
+          .select('*', { count: 'exact', head: true })
+          .eq('appointment_id', apt.id);
+        
+        if (count && count > 0) {
+          followupSet.add(apt.id);
+        }
+      }
+      
+      setAppointmentsWithFollowup(followupSet);
+      console.log('✅ Followup status loaded:', followupSet.size, 'appointments have followup');
+    } catch (error) {
+      console.error('❌ Error loading followup status:', error);
     }
   };
 
@@ -223,7 +249,7 @@ export default function PatientAppointmentsPage() {
   const getTypeBadge = (type: string) => {
     switch (type) {
       case 'followup': return '🔄 ติดตามผล';
-      case 'consultation': return '👨‍️ ปรึกษาแพทย์';
+      case 'consultation': return '👨‍⚕️ ปรึกษาแพทย์';
       case 'screening': return '📋 คัดกรอง';
       case 'education': return '📚 ให้ความรู้';
       default: return type;
@@ -320,67 +346,90 @@ export default function PatientAppointmentsPage() {
                     </td>
                   </tr>
                 ) : (
-                  appointments.map((appointment) => (
-                    <tr key={appointment.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4 text-gray-400" />
-                          <div>
-                            <p className="font-medium text-gray-800">{new Date(appointment.appointment_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                            <p className="text-sm text-gray-500">{new Date(appointment.appointment_date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</p>
+                  appointments.map((appointment) => {
+                    const hasFollowup = appointmentsWithFollowup.has(appointment.id);
+                    const isCompleted = appointment.status === 'completed';
+                    const needsFollowup = isCompleted && !hasFollowup;
+
+                    return (
+                      <tr key={appointment.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-gray-400" />
+                            <div>
+                              <p className="font-medium text-gray-800">{new Date(appointment.appointment_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                              <p className="text-sm text-gray-500">{new Date(appointment.appointment_date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">{getTypeBadge(appointment.appointment_type)}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <User className="w-4 h-4 text-gray-400" />
-                          <span className="text-gray-700">{appointment.doctors?.full_name_th || '-'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <MapPin className="w-4 h-4 text-gray-400" />
-                          <span className="text-gray-700">{appointment.location_type === 'clinic' ? 'คลินิก' : appointment.location_type === 'online' ? 'ออนไลน์' : appointment.location_type === 'home' ? 'บ้าน' : appointment.location_detail || '-'}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">{getStatusBadge(appointment.status)}</td>
-                      <td className="px-6 py-4">
-                        <div className="max-w-xs truncate text-gray-600 text-sm">{appointment.notes || '-'}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          {/* ✅ 2. ซ่อนปุ่มจัดการถ้าสถานะเป็น 'completed' */}
-                          {appointment.status !== 'completed' && (
-                            <>
-                              {appointment.status === 'scheduled' && (
-                                <>
-                                  <button onClick={() => handleCompleteAppointment(appointment.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="ทำเครื่องหมายว่าเสร็จสิ้น">
-                                    <CheckCircle className="w-4 h-4" />
-                                  </button>
-                                  <button onClick={() => handleCancelAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ยกเลิกนัดหมาย">
-                                    <XCircle className="w-4 h-4" />
-                                  </button>
-                                </>
-                              )}
-                              <button onClick={() => openEditModal(appointment)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="แก้ไข">
-                                <Edit className="w-4 h-4" />
+                        </td>
+                        <td className="px-6 py-4">{getTypeBadge(appointment.appointment_type)}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <User className="w-4 h-4 text-gray-400" />
+                            <span className="text-gray-700">{appointment.doctors?.full_name_th || '-'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-gray-400" />
+                            <span className="text-gray-700">{appointment.location_type === 'clinic' ? 'คลินิก' : appointment.location_type === 'online' ? 'ออนไลน์' : appointment.location_type === 'home' ? 'บ้าน' : appointment.location_detail || '-'}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1">
+                            <span>{getStatusBadge(appointment.status)}</span>
+                            {needsFollowup && (
+                              <span className="text-xs text-purple-600 font-medium">⏳ รอบันทึกติดตาม</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="max-w-xs truncate text-gray-600 text-sm">{appointment.notes || '-'}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* ✅ แสดงปุ่ม "บันทึกติดตาม" เฉพาะเมื่อเสร็จสิ้นแล้วแต่ยังไม่มี followup */}
+                            {needsFollowup && (
+                              <button
+                                onClick={() => router.push(`/admin/appointments/followup/${appointment.id}`)}
+                                className="flex items-center gap-1 px-3 py-1.5 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600 transition-colors font-medium"
+                                title="บันทึกผลการติดตาม"
+                              >
+                                <FileText className="w-4 h-4" />
+                                บันทึกติดตาม
                               </button>
-                              <button onClick={() => handleDeleteAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ลบ">
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </>
-                          )}
-                          {/* แสดงข้อความถ้าเสร็จสิ้นแล้ว */}
-                          {appointment.status === 'completed' && (
-                            <span className="text-gray-400 text-sm flex items-center gap-1">
-                              <CheckCircle className="w-4 h-4" /> เสร็จสิ้น
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            )}
+
+                            {/* ซ่อนปุ่มจัดการถ้าเสร็จสิ้นแล้วและมี followup แล้ว */}
+                            {!isCompleted || !hasFollowup ? (
+                              <>
+                                {appointment.status === 'scheduled' && (
+                                  <>
+                                    <button onClick={() => handleCompleteAppointment(appointment.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="ทำเครื่องหมายว่าเสร็จสิ้น">
+                                      <CheckCircle className="w-4 h-4" />
+                                    </button>
+                                    <button onClick={() => handleCancelAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ยกเลิกนัดหมาย">
+                                      <XCircle className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
+                                <button onClick={() => openEditModal(appointment)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="แก้ไข">
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => handleDeleteAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ลบ">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-gray-400 text-sm flex items-center gap-1">
+                                <CheckCircle className="w-4 h-4" /> เสร็จสมบูรณ์
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
