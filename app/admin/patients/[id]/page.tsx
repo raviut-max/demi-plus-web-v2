@@ -48,8 +48,9 @@ export default function PatientDetailPage() {
   const [goalsCount, setGoalsCount] = useState(0);
   const [cardsLoading, setCardsLoading] = useState(true);
   
-  // ✅ State สำหรับตรวจสอบ baseline
+  // ✅ State สำหรับตรวจสอบ baseline และนัดหมาย
   const [hasBaseline, setHasBaseline] = useState(false);
+  const [hasCompletedAppointment, setHasCompletedAppointment] = useState(false);
   const [baselineLoading, setBaselineLoading] = useState(true);
 
   useEffect(() => {
@@ -76,10 +77,10 @@ export default function PatientDetailPage() {
       // ✅ โหลดข้อมูลการ์ดสรุป
       await loadSummaryCards();
       
-      // ✅ ตรวจสอบว่ามี baseline แล้วหรือไม่
-      await checkBaseline();
+      // ✅ ตรวจสอบว่ามี baseline แล้วหรือไม่ และมีนัดหมายที่เสร็จสิ้นแล้วหรือไม่
+      await checkBaselineAndAppointments();
     } catch (error) {
-      console.error('Error loading patient data:', error);
+      console.error('Error loading patient ', error);
     } finally {
       setLoading(false);
     }
@@ -120,29 +121,45 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบว่ามี baseline แล้วหรือไม่
-  const checkBaseline = async () => {
+  // ✅ ฟังก์ชันตรวจสอบ baseline และนัดหมายที่เสร็จสิ้น
+  const checkBaselineAndAppointments = async () => {
     try {
-      console.log('🔍 Checking baseline for patient:', patientId);
+      console.log('🔍 Checking baseline and appointments for patient:', patientId);
       
-      const { count, error } = await supabase
+      // ✅ 1. ตรวจสอบว่ามี baseline (followup_round = 0) แล้วหรือไม่
+      const { count: baselineCount, error: baselineError } = await supabase
         .from('appointment_followups')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', patientId)
         .eq('followup_round', 0);
 
-      if (error) {
-        console.error('Error checking baseline:', error);
+      if (baselineError) {
+        console.error('Error checking baseline:', baselineError);
         setHasBaseline(false);
-        return;
+      } else {
+        setHasBaseline((baselineCount || 0) > 0);
       }
 
-      const hasBaselineData = (count || 0) > 0;
-      setHasBaseline(hasBaselineData);
-      console.log('✅ Baseline check:', hasBaselineData ? 'มี baseline แล้ว' : 'ยังไม่มี baseline');
+      // ✅ 2. ตรวจสอบว่ามีนัดหมายที่เสร็จสิ้นแล้ว (status = 'completed') หรือไม่
+      const { count: completedCount, error: appointmentError } = await supabase
+        .from('appointments')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', patientId)
+        .eq('status', 'completed');
+
+      if (appointmentError) {
+        console.error('Error checking appointments:', appointmentError);
+        setHasCompletedAppointment(false);
+      } else {
+        setHasCompletedAppointment((completedCount || 0) > 0);
+      }
+
+      console.log('✅ Baseline check:', (baselineCount || 0) > 0 ? 'มี baseline แล้ว' : 'ยังไม่มี baseline');
+      console.log('✅ Completed appointments check:', (completedCount || 0) > 0 ? 'มีนัดหมายที่เสร็จสิ้นแล้ว' : 'ยังไม่มีนัดหมายที่เสร็จสิ้น');
     } catch (err) {
-      console.error('Error in checkBaseline:', err);
+      console.error('Error in checkBaselineAndAppointments:', err);
       setHasBaseline(false);
+      setHasCompletedAppointment(false);
     } finally {
       setBaselineLoading(false);
     }
@@ -261,8 +278,8 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
 
-              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อไม่มี baseline */}
-              {!baselineLoading && !hasBaseline && (
+              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อไม่มีนัดหมายที่เสร็จสิ้นแล้ว */}
+              {!baselineLoading && !hasCompletedAppointment && (
                 <button
                   onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
                   className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -272,22 +289,13 @@ export default function PatientDetailPage() {
                 </button>
               )}
 
-              {/* ✅ แสดงสถานะถ้ามี baseline แล้ว (optional) */}
-              {!baselineLoading && hasBaseline && (
+              {/* ✅ แสดงสถานะถ้ามีนัดหมายที่เสร็จสิ้นแล้ว (แทนปุ่มบันทึกข้อมูลเริ่มต้น) */}
+              {!baselineLoading && hasCompletedAppointment && (
                 <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
-                  <FileText className="w-4 h-4" />
-                  <span>มีข้อมูลเริ่มต้นแล้ว</span>
+                  <Calendar className="w-4 h-4" />
+                  <span>มีประวัติการติดตามแล้ว</span>
                 </div>
               )}
-
-              {/* ✅ ปุ่มติดตามสถานะ */}
-              <button
-                onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
-              >
-                <Activity className="w-4 h-4" />
-                ติดตามสถานะ
-              </button>
 
               {/* ✅ ปุ่มออกจากระบบ */}
               <button
