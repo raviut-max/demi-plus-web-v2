@@ -7,7 +7,9 @@ import { checkSession, logout, registerPatient, getCoaches } from '@/lib/supabas
 import { UserPlus, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 
-// เดือนภาษาไทย
+// =====================================================
+// 📅 เดือนภาษาไทย (สำหรับ dropdown วันเกิด)
+// =====================================================
 const THAI_MONTHS = [
   'มกราคม',
   'กุมภาพันธ์',
@@ -25,13 +27,19 @@ const THAI_MONTHS = [
 
 export default function NewPatientPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  
+  // =====================================================
+  // 🔐 State สำหรับ authentication และ loading
+  // =====================================================
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-
-  // ✅ State สำหรับที่อยู่จาก ThaiAddressSelector
+  
+  // =====================================================
+  // 🏠 State สำหรับที่อยู่จาก ThaiAddressSelector
+  // =====================================================
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
@@ -39,9 +47,12 @@ export default function NewPatientPage() {
     postalCode: '',
   });
 
+  // =====================================================
+  // 📝 State สำหรับฟอร์มทั้งหมด
+  // =====================================================
   const [formData, setFormData] = useState({
     // ข้อมูลบัญชี
-    id_card: '',  // ✅ ต้องเป็น string ว่างเปล่า - ไม่มีค่า default
+    id_card: '',
     password: '',
     confirmPassword: '',
     
@@ -58,12 +69,12 @@ export default function NewPatientPage() {
     gender: 'male',
     phone: '',
     email: '',
-
+    
     // ข้อมูลสุขภาพ
     current_weight: '',
     height: '',
     waist_circumference: '',
-
+    
     // ข้อมูลเพิ่มเติม
     diabetes_type: '',
     
@@ -74,8 +85,8 @@ export default function NewPatientPage() {
     
     hba1c_level: '',
     notes: '',
-
-    // ที่อยู่ (แยกส่วน) - ที่เหลือจะมาจาก addressData
+    
+    // ที่อยู่ (แยกส่วน)
     house_number: '',
     address_line1: '',
     soi: '',
@@ -85,25 +96,27 @@ export default function NewPatientPage() {
     // province, district, subdistrict, postal_code จะมาจาก addressData
     
     subdistrict_health_center: '',
-
+    
     // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
-
+    
     // ข้อมูลอื่นๆ
     occupation: '',
     education_level: '',
     coach_id: '',
   });
 
+  // =====================================================
+  // 🔐 ตรวจสอบ Session และสิทธิ์เมื่อโหลดหน้า
+  // =====================================================
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -114,6 +127,9 @@ export default function NewPatientPage() {
     loadCoaches();
   }, [router]);
 
+  // =====================================================
+  // 👨‍⚕️ โหลดรายการโค้ช/หมอ สำหรับ dropdown
+  // =====================================================
   const loadCoaches = async () => {
     try {
       const data = await getCoaches();
@@ -123,12 +139,18 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ ฟังก์ชันสร้างรหัสผ่านจากวันเกิด (ปี พ.ศ.)
+  // =====================================================
+  // 🔑 ฟังก์ชันสร้างรหัสผ่านจากวันเกิด (ปี พ.ศ.)
+  // รูปแบบ: dd-mm-yyyy (เช่น 01-04-2540)
+  // =====================================================
   const generatePasswordFromBirthDate = (day: string, month: string, year: string) => {
     if (!day || !month || !year) return '';
     return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
   };
 
+  // =====================================================
+  // 📝 Handle การเปลี่ยนแปลงค่าใน input ทั่วไป
+  // =====================================================
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({
       ...formData,
@@ -136,7 +158,9 @@ export default function NewPatientPage() {
     });
   };
 
-  // ✅ Auto-generate password เมื่อกรอกวันเกิดครบ
+  // =====================================================
+  // 🔐 Auto-generate password เมื่อกรอกวันเกิดครบ
+  // =====================================================
   useEffect(() => {
     if (formData.birth_day && formData.birth_month && formData.birth_year) {
       const autoPassword = generatePasswordFromBirthDate(
@@ -152,7 +176,9 @@ export default function NewPatientPage() {
     }
   }, [formData.birth_day, formData.birth_month, formData.birth_year]);
 
-  // ✅ Handler สำหรับรับข้อมูลจาก ThaiAddressSelector
+  // =====================================================
+  // 🏠 Handler สำหรับรับข้อมูลที่อยู่จาก ThaiAddressSelector
+  // =====================================================
   const handleAddressChange = (data: {
     province: string;
     district: string;
@@ -162,11 +188,14 @@ export default function NewPatientPage() {
     setAddressData(data);
   };
 
+  // =====================================================
+  // ✅ Submit ฟอร์ม - ลงทะเบียนผู้ป่วยใหม่
+  // =====================================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // Validate
+    // 🔍 Validate ข้อมูล
     if (formData.password !== formData.confirmPassword) {
       setError('รหัสผ่านไม่ตรงกัน');
       return;
@@ -210,6 +239,7 @@ export default function NewPatientPage() {
       // ✅ รวมชื่อ-นามสกุล
       const fullName = `${formData.first_name} ${formData.last_name}`;
 
+      // ✅ บันทึกผู้ป่วยใหม่
       const result = await registerPatient({
         id_card: formData.id_card,
         password: formData.password,
@@ -228,7 +258,7 @@ export default function NewPatientPage() {
         diabetes_type: formData.diabetes_type || undefined,
         diagnosis_date: diagnosisDate || undefined,
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
-        notes: formData.notes || undefined, 
+        notes: formData.notes || undefined,
         
         // ✅ ที่อยู่ - ส่งแยกฟิลด์
         house_number: formData.house_number || undefined,
@@ -248,6 +278,10 @@ export default function NewPatientPage() {
         emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
+        
+        // ✅ สำคัญ: กำหนด pam_level เป็น 'L0' สำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
+        pam_level: 'L0',
+        
         created_by: user?.id,
       });
 
@@ -268,12 +302,15 @@ export default function NewPatientPage() {
     }
   };
 
+  // =====================================================
+  // ✅ แสดงหน้าสำเร็จ
+  // =====================================================
   if (success) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-cyan-50">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 text-center max-w-md">
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
@@ -288,35 +325,48 @@ export default function NewPatientPage() {
     );
   }
 
+  // =====================================================
+  // ⏳ แสดงหน้าโหลด
+  // =====================================================
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-500 mx-auto mb-2" />
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
+  // =====================================================
+  // 📋 ฟอร์มลงทะเบียน
+  // =====================================================
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50 p-4 md:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50">
       {/* Header */}
-      <div className="max-w-5xl mx-auto mb-6">
-        <button
-          onClick={() => router.back()}
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          <span>กลับ</span>
-        </button>
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">ลงทะเบียนผู้ป่วยใหม่</h1>
-        <p className="text-gray-600">กรอกข้อมูลผู้ป่วยเพื่อสร้างบัญชีและโปรไฟล์</p>
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-5xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ
+          </button>
+          
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">
+              ลงทะเบียนผู้ป่วยใหม่
+            </h1>
+            <p className="text-gray-600">
+              กรอกข้อมูลผู้ป่วยเพื่อสร้างบัญชีและโปรไฟล์
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6">
-        {/* ข้อมูลบัญชี */}
+        
+        {/* 1. ข้อมูลบัญชี */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
@@ -327,60 +377,62 @@ export default function NewPatientPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เลขบัตรประชาชน <span className="text-red-500">*</span>
               </label>
-<input
-  type="text"
-  name="id_card"
-  value={formData.id_card}
-  onChange={handleChange}
-  maxLength={13}
-  required
-  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-  placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
-  autoComplete="off"        // ✅ ป้องกัน browser จำค่า
-  autoCorrect="off"         // ✅ ปิด auto-correct
-  spellCheck="false"        // ✅ ปิด spell check
-  readOnly={false}          // ✅ ตรวจสอบว่าไม่ได้อ่านอย่างเดียว
-/>
-<p className="text-xs text-gray-500 mt-1">
-  💡 กรอกเลขบัตรประชาชน 13 หลัก (ไม่มีช่องว่าง)
-</p>
+              <input
+                type="text"
+                name="id_card"
+                value={formData.id_card}
+                onChange={handleChange}
+                maxLength={13}
+                required
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                💡 กรอกเลขบัตรประชาชน 13 หลัก (ไม่มีช่องว่าง)
+              </p>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 รหัสผ่าน <span className="text-red-500">*</span>
               </label>
               <input
-                type="password"
+                type="text"
                 name="password"
                 value={formData.password}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="จะถูกสร้างอัตโนมัติจากวันเกิด"
                 readOnly
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
+                placeholder="会自动生成"
               />
               <p className="text-xs text-gray-500 mt-1">
                 💡 รหัสผ่านเริ่มต้น: วันเกิดในรูปแบบ dd-mm-yyyy (ปี พ.ศ.)
               </p>
             </div>
+
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ยืนยันรหัสผ่าน <span className="text-red-500">*</span>
               </label>
               <input
-                type="password"
+                type="text"
                 name="confirmPassword"
                 value={formData.confirmPassword}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="ยืนยันรหัสผ่าน"
+                readOnly
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
+                placeholder="会自动生成"
               />
             </div>
           </div>
         </div>
 
-        {/* ข้อมูลส่วนตัว */}
+        {/* 2. ข้อมูลส่วนตัว */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-green-600 text-sm font-bold">2</span>
@@ -401,6 +453,7 @@ export default function NewPatientPage() {
                 placeholder="ชื่อ"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 นามสกุล <span className="text-red-500">*</span>
@@ -415,8 +468,7 @@ export default function NewPatientPage() {
                 placeholder="นามสกุล"
               />
             </div>
-            
-            {/* HN + วันเกิด */}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 HN (Hospital Number) <span className="text-red-500">*</span>
@@ -431,6 +483,7 @@ export default function NewPatientPage() {
                 placeholder="HN-001"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 วันเกิด <span className="text-red-500">*</span>
@@ -450,6 +503,7 @@ export default function NewPatientPage() {
                     </option>
                   ))}
                 </select>
+
                 <select
                   name="birth_month"
                   value={formData.birth_month}
@@ -464,6 +518,7 @@ export default function NewPatientPage() {
                     </option>
                   ))}
                 </select>
+
                 <select
                   name="birth_year"
                   value={formData.birth_year}
@@ -496,6 +551,7 @@ export default function NewPatientPage() {
                 <option value="female">หญิง</option>
               </select>
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เบอร์โทรศัพท์
@@ -509,6 +565,7 @@ export default function NewPatientPage() {
                 placeholder="0812345678"
               />
             </div>
+
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 อีเมล
@@ -525,7 +582,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* ข้อมูลสุขภาพ */}
+        {/* 3. ข้อมูลสุขภาพ */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">3</span>
@@ -546,6 +603,7 @@ export default function NewPatientPage() {
                 placeholder="75.5"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ส่วนสูง (cm)
@@ -560,6 +618,7 @@ export default function NewPatientPage() {
                 placeholder="170"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 รอบเอว (cm)
@@ -574,8 +633,7 @@ export default function NewPatientPage() {
                 placeholder="92"
               />
             </div>
-            
-            {/* ประเภทเบาหวาน + วันที่วินิจฉัย */}
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ประเภทเบาหวาน
@@ -593,6 +651,7 @@ export default function NewPatientPage() {
                 <option value="Other">Other</option>
               </select>
             </div>
+
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 วันที่วินิจฉัย
@@ -611,6 +670,7 @@ export default function NewPatientPage() {
                     </option>
                   ))}
                 </select>
+
                 <select
                   name="diagnosis_month"
                   value={formData.diagnosis_month}
@@ -624,6 +684,7 @@ export default function NewPatientPage() {
                     </option>
                   ))}
                 </select>
+
                 <select
                   name="diagnosis_year"
                   value={formData.diagnosis_year}
@@ -654,9 +715,10 @@ export default function NewPatientPage() {
                 placeholder="7.5"
               />
             </div>
+
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                หมายเหตุ(คำแนะนำเพิ่มเติม)
+                หมายเหตุ (คำแนะนำเพิ่มเติม)
               </label>
               <input
                 type="text"
@@ -670,7 +732,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* ที่อยู่ - ใช้ ThaiAddressSelector */}
+        {/* 4. ที่อยู่ - ใช้ ThaiAddressSelector */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 text-sm font-bold">4</span>
@@ -693,6 +755,7 @@ export default function NewPatientPage() {
                     placeholder="123"
                   />
                 </div>
+
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     ที่อยู่เพิ่มเติม (ถ้ามี)
@@ -708,7 +771,7 @@ export default function NewPatientPage() {
                 </div>
               </div>
             </div>
-            
+
             {/* หมู่ที่/ชุมชน + หมู่บ้าน */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -723,6 +786,7 @@ export default function NewPatientPage() {
                 placeholder="หมู่ 5"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 หมู่บ้าน
@@ -736,7 +800,7 @@ export default function NewPatientPage() {
                 placeholder="หมู่บ้านสุขใจ"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ซอย
@@ -750,6 +814,7 @@ export default function NewPatientPage() {
                 placeholder="ซอย 5"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ถนน
@@ -763,14 +828,14 @@ export default function NewPatientPage() {
                 placeholder="ถนนสุขุมวิท"
               />
             </div>
-            
+
             {/* ThaiAddressSelector */}
             <div className="md:col-span-2">
               <ThaiAddressSelector 
                 onAddressChange={handleAddressChange}
               />
             </div>
-            
+
             {/* รพสต */}
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -791,7 +856,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* ผู้ติดต่อฉุกเฉิน */}
+        {/* 5. ผู้ติดต่อฉุกเฉิน */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">5</span>
@@ -811,6 +876,7 @@ export default function NewPatientPage() {
                 placeholder="ชื่อ-นามสกุล"
               />
             </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เบอร์โทรศัพท์
@@ -824,6 +890,7 @@ export default function NewPatientPage() {
                 placeholder="0812345678"
               />
             </div>
+
             <div className="md:col-span-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ความสัมพันธ์
@@ -840,7 +907,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* กำหนดโค้ช */}
+        {/* 6. กำหนดโค้ช/หมอผู้ดูแล */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -893,6 +960,7 @@ export default function NewPatientPage() {
               </>
             )}
           </button>
+          
           <button
             type="button"
             onClick={() => router.back()}
