@@ -26,34 +26,32 @@ import {
   Hospital,
   Calendar,
   Target,
-  TrendingUp,
-  ImageIcon,
-  ClipboardList,
-  Archive
+  TrendingUp
 } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
 
-  // ✅ State สำหรับข้อมูลผู้ใช้และผู้ป่วย
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState<any>(null);
-
-  // 📊 State สำหรับการ์ดสรุปข้อมูลสำคัญ
-  const [nextAppointment, setNextAppointment] = useState<any>(null);
-  const [latestScreening, setLatestScreening] = useState<any>(null);
-  const [latestFollowup, setLatestFollowup] = useState<any>(null);
+  const [patient, setPatient] = useState(null);
+  
+  // ✅ State สำหรับการ์ดสรุป
+  const [nextAppointment, setNextAppointment] = useState(null);
+  const [latestScreening, setLatestScreening] = useState(null);
+  const [latestFollowup, setLatestFollowup] = useState(null);
   const [goalsStats, setGoalsStats] = useState({ total: 0, completed: 0 });
   const [screeningCount, setScreeningCount] = useState(0);
   const [goalsCount, setGoalsCount] = useState(0);
   const [cardsLoading, setCardsLoading] = useState(true);
+  
+  // ✅ State สำหรับตรวจสอบ baseline
+  const [hasBaseline, setHasBaseline] = useState(false);
+  const [baselineLoading, setBaselineLoading] = useState(true);
 
-  // =====================================================
-  // 🔐 ตรวจสอบ Session และสิทธิ์ผู้ใช้
-  // =====================================================
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -70,33 +68,27 @@ export default function PatientDetailPage() {
     loadPatientData();
   }, [router]);
 
-  // =====================================================
-  // 📥 โหลดข้อมูลผู้ป่วย
-  // =====================================================
   const loadPatientData = async () => {
     try {
-      console.log('🔍 Loading patient data for ID:', patientId);
       const data = await getPatientDetail(patientId);
       setPatient(data);
       
       // ✅ โหลดข้อมูลการ์ดสรุป
       await loadSummaryCards();
       
-      console.log('✅ Patient data loaded successfully');
+      // ✅ ตรวจสอบว่ามี baseline แล้วหรือไม่
+      await checkBaseline();
     } catch (error) {
-      console.error('❌ Error loading patient data:', error);
+      console.error('Error loading patient data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // =====================================================
-  // 📊 โหลดข้อมูลการ์ดสรุป (4 การ์ดด้านบน)
-  // =====================================================
+  // ✅ ฟังก์ชันโหลดข้อมูลการ์ดสรุป
   const loadSummaryCards = async () => {
     try {
       console.log('📊 Loading summary cards for patient:', patientId);
-      
       const [
         nextApt,
         latestScreen,
@@ -122,23 +114,46 @@ export default function PatientDetailPage() {
 
       console.log('✅ Summary cards loaded');
     } catch (err) {
-      console.error('❌ Error loading summary cards:', err);
+      console.error('Error loading summary cards:', err);
     } finally {
       setCardsLoading(false);
     }
   };
 
-  // =====================================================
-  // 🚪 ออกจากระบบ
-  // =====================================================
+  // ✅ ฟังก์ชันตรวจสอบว่ามี baseline แล้วหรือไม่
+  const checkBaseline = async () => {
+    try {
+      console.log('🔍 Checking baseline for patient:', patientId);
+      
+      const { count, error } = await supabase
+        .from('appointment_followups')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', patientId)
+        .eq('followup_round', 0);
+
+      if (error) {
+        console.error('Error checking baseline:', error);
+        setHasBaseline(false);
+        return;
+      }
+
+      const hasBaselineData = (count || 0) > 0;
+      setHasBaseline(hasBaselineData);
+      console.log('✅ Baseline check:', hasBaselineData ? 'มี baseline แล้ว' : 'ยังไม่มี baseline');
+    } catch (err) {
+      console.error('Error in checkBaseline:', err);
+      setHasBaseline(false);
+    } finally {
+      setBaselineLoading(false);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
   };
 
-  // =====================================================
-  // 📅 จัดรูปแบบวันที่ (DD/MM/YYYY)
-  // =====================================================
+  // ✅ ฟังก์ชันแสดงผลวันที่
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -149,9 +164,7 @@ export default function PatientDetailPage() {
     });
   };
 
-  // =====================================================
-  // 🎂 คำนวณอายุจากวันเกิด
-  // =====================================================
+  // ✅ ฟังก์ชันคำนวณอายุ
   const calculateAge = (birthDateString: string) => {
     if (!birthDateString) return '-';
     const birthDate = new Date(birthDateString);
@@ -161,12 +174,11 @@ export default function PatientDetailPage() {
     if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
       age--;
     }
+
     return age >= 0 ? age : '-';
   };
 
-  // =====================================================
-  // 👤 แสดงชื่อผู้ป่วย (รวม first_name + last_name)
-  // =====================================================
+  // ✅ ฟังก์ชันแสดงชื่อผู้ป่วย (รวม first_name + last_name)
   const getPatientName = () => {
     if (patient?.first_name && patient?.last_name) {
       return `${patient.first_name} ${patient.last_name}`;
@@ -174,9 +186,7 @@ export default function PatientDetailPage() {
     return patient?.full_name || 'ไม่ระบุชื่อ';
   };
 
-  // =====================================================
-  // 🏠 แสดงที่อยู่เต็มรูปแบบ
-  // =====================================================
+  // ✅ ฟังก์ชันแสดงที่อยู่เต็มรูปแบบ
   const getFullAddress = () => {
     if (!patient) return '-';
     const parts = [
@@ -194,9 +204,6 @@ export default function PatientDetailPage() {
     return parts.length > 0 ? parts.join(' ') : '-';
   };
 
-  // =====================================================
-  // ⏳ แสดงหน้าโหลด
-  // =====================================================
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -205,9 +212,6 @@ export default function PatientDetailPage() {
     );
   }
 
-  // =====================================================
-  // ⚠️ กรณีไม่พบข้อมูลผู้ป่วย
-  // =====================================================
   if (!patient) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -224,19 +228,11 @@ export default function PatientDetailPage() {
     );
   }
 
-  // =====================================================
-  // 🎨 แสดงหน้าข้อมูลผู้ป่วย
-  // =====================================================
   return (
     <div className="min-h-screen bg-gray-50">
-      
-      {/* =====================================================
-          Header - ส่วนหัวของหน้า
-          ===================================================== */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          
-          {/* ปุ่มกลับ */}
           <button
             onClick={() => router.push('/admin/patients')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
@@ -245,7 +241,6 @@ export default function PatientDetailPage() {
             กลับรายการผู้ป่วย
           </button>
           
-          {/* ชื่อผู้ป่วยและ HN */}
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -256,7 +251,6 @@ export default function PatientDetailPage() {
               </p>
             </div>
 
-            {/* ปุ่มจัดการ */}
             <div className="flex flex-wrap gap-2">
               {/* ✅ ปุ่มแก้ไขข้อมูล */}
               <button
@@ -267,21 +261,31 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
 
-              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น (ครั้งที่ 0) - ใหม่ */}
-              <button
-                onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
-                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
-              >
-                <FileText className="w-4 h-4" />
-                บันทึกข้อมูลเริ่มต้น
-              </button>
+              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อไม่มี baseline */}
+              {!baselineLoading && !hasBaseline && (
+                <button
+                  onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+                >
+                  <FileText className="w-4 h-4" />
+                  บันทึกข้อมูลเริ่มต้น
+                </button>
+              )}
+
+              {/* ✅ แสดงสถานะถ้ามี baseline แล้ว (optional) */}
+              {!baselineLoading && hasBaseline && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
+                  <FileText className="w-4 h-4" />
+                  <span>มีข้อมูลเริ่มต้นแล้ว</span>
+                </div>
+              )}
 
               {/* ✅ ปุ่มติดตามสถานะ */}
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
                 className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
               >
-                <ImageIcon className="w-4 h-4" />
+                <Activity className="w-4 h-4" />
                 ติดตามสถานะ
               </button>
 
@@ -298,18 +302,14 @@ export default function PatientDetailPage() {
         </div>
       </div>
 
-      {/* =====================================================
-          Main Content - เนื้อหาหลัก
-          ===================================================== */}
+      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
 
-        {/* =====================================================
-            Summary Cards - การ์ดสรุปข้อมูลสำคัญ (4 การ์ด)
-            ===================================================== */}
+        {/* ✅ การ์ดสรุปข้อมูลสำคัญ */}
         {!cardsLoading && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
 
-            {/* 📅 การ์ดที่ 1: นัดหมายครั้งถัดไป */}
+            {/* 📅 นัดหมายครั้งถัดไป */}
             <div
               className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
@@ -344,7 +344,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 📊 การ์ดที่ 2: การประเมินล่าสุด */}
+            {/* 📊 การประเมินล่าสุด */}
             <div
               className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
@@ -383,7 +383,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 🏥 การ์ดที่ 3: Follow-up ล่าสุด */}
+            {/* 🏥 Follow-up ล่าสุด */}
             <div
               className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
@@ -424,7 +424,7 @@ export default function PatientDetailPage() {
               )}
             </div>
 
-            {/* 🎯 การ์ดที่ 4: เป้าหมาย */}
+            {/* 🎯 เป้าหมาย */}
             <div
               className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-xl p-6 shadow-lg hover:shadow-xl transition-all cursor-pointer"
               onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
@@ -458,9 +458,7 @@ export default function PatientDetailPage() {
           </div>
         )}
 
-        {/* =====================================================
-            Quick Actions - ปุ่มดูประวัติเพิ่มเติม
-            ===================================================== */}
+        {/* ✅ ปุ่มดูประวัติเพิ่มเติม */}
         <div className="flex flex-wrap gap-3 mb-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
@@ -485,34 +483,12 @@ export default function PatientDetailPage() {
             <Calendar className="w-4 h-4" />
             ดูประวัตินัดหมาย
           </button>
-
-          {/* ✅ ปุ่มติดตามสถานะ */}
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}/status-tracking`)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-all text-purple-700"
-          >
-            <ImageIcon className="w-4 h-4" />
-            ติดตามสถานะ
-          </button>
-
-          {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น (ครั้งที่ 0) - ใหม่ */}
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-50 border border-purple-300 rounded-lg hover:bg-purple-100 transition-all text-purple-700"
-          >
-            <FileText className="w-4 h-4" />
-            บันทึกข้อมูลเริ่มต้น
-          </button>
         </div>
 
-        {/* =====================================================
-            Patient Info Grid - ตารางข้อมูลผู้ป่วย (3 คอลัมน์)
-            ===================================================== */}
+        {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* =====================================================
-              คอลัมน์ที่ 1: ข้อมูลส่วนตัว
-              ===================================================== */}
+          {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <User className="w-5 h-5 text-blue-600" />
@@ -570,9 +546,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* =====================================================
-              คอลัมน์ที่ 2: ข้อมูลสุขภาพ
-              ===================================================== */}
+          {/* ข้อมูลสุขภาพ */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <Activity className="w-5 h-5 text-green-600" />
@@ -636,9 +610,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* =====================================================
-              คอลัมน์ที่ 3: ที่อยู่
-              ===================================================== */}
+          {/* ที่อยู่ */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <MapPin className="w-5 h-5 text-purple-600" />
@@ -729,9 +701,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* =====================================================
-              แถวที่ 2: ผู้ติดต่อฉุกเฉิน
-              ===================================================== */}
+          {/* ผู้ติดต่อฉุกเฉิน */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-2 mb-4">
               <Phone className="w-5 h-5 text-red-600" />
@@ -756,17 +726,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* =====================================================
-              แถวที่ 2: สถานะการประเมิน (กว้าง 2 คอลัมน์)
-              ===================================================== */}
+          {/* สถานะการประเมิน */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 lg:col-span-2">
             <div className="flex items-center gap-2 mb-4">
-              <ClipboardList className="w-5 h-5 text-orange-600" />
+              <FileText className="w-5 h-5 text-orange-600" />
               <h2 className="text-xl font-bold text-gray-800">สถานะการประเมิน</h2>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {/* PAM Level */}
               <div className={`p-4 rounded-lg border-2 ${
                 patient.pam_level === 'L1' ? 'bg-red-50 border-red-500' :
                 patient.pam_level === 'L2' ? 'bg-yellow-50 border-yellow-500' :
@@ -777,7 +744,6 @@ export default function PatientDetailPage() {
                 <p className="text-2xl font-bold">{patient.pam_level || 'L1'}</p>
               </div>
 
-              {/* Zone */}
               <div className={`p-4 rounded-lg border-2 ${
                 patient.zone === 'Red Zone' ? 'bg-red-50 border-red-500' :
                 patient.zone === 'Yellow Zone' ? 'bg-yellow-50 border-yellow-500' :
@@ -787,13 +753,11 @@ export default function PatientDetailPage() {
                 <p className="text-lg font-bold">{patient.zone || 'Green Zone'}</p>
               </div>
 
-              {/* Step */}
               <div className="p-4 rounded-lg border-2 bg-purple-50 border-purple-500">
                 <p className="text-sm text-gray-600 mb-1">Step</p>
                 <p className="text-lg font-bold">{patient.current_step || 'Starter'}</p>
               </div>
 
-              {/* PAM Score */}
               <div className="p-4 rounded-lg border-2 bg-orange-50 border-orange-500">
                 <p className="text-sm text-gray-600 mb-1">คะแนน PAM</p>
                 <p className="text-2xl font-bold">{patient.pam_score || 18}</p>
@@ -801,9 +765,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* =====================================================
-              แถวที่ 3: ข้อมูลอื่นๆ
-              ===================================================== */}
+          {/* ข้อมูลเพิ่มเติม */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลอื่นๆ</h2>
 
