@@ -232,7 +232,6 @@ export async function getDeletedPatients() {
   }
 }
 
-// @/lib/supabase/queries.ts
 // =====================================================
 // ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin)
 // =====================================================
@@ -265,11 +264,13 @@ export async function registerPatient(data: {
   postal_code?: string;
   subdistrict_health_center?: string;
   diabetes_type?: string;
-  blood_sugar?: number;      // ✅ เพิ่ม parameter ใหม่
+  blood_sugar?: number;
   hba1c_level?: number;
   notes?: string;
   occupation?: string;
   education_level?: string;
+  hospital_id?: string;
+  village_id?: string;
   pam_level?: string;
   pam_score?: number;
   zone?: string;
@@ -323,16 +324,18 @@ export async function registerPatient(data: {
         postal_code: data.postal_code,
         subdistrict_health_center: data.subdistrict_health_center,
         diabetes_type: data.diabetes_type,
-        blood_sugar: data.blood_sugar,  // ✅ เพิ่ม field ใหม่
+        blood_sugar: data.blood_sugar,
         hba1c_level: data.hba1c_level,
         notes: data.notes,
         occupation: data.occupation,
         education_level: data.education_level,
+        hospital_id: data.hospital_id,
+        village_id: data.village_id,
         
         // ✅ ใช้ค่าที่ส่งมา หรือ default สำหรับผู้ป่วยใหม่
-        pam_level: data.pam_level || 'L0',      // ✅ เปลี่ยนจาก 'L1' เป็น 'L0'
-        pam_score: data.pam_score ?? 0,          // ✅ คะแนนเริ่มต้น 0
-        zone: data.zone || 'Zero Zone',          // ✅ โซนเริ่มต้น
+        pam_level: data.pam_level || 'L0',
+        pam_score: data.pam_score ?? 0,
+        zone: data.zone || 'Zero Zone',
         
         current_step: 'Starter',
         is_active: true,
@@ -2152,5 +2155,195 @@ export async function getGoalsCount(patientId: string) {
   } catch (err) {
     console.error('Get goals count error:', err);
     return 0;
+  }
+}
+
+// =====================================================
+// 🏥 ฟังก์ชันจัดการโรงพยาบาล
+// =====================================================
+
+// ดึงโรงพยาบาลทั้งหมด
+export async function getHospitals(parentId?: string) {
+  try {
+    let query = supabase
+      .from('hospitals')
+      .select('*')
+      .eq('is_active', true)
+      .order('type', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (parentId) {
+      query = query.eq('parent_id', parentId);
+    } else {
+      query = query.is('parent_id', null);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('Get hospitals error:', err);
+    return [];
+  }
+}
+
+// เพิ่มโรงพยาบาลใหม่
+export async function createHospital(data: {
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id?: string;
+  address?: string;
+  phone?: string;
+  province?: string;
+  district?: string;
+  subdistrict?: string;
+}) {
+  try {
+    const { data: hospital, error } = await supabase
+      .from('hospitals')
+      .insert({
+        name: data.name,
+        code: data.code,
+        type: data.type,
+        parent_id: data.parent_id,
+        address: data.address,
+        phone: data.phone,
+        province: data.province,
+        district: data.district,
+        subdistrict: data.subdistrict,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, hospital };
+  } catch (err) {
+    console.error('Create hospital error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างโรงพยาบาล' };
+  }
+}
+
+// =====================================================
+// 🏘️ ฟังก์ชันจัดการหมู่บ้าน
+// =====================================================
+
+// ดึงหมู่บ้านทั้งหมด
+export async function getVillages(hospitalId?: string) {
+  try {
+    let query = supabase
+      .from('villages')
+      .select(`
+        *,
+        hospitals (
+          name,
+          type
+        )
+      `)
+      .eq('is_active', true)
+      .order('province', { ascending: true })
+      .order('district', { ascending: true })
+      .order('subdistrict', { ascending: true })
+      .order('village_no', { ascending: true });
+
+    if (hospitalId) {
+      query = query.eq('hospital_id', hospitalId);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('Get villages error:', err);
+    return [];
+  }
+}
+
+// เพิ่มหมู่บ้านใหม่
+export async function createVillage(data: {
+  village_no: string;
+  village_name?: string;
+  subdistrict: string;
+  district: string;
+  province: string;
+  postal_code?: string;
+  hospital_id?: string;
+}) {
+  try {
+    const { data: village, error } = await supabase
+      .from('villages')
+      .insert({
+        village_no: data.village_no,
+        village_name: data.village_name,
+        subdistrict: data.subdistrict,
+        district: data.district,
+        province: data.province,
+        postal_code: data.postal_code,
+        hospital_id: data.hospital_id,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, village };
+  } catch (err) {
+    console.error('Create village error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างหมู่บ้าน' };
+  }
+}
+
+// =====================================================
+// 👩‍⚕️ ฟังก์ชันจัดการ อสม. และหมู่บ้านที่ดูแล
+// =====================================================
+
+// ดึงหมู่บ้านที่ อสม. ดูแล
+export async function getVolunteerVillages(volunteerId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('volunteer_villages')
+      .select(`
+        *,
+        villages (
+          village_no,
+          village_name,
+          subdistrict,
+          district,
+          province
+        )
+      `)
+      .eq('volunteer_id', volunteerId)
+      .eq('is_active', true);
+
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('Get volunteer villages error:', err);
+    return [];
+  }
+}
+
+// เพิ่มหมู่บ้านให้อสม. ดูแล
+export async function assignVolunteerVillage(data: {
+  volunteer_id: string;
+  village_id: string;
+}) {
+  try {
+    const { data: result, error } = await supabase
+      .from('volunteer_villages')
+      .insert({
+        volunteer_id: data.volunteer_id,
+        village_id: data.village_id,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data: result };
+  } catch (err) {
+    console.error('Assign volunteer village error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการมอบหมายหมู่บ้าน' };
   }
 }

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { checkSession, logout, registerPatient, getCoaches } from '@/lib/supabase/queries';
 import { UserPlus, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
+import { supabase } from '@/lib/supabase/client';
 
 // =====================================================
 // 📅 เดือนภาษาไทย (สำหรับ dropdown วันเกิด)
@@ -27,19 +28,14 @@ const THAI_MONTHS = [
 
 export default function NewPatientPage() {
   const router = useRouter();
-  
-  // =====================================================
-  // 🔐 State สำหรับ authentication และ loading
-  // =====================================================
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [coaches, setCoaches] = useState<any[]>([]);
+  const [hospitals, setHospitals] = useState<any[]>([]);
+  const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
   
-  // =====================================================
-  // 🏠 State สำหรับที่อยู่จาก ThaiAddressSelector
-  // =====================================================
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
@@ -47,66 +43,43 @@ export default function NewPatientPage() {
     postalCode: '',
   });
 
-  // =====================================================
-  // 📝 State สำหรับฟอร์มทั้งหมด
-  // =====================================================
   const [formData, setFormData] = useState({
-    // ข้อมูลบัญชี
     id_card: '',
     password: '',
     confirmPassword: '',
-    
-    // ข้อมูลส่วนตัว (แยกชื่อ-นามสกุล)
     first_name: '',
     last_name: '',
     hospital_number: '',
-    
-    // วันเกิด (แยก 3 ช่อง)
     birth_day: '',
     birth_month: '',
     birth_year: '',
-    
     gender: 'male',
     phone: '',
     email: '',
-    
-    // ข้อมูลสุขภาพ
     current_weight: '',
     height: '',
     waist_circumference: '',
-    
-    // ข้อมูลเพิ่มเติม
     diabetes_type: '',
-    blood_sugar: '',  // ✅ เพิ่มค่าน้ำตาล
-    
+    blood_sugar: '',
     hba1c_level: '',
     notes: '',
-    
-    // ที่อยู่ (แยกส่วน)
     house_number: '',
     address_line1: '',
     soi: '',
     road: '',
     village_no: '',
     village_name: '',
-    // province, district, subdistrict, postal_code จะมาจาก addressData
-    
     subdistrict_health_center: '',
-    
-    // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
-    
-    // ข้อมูลอื่นๆ
     occupation: '',
     education_level: '',
     coach_id: '',
+    hospital_id: '',
+    village_id: '',
   });
 
-  // =====================================================
-  // 🔐 ตรวจสอบ Session และสิทธิ์เมื่อโหลดหน้า
-  // =====================================================
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -121,11 +94,9 @@ export default function NewPatientPage() {
 
     setUser(userData);
     loadCoaches();
+    loadHospitals();
   }, [router]);
 
-  // =====================================================
-  // 👨‍⚕️ โหลดรายการโค้ช/หมอ สำหรับ dropdown
-  // =====================================================
   const loadCoaches = async () => {
     try {
       const data = await getCoaches();
@@ -135,18 +106,48 @@ export default function NewPatientPage() {
     }
   };
 
-  // =====================================================
-  // 🔑 ฟังก์ชันสร้างรหัสผ่านจากวันเกิด (ปี พ.ศ.)
-  // รูปแบบ: dd-mm-yyyy (เช่น 01-04-2540)
-  // =====================================================
+  const loadHospitals = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('hospitals')
+        .select('*')
+        .eq('is_active', true)
+        .order('name');
+      
+      if (error) throw error;
+      setHospitals(data || []);
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
+    }
+  };
+
+  const handleHospitalChange = (hospitalId: string) => {
+    setFormData({ ...formData, hospital_id: hospitalId, village_id: '' });
+    
+    const loadVillages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('villages')
+          .select('*')
+          .eq('hospital_id', hospitalId)
+          .eq('is_active', true)
+          .order('village_no');
+        
+        if (error) throw error;
+        setVillages(data || []);
+      } catch (error) {
+        console.error('Error loading villages:', error);
+      }
+    };
+    
+    loadVillages();
+  };
+
   const generatePasswordFromBirthDate = (day: string, month: string, year: string) => {
     if (!day || !month || !year) return '';
     return `${day.padStart(2, '0')}-${month.padStart(2, '0')}-${year}`;
   };
 
-  // =====================================================
-  // 📝 Handle การเปลี่ยนแปลงค่าใน input ทั่วไป
-  // =====================================================
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setFormData({
       ...formData,
@@ -154,9 +155,6 @@ export default function NewPatientPage() {
     });
   };
 
-  // =====================================================
-  // 🔐 Auto-generate password เมื่อกรอกวันเกิดครบ
-  // =====================================================
   useEffect(() => {
     if (formData.birth_day && formData.birth_month && formData.birth_year) {
       const autoPassword = generatePasswordFromBirthDate(
@@ -172,9 +170,6 @@ export default function NewPatientPage() {
     }
   }, [formData.birth_day, formData.birth_month, formData.birth_year]);
 
-  // =====================================================
-  // 🏠 Handler สำหรับรับข้อมูลที่อยู่จาก ThaiAddressSelector
-  // =====================================================
   const handleAddressChange = (data: {
     province: string;
     district: string;
@@ -184,116 +179,105 @@ export default function NewPatientPage() {
     setAddressData(data);
   };
 
-  // =====================================================
-  // ✅ Submit ฟอร์ม - ลงทะเบียนผู้ป่วยใหม่
-  // =====================================================
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError('');
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
 
-  // 🔍 Validate ข้อมูล
-  if (formData.password !== formData.confirmPassword) {
-    setError('รหัสผ่านไม่ตรงกัน');
-    return;
-  }
-
-  if (formData.id_card.length !== 13) {
-    setError('เลขบัตรประชาชนต้อง 13 หลัก');
-    return;
-  }
-
-  if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
-    setError('กรุณากรอกข้อมูล必填ให้ครบถ้วน');
-    return;
-  }
-
-  if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-    setError('กรุณากรอกวันเกิดให้ครบถ้วน');
-    return;
-  }
-
-  // ✅ ตรวจสอบที่อยู่
-  if (!addressData.province || !addressData.district || !addressData.subdistrict) {
-    setError('กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
-    return;
-  }
-
-  setLoading(true);
-
-  try {
-    // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
-    const birthYearAD = parseInt(formData.birth_year) - 543;
-    const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-
-    // ✅ รวมชื่อ-นามสกุล
-    const fullName = `${formData.first_name} ${formData.last_name}`;
-
-    // ✅ บันทึกผู้ป่วยใหม่
-    const result = await registerPatient({
-      id_card: formData.id_card,
-      password: formData.password,
-      first_name: formData.first_name,
-      last_name: formData.last_name,
-      hospital_number: formData.hospital_number,
-      birth_date: birthDate,
-      gender: formData.gender,
-      phone: formData.phone || undefined,
-      email: formData.email || undefined,
-      current_weight: formData.current_weight ? parseFloat(formData.current_weight) : undefined,
-      height: formData.height ? parseFloat(formData.height) : undefined,
-      waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
-      coach_id: formData.coach_id || undefined,
-      diabetes_type: formData.diabetes_type || undefined,
-      hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
-      notes: formData.notes || undefined,
-      
-      // ✅ ที่อยู่ - ส่งแยกฟิลด์
-      house_number: formData.house_number || undefined,
-      address_line1: formData.address_line1 || undefined,
-      soi: formData.soi || undefined,
-      road: formData.road || undefined,
-      village_no: formData.village_no || undefined,
-      village_name: formData.village_name || undefined,
-      subdistrict: addressData.subdistrict || undefined,  // ✅ จาก ThaiAddressSelector
-      district: addressData.district || undefined,        // ✅ จาก ThaiAddressSelector
-      province: addressData.province || undefined,        // ✅ จาก ThaiAddressSelector
-      postal_code: addressData.postalCode || undefined,   // ✅ จาก ThaiAddressSelector
-      subdistrict_health_center: formData.subdistrict_health_center || undefined,
-      
-      emergency_contact_name: formData.emergency_contact_name || undefined,
-      emergency_contact_phone: formData.emergency_contact_phone || undefined,
-      emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
-      occupation: formData.occupation || undefined,
-      education_level: formData.education_level || undefined,
-      
-      // ✅ สำคัญ: กำหนดค่าเริ่มต้นสำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
-      pam_level: 'L0',      // ระดับ L0 = ยังไม่ได้ประเมิน
-      pam_score: 0,          // คะแนนเริ่มต้น 0
-      zone: 'Zero Zone',     // โซนเริ่มต้น
-      
-      created_by: user?.id,
-    });
-
-    setLoading(false);
-
-    if (result.success) {
-      setSuccess(true);
-      setTimeout(() => {
-        router.push('/admin/patients');
-      }, 2000);
-    } else {
-      setError(result.error || 'เกิดข้อผิดพลาด');
+    if (formData.password !== formData.confirmPassword) {
+      setError('รหัสผ่านไม่ตรงกัน');
+      return;
     }
-  } catch (err) {
-    console.error('Registration error:', err);
-    setError('เกิดข้อผิดพลาดในการลงทะเบียน');
-    setLoading(false);
-  }
-};
 
-  // =====================================================
-  // ✅ แสดงหน้าสำเร็จ
-  // =====================================================
+    if (formData.id_card.length !== 13) {
+      setError('เลขบัตรประชาชนต้อง 13 หลัก');
+      return;
+    }
+
+    if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
+      setError('กรุณากรอกข้อมูล必填ให้ครบถ้วน');
+      return;
+    }
+
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+      setError('กรุณากรอกวันเกิดให้ครบถ้วน');
+      return;
+    }
+
+    if (!addressData.province || !addressData.district || !addressData.subdistrict) {
+      setError('กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const birthYearAD = parseInt(formData.birth_year) - 543;
+      const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
+
+      const result = await registerPatient({
+        id_card: formData.id_card,
+        password: formData.password,
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        hospital_number: formData.hospital_number,
+        birth_date: birthDate,
+        gender: formData.gender,
+        phone: formData.phone || undefined,
+        email: formData.email || undefined,
+        current_weight: formData.current_weight ? parseFloat(formData.current_weight) : undefined,
+        height: formData.height ? parseFloat(formData.height) : undefined,
+        waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
+        coach_id: formData.coach_id || undefined,
+        diabetes_type: formData.diabetes_type || undefined,
+        blood_sugar: formData.blood_sugar ? parseFloat(formData.blood_sugar) : undefined,
+        hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
+        notes: formData.notes || undefined,
+        
+        house_number: formData.house_number || undefined,
+        address_line1: formData.address_line1 || undefined,
+        soi: formData.soi || undefined,
+        road: formData.road || undefined,
+        village_no: formData.village_no || undefined,
+        village_name: formData.village_name || undefined,
+        subdistrict: addressData.subdistrict || undefined,
+        district: addressData.district || undefined,
+        province: addressData.province || undefined,
+        postal_code: addressData.postalCode || undefined,
+        subdistrict_health_center: formData.subdistrict_health_center || undefined,
+        
+        emergency_contact_name: formData.emergency_contact_name || undefined,
+        emergency_contact_phone: formData.emergency_contact_phone || undefined,
+        emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
+        occupation: formData.occupation || undefined,
+        education_level: formData.education_level || undefined,
+        
+        hospital_id: formData.hospital_id || undefined,
+        village_id: formData.village_id || undefined,
+        
+        pam_level: 'L0',
+        pam_score: 0,
+        zone: 'Zero Zone',
+        
+        created_by: user?.id,
+      });
+
+      setLoading(false);
+
+      if (result.success) {
+        setSuccess(true);
+        setTimeout(() => {
+          router.push('/admin/patients');
+        }, 2000);
+      } else {
+        setError(result.error || 'เกิดข้อผิดพลาด');
+      }
+    } catch (err) {
+      console.error('Registration error:', err);
+      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
+      setLoading(false);
+    }
+  };
+
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-cyan-50">
@@ -314,9 +298,6 @@ const handleSubmit = async (e: React.FormEvent) => {
     );
   }
 
-  // =====================================================
-  // ⏳ แสดงหน้าโหลด
-  // =====================================================
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -325,12 +306,8 @@ const handleSubmit = async (e: React.FormEvent) => {
     );
   }
 
-  // =====================================================
-  // 📋 ฟอร์มลงทะเบียน
-  // =====================================================
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-5xl mx-auto px-4 py-6">
           <button
@@ -352,7 +329,6 @@ const handleSubmit = async (e: React.FormEvent) => {
         </div>
       </div>
 
-      {/* Form */}
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6">
         
         {/* 1. ข้อมูลบัญชี */}
@@ -396,7 +372,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 required
                 readOnly
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
-                placeholder="ระบบจะสร้างอัตโนมัติ"  // ✅ เปลี่ยนจาก "会自动生成"
+                placeholder="ระบบจะสร้างอัตโนมัติ"
               />
               <p className="text-xs text-gray-500 mt-1">
                 💡 รหัสผ่านเริ่มต้น: วันเกิดในรูปแบบ dd-mm-yyyy (ปี พ.ศ.)
@@ -415,7 +391,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 required
                 readOnly
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
-                placeholder="ระบบจะสร้างอัตโนมัติ"  // ✅ เปลี่ยนจาก "会自动生成"
+                placeholder="ระบบจะสร้างอัตโนมัติ"
               />
             </div>
           </div>
@@ -487,9 +463,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 >
                   <option value="">วัน</option>
                   {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                    <option key={day} value={day}>
-                      {day}
-                    </option>
+                    <option key={day} value={day}>{day}</option>
                   ))}
                 </select>
 
@@ -502,9 +476,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 >
                   <option value="">เดือน</option>
                   {THAI_MONTHS.map((month, index) => (
-                    <option key={index + 1} value={index + 1}>
-                      {month}
-                    </option>
+                    <option key={index + 1} value={index + 1}>{month}</option>
                   ))}
                 </select>
 
@@ -517,9 +489,7 @@ const handleSubmit = async (e: React.FormEvent) => {
                 >
                   <option value="">ปี พ.ศ.</option>
                   {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
+                    <option key={year} value={year}>{year}</option>
                   ))}
                 </select>
               </div>
@@ -634,12 +604,11 @@ const handleSubmit = async (e: React.FormEvent) => {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               >
                 <option value="">-- เลือก --</option>
-                <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>  {/* ✅ เปลี่ยนใหม่ */}
-                <option value="เบาหวาน">เบาหวาน</option>        {/* ✅ เปลี่ยนใหม่ */}
+                <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
+                <option value="เบาหวาน">เบาหวาน</option>
               </select>
             </div>
 
-            {/* ✅ เพิ่มฟิลด์ค่าน้ำตาล */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ค่าน้ำตาลในเลือด (mg/dL)
@@ -686,14 +655,56 @@ const handleSubmit = async (e: React.FormEvent) => {
           </div>
         </div>
 
-        {/* 4. ที่อยู่ - ใช้ ThaiAddressSelector */}
+        {/* 4. ที่อยู่และโรงพยาบาล */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 text-sm font-bold">4</span>
-            ที่อยู่
+            ที่อยู่และโรงพยาบาลสังกัด
           </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                โรงพยาบาลสังกัด
+              </label>
+              <select
+                name="hospital_id"
+                value={formData.hospital_id}
+                onChange={(e) => handleHospitalChange(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+              >
+                <option value="">-- เลือกโรงพยาบาล --</option>
+                {hospitals.map(hospital => (
+                  <option key={hospital.id} value={hospital.id}>
+                    {hospital.name} ({hospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {formData.hospital_id && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  หมู่บ้าน
+                </label>
+                <select
+                  name="village_id"
+                  value={formData.village_id}
+                  onChange={(e) => setFormData({...formData, village_id: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
+                >
+                  <option value="">-- เลือกหมู่บ้าน --</option>
+                  {villages.map(village => (
+                    <option key={village.id} value={village.id}>
+                      หมู่ {village.village_no} {village.village_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* เลขที่ + ที่อยู่เพิ่มเติม */}
             <div className="md:col-span-2">
               <div className="grid grid-cols-3 gap-4">
                 <div>
@@ -726,7 +737,6 @@ const handleSubmit = async (e: React.FormEvent) => {
               </div>
             </div>
 
-            {/* หมู่ที่/ชุมชน + หมู่บ้าน */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 หมู่ที่/ชุมชน
@@ -783,14 +793,12 @@ const handleSubmit = async (e: React.FormEvent) => {
               />
             </div>
 
-            {/* ThaiAddressSelector */}
             <div className="md:col-span-2">
               <ThaiAddressSelector 
                 onAddressChange={handleAddressChange}
               />
             </div>
 
-            {/* รพสต */}
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 🏥 รพสต (โรงพยาบาลส่งเสริมสุขภาพตำบล)
@@ -861,7 +869,7 @@ const handleSubmit = async (e: React.FormEvent) => {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช/หมอผู้ดูแล */}
+        {/* 6. กำหนดโค้ช */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -887,7 +895,6 @@ const handleSubmit = async (e: React.FormEvent) => {
           </div>
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
@@ -895,7 +902,6 @@ const handleSubmit = async (e: React.FormEvent) => {
           </div>
         )}
 
-        {/* Submit Button */}
         <div className="flex items-center gap-4">
           <button
             type="submit"
