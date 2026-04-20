@@ -187,108 +187,109 @@ export default function NewPatientPage() {
   // =====================================================
   // ✅ Submit ฟอร์ม - ลงทะเบียนผู้ป่วยใหม่
   // =====================================================
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setError('');
 
-    // 🔍 Validate ข้อมูล
-    if (formData.password !== formData.confirmPassword) {
-      setError('รหัสผ่านไม่ตรงกัน');
-      return;
+  // 🔍 Validate ข้อมูล
+  if (formData.password !== formData.confirmPassword) {
+    setError('รหัสผ่านไม่ตรงกัน');
+    return;
+  }
+
+  if (formData.id_card.length !== 13) {
+    setError('เลขบัตรประชาชนต้อง 13 หลัก');
+    return;
+  }
+
+  if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
+    setError('กรุณากรอกข้อมูล必填ให้ครบถ้วน');
+    return;
+  }
+
+  if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+    setError('กรุณากรอกวันเกิดให้ครบถ้วน');
+    return;
+  }
+
+  // ✅ ตรวจสอบที่อยู่
+  if (!addressData.province || !addressData.district || !addressData.subdistrict) {
+    setError('กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
+    const birthYearAD = parseInt(formData.birth_year) - 543;
+    const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
+
+    // ✅ รวมชื่อ-นามสกุล
+    const fullName = `${formData.first_name} ${formData.last_name}`;
+
+    // ✅ บันทึกผู้ป่วยใหม่
+    const result = await registerPatient({
+      id_card: formData.id_card,
+      password: formData.password,
+      first_name: formData.first_name,
+      last_name: formData.last_name,
+      hospital_number: formData.hospital_number,
+      birth_date: birthDate,
+      gender: formData.gender,
+      phone: formData.phone || undefined,
+      email: formData.email || undefined,
+      current_weight: formData.current_weight ? parseFloat(formData.current_weight) : undefined,
+      height: formData.height ? parseFloat(formData.height) : undefined,
+      waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
+      coach_id: formData.coach_id || undefined,
+      diabetes_type: formData.diabetes_type || undefined,
+      hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
+      notes: formData.notes || undefined,
+      
+      // ✅ ที่อยู่ - ส่งแยกฟิลด์
+      house_number: formData.house_number || undefined,
+      address_line1: formData.address_line1 || undefined,
+      soi: formData.soi || undefined,
+      road: formData.road || undefined,
+      village_no: formData.village_no || undefined,
+      village_name: formData.village_name || undefined,
+      subdistrict: addressData.subdistrict || undefined,  // ✅ จาก ThaiAddressSelector
+      district: addressData.district || undefined,        // ✅ จาก ThaiAddressSelector
+      province: addressData.province || undefined,        // ✅ จาก ThaiAddressSelector
+      postal_code: addressData.postalCode || undefined,   // ✅ จาก ThaiAddressSelector
+      subdistrict_health_center: formData.subdistrict_health_center || undefined,
+      
+      emergency_contact_name: formData.emergency_contact_name || undefined,
+      emergency_contact_phone: formData.emergency_contact_phone || undefined,
+      emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
+      occupation: formData.occupation || undefined,
+      education_level: formData.education_level || undefined,
+      
+      // ✅ สำคัญ: กำหนดค่าเริ่มต้นสำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
+      pam_level: 'L0',      // ระดับ L0 = ยังไม่ได้ประเมิน
+      pam_score: 0,          // คะแนนเริ่มต้น 0
+      zone: 'Zero Zone',     // โซนเริ่มต้น
+      
+      created_by: user?.id,
+    });
+
+    setLoading(false);
+
+    if (result.success) {
+      setSuccess(true);
+      setTimeout(() => {
+        router.push('/admin/patients');
+      }, 2000);
+    } else {
+      setError(result.error || 'เกิดข้อผิดพลาด');
     }
-
-    if (formData.id_card.length !== 13) {
-      setError('เลขบัตรประชาชนต้อง 13 หลัก');
-      return;
-    }
-
-    if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
-      setError('กรุณากรอกข้อมูล必填ให้ครบถ้วน');
-      return;
-    }
-
-    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      setError('กรุณากรอกวันเกิดให้ครบถ้วน');
-      return;
-    }
-
-    // ✅ ตรวจสอบที่อยู่
-    if (!addressData.province || !addressData.district || !addressData.subdistrict) {
-      setError('กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
-      const birthYearAD = parseInt(formData.birth_year) - 543;
-      const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-
-      // ✅ รวมชื่อ-นามสกุล
-      const fullName = `${formData.first_name} ${formData.last_name}`;
-
-      // ✅ บันทึกผู้ป่วยใหม่
-      const result = await registerPatient({
-        id_card: formData.id_card,
-        password: formData.password,
-        first_name: formData.first_name,
-        last_name: formData.last_name,
-        hospital_number: formData.hospital_number,
-        birth_date: birthDate,
-        gender: formData.gender,
-        phone: formData.phone || undefined,
-        email: formData.email || undefined,
-        current_weight: formData.current_weight ? parseFloat(formData.current_weight) : undefined,
-        height: formData.height ? parseFloat(formData.height) : undefined,
-        waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
-        coach_id: formData.coach_id || undefined,
-        diabetes_type: formData.diabetes_type || undefined,
-        blood_sugar: formData.blood_sugar ? parseFloat(formData.blood_sugar) : undefined,  // ✅ เพิ่มค่าน้ำตาล
-        hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
-        notes: formData.notes || undefined,
-        
-        // ✅ ที่อยู่ - ส่งแยกฟิลด์
-        house_number: formData.house_number || undefined,
-        address_line1: formData.address_line1 || undefined,
-        soi: formData.soi || undefined,
-        road: formData.road || undefined,
-        village_no: formData.village_no || undefined,
-        village_name: formData.village_name || undefined,
-        subdistrict: addressData.subdistrict || undefined,
-        district: addressData.district || undefined,
-        province: addressData.province || undefined,
-        postal_code: addressData.postalCode || undefined,
-        subdistrict_health_center: formData.subdistrict_health_center || undefined,
-        
-        emergency_contact_name: formData.emergency_contact_name || undefined,
-        emergency_contact_phone: formData.emergency_contact_phone || undefined,
-        emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
-        occupation: formData.occupation || undefined,
-        education_level: formData.education_level || undefined,
-        
-        // ✅ สำคัญ: กำหนด pam_level เป็น 'L0' สำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
-        pam_level: 'L0',
-        
-        created_by: user?.id,
-      });
-
-      setLoading(false);
-
-      if (result.success) {
-        setSuccess(true);
-        setTimeout(() => {
-          router.push('/admin/patients');
-        }, 2000);
-      } else {
-        setError(result.error || 'เกิดข้อผิดพลาด');
-      }
-    } catch (err) {
-      console.error('Registration error:', err);
-      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
-      setLoading(false);
-    }
-  };
+  } catch (err) {
+    console.error('Registration error:', err);
+    setError('เกิดข้อผิดพลาดในการลงทะเบียน');
+    setLoading(false);
+  }
+};
 
   // =====================================================
   // ✅ แสดงหน้าสำเร็จ
