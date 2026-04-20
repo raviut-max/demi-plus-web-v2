@@ -77,11 +77,7 @@ export default function NewPatientPage() {
     
     // ข้อมูลเพิ่มเติม
     diabetes_type: '',
-    
-    // วันที่วินิจฉัย (แยก 3 ช่อง)
-    diagnosis_day: '',
-    diagnosis_month: '',
-    diagnosis_year: '',
+    blood_sugar: '',  // ✅ เพิ่มค่าน้ำตาล
     
     hba1c_level: '',
     notes: '',
@@ -229,13 +225,6 @@ export default function NewPatientPage() {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
-      // ✅ รวมวันที่วินิจฉัยเป็น ค.ศ. (ถ้ามี)
-      let diagnosisDate = null;
-      if (formData.diagnosis_day && formData.diagnosis_month && formData.diagnosis_year) {
-        const diagnosisYearAD = parseInt(formData.diagnosis_year) - 543;
-        diagnosisDate = `${diagnosisYearAD}-${formData.diagnosis_month.padStart(2, '0')}-${formData.diagnosis_day.padStart(2, '0')}`;
-      }
-
       // ✅ รวมชื่อ-นามสกุล
       const fullName = `${formData.first_name} ${formData.last_name}`;
 
@@ -243,7 +232,6 @@ export default function NewPatientPage() {
       const result = await registerPatient({
         id_card: formData.id_card,
         password: formData.password,
-        //full_name: fullName,
         first_name: formData.first_name,
         last_name: formData.last_name,
         hospital_number: formData.hospital_number,
@@ -256,7 +244,7 @@ export default function NewPatientPage() {
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
         coach_id: formData.coach_id || undefined,
         diabetes_type: formData.diabetes_type || undefined,
-        diagnosis_date: diagnosisDate || undefined,
+        blood_sugar: formData.blood_sugar ? parseFloat(formData.blood_sugar) : undefined,  // ✅ เพิ่มค่าน้ำตาล
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
         notes: formData.notes || undefined,
         
@@ -267,10 +255,10 @@ export default function NewPatientPage() {
         road: formData.road || undefined,
         village_no: formData.village_no || undefined,
         village_name: formData.village_name || undefined,
-        subdistrict: addressData.subdistrict || undefined,  // ✅ จาก ThaiAddressSelector
-        district: addressData.district || undefined,        // ✅ จาก ThaiAddressSelector
-        province: addressData.province || undefined,        // ✅ จาก ThaiAddressSelector
-        postal_code: addressData.postalCode || undefined,   // ✅ จาก ThaiAddressSelector
+        subdistrict: addressData.subdistrict || undefined,
+        district: addressData.district || undefined,
+        province: addressData.province || undefined,
+        postal_code: addressData.postalCode || undefined,
         subdistrict_health_center: formData.subdistrict_health_center || undefined,
         
         emergency_contact_name: formData.emergency_contact_name || undefined,
@@ -279,10 +267,8 @@ export default function NewPatientPage() {
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
         
-        // ✅ สำคัญ: กำหนดค่าเริ่มต้นสำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
-        pam_level: 'L0',           // ระดับ L0 = ยังไม่ได้ประเมิน
-        pam_score: 0,               // คะแนนเริ่มต้น 0
-        zone: 'Zero Zone',          // โซนเริ่มต้น
+        // ✅ สำคัญ: กำหนด pam_level เป็น 'L0' สำหรับผู้ป่วยใหม่ (ยังไม่ทำ screening)
+        pam_level: 'L0',
         
         created_by: user?.id,
       });
@@ -409,7 +395,7 @@ export default function NewPatientPage() {
                 required
                 readOnly
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
-                placeholder="会自动生成"
+                placeholder="ระบบจะสร้างอัตโนมัติ"  // ✅ เปลี่ยนจาก "会自动生成"
               />
               <p className="text-xs text-gray-500 mt-1">
                 💡 รหัสผ่านเริ่มต้น: วันเกิดในรูปแบบ dd-mm-yyyy (ปี พ.ศ.)
@@ -428,7 +414,7 @@ export default function NewPatientPage() {
                 required
                 readOnly
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
-                placeholder="会自动生成"
+                placeholder="ระบบจะสร้างอัตโนมัติ"  // ✅ เปลี่ยนจาก "会自动生成"
               />
             </div>
           </div>
@@ -647,60 +633,25 @@ export default function NewPatientPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               >
                 <option value="">-- เลือก --</option>
-                <option value="Type 1">Type 1</option>
-                <option value="Type 2">Type 2</option>
-                <option value="Gestational">Gestational</option>
-                <option value="Other">Other</option>
+                <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>  {/* ✅ เปลี่ยนใหม่ */}
+                <option value="เบาหวาน">เบาหวาน</option>        {/* ✅ เปลี่ยนใหม่ */}
               </select>
             </div>
 
-            <div className="md:col-span-2">
+            {/* ✅ เพิ่มฟิลด์ค่าน้ำตาล */}
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                วันที่วินิจฉัย
+                ค่าน้ำตาลในเลือด (mg/dL)
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                <select
-                  name="diagnosis_day"
-                  value={formData.diagnosis_day}
-                  onChange={handleChange}
-                  className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                >
-                  <option value="">วัน</option>
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                    <option key={day} value={day}>
-                      {day}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  name="diagnosis_month"
-                  value={formData.diagnosis_month}
-                  onChange={handleChange}
-                  className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                >
-                  <option value="">เดือน</option>
-                  {THAI_MONTHS.map((month, index) => (
-                    <option key={index + 1} value={index + 1}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  name="diagnosis_year"
-                  value={formData.diagnosis_year}
-                  onChange={handleChange}
-                  className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                >
-                  <option value="">ปี พ.ศ.</option>
-                  {Array.from({ length: 30 }, (_, i) => 2567 - i).map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <input
+                type="number"
+                name="blood_sugar"
+                value={formData.blood_sugar}
+                onChange={handleChange}
+                step="0.1"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="เช่น 110"
+              />
             </div>
 
             <div>
