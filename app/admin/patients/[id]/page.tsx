@@ -29,6 +29,52 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
+// ✅ เพิ่ม type definitions
+interface Patient {
+  id: string;
+  hospital_number: string;
+  first_name: string;
+  last_name: string;
+  full_name?: string;
+  birth_date: string;
+  gender: string;
+  phone?: string;
+  email?: string;
+  current_weight?: number;
+  height?: number;
+  waist_circumference?: number;
+  diabetes_type?: string;
+  diagnosis_date?: string;
+  hba1c_level?: number;
+  notes?: string;
+  occupation?: string;
+  education_level?: string;
+  house_number?: string;
+  address_line1?: string;
+  village_no?: string;
+  village_name?: string;
+  soi?: string;
+  road?: string;
+  subdistrict?: string;
+  district?: string;
+  province?: string;
+  postal_code?: string;
+  subdistrict_health_center?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_contact_relationship?: string;
+  pam_level: string;
+  pam_score: number;
+  zone: string;
+  current_step: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  users?: {
+    id_card: string;
+  };
+}
+
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
@@ -36,7 +82,7 @@ export default function PatientDetailPage() {
 
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState<any>(null);
+  const [patient, setPatient] = useState<Patient | null>(null);
   
   // State สำหรับการ์ดสรุป
   const [nextAppointment, setNextAppointment] = useState<any>(null);
@@ -79,7 +125,7 @@ export default function PatientDetailPage() {
       // ตรวจสอบว่ามี baseline แล้วหรือไม่
       await checkBaselineAndAppointments();
     } catch (error) {
-      console.error('Error loading patient ', error);
+      console.error('Error loading patient:', error);
     } finally {
       setLoading(false);
     }
@@ -165,7 +211,7 @@ export default function PatientDetailPage() {
     router.push('/admin/login');
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString: string | null | undefined) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
     return date.toLocaleDateString('th-TH', {
@@ -175,7 +221,7 @@ export default function PatientDetailPage() {
     });
   };
 
-  const calculateAge = (birthDateString: string) => {
+  const calculateAge = (birthDateString: string | null | undefined) => {
     if (!birthDateString) return '-';
     const birthDate = new Date(birthDateString);
     const today = new Date();
@@ -188,10 +234,11 @@ export default function PatientDetailPage() {
   };
 
   const getPatientName = () => {
-    if (patient?.first_name && patient?.last_name) {
+    if (!patient) return 'ไม่ระบุชื่อ';
+    if (patient.first_name && patient.last_name) {
       return `${patient.first_name} ${patient.last_name}`;
     }
-    return patient?.full_name || 'ไม่ระบุชื่อ';
+    return patient.full_name || 'ไม่ระบุชื่อ';
   };
 
   const getFullAddress = () => {
@@ -332,7 +379,7 @@ export default function PatientDetailPage() {
                     })}
                   </p>
                   <p className="text-xs opacity-75 mt-2">
-                    {nextAppointment.doctors?.full_name_th || 'แพทย์'}
+                    {(nextAppointment.doctors as any)?.full_name_th || 'แพทย์'}
                   </p>
                 </>
               ) : (
@@ -755,7 +802,8 @@ export default function PatientDetailPage() {
 
               <div className="p-4 rounded-lg border-2 bg-orange-50 border-orange-500">
                 <p className="text-sm text-gray-600 mb-1">คะแนน PAM</p>
-                <p className="text-2xl font-bold">{patient.pam_score || 18}</p>
+                {/* ✅ แก้ไข: ใช้ ?? แทน || เพื่อแสดงค่า 0 ได้ถูกต้อง */}
+                <p className="text-2xl font-bold">{patient.pam_score ?? 0}</p>
               </div>
             </div>
           </div>
