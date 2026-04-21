@@ -15,7 +15,6 @@ import {
   Users,
   Settings
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client';
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -61,6 +60,7 @@ export default function SettingsPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ แก้ไขตรงนี้ - กลับไปหน้า /admin (Dashboard) */}
           <button
             onClick={() => router.push('/admin')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"

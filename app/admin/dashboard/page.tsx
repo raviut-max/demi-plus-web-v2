@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getDashboardStats, getPatientList } from '@/lib/supabase/queries';
+import { checkSession, logout, getDashboardStats } from '@/lib/supabase/queries';
 import {
   Users,
   FileText,
@@ -14,11 +14,8 @@ import {
   UserCheck,
   Target,
   ClipboardCheck,
-  Stethoscope,
-  Activity,
   BarChart3,
-  Settings,
-  Award
+  Settings
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -81,7 +78,7 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - ลบ กิจกรรม, ความรู้, Mentor ออก
+  // ✅ เมนูจัดการระบบ - ลบ กิจกรรม, ความรู้, Mentor ออก (เหลือ 7 เมนู)
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -149,8 +146,9 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
+              {/* ✅ แก้ไขชื่อเป็น "DeMi+ หน้าหลัก" */}
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                DeMi+ Admin Dashboard
+                DeMi+ หน้าหลัก
               </h1>
               <p className="text-gray-600">
                 ระบบจัดการสำหรับเจ้าหน้าที่
