@@ -12,6 +12,7 @@ export default function HospitalsPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [hospitals, setHospitals] = useState<any[]>([]);
+  const [groupedHospitals, setGroupedHospitals] = useState<any[]>([]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -34,11 +35,50 @@ export default function HospitalsPage() {
 
       if (error) throw error;
       setHospitals(data || []);
+      
+      // ✅ จัดกลุ่มโรงพยาบาลแม่ข่ายกับลูกข่าย
+      const grouped = groupHospitals(data || []);
+      setGroupedHospitals(grouped);
     } catch (error) {
       console.error('Error loading hospitals:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล
+  const groupHospitals = (allHospitals: any[]) => {
+    const mainHospitals = allHospitals.filter(h => h.type === 'main');
+    const subHospitals = allHospitals.filter(h => h.type === 'sub');
+
+    // ✅ จัดกลุ่มโดยให้ลูกข่ายอยู่ใต้แม่ข่าย
+    const grouped = mainHospitals.map(main => {
+      const children = subHospitals.filter(sub => sub.parent_id === main.id);
+      return {
+        ...main,
+        children: children,
+        childrenCount: children.length,
+      };
+    });
+
+    // ✅ เพิ่มแม่ข่ายที่ไม่มีลูกข่าย (แสดงเดี่ยว)
+    const orphanSubs = subHospitals.filter(sub => {
+      const hasParent = mainHospitals.some(main => main.id === sub.parent_id);
+      return !hasParent;
+    });
+
+    // ✅ เพิ่มลูกข่ายที่ไม่มีแม่ข่าย (ถ้ามี)
+    if (orphanSubs.length > 0) {
+      grouped.push({
+        id: 'orphan',
+        name: 'โรงพยาบาลลูกข่าย (ไม่มีแม่ข่าย)',
+        type: 'orphan',
+        children: orphanSubs,
+        childrenCount: orphanSubs.length,
+      });
+    }
+
+    return grouped;
   };
 
   const handleDelete = async (id: string) => {
@@ -67,9 +107,6 @@ export default function HospitalsPage() {
     );
   }
 
-  const mainHospitals = hospitals.filter(h => h.type === 'main');
-  const subHospitals = hospitals.filter(h => h.type === 'sub');
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -89,7 +126,6 @@ export default function HospitalsPage() {
               </h1>
               <p className="text-gray-600">จัดการโรงพยาบาลแม่ข่ายและลูกข่าย</p>
             </div>
-            {/* ✅ แก้ไขตรงนี้ - เปลี่ยนจาก Modal เป็น Navigate ไปหน้าใหม่ */}
             <button
               onClick={() => router.push('/admin/hospitals/new')}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
@@ -103,110 +139,145 @@ export default function HospitalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* โรงพยาบาลแม่ข่าย */}
-        <div className="mb-8">
-          <h2 className="text-xl font-bold text-gray-800 mb-4">
-            🏥 โรงพยาบาลแม่ข่าย ({mainHospitals.length})
-          </h2>
-          {mainHospitals.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-              <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500 text-lg">ยังไม่มีโรงพยาบาลแม่ข่าย</p>
-              <button
-                onClick={() => router.push('/admin/hospitals/new')}
-                className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-              >
-                เพิ่มโรงพยาบาลแรก
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {mainHospitals.map(hospital => (
-                <div key={hospital.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <Building2 className="w-8 h-8 text-blue-600" />
+        {/* ✅ แสดงเป็นกลุ่ม แม่ข่าย + ลูกข่าย */}
+        <div className="space-y-8">
+          {groupedHospitals.map((group) => (
+            <div key={group.id} className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              {/* ✅ Header ของกลุ่ม (แม่ข่าย) */}
+              {group.type !== 'orphan' && (
+                <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <Building2 className="w-8 h-8" />
                       <div>
-                        <h3 className="font-bold text-gray-800">{hospital.name}</h3>
-                        <p className="text-sm text-gray-500">{hospital.code}</p>
+                        <h2 className="text-xl font-bold">{group.name}</h2>
+                        <p className="text-blue-100 text-sm">{group.code}</p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => router.push(`/admin/hospitals/${hospital.id}/edit`)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(hospital.id)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="space-y-2 text-sm text-gray-600">
-                    <p>📍 {hospital.province} {hospital.district}</p>
-                    <p>📞 {hospital.phone || '-'}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* โรงพยาบาลลูกข่าย */}
-        <div>
-          <h2 className="text-xl font-bold text-gray-800 mb-4">
-            🏥 โรงพยาบาลลูกข่าย ({subHospitals.length})
-          </h2>
-          {subHospitals.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-xl border border-gray-200">
-              <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500 text-lg">ยังไม่มีโรงพยาบาลลูกข่าย</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {subHospitals.map(hospital => {
-                const parent = hospitals.find(h => h.id === hospital.parent_id);
-                return (
-                  <div key={hospital.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-3">
-                        <Building2 className="w-8 h-8 text-green-600" />
-                        <div>
-                          <h3 className="font-bold text-gray-800">{hospital.name}</h3>
-                          <p className="text-sm text-gray-500">{hospital.code}</p>
-                        </div>
-                      </div>
+                    <div className="flex items-center gap-4">
+                      <span className="bg-white/20 px-3 py-1 rounded-full text-sm">
+                        {group.childrenCount} ลูกข่าย
+                      </span>
                       <div className="flex gap-2">
                         <button
-                          onClick={() => router.push(`/admin/hospitals/${hospital.id}/edit`)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                          onClick={() => router.push(`/admin/hospitals/${group.id}/edit`)}
+                          className="p-2 hover:bg-white/20 rounded-lg transition-all"
                         >
                           <Edit className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleDelete(hospital.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                          onClick={() => handleDelete(group.id)}
+                          className="p-2 hover:bg-white/20 rounded-lg transition-all"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
-                    <div className="space-y-2 text-sm text-gray-600">
-                      <p>🏢 แม่ข่าย: {parent?.name || '-'}</p>
-                      <p>📍 {hospital.province} {hospital.district}</p>
-                      <p>📞 {hospital.phone || '-'}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ รายการลูกข่าย */}
+              <div className="p-6">
+                {group.type === 'orphan' ? (
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                      <Building2 className="w-5 h-5 text-orange-500" />
+                      {group.name}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {group.children.map((sub: any) => (
+                        <HospitalCard 
+                          key={sub.id} 
+                          hospital={sub} 
+                          onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
+                          onDelete={() => handleDelete(sub.id)}
+                        />
+                      ))}
                     </div>
                   </div>
-                );
-              })}
+                ) : group.children.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {group.children.map((sub: any) => (
+                      <HospitalCard 
+                        key={sub.id} 
+                        hospital={sub} 
+                        onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
+                        onDelete={() => handleDelete(sub.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>ยังไม่มีโรงพยาบาลลูกข่าย</p>
+                    <button
+                      onClick={() => router.push(`/admin/hospitals/new?type=sub&parent=${group.id}`)}
+                      className="mt-2 text-blue-500 hover:text-blue-600 font-medium"
+                    >
+                      + เพิ่มลูกข่าย
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
+          ))}
+        </div>
+
+        {groupedHospitals.length === 0 && (
+          <div className="text-center py-12">
+            <Building2 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500 text-lg">ยังไม่มีโรงพยาบาล</p>
+            <button
+              onClick={() => router.push('/admin/hospitals/new')}
+              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+            >
+              เพิ่มโรงพยาบาลแรก
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ✅ Component สำหรับแสดงการ์ดโรงพยาบาลลูกข่าย
+function HospitalCard({ hospital, onEdit, onDelete }: { 
+  hospital: any; 
+  onEdit: () => void; 
+  onDelete: () => void;
+}) {
+  return (
+    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 hover:shadow-md transition-all">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <Building2 className="w-6 h-6 text-green-600" />
+          <div>
+            <h3 className="font-semibold text-gray-800">{hospital.name}</h3>
+            <p className="text-sm text-gray-500">{hospital.code}</p>
+          </div>
+        </div>
+        <div className="flex gap-1">
+          <button
+            onClick={onEdit}
+            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-all"
+          >
+            <Edit className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-all"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
+      
+      {hospital.phone && (
+        <div className="text-sm text-gray-600 flex items-center gap-2">
+          <span>📞</span>
+          <span>{hospital.phone}</span>
+        </div>
+      )}
     </div>
   );
 }
