@@ -305,44 +305,53 @@ export default function PatientDetailPage() {
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {/* ปุ่มแก้ไขข้อมูล */}
-              <button
-                onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-              >
-                <Edit className="w-4 h-4" />
-                แก้ไขข้อมูล
-              </button>
+<div className="flex flex-wrap gap-2">
+  {/* ปุ่มแก้ไขข้อมูล */}
+  <button
+    onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
+    className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+  >
+    <Edit className="w-4 h-4" />
+    แก้ไขข้อมูล
+  </button>
 
-              {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อไม่มี baseline */}
-              {!baselineLoading && !hasBaseline && (
-                <button
-                  onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
-                  className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
-                >
-                  <FileText className="w-4 h-4" />
-                  บันทึกข้อมูลเริ่มต้น
-                </button>
-              )}
+  {/* ✅ ปุ่มบันทึกข้อมูลเริ่มต้น - แสดงเฉพาะเมื่อยังไม่มีการติดตามใดๆ */}
+  {!baselineLoading && !hasBaseline && !hasCompletedAppointment && (
+    <button
+      onClick={() => router.push(`/admin/patients/${patientId}/baseline`)}
+      className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+    >
+      <FileText className="w-4 h-4" />
+      บันทึกข้อมูลเริ่มต้น
+    </button>
+  )}
 
-              {/* ✅ แสดงสถานะถ้ามี baseline แล้ว */}
-              {!baselineLoading && hasBaseline && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
-                  <FileText className="w-4 h-4" />
-                  <span>มีข้อมูลเริ่มต้นแล้ว</span>
-                </div>
-              )}
+  {/* ✅ แสดงสถานะถ้ามี baseline แล้ว */}
+  {!baselineLoading && hasBaseline && (
+    <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
+      <FileText className="w-4 h-4" />
+      <span>มีข้อมูลเริ่มต้นแล้ว</span>
+    </div>
+  )}
 
-              {/* ปุ่มออกจากระบบ */}
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
-              >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
-              </button>
-            </div>
+  {/* ✅ แสดงสถานะถ้ามีนัดหมายเสร็จสิ้นแล้ว */}
+  {!baselineLoading && hasCompletedAppointment && (
+    <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-200">
+      <Calendar className="w-4 h-4" />
+      <span>มีการติดตามแล้ว</span>
+    </div>
+  )}
+
+  {/* ปุ่มออกจากระบบ */}
+  <button
+    onClick={handleLogout}
+    className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+  >
+    <LogOut className="w-4 h-4" />
+    ออกจากระบบ
+  </button>
+</div>
+
           </div>
         </div>
       </div>
