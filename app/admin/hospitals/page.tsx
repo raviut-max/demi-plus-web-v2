@@ -4,9 +4,8 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
-import { Building2, Plus, Edit, Trash2, X } from 'lucide-react';
+import { Building2, Plus, Edit, Trash2, X, ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { getProvinces, getDistricts, getSubdistricts } from '@/lib/supabase/queries';
 
 export default function HospitalsPage() {
   const router = useRouter();
@@ -19,7 +18,7 @@ export default function HospitalsPage() {
   // ✅ State สำหรับจังหวัด/อำเภอ/ตำบล
   const [provinces, setProvinces] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
-  const [subdistricts, setSubdistricts] = useState<any[]>([]);
+  const [subdistricts, setSubdistricts] = useState<string[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -33,6 +32,8 @@ export default function HospitalsPage() {
     postal_code: '',
     phone: '',
   });
+
+  const [mainHospitals, setMainHospitals] = useState<any[]>([]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -56,6 +57,7 @@ export default function HospitalsPage() {
 
       if (error) throw error;
       setHospitals(data || []);
+      setMainHospitals(data?.filter(h => h.type === 'main') || []);
     } catch (error) {
       console.error('Error loading hospitals:', error);
     } finally {
@@ -63,12 +65,22 @@ export default function HospitalsPage() {
     }
   };
 
-  // ✅ โหลดรายการจังหวัด
+  // ✅ โหลดรายการจังหวัดจากตาราง villages
   const loadProvinces = async () => {
     try {
       setLoadingLocations(true);
-      const provincesList = await getProvinces();
-      setProvinces(provincesList);
+      const { data, error } = await supabase
+        .from('villages')
+        .select('province')
+        .neq('province', null)
+        .order('province', { ascending: true });
+
+      if (error) throw error;
+
+      // ✅ ดึง province ที่ไม่ซ้ำกัน
+      const uniqueProvinces = [...new Set(data?.map(v => v.province) || [])];
+      setProvinces(uniqueProvinces);
+      console.log('✅ Loaded provinces:', uniqueProvinces.length);
     } catch (error) {
       console.error('Error loading provinces:', error);
     } finally {
@@ -76,7 +88,7 @@ export default function HospitalsPage() {
     }
   };
 
-  // ✅ เมื่อเลือกจังหวัด ให้โหลดอำเภอ
+  // ✅ เมื่อเลือกจังหวัด → โหลดอำเภอ
   const handleProvinceChange = async (province: string) => {
     setFormData({ 
       ...formData, 
@@ -91,8 +103,18 @@ export default function HospitalsPage() {
     if (province) {
       try {
         setLoadingLocations(true);
-        const districtsList = await getDistricts(province);
-        setDistricts(districtsList);
+        const { data, error } = await supabase
+          .from('villages')
+          .select('district')
+          .eq('province', province)
+          .neq('district', null)
+          .order('district', { ascending: true });
+
+        if (error) throw error;
+
+        const uniqueDistricts = [...new Set(data?.map(v => v.district) || [])];
+        setDistricts(uniqueDistricts);
+        console.log('✅ Loaded districts:', uniqueDistricts.length);
       } catch (error) {
         console.error('Error loading districts:', error);
       } finally {
@@ -101,7 +123,7 @@ export default function HospitalsPage() {
     }
   };
 
-  // ✅ เมื่อเลือกอำเภอ ให้โหลดตำบล
+  // ✅ เมื่อเลือกอำเภอ → โหลดตำบล
   const handleDistrictChange = async (district: string) => {
     setFormData({ 
       ...formData, 
@@ -114,8 +136,19 @@ export default function HospitalsPage() {
     if (district && formData.province) {
       try {
         setLoadingLocations(true);
-        const subdistrictsList = await getSubdistricts(formData.province, district);
-        setSubdistricts(subdistrictsList);
+        const { data, error } = await supabase
+          .from('villages')
+          .select('subdistrict, postal_code')
+          .eq('province', formData.province)
+          .eq('district', district)
+          .neq('subdistrict', null)
+          .order('subdistrict', { ascending: true });
+
+        if (error) throw error;
+
+        const uniqueSubdistricts = [...new Set(data?.map(v => v.subdistrict) || [])];
+        setSubdistricts(uniqueSubdistricts);
+        console.log('✅ Loaded subdistricts:', uniqueSubdistricts.length);
       } catch (error) {
         console.error('Error loading subdistricts:', error);
       } finally {
@@ -124,8 +157,30 @@ export default function HospitalsPage() {
     }
   };
 
-  // ✅ เมื่อเลือกตำบล ให้กรอกรหัสไปรษณีย์อัตโนมัติ
-  const handleSubdistrictChange = (subdistrict: string, postalCode: string) => {
+  // ✅ เมื่อเลือกตำบล → กรอกรหัสไปรษณีย์อัตโนมัติ
+  const handleSubdistrictChange = async (subdistrict: string) => {
+    let postalCode = '';
+    
+    if (subdistrict && formData.province && formData.district) {
+      try {
+        const { data, error } = await supabase
+          .from('villages')
+          .select('postal_code')
+          .eq('province', formData.province)
+          .eq('district', formData.district)
+          .eq('subdistrict', subdistrict)
+          .neq('postal_code', null)
+          .limit(1)
+          .single();
+
+        if (!error && data) {
+          postalCode = data.postal_code;
+        }
+      } catch (error) {
+        console.error('Error loading postal code:', error);
+      }
+    }
+
     setFormData({ 
       ...formData, 
       subdistrict,
@@ -216,13 +271,51 @@ export default function HospitalsPage() {
     
     // ✅ โหลดอำเภอและตำบลของโรงพยาบาลนี้
     if (hospital.province) {
-      getDistricts(hospital.province).then(setDistricts);
-      if (hospital.district) {
-        getSubdistricts(hospital.province, hospital.district).then(setSubdistricts);
-      }
+      loadDistrictsForEdit(hospital.province, hospital.district);
     }
     
     setShowModal(true);
+  };
+
+  const loadDistrictsForEdit = async (province: string, district?: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('villages')
+        .select('district')
+        .eq('province', province)
+        .neq('district', null)
+        .order('district', { ascending: true });
+
+      if (error) throw error;
+
+      const uniqueDistricts = [...new Set(data?.map(v => v.district) || [])];
+      setDistricts(uniqueDistricts);
+
+      if (district) {
+        loadSubdistrictsForEdit(province, district);
+      }
+    } catch (error) {
+      console.error('Error loading districts for edit:', error);
+    }
+  };
+
+  const loadSubdistrictsForEdit = async (province: string, district: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('villages')
+        .select('subdistrict, postal_code')
+        .eq('province', province)
+        .eq('district', district)
+        .neq('subdistrict', null)
+        .order('subdistrict', { ascending: true });
+
+      if (error) throw error;
+
+      const uniqueSubdistricts = [...new Set(data?.map(v => v.subdistrict) || [])];
+      setSubdistricts(uniqueSubdistricts);
+    } catch (error) {
+      console.error('Error loading subdistricts for edit:', error);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -269,8 +362,8 @@ export default function HospitalsPage() {
     );
   }
 
-  const mainHospitals = hospitals.filter(h => h.type === 'main');
-  const subHospitals = hospitals.filter(h => h.type === 'sub');
+  const mainHospitalsList = hospitals.filter(h => h.type === 'main');
+  const subHospitalsList = hospitals.filter(h => h.type === 'sub');
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -281,7 +374,8 @@ export default function HospitalsPage() {
             onClick={() => router.push('/admin/settings')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            ← กลับ
+            <ArrowLeft className="w-4 h-4" />
+            กลับ
           </button>
           <div className="flex items-center justify-between">
             <div>
@@ -306,10 +400,10 @@ export default function HospitalsPage() {
         {/* โรงพยาบาลแม่ข่าย */}
         <div className="mb-8">
           <h2 className="text-xl font-bold text-gray-800 mb-4">
-            🏥 โรงพยาบาลแม่ข่าย ({mainHospitals.length})
+            🏥 โรงพยาบาลแม่ข่าย ({mainHospitalsList.length})
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {mainHospitals.map(hospital => (
+            {mainHospitalsList.map(hospital => (
               <div key={hospital.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex items-center gap-3">
@@ -346,10 +440,10 @@ export default function HospitalsPage() {
         {/* โรงพยาบาลลูกข่าย */}
         <div>
           <h2 className="text-xl font-bold text-gray-800 mb-4">
-            🏥 โรงพยาบาลลูกข่าย ({subHospitals.length})
+            🏥 โรงพยาบาลลูกข่าย ({subHospitalsList.length})
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {subHospitals.map(hospital => {
+            {subHospitalsList.map(hospital => {
               const parent = hospitals.find(h => h.id === hospital.parent_id);
               return (
                 <div key={hospital.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -407,7 +501,7 @@ export default function HospitalsPage() {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ประเภทโรงพยาบาล *
+                  ประเภทโรงพยาบาล <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={formData.type}
@@ -422,7 +516,7 @@ export default function HospitalsPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ชื่อโรงพยาบาล *
+                  ชื่อโรงพยาบาล <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -436,7 +530,7 @@ export default function HospitalsPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  รหัสโรงพยาบาล *
+                  รหัสโรงพยาบาล <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -451,7 +545,7 @@ export default function HospitalsPage() {
               {formData.type === 'sub' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    โรงพยาบาลแม่ข่าย *
+                    โรงพยาบาลแม่ข่าย <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.parent_id}
@@ -470,7 +564,7 @@ export default function HospitalsPage() {
               {/* ✅ จังหวัด */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  จังหวัด *
+                  จังหวัด <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={formData.province}
@@ -494,7 +588,7 @@ export default function HospitalsPage() {
               {formData.province && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    อำเภอ *
+                    อำเภอ <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.district}
@@ -516,23 +610,18 @@ export default function HospitalsPage() {
               {formData.district && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ตำบล *
+                    ตำบล <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.subdistrict}
-                    onChange={(e) => {
-                      const selected = subdistricts.find(s => s.subdistrict === e.target.value);
-                      if (selected) {
-                        handleSubdistrictChange(selected.subdistrict, selected.postal_code || '');
-                      }
-                    }}
+                    onChange={(e) => handleSubdistrictChange(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                     required
                   >
                     <option value="">-- เลือกตำบล --</option>
-                    {subdistricts.map((s) => (
-                      <option key={s.subdistrict} value={s.subdistrict}>
-                        {s.subdistrict}
+                    {subdistricts.map((subdistrict) => (
+                      <option key={subdistrict} value={subdistrict}>
+                        {subdistrict}
                       </option>
                     ))}
                   </select>
