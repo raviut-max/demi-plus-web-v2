@@ -2347,3 +2347,56 @@ export async function assignVolunteerVillage(data: {
     return { success: false, error: 'เกิดข้อผิดพลาดในการมอบหมายหมู่บ้าน' };
   }
 }
+
+// =====================================================
+// ฟังก์ชันดึงรายการจังหวัดทั้งหมด (จาก villages)
+// =====================================================
+export async function getProvinces() {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('province')
+      .neq('province', null)
+      .order('province', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching provinces:', error);
+      return [];
+    }
+
+    // ✅ ดึง province ที่ไม่ซ้ำกัน
+    const provinces = [...new Set(data?.map(v => v.province) || [])];
+    console.log('✅ Provinces fetched:', provinces.length);
+    return provinces;
+  } catch (err) {
+    console.error('Get provinces error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// ฟังก์ชันดึงรายการอำเภอในจังหวัดที่เลือก
+// =====================================================
+export async function getDistricts(province: string) {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('district')
+      .eq('province', province)
+      .neq('district', null)
+      .order('district', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching districts:', error);
+      return [];
+    }
+
+    // ✅ ดึง district ที่ไม่ซ้ำกัน
+    const districts = [...new Set(data?.map(v => v.district) || [])];
+    console.log('✅ Districts fetched for', province, ':', districts.length);
+    return districts;
+  } catch (err) {
+    console.error('Get districts error:', err);
+    return [];
+  }
+}
