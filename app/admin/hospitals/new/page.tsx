@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
 import { ArrowLeft, Building2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import HospitalAddressSelector from '@/components/HospitalAddressSelector';
 
 export default function NewHospitalPage() {
   const router = useRouter();
@@ -19,10 +18,6 @@ export default function NewHospitalPage() {
     code: '',
     type: 'main' as 'main' | 'sub',
     parent_id: '',
-    province: '',
-    district: '',
-    subdistrict: '',
-    phone: '',
   });
 
   useEffect(() => {
@@ -51,19 +46,6 @@ export default function NewHospitalPage() {
     }
   };
 
-  const handleAddressChange = (data: {
-    province: string;
-    district: string;
-    subdistrict: string;
-  }) => {
-    setFormData({
-      ...formData,
-      province: data.province,
-      district: data.district,
-      subdistrict: data.subdistrict,
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -76,10 +58,6 @@ export default function NewHospitalPage() {
           code: formData.code,
           type: formData.type,
           parent_id: formData.type === 'sub' ? formData.parent_id : null,
-          province: formData.province,
-          district: formData.district,
-          subdistrict: formData.subdistrict,
-          phone: formData.phone,
           is_active: true,
         });
 
@@ -99,7 +77,7 @@ export default function NewHospitalPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="max-w-2xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push('/admin/hospitals')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
@@ -118,7 +96,7 @@ export default function NewHospitalPage() {
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="max-w-4xl mx-auto px-4 py-8">
+      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-4 py-8">
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 space-y-6">
           
           {/* ประเภทโรงพยาบาล */}
@@ -186,28 +164,6 @@ export default function NewHospitalPage() {
               </select>
             </div>
           )}
-
-          {/* ✅ ที่อยู่ - ใช้ HospitalAddressSelector */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              📍 ที่อยู่โรงพยาบาล
-            </label>
-            <HospitalAddressSelector onAddressChange={handleAddressChange} />
-          </div>
-
-          {/* เบอร์โทรศัพท์ */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              เบอร์โทรศัพท์
-            </label>
-            <input
-              type="text"
-              value={formData.phone}
-              onChange={(e) => setFormData({...formData, phone: e.target.value})}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              placeholder="056-123456"
-            />
-          </div>
 
           {/* Submit Buttons */}
           <div className="flex gap-4 pt-6 border-t border-gray-200">
