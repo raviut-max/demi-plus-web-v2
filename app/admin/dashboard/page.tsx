@@ -1,25 +1,23 @@
-//  app/admin/dashboard/page.tsx
-
+// app/admin/dashboard/page.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getDashboardStats, getPatientList } from '@/lib/supabase/queries';
-import { 
-  Users, 
-  FileText, 
-  Calendar, 
-  Clock, 
-  LogOut, 
-  UserPlus, 
-  UserCheck, 
+import {
+  Users,
+  FileText,
+  Calendar,
+  Clock,
+  LogOut,
+  UserPlus,
+  UserCheck,
   Target,
   ClipboardCheck,
   Stethoscope,
   Activity,
   BarChart3,
   Settings,
-  BookOpen,
   Award
 } from 'lucide-react';
 
@@ -41,8 +39,8 @@ interface MenuItem {
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [stats, setStats] = useState<DashboardStats>({
+  const [user, setUser] = useState(null);
+  const [stats, setStats] = useState({
     totalPatients: 0,
     todayRecords: 0,
     todayAppointments: 0,
@@ -52,7 +50,6 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -84,75 +81,54 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - แก้ไข "กิจกรรม" เป็น "เป้าหมาย"
+  // ✅ เมนูจัดการระบบ - ลบ กิจกรรม, ความรู้, Mentor ออก
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
       description: 'เพิ่ม/แก้ไข/ดูข้อมูลผู้ป่วย',
-      icon: <Users className="w-8 h-8" />,
+      icon: <Users className="w-6 h-6" />,
       color: 'from-blue-500 to-cyan-500',
       href: '/admin/patients',
     },
     {
       title: 'แบบประเมิน',
       description: 'ทำแบบประเมิน PAM และ PROMs',
-      icon: <FileText className="w-8 h-8" />,
+      icon: <FileText className="w-6 h-6" />,
       color: 'from-purple-500 to-pink-500',
       href: '/admin/screening',
     },
     {
       title: 'เป้าหมาย',
       description: 'กำหนดและจัดการเป้าหมายผู้ป่วย',
-      icon: <Target className="w-8 h-8" />,
+      icon: <Target className="w-6 h-6" />,
       color: 'from-green-500 to-emerald-500',
       href: '/admin/goals',
     },
     {
       title: 'นัดหมาย',
       description: 'จัดการนัดหมายผู้ป่วย',
-      icon: <Calendar className="w-8 h-8" />,
+      icon: <Calendar className="w-6 h-6" />,
       color: 'from-orange-500 to-red-500',
       href: '/admin/appointments',
     },
     {
       title: 'จัดการเจ้าหน้าที่',
       description: 'เพิ่ม/แก้ไข/ดูข้อมูลเจ้าหน้าที่',
-      icon: <Stethoscope className="w-8 h-8" />,
+      icon: <UserCheck className="w-6 h-6" />,
       color: 'from-indigo-500 to-purple-500',
       href: '/admin/staff',
     },
     {
-      title: 'กิจกรรม',
-      description: 'จัดการกิจกรรมตาม PAM Level',
-      icon: <Activity className="w-8 h-8" />,
-      color: 'from-teal-500 to-cyan-500',
-      href: '/admin/activities',
-    },
-    {
       title: 'รายงาน',
       description: 'ดูสถิติและรายงาน',
-      icon: <BarChart3 className="w-8 h-8" />,
+      icon: <BarChart3 className="w-6 h-6" />,
       color: 'from-red-500 to-pink-500',
       href: '/admin/reports',
     },
     {
-      title: 'ความรู้',
-      description: 'จัดการบทความและวิดีโอ',
-      icon: <BookOpen className="w-8 h-8" />,
-      color: 'from-yellow-500 to-orange-500',
-      href: '/admin/knowledge',
-    },
-    {
-      title: 'Mentor',
-      description: 'จัดการ Mentor และ Mentee',
-      icon: <Award className="w-8 h-8" />,
-      color: 'from-violet-500 to-purple-500',
-      href: '/admin/mentors',
-    },
-    {
       title: 'ตั้งค่า',
-      description: 'ตั้งค่าระบบ',
-      icon: <Settings className="w-8 h-8" />,
+      description: 'ตั้งค่าระบบและจัดการข้อมูลพื้นฐาน',
+      icon: <Settings className="w-6 h-6" />,
       color: 'from-gray-500 to-slate-500',
       href: '/admin/settings',
     },
@@ -160,32 +136,34 @@ export default function AdminDashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-purple-50">
       {/* Header */}
       <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-800">DeMi+ Admin Dashboard</h1>
-              <p className="text-sm text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                DeMi+ Admin Dashboard
+              </h1>
+              <p className="text-gray-600">
+                ระบบจัดการสำหรับเจ้าหน้าที่
+              </p>
             </div>
+            
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <p className="text-sm font-semibold text-gray-800">
+                <p className="font-semibold text-gray-800">
                   {user?.full_name_th || 'ผู้ดูแลระบบ'}
                 </p>
-                <p className="text-xs text-gray-500">
-                  {user?.role === 'admin' ? 'ผู้ดูแลระบบ' : 
+                <p className="text-sm text-gray-500">
+                  {user?.role === 'admin' ? 'ผู้ดูแลระบบ' :
                    user?.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
                 </p>
               </div>
@@ -295,7 +273,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Menu Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {menuItems.map((item, index) => (
             <button
               key={index}
