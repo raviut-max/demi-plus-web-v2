@@ -60,9 +60,9 @@ export default function SettingsPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ แก้ไขตรงนี้ - กลับไปหน้า Dashboard (/admin) */}
+          {/* ✅ แก้ไขตรงนี้ - เปลี่ยนจาก /admin เป็น /admin/dashboard */}
           <button
-            onClick={() => router.push('/admin')}
+            onClick={() => router.push('/admin/dashboard')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
