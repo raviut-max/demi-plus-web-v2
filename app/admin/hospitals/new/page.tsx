@@ -7,13 +7,30 @@ import { checkSession } from '@/lib/supabase/queries';
 import { ArrowLeft, Building2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
+// ✅ รายการจังหวัดไทยทั้งหมด (ใช้เป็น fallback)
+const THAI_PROVINCES = [
+  'กระบี่', 'กรุงเทพมหานคร', 'กาญจนบุรี', 'กาฬสินธุ์', 'กำแพงเพชร', 'ขอนแก่น',
+  'จันทบุรี', 'ฉะเชิงเทรา', 'ชลบุรี', 'ชัยนาท', 'ชัยภูมิ', 'ชุมพร',
+  'เชียงราย', 'เชียงใหม่', 'ตรัง', 'ตราด', 'ตาก', 'นครนายก',
+  'นครปฐม', 'นครพนม', 'นครราชสีมา', 'นครศรีธรรมราช', 'นครสวรรค์', 'นนทบุรี',
+  'นราธิวาส', 'น่าน', 'บึงกาฬ', 'บุรีรัมย์', 'ปทุมธานี', 'ประจวบคีรีขันธ์',
+  'ปราจีนบุรี', 'ปัตตานี', 'พระนครศรีอยุธยา', 'พังงา', 'พัทลุง', 'พิจิตร',
+  'พิษณุโลก', 'เพชรบุรี', 'เพชรบูรณ์', 'แพร่', 'พะเยา', 'ภูเก็ต',
+  'มหาสารคาม', 'มุกดาหาร', 'แม่ฮ่องสอน', 'ยโสธร', 'ยะลา', 'ร้อยเอ็ด',
+  'ระนอง', 'ระยอง', 'ราชบุรี', 'ลพบุรี', 'ลำปาง', 'ลำพูน',
+  'เลย', 'ศรีสะเกษ', 'สกลนคร', 'สงขลา', 'สตูล', 'สมุทรปราการ',
+  'สมุทรสงคราม', 'สมุทรสาคร', 'สระแก้ว', 'สระบุรี', 'สิงห์บุรี', 'สุโขทัย',
+  'สุพรรณบุรี', 'สุราษฎร์ธานี', 'สุรินทร์', 'หนองคาย', 'หนองบัวลำภู', 'อ่างทอง',
+  'อุดรธานี', 'อุตรดิตถ์', 'อุทัยธานี', 'อุบลราชธานี', 'อำนาจเจริญ'
+];
+
 export default function NewHospitalPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingLocations, setLoadingLocations] = useState(false);
   
-  // ✅ State สำหรับจังหวัด/อำเภอ/ตำบล (ดึงจาก hospitals table)
+  // State สำหรับจังหวัด/อำเภอ/ตำบล
   const [provinces, setProvinces] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
   const [subdistricts, setSubdistricts] = useState<string[]>([]);
@@ -42,31 +59,39 @@ export default function NewHospitalPage() {
     loadMainHospitals();
   }, [router]);
 
-  // ✅ โหลดรายการจังหวัดจาก hospitals table (ไม่ใช้ villages)
+  // ✅ โหลดรายการจังหวัด - ดึงจาก villages หรือใช้รายการ default
   const loadProvinces = async () => {
     try {
       setLoadingLocations(true);
-      console.log('🔍 [DEBUG] Loading provinces from hospitals table...');
+      console.log('[DEBUG] Loading provinces...');
       
-      // ✅ ดึง province ที่ไม่ซ้ำกันจาก hospitals table
+      // พยายามดึงจาก villages table ก่อน
       const { data, error } = await supabase
-        .from('hospitals')
+        .from('villages')
         .select('province')
         .neq('province', null)
         .order('province', { ascending: true });
 
-      console.log('🔍 [DEBUG] Provinces query result:', { data, error });
+      console.log('[DEBUG] Villages query result:', { data, error });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error loading from villages:', error);
+      }
 
-      // ✅ ดึง province ที่ไม่ซ้ำกัน
-      const uniqueProvinces = [...new Set(data?.map(h => h.province).filter(Boolean) || [])];
-      console.log('🔍 [DEBUG] Unique provinces:', uniqueProvinces);
-      console.log('🔍 [DEBUG] Total provinces:', uniqueProvinces.length);
+      // ดึง province ที่ไม่ซ้ำกัน
+      const uniqueProvinces = [...new Set(data?.map(v => v.province).filter(Boolean) || [])];
       
-      setProvinces(uniqueProvinces);
+      console.log('[DEBUG] Unique provinces from villages:', uniqueProvinces);
+
+      // ✅ ถ้าไม่มีข้อมูลใน villages ให้ใช้รายการจังหวัดไทยทั้งหมด
+      const finalProvinces = uniqueProvinces.length > 0 ? uniqueProvinces : THAI_PROVINCES;
+      
+      console.log('[DEBUG] Final provinces:', finalProvinces.length);
+      setProvinces(finalProvinces);
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading provinces:', error);
+      console.error('Error loading provinces:', error);
+      // ✅ Fallback: ใช้รายการจังหวัดไทยทั้งหมด
+      setProvinces(THAI_PROVINCES);
     } finally {
       setLoadingLocations(false);
     }
@@ -84,15 +109,15 @@ export default function NewHospitalPage() {
 
       if (error) throw error;
       setMainHospitals(data || []);
-      console.log('🔍 [DEBUG] Main hospitals loaded:', data?.length || 0);
+      console.log('[DEBUG] Main hospitals loaded:', data?.length || 0);
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading main hospitals:', error);
+      console.error('Error loading main hospitals:', error);
     }
   };
 
-  // ✅ เมื่อเลือกจังหวัด → โหลดอำเภอจาก hospitals table
+  // ✅ เมื่อเลือกจังหวัด → โหลดอำเภอจาก villages
   const handleProvinceChange = async (province: string) => {
-    console.log('🔍 [DEBUG] Province changed to:', province);
+    console.log('[DEBUG] Province changed to:', province);
     setFormData({ 
       ...formData, 
       province, 
@@ -106,35 +131,32 @@ export default function NewHospitalPage() {
     if (province) {
       try {
         setLoadingLocations(true);
-        console.log('🔍 [DEBUG] Loading districts for province:', province);
-        
         const { data, error } = await supabase
-          .from('hospitals')
+          .from('villages')
           .select('district')
           .eq('province', province)
           .neq('district', null)
           .order('district', { ascending: true });
 
-        console.log('🔍 [DEBUG] Districts query result:', { data, error });
+        console.log('[DEBUG] Districts query result:', { data, error });
 
         if (error) throw error;
 
-        const uniqueDistricts = [...new Set(data?.map(h => h.district).filter(Boolean) || [])];
-        console.log('🔍 [DEBUG] Unique districts:', uniqueDistricts);
-        console.log('🔍 [DEBUG] Total districts:', uniqueDistricts.length);
+        const uniqueDistricts = [...new Set(data?.map(v => v.district).filter(Boolean) || [])];
+        console.log('[DEBUG] Unique districts:', uniqueDistricts);
         
         setDistricts(uniqueDistricts);
       } catch (error) {
-        console.error('❌ [DEBUG] Error loading districts:', error);
+        console.error('Error loading districts:', error);
       } finally {
         setLoadingLocations(false);
       }
     }
   };
 
-  // ✅ เมื่อเลือกอำเภอ → โหลดตำบลจาก hospitals table
+  // ✅ เมื่อเลือกอำเภอ → โหลดตำบลจาก villages
   const handleDistrictChange = async (district: string) => {
-    console.log('🔍 [DEBUG] District changed to:', district);
+    console.log('[DEBUG] District changed to:', district);
     setFormData({ 
       ...formData, 
       district, 
@@ -146,27 +168,24 @@ export default function NewHospitalPage() {
     if (district && formData.province) {
       try {
         setLoadingLocations(true);
-        console.log('🔍 [DEBUG] Loading subdistricts for:', formData.province, district);
-        
         const { data, error } = await supabase
-          .from('hospitals')
+          .from('villages')
           .select('subdistrict, postal_code')
           .eq('province', formData.province)
           .eq('district', district)
           .neq('subdistrict', null)
           .order('subdistrict', { ascending: true });
 
-        console.log('🔍 [DEBUG] Subdistricts query result:', { data, error });
+        console.log('[DEBUG] Subdistricts query result:', { data, error });
 
         if (error) throw error;
 
-        const uniqueSubdistricts = [...new Set(data?.map(h => h.subdistrict).filter(Boolean) || [])];
-        console.log('🔍 [DEBUG] Unique subdistricts:', uniqueSubdistricts);
-        console.log('🔍 [DEBUG] Total subdistricts:', uniqueSubdistricts.length);
+        const uniqueSubdistricts = [...new Set(data?.map(v => v.subdistrict).filter(Boolean) || [])];
+        console.log('[DEBUG] Unique subdistricts:', uniqueSubdistricts);
         
         setSubdistricts(uniqueSubdistricts);
       } catch (error) {
-        console.error('❌ [DEBUG] Error loading subdistricts:', error);
+        console.error('Error loading subdistricts:', error);
       } finally {
         setLoadingLocations(false);
       }
@@ -175,13 +194,13 @@ export default function NewHospitalPage() {
 
   // ✅ เมื่อเลือกตำบล → กรอกรหัสไปรษณีย์อัตโนมัติ
   const handleSubdistrictChange = async (subdistrict: string) => {
-    console.log('🔍 [DEBUG] Subdistrict changed to:', subdistrict);
+    console.log('[DEBUG] Subdistrict changed to:', subdistrict);
     let postalCode = '';
     
     if (subdistrict && formData.province && formData.district) {
       try {
         const { data, error } = await supabase
-          .from('hospitals')
+          .from('villages')
           .select('postal_code')
           .eq('province', formData.province)
           .eq('district', formData.district)
@@ -190,14 +209,14 @@ export default function NewHospitalPage() {
           .limit(1)
           .single();
 
-        console.log('🔍 [DEBUG] Postal code query result:', { data, error });
+        console.log('[DEBUG] Postal code query result:', { data, error });
 
         if (!error && data) {
           postalCode = data.postal_code;
-          console.log('🔍 [DEBUG] Postal code found:', postalCode);
+          console.log('[DEBUG] Postal code found:', postalCode);
         }
       } catch (error) {
-        console.error('❌ [DEBUG] Error loading postal code:', error);
+        console.error('Error loading postal code:', error);
       }
     }
 
@@ -210,7 +229,7 @@ export default function NewHospitalPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('🔍 [DEBUG] Form submitted with data:', formData);
+    console.log('[DEBUG] Form submitted with data:', formData);
     setLoading(true);
 
     try {
@@ -234,7 +253,7 @@ export default function NewHospitalPage() {
       alert('✅ เพิ่มโรงพยาบาลสำเร็จ!');
       router.push('/admin/hospitals');
     } catch (error: any) {
-      console.error('❌ [DEBUG] Error saving hospital:', error);
+      console.error('[DEBUG] Error saving hospital:', error);
       alert('❌ เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
@@ -242,7 +261,7 @@ export default function NewHospitalPage() {
   };
 
   // ✅ DEBUG: แสดง state
-  console.log('🔍 [DEBUG] Render with state:', {
+  console.log('[DEBUG] Render with state:', {
     provinces: provinces.length,
     districts: districts.length,
     subdistricts: subdistricts.length,
@@ -341,7 +360,7 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* ✅ จังหวัด - ดึงจาก hospitals table */}
+          {/* ✅ จังหวัด - ดึงจาก villages หรือใช้ default */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               จังหวัด <span className="text-red-500">*</span>
@@ -368,7 +387,7 @@ export default function NewHospitalPage() {
             </p>
           </div>
 
-          {/* ✅ อำเภอ - ดึงจาก hospitals table */}
+          {/* ✅ อำเภอ */}
           {formData.province && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -394,7 +413,7 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* ✅ ตำบล - ดึงจาก hospitals table */}
+          {/* ✅ ตำบล */}
           {formData.district && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
