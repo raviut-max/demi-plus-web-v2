@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase/client';
 
+// ✅ Interfaces สำหรับ Province, District, Subdistrict
 interface Province {
   id: string;
   name_th: string;
@@ -26,8 +27,9 @@ interface Subdistrict {
   zipcode: string;
 }
 
+// ✅ Props Interface - แก้ไขตรงนี้!
 interface HospitalAddressSelectorProps {
-  onAddressChange: ( {
+  onAddressChange?: (data: {
     province: string;
     district: string;
     subdistrict: string;
@@ -66,7 +68,7 @@ export default function HospitalAddressSelector({ onAddressChange }: HospitalAdd
         postalCode: subdistrictData?.zipcode || postalCode,
       });
     }
-  }, [selectedProvince, selectedDistrict, selectedSubdistrict, postalCode, provinces, districts, subdistricts]);
+  }, [selectedProvince, selectedDistrict, selectedSubdistrict, postalCode, provinces, districts, subdistricts, onAddressChange]);
 
   // ✅ โหลดอำเภอเมื่อเลือกจังหวัด
   useEffect(() => {
@@ -155,7 +157,7 @@ export default function HospitalAddressSelector({ onAddressChange }: HospitalAdd
   };
 
   // ✅ จัดการเมื่อเลือกตำบล
-  const handleSubdistrictChange = (e: React.ChangeEvent) => {
+  const handleSubdistrictChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const subdistrictName = e.target.value;
     setSelectedSubdistrict(subdistrictName);
     
