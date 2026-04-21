@@ -6,34 +6,12 @@ import { useRouter } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
 import { ArrowLeft, Building2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-
-// ✅ รายการจังหวัดไทยทั้งหมด (ใช้เป็น fallback)
-const THAI_PROVINCES = [
-  'กระบี่', 'กรุงเทพมหานคร', 'กาญจนบุรี', 'กาฬสินธุ์', 'กำแพงเพชร', 'ขอนแก่น',
-  'จันทบุรี', 'ฉะเชิงเทรา', 'ชลบุรี', 'ชัยนาท', 'ชัยภูมิ', 'ชุมพร',
-  'เชียงราย', 'เชียงใหม่', 'ตรัง', 'ตราด', 'ตาก', 'นครนายก',
-  'นครปฐม', 'นครพนม', 'นครราชสีมา', 'นครศรีธรรมราช', 'นครสวรรค์', 'นนทบุรี',
-  'นราธิวาส', 'น่าน', 'บึงกาฬ', 'บุรีรัมย์', 'ปทุมธานี', 'ประจวบคีรีขันธ์',
-  'ปราจีนบุรี', 'ปัตตานี', 'พระนครศรีอยุธยา', 'พังงา', 'พัทลุง', 'พิจิตร',
-  'พิษณุโลก', 'เพชรบุรี', 'เพชรบูรณ์', 'แพร่', 'พะเยา', 'ภูเก็ต',
-  'มหาสารคาม', 'มุกดาหาร', 'แม่ฮ่องสอน', 'ยโสธร', 'ยะลา', 'ร้อยเอ็ด',
-  'ระนอง', 'ระยอง', 'ราชบุรี', 'ลพบุรี', 'ลำปาง', 'ลำพูน',
-  'เลย', 'ศรีสะเกษ', 'สกลนคร', 'สงขลา', 'สตูล', 'สมุทรปราการ',
-  'สมุทรสงคราม', 'สมุทรสาคร', 'สระแก้ว', 'สระบุรี', 'สิงห์บุรี', 'สุโขทัย',
-  'สุพรรณบุรี', 'สุราษฎร์ธานี', 'สุรินทร์', 'หนองคาย', 'หนองบัวลำภู', 'อ่างทอง',
-  'อุดรธานี', 'อุตรดิตถ์', 'อุทัยธานี', 'อุบลราชธานี', 'อำนาจเจริญ'
-];
+import HospitalAddressSelector from '@/components/HospitalAddressSelector';
 
 export default function NewHospitalPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [loadingLocations, setLoadingLocations] = useState(false);
-  
-  // State สำหรับจังหวัด/อำเภอ/ตำบล
-  const [provinces, setProvinces] = useState<string[]>([]);
-  const [districts, setDistricts] = useState<string[]>([]);
-  const [subdistricts, setSubdistricts] = useState<string[]>([]);
   const [mainHospitals, setMainHospitals] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
@@ -44,7 +22,6 @@ export default function NewHospitalPage() {
     province: '',
     district: '',
     subdistrict: '',
-    postal_code: '',
     phone: '',
   });
 
@@ -55,49 +32,9 @@ export default function NewHospitalPage() {
       return;
     }
     setUser(userData);
-    loadProvinces();
     loadMainHospitals();
   }, [router]);
 
-  // ✅ โหลดรายการจังหวัด - ดึงจาก villages หรือใช้รายการ default
-  const loadProvinces = async () => {
-    try {
-      setLoadingLocations(true);
-      console.log('[DEBUG] Loading provinces...');
-      
-      // พยายามดึงจาก villages table ก่อน
-      const { data, error } = await supabase
-        .from('villages')
-        .select('province')
-        .neq('province', null)
-        .order('province', { ascending: true });
-
-      console.log('[DEBUG] Villages query result:', { data, error });
-
-      if (error) {
-        console.error('Error loading from villages:', error);
-      }
-
-      // ดึง province ที่ไม่ซ้ำกัน
-      const uniqueProvinces = [...new Set(data?.map(v => v.province).filter(Boolean) || [])];
-      
-      console.log('[DEBUG] Unique provinces from villages:', uniqueProvinces);
-
-      // ✅ ถ้าไม่มีข้อมูลใน villages ให้ใช้รายการจังหวัดไทยทั้งหมด
-      const finalProvinces = uniqueProvinces.length > 0 ? uniqueProvinces : THAI_PROVINCES;
-      
-      console.log('[DEBUG] Final provinces:', finalProvinces.length);
-      setProvinces(finalProvinces);
-    } catch (error) {
-      console.error('Error loading provinces:', error);
-      // ✅ Fallback: ใช้รายการจังหวัดไทยทั้งหมด
-      setProvinces(THAI_PROVINCES);
-    } finally {
-      setLoadingLocations(false);
-    }
-  };
-
-  // ✅ โหลดโรงพยาบาลแม่ข่ายสำหรับ dropdown
   const loadMainHospitals = async () => {
     try {
       const { data, error } = await supabase
@@ -109,127 +46,26 @@ export default function NewHospitalPage() {
 
       if (error) throw error;
       setMainHospitals(data || []);
-      console.log('[DEBUG] Main hospitals loaded:', data?.length || 0);
     } catch (error) {
       console.error('Error loading main hospitals:', error);
     }
   };
 
-  // ✅ เมื่อเลือกจังหวัด → โหลดอำเภอจาก villages
-  const handleProvinceChange = async (province: string) => {
-    console.log('[DEBUG] Province changed to:', province);
-    setFormData({ 
-      ...formData, 
-      province, 
-      district: '', 
-      subdistrict: '',
-      postal_code: '' 
-    });
-    setDistricts([]);
-    setSubdistricts([]);
-    
-    if (province) {
-      try {
-        setLoadingLocations(true);
-        const { data, error } = await supabase
-          .from('villages')
-          .select('district')
-          .eq('province', province)
-          .neq('district', null)
-          .order('district', { ascending: true });
-
-        console.log('[DEBUG] Districts query result:', { data, error });
-
-        if (error) throw error;
-
-        const uniqueDistricts = [...new Set(data?.map(v => v.district).filter(Boolean) || [])];
-        console.log('[DEBUG] Unique districts:', uniqueDistricts);
-        
-        setDistricts(uniqueDistricts);
-      } catch (error) {
-        console.error('Error loading districts:', error);
-      } finally {
-        setLoadingLocations(false);
-      }
-    }
-  };
-
-  // ✅ เมื่อเลือกอำเภอ → โหลดตำบลจาก villages
-  const handleDistrictChange = async (district: string) => {
-    console.log('[DEBUG] District changed to:', district);
-    setFormData({ 
-      ...formData, 
-      district, 
-      subdistrict: '',
-      postal_code: '' 
-    });
-    setSubdistricts([]);
-    
-    if (district && formData.province) {
-      try {
-        setLoadingLocations(true);
-        const { data, error } = await supabase
-          .from('villages')
-          .select('subdistrict, postal_code')
-          .eq('province', formData.province)
-          .eq('district', district)
-          .neq('subdistrict', null)
-          .order('subdistrict', { ascending: true });
-
-        console.log('[DEBUG] Subdistricts query result:', { data, error });
-
-        if (error) throw error;
-
-        const uniqueSubdistricts = [...new Set(data?.map(v => v.subdistrict).filter(Boolean) || [])];
-        console.log('[DEBUG] Unique subdistricts:', uniqueSubdistricts);
-        
-        setSubdistricts(uniqueSubdistricts);
-      } catch (error) {
-        console.error('Error loading subdistricts:', error);
-      } finally {
-        setLoadingLocations(false);
-      }
-    }
-  };
-
-  // ✅ เมื่อเลือกตำบล → กรอกรหัสไปรษณีย์อัตโนมัติ
-  const handleSubdistrictChange = async (subdistrict: string) => {
-    console.log('[DEBUG] Subdistrict changed to:', subdistrict);
-    let postalCode = '';
-    
-    if (subdistrict && formData.province && formData.district) {
-      try {
-        const { data, error } = await supabase
-          .from('villages')
-          .select('postal_code')
-          .eq('province', formData.province)
-          .eq('district', formData.district)
-          .eq('subdistrict', subdistrict)
-          .neq('postal_code', null)
-          .limit(1)
-          .single();
-
-        console.log('[DEBUG] Postal code query result:', { data, error });
-
-        if (!error && data) {
-          postalCode = data.postal_code;
-          console.log('[DEBUG] Postal code found:', postalCode);
-        }
-      } catch (error) {
-        console.error('Error loading postal code:', error);
-      }
-    }
-
-    setFormData({ 
-      ...formData, 
-      subdistrict,
-      postal_code: postalCode 
+  const handleAddressChange = (data: {
+    province: string;
+    district: string;
+    subdistrict: string;
+  }) => {
+    setFormData({
+      ...formData,
+      province: data.province,
+      district: data.district,
+      subdistrict: data.subdistrict,
     });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('[DEBUG] Form submitted with data:', formData);
     setLoading(true);
 
     try {
@@ -243,7 +79,6 @@ export default function NewHospitalPage() {
           province: formData.province,
           district: formData.district,
           subdistrict: formData.subdistrict,
-          postal_code: formData.postal_code,
           phone: formData.phone,
           is_active: true,
         });
@@ -253,20 +88,12 @@ export default function NewHospitalPage() {
       alert('✅ เพิ่มโรงพยาบาลสำเร็จ!');
       router.push('/admin/hospitals');
     } catch (error: any) {
-      console.error('[DEBUG] Error saving hospital:', error);
+      console.error('Error saving hospital:', error);
       alert('❌ เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
     }
   };
-
-  // ✅ DEBUG: แสดง state
-  console.log('[DEBUG] Render with state:', {
-    provinces: provinces.length,
-    districts: districts.length,
-    subdistricts: subdistricts.length,
-    formData,
-  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -360,100 +187,13 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* ✅ จังหวัด - ดึงจาก villages หรือใช้ default */}
+          {/* ✅ ที่อยู่ - ใช้ HospitalAddressSelector */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              จังหวัด <span className="text-red-500">*</span>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              📍 ที่อยู่โรงพยาบาล
             </label>
-            <select
-              value={formData.province}
-              onChange={(e) => handleProvinceChange(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              <option value="">-- เลือกจังหวัด --</option>
-              {provinces.map((province) => (
-                <option key={province} value={province}>
-                  {province}
-                </option>
-              ))}
-            </select>
-            {loadingLocations && (
-              <p className="text-xs text-gray-500 mt-1">กำลังโหลดข้อมูล...</p>
-            )}
-            {/* ✅ DEBUG: แสดงจำนวนจังหวัด */}
-            <p className="text-xs text-gray-400 mt-1">
-              🔍 พบ {provinces.length} จังหวัด
-            </p>
+            <HospitalAddressSelector onAddressChange={handleAddressChange} />
           </div>
-
-          {/* ✅ อำเภอ */}
-          {formData.province && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                อำเภอ <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.district}
-                onChange={(e) => handleDistrictChange(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                required
-              >
-                <option value="">-- เลือกอำเภอ --</option>
-                {districts.map((district) => (
-                  <option key={district} value={district}>
-                    {district}
-                  </option>
-                ))}
-              </select>
-              {/* ✅ DEBUG: แสดงจำนวนอำเภอ */}
-              <p className="text-xs text-gray-400 mt-1">
-                🔍 พบ {districts.length} อำเภอใน {formData.province}
-              </p>
-            </div>
-          )}
-
-          {/* ✅ ตำบล */}
-          {formData.district && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ตำบล <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={formData.subdistrict}
-                onChange={(e) => handleSubdistrictChange(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                required
-              >
-                <option value="">-- เลือกตำบล --</option>
-                {subdistricts.map((subdistrict) => (
-                  <option key={subdistrict} value={subdistrict}>
-                    {subdistrict}
-                  </option>
-                ))}
-              </select>
-              {/* ✅ DEBUG: แสดงจำนวนตำบล */}
-              <p className="text-xs text-gray-400 mt-1">
-                🔍 พบ {subdistricts.length} ตำบลใน {formData.district}
-              </p>
-            </div>
-          )}
-
-          {/* ✅ รหัสไปรษณีย์ (กรอกอัตโนมัติ) */}
-          {formData.subdistrict && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                รหัสไปรษณีย์
-              </label>
-              <input
-                type="text"
-                value={formData.postal_code}
-                onChange={(e) => setFormData({...formData, postal_code: e.target.value})}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="เช่น 67000"
-              />
-            </div>
-          )}
 
           {/* เบอร์โทรศัพท์ */}
           <div>
