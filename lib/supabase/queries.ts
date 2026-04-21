@@ -2400,3 +2400,31 @@ export async function getDistricts(province: string) {
     return [];
   }
 }
+
+
+
+// =====================================================
+// ✅ ฟังก์ชันดึงรายการตำบลในอำเภอที่เลือก
+// =====================================================
+export async function getSubdistricts(province: string, district: string) {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('subdistrict, postal_code')
+      .eq('province', province)
+      .eq('district', district)
+      .neq('subdistrict', null)
+      .order('subdistrict', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching subdistricts:', error);
+      return [];
+    }
+
+    console.log('✅ Subdistricts fetched:', data?.length || 0);
+    return data || [];
+  } catch (err) {
+    console.error('Get subdistricts error:', err);
+    return [];
+  }
+}

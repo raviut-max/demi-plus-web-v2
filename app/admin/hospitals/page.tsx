@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
 import { Building2, Plus, Edit, Trash2, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { getProvinces, getDistricts } from '@/lib/supabase/queries';
+import { getProvinces, getDistricts, getSubdistricts } from '@/lib/supabase/queries';
 
 export default function HospitalsPage() {
   const router = useRouter();
@@ -16,9 +16,10 @@ export default function HospitalsPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingHospital, setEditingHospital] = useState<any>(null);
   
-  // ✅ State สำหรับจังหวัดและอำเภอ
+  // ✅ State สำหรับจังหวัด/อำเภอ/ตำบล
   const [provinces, setProvinces] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
+  const [subdistricts, setSubdistricts] = useState<any[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(false);
   
   const [formData, setFormData] = useState({
@@ -29,6 +30,7 @@ export default function HospitalsPage() {
     province: '',
     district: '',
     subdistrict: '',
+    postal_code: '',
     phone: '',
   });
 
@@ -76,18 +78,59 @@ export default function HospitalsPage() {
 
   // ✅ เมื่อเลือกจังหวัด ให้โหลดอำเภอ
   const handleProvinceChange = async (province: string) => {
-    setFormData({ ...formData, province, district: '', subdistrict: '' });
+    setFormData({ 
+      ...formData, 
+      province, 
+      district: '', 
+      subdistrict: '',
+      postal_code: '' 
+    });
+    setDistricts([]);
+    setSubdistricts([]);
     
     if (province) {
       try {
+        setLoadingLocations(true);
         const districtsList = await getDistricts(province);
         setDistricts(districtsList);
       } catch (error) {
         console.error('Error loading districts:', error);
+      } finally {
+        setLoadingLocations(false);
       }
-    } else {
-      setDistricts([]);
     }
+  };
+
+  // ✅ เมื่อเลือกอำเภอ ให้โหลดตำบล
+  const handleDistrictChange = async (district: string) => {
+    setFormData({ 
+      ...formData, 
+      district, 
+      subdistrict: '',
+      postal_code: '' 
+    });
+    setSubdistricts([]);
+    
+    if (district && formData.province) {
+      try {
+        setLoadingLocations(true);
+        const subdistrictsList = await getSubdistricts(formData.province, district);
+        setSubdistricts(subdistrictsList);
+      } catch (error) {
+        console.error('Error loading subdistricts:', error);
+      } finally {
+        setLoadingLocations(false);
+      }
+    }
+  };
+
+  // ✅ เมื่อเลือกตำบล ให้กรอกรหัสไปรษณีย์อัตโนมัติ
+  const handleSubdistrictChange = (subdistrict: string, postalCode: string) => {
+    setFormData({ 
+      ...formData, 
+      subdistrict,
+      postal_code: postalCode 
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -106,6 +149,7 @@ export default function HospitalsPage() {
             province: formData.province,
             district: formData.district,
             subdistrict: formData.subdistrict,
+            postal_code: formData.postal_code,
             phone: formData.phone,
             updated_at: new Date().toISOString(),
           })
@@ -125,6 +169,7 @@ export default function HospitalsPage() {
             province: formData.province,
             district: formData.district,
             subdistrict: formData.subdistrict,
+            postal_code: formData.postal_code,
             phone: formData.phone,
             is_active: true,
           });
@@ -143,9 +188,11 @@ export default function HospitalsPage() {
         province: '',
         district: '',
         subdistrict: '',
+        postal_code: '',
         phone: '',
       });
       setDistricts([]);
+      setSubdistricts([]);
       loadHospitals();
     } catch (error: any) {
       console.error('Error saving hospital:', error);
@@ -163,12 +210,16 @@ export default function HospitalsPage() {
       province: hospital.province || '',
       district: hospital.district || '',
       subdistrict: hospital.subdistrict || '',
+      postal_code: hospital.postal_code || '',
       phone: hospital.phone || '',
     });
     
-    // ✅ โหลดอำเภอของจังหวัดนี้
+    // ✅ โหลดอำเภอและตำบลของโรงพยาบาลนี้
     if (hospital.province) {
       getDistricts(hospital.province).then(setDistricts);
+      if (hospital.district) {
+        getSubdistricts(hospital.province, hospital.district).then(setSubdistricts);
+      }
     }
     
     setShowModal(true);
@@ -203,9 +254,11 @@ export default function HospitalsPage() {
       province: '',
       district: '',
       subdistrict: '',
+      postal_code: '',
       phone: '',
     });
     setDistricts([]);
+    setSubdistricts([]);
   };
 
   if (loading) {
@@ -225,7 +278,7 @@ export default function HospitalsPage() {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
-            onClick={() => router.push('/admin')}
+            onClick={() => router.push('/admin/settings')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             ← กลับ
@@ -414,7 +467,7 @@ export default function HospitalsPage() {
                 </div>
               )}
 
-              {/* ✅ จังหวัด - Dropdown จากฐานข้อมูล */}
+              {/* ✅ จังหวัด */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   จังหวัด *
@@ -437,7 +490,7 @@ export default function HospitalsPage() {
                 )}
               </div>
 
-              {/* ✅ อำเภอ - Dropdown จากฐานข้อมูล */}
+              {/* ✅ อำเภอ */}
               {formData.province && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -445,7 +498,7 @@ export default function HospitalsPage() {
                   </label>
                   <select
                     value={formData.district}
-                    onChange={(e) => setFormData({...formData, district: e.target.value})}
+                    onChange={(e) => handleDistrictChange(e.target.value)}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                     required
                   >
@@ -459,17 +512,48 @@ export default function HospitalsPage() {
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ตำบล
-                </label>
-                <input
-                  type="text"
-                  value={formData.subdistrict}
-                  onChange={(e) => setFormData({...formData, subdistrict: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
+              {/* ✅ ตำบล */}
+              {formData.district && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ตำบล *
+                  </label>
+                  <select
+                    value={formData.subdistrict}
+                    onChange={(e) => {
+                      const selected = subdistricts.find(s => s.subdistrict === e.target.value);
+                      if (selected) {
+                        handleSubdistrictChange(selected.subdistrict, selected.postal_code || '');
+                      }
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    required
+                  >
+                    <option value="">-- เลือกตำบล --</option>
+                    {subdistricts.map((s) => (
+                      <option key={s.subdistrict} value={s.subdistrict}>
+                        {s.subdistrict}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* ✅ รหัสไปรษณีย์ */}
+              {formData.subdistrict && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    รหัสไปรษณีย์
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.postal_code}
+                    onChange={(e) => setFormData({...formData, postal_code: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    placeholder="เช่น 67000"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
