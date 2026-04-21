@@ -13,10 +13,10 @@ export default function NewHospitalPage() {
   const [loading, setLoading] = useState(false);
   const [loadingLocations, setLoadingLocations] = useState(false);
   
+  // ✅ State สำหรับจังหวัด/อำเภอ/ตำบล
   const [provinces, setProvinces] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
   const [subdistricts, setSubdistricts] = useState<string[]>([]);
-  const [mainHospitals, setMainHospitals] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
     name: '',
@@ -30,6 +30,8 @@ export default function NewHospitalPage() {
     phone: '',
   });
 
+  const [mainHospitals, setMainHospitals] = useState<any[]>([]);
+
   useEffect(() => {
     const userData = checkSession();
     if (!userData || !['admin'].includes(userData.role)) {
@@ -41,6 +43,7 @@ export default function NewHospitalPage() {
     loadMainHospitals();
   }, [router]);
 
+  // ✅ โหลดรายการจังหวัดจากตาราง villages
   const loadProvinces = async () => {
     try {
       setLoadingLocations(true);
@@ -52,8 +55,10 @@ export default function NewHospitalPage() {
 
       if (error) throw error;
 
+      // ✅ ดึง province ที่ไม่ซ้ำกัน
       const uniqueProvinces = [...new Set(data?.map(v => v.province) || [])];
       setProvinces(uniqueProvinces);
+      console.log('✅ Loaded provinces:', uniqueProvinces.length);
     } catch (error) {
       console.error('Error loading provinces:', error);
     } finally {
@@ -61,6 +66,7 @@ export default function NewHospitalPage() {
     }
   };
 
+  // ✅ โหลดโรงพยาบาลแม่ข่ายสำหรับ dropdown
   const loadMainHospitals = async () => {
     try {
       const { data, error } = await supabase
@@ -77,6 +83,7 @@ export default function NewHospitalPage() {
     }
   };
 
+  // ✅ เมื่อเลือกจังหวัด → โหลดอำเภอ
   const handleProvinceChange = async (province: string) => {
     setFormData({ 
       ...formData, 
@@ -102,6 +109,7 @@ export default function NewHospitalPage() {
 
         const uniqueDistricts = [...new Set(data?.map(v => v.district) || [])];
         setDistricts(uniqueDistricts);
+        console.log('✅ Loaded districts:', uniqueDistricts.length);
       } catch (error) {
         console.error('Error loading districts:', error);
       } finally {
@@ -110,6 +118,7 @@ export default function NewHospitalPage() {
     }
   };
 
+  // ✅ เมื่อเลือกอำเภอ → โหลดตำบล
   const handleDistrictChange = async (district: string) => {
     setFormData({ 
       ...formData, 
@@ -134,6 +143,7 @@ export default function NewHospitalPage() {
 
         const uniqueSubdistricts = [...new Set(data?.map(v => v.subdistrict) || [])];
         setSubdistricts(uniqueSubdistricts);
+        console.log('✅ Loaded subdistricts:', uniqueSubdistricts.length);
       } catch (error) {
         console.error('Error loading subdistricts:', error);
       } finally {
@@ -142,6 +152,7 @@ export default function NewHospitalPage() {
     }
   };
 
+  // ✅ เมื่อเลือกตำบล → กรอกรหัสไปรษณีย์อัตโนมัติ
   const handleSubdistrictChange = async (subdistrict: string) => {
     let postalCode = '';
     
@@ -296,7 +307,7 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* จังหวัด */}
+          {/* ✅ จังหวัด */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               จังหวัด <span className="text-red-500">*</span>
@@ -319,7 +330,7 @@ export default function NewHospitalPage() {
             )}
           </div>
 
-          {/* อำเภอ */}
+          {/* ✅ อำเภอ */}
           {formData.province && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -341,7 +352,7 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* ตำบล */}
+          {/* ✅ ตำบล */}
           {formData.district && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -363,7 +374,7 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* รหัสไปรษณีย์ */}
+          {/* ✅ รหัสไปรษณีย์ (กรอกอัตโนมัติ) */}
           {formData.subdistrict && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
