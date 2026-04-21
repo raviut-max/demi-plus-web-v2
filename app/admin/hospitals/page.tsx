@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
-import { Building2, Plus, Edit, Trash2, ArrowLeft } from 'lucide-react';
+import { Building2, Plus, Edit, Trash2, ArrowLeft, Hospital, Activity } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function HospitalsPage() {
@@ -107,6 +107,11 @@ export default function HospitalsPage() {
     );
   }
 
+  // ✅ คำนวณจำนวนโรงพยาบาล
+  const totalHospitals = hospitals.length;
+  const mainHospitalsCount = hospitals.filter(h => h.type === 'main').length;
+  const subHospitalsCount = hospitals.filter(h => h.type === 'sub').length;
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -139,6 +144,43 @@ export default function HospitalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+        
+        {/* ✅ สรุปจำนวนโรงพยาบาล (เพิ่มใหม่) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          {/* ทั้งหมด */}
+          <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-blue-100 text-sm mb-1">โรงพยาบาลทั้งหมด</p>
+                <p className="text-4xl font-bold">{totalHospitals}</p>
+              </div>
+              <Hospital className="w-12 h-12 text-blue-200 opacity-50" />
+            </div>
+          </div>
+
+          {/* แม่ข่าย */}
+          <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-green-100 text-sm mb-1">โรงพยาบาลแม่ข่าย</p>
+                <p className="text-4xl font-bold">{mainHospitalsCount}</p>
+              </div>
+              <Building2 className="w-12 h-12 text-green-200 opacity-50" />
+            </div>
+          </div>
+
+          {/* ลูกข่าย */}
+          <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-purple-100 text-sm mb-1">โรงพยาบาลลูกข่าย</p>
+                <p className="text-4xl font-bold">{subHospitalsCount}</p>
+              </div>
+              <Activity className="w-12 h-12 text-purple-200 opacity-50" />
+            </div>
+          </div>
+        </div>
+
         {/* ✅ แสดงเป็นกลุ่ม แม่ข่าย + ลูกข่าย */}
         <div className="space-y-8">
           {groupedHospitals.map((group) => (
