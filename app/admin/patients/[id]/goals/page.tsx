@@ -1,5 +1,9 @@
 // app/admin/patients/[id]/goals/page.tsx
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข: แสดงจำนวนวัน/สัปดาห์ สำหรับแต่ละเป้าหมาย
+
 'use client';
+
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
@@ -24,7 +28,11 @@ import {
   AlertCircle,
   FileText,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Edit,
+  LogOut,
+  Activity,
+  ClipboardCheck
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -353,6 +361,11 @@ export default function PatientGoalsPage() {
   const weeklyData = getWeeklyData();
   const calendarData = getCalendarData();
 
+  const handleLogout = () => {
+    logout();
+    router.push('/admin/login');
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -387,7 +400,6 @@ export default function PatientGoalsPage() {
             </div>
             
             <div className="flex gap-2">
-              {/* ✅ แก้ไขตรงนี้ - เปลี่ยนจากสร้างอัตโนมัติ เป็นไปตั้งเป้าหมาย */}
               {goals.length === 0 && (
                 <button
                   onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
@@ -415,77 +427,6 @@ export default function PatientGoalsPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* ✅ Alert Banner - แสดงเมื่อไม่มี goals (เพิ่มใหม่) */}
-        {goals.length === 0 && (
-          <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-xl p-6 mb-6 animate-pulse">
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0">
-                <div className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center">
-                  <span className="text-2xl">⚠️</span>
-                </div>
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-yellow-900 mb-2">
-                  ยังไม่มีเป้าหมายสำหรับผู้ป่วยคนนี้
-                </h3>
-                <p className="text-sm text-yellow-800 mb-3">
-                  กรุณาสร้างเป้าหมายเริ่มต้นก่อนที่จะบันทึกข้อมูลอื่นๆ ผู้ป่วยจะต้องมีเป้าหมายก่อนที่จะทำกิจกรรมหรือติดตามผลได้
-                </p>
-                <div className="flex items-center gap-2 text-xs text-yellow-700 mb-4">
-                  <span className="font-semibold">💡 คำแนะนำ:</span>
-                  <span>กดปุ่ม "ไปตั้งเป้าหมาย" ด้านบนเพื่อสร้างเป้าหมายตามระดับ PAM</span>
-                </div>
-                <button
-                  onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
-                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg shadow-lg transition-all"
-                >
-                  <div className="flex items-center gap-2">
-                    <Target className="w-5 h-5" />
-                    <span>ไปตั้งเป้าหมายตอนนี้</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-lg p-2 border border-gray-200 overflow-x-auto">
-          <button
-            onClick={() => setViewMode('goals')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-              viewMode === 'goals' 
-                ? 'bg-blue-500 text-white shadow-lg' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <Target className="w-5 h-5" />
-            ภาพรวม
-          </button>
-          <button
-            onClick={() => setViewMode('weekly')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-              viewMode === 'weekly' 
-                ? 'bg-blue-500 text-white shadow-lg' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <TrendingUp className="w-5 h-5" />
-            บันทึกประจำวัน
-          </button>
-          <button
-            onClick={() => setViewMode('calendar')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-              viewMode === 'calendar' 
-                ? 'bg-blue-500 text-white shadow-lg' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <Calendar className="w-5 h-5" />
-            ปฏิทิน
-          </button>
-        </div>
-
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -587,50 +528,18 @@ export default function PatientGoalsPage() {
                 )}
               </div>
 
-              {/* ✅ แก้ไขตรงนี้ - Empty State */}
               {groupedGoals.length === 0 ? (
                 <div className="text-center py-12">
-                  <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Target className="w-10 h-10 text-yellow-600" />
-                  </div>
-                  
-                  <h2 className="text-2xl font-bold text-gray-800 mb-3">
-                    ยังไม่มีเป้าหมาย
-                  </h2>
-                  
-                  <p className="text-gray-600 mb-8 max-w-md mx-auto">
-                    ผู้ป่วยคนนี้ยังไม่มีเป้าหมาย กรุณาตั้งเป้าหมายก่อนที่จะทำกิจกรรมหรือติดตามผล
-                  </p>
-                  
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  <Target className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500 mb-4">ยังไม่มีเป้าหมายในรอบนี้</p>
+                  {patient?.pam_level !== 'L1' && (
                     <button
                       onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
-                      className="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transition-all"
+                      className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
                     >
-                      <div className="flex items-center gap-3">
-                        <Target className="w-5 h-5" />
-                        <span>ไปตั้งเป้าหมาย</span>
-                      </div>
+                      สร้างเป้าหมายอัตโนมัติ
                     </button>
-                    
-                    <button
-                      onClick={() => router.back()}
-                      className="px-8 py-4 bg-gray-500 hover:bg-gray-600 text-white font-bold rounded-lg transition-all"
-                    >
-                      ยกเลิก
-                    </button>
-                  </div>
-                  
-                  <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg text-left max-w-md mx-auto">
-                    <p className="text-sm text-blue-800 font-semibold mb-2">
-                      💡 คำแนะนำ:
-                    </p>
-                    <ul className="text-sm text-blue-700 space-y-1">
-                      <li>• ระบบจะนำคุณไปยังหน้าจัดการเป้าหมาย</li>
-                      <li>• คุณสามารถสร้างเป้าหมายเริ่มต้นตามระดับ PAM</li>
-                      <li>• หรือกำหนดเป้าหมายเองตามความต้องการ</li>
-                    </ul>
-                  </div>
+                  )}
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200">
@@ -654,6 +563,12 @@ export default function PatientGoalsPage() {
                               <p className="text-sm text-gray-500">
                                 {goal.activities?.activity_name_th || goal.description_th || '-'}
                               </p>
+                              {/* ✅ แสดงจำนวนวัน/สัปดาห์ */}
+                              {goal.target_days && (
+                                <p className="text-xs text-blue-600 mt-1 font-medium">
+                                  📅 เป้าหมาย: {goal.target_days} วัน/สัปดาห์
+                                </p>
+                              )}
                             </div>
                           </div>
                           
