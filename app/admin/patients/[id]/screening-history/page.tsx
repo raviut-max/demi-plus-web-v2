@@ -1,6 +1,8 @@
 // app/admin/patients/[id]/screening-history/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 14:30)
-// ✅ การแก้ไข: แก้ไขการคำนวณคะแนน PROMs ให้ดึงจากฟิลด์ที่บันทึกในฐานข้อมูล
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 14:45)
+// ✅ การแก้ไข:
+//    1. แก้ไขฟังก์ชัน calculatePromsTotal ให้คำนวณจาก screening_responses
+//    2. เพิ่ม Debug log แสดงคะแนนแต่ละข้อจาก responses
 
 'use client';
 
@@ -77,7 +79,7 @@ export default function ScreeningHistoryPage() {
           proms_q2: s.proms_q2_score,
           proms_q3: s.proms_q3_score,
           proms_q4: s.proms_q4_score,
-          proms_total: (s.proms_q1_score || 0) + (s.proms_q2_score || 0) + (s.proms_q3_score || 0) + (s.proms_q4_score || 0)
+          responses_count: s.screening_responses?.length || 0
         });
       });
 
@@ -106,10 +108,10 @@ export default function ScreeningHistoryPage() {
 
   const getPamLevelColor = (level: string) => {
     switch (level) {
-      case 'Deny': return 'bg-red-100 text-red-700 border-red-300';
-      case 'General': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
-      case 'Intensive': return 'bg-blue-100 text-blue-700 border-blue-300';
-      case 'Champion': return 'bg-green-100 text-green-700 border-green-300';
+      case 'L1': return 'bg-red-100 text-red-700 border-red-300';
+      case 'L2': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
+      case 'L3': return 'bg-blue-100 text-blue-700 border-blue-300';
+      case 'L4': return 'bg-green-100 text-green-700 border-green-300';
       default: return 'bg-gray-100 text-gray-700 border-gray-300';
     }
   };
@@ -141,9 +143,25 @@ export default function ScreeningHistoryPage() {
     });
   };
 
-  // ✅ คำนวณคะแนน PROMs รวม (แก้ไขแล้ว - ดึงจากฟิลด์ในฐานข้อมูล)
+  // ✅ แก้ไขฟังก์ชันนี้ - คำนวณจาก screening_responses แทนฟิลด์
   const calculatePromsTotal = (screening: any) => {
-    // ✅ ดึงคะแนนจากฟิลด์ที่บันทึกในฐานข้อมูล
+    // ✅ วิธีที่ 1: คำนวณจาก screening_responses (น่าเชื่อถือกว่า)
+    if (screening.screening_responses && screening.screening_responses.length > 0) {
+      const promsResponses = screening.screening_responses.filter(
+        (r: any) => r.question_type === 'proms'
+      );
+      
+      const total = promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
+      
+      console.log('🔍 [DEBUG] PROMs total from responses:', total, {
+        responses: promsResponses.length,
+        scores: promsResponses.map((r: any) => r.score)
+      });
+      
+      return total;
+    }
+    
+    // ✅ วิธีที่ 2: ถ้าไม่มี responses ให้ใช้ฟิลด์ proms_q1_score ถึง q4_score (fallback)
     const q1 = screening.proms_q1_score || 0;
     const q2 = screening.proms_q2_score || 0;
     const q3 = screening.proms_q3_score || 0;
@@ -151,7 +169,7 @@ export default function ScreeningHistoryPage() {
     
     const total = q1 + q2 + q3 + q4;
     
-    console.log('🔍 [DEBUG] PROMs total calculated:', total, {
+    console.log('🔍 [DEBUG] PROMs total from fields:', total, {
       q1, q2, q3, q4
     });
     
@@ -333,7 +351,7 @@ export default function ScreeningHistoryPage() {
                             </div>
                             <div>
                               <p className="text-gray-500">คะแนน PROMs</p>
-                              {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้ */}
+                              {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้จาก responses */}
                               <p className="font-medium text-green-600">{promsTotal} / 24</p>
                             </div>
                             <div>
@@ -454,7 +472,7 @@ export default function ScreeningHistoryPage() {
                   </div>
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">คะแนน PROMs</p>
-                    {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้ */}
+                    {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้จาก responses */}
                     <p className="text-3xl font-bold">
                       {calculatePromsTotal(selectedScreening)} / 24
                     </p>
