@@ -1,26 +1,25 @@
 // app/admin/screening/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 12:00)
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่ม useSearchParams เพื่อดึง patient_id จาก URL
-//    2. Auto-select ผู้ป่วยเมื่อมี patient_id ใน URL
+//    1. ใช้ window.location.search แทน useSearchParams (แก้ปัญหา Suspense boundary)
+//    2. Auto-select ผู้ป่วยจาก URL parameter patient_id
 //    3. แสดงฟอร์มทันทีเมื่อเลือกผู้ป่วย
 //    4. ปุ่มกลับใช้ router.back() เพื่อกลับไปหน้าเดิม
+//    5. แสดงข้อมูลผู้ป่วยที่เลือกแบบชัดเจน
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation'; // ✅ แยก useSearchParams
+import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening, createDefaultGoals } from '@/lib/supabase/queries';
 import { FileText, Save, ArrowLeft, LogOut, AlertCircle, User } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function ScreeningPage() {
   const router = useRouter();
-  const searchParams = useSearchParams(); // ✅ ดึง URL parameters
-  const patientIdFromUrl = searchParams.get('patient_id'); // ✅ ดึง patient_id จาก URL
   
-  console.log('🔍 [DEBUG] Component mounted');
-  console.log('🔍 [DEBUG] patient_id from URL:', patientIdFromUrl);
+  // ✅ ใช้ state + useEffect แทน useSearchParams (แก้ปัญหา Suspense boundary)
+  const [patientIdFromUrl, setPatientIdFromUrl] = useState<string | null>(null);
   
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -41,95 +40,73 @@ export default function ScreeningPage() {
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidencePlan, setConfidencePlan] = useState('');
 
-  // ✅ useEffect หลัก - ตรวจสอบ auth และโหลดข้อมูลเริ่มต้น
+  // ✅ useEffect สำหรับดึง patient_id จาก URL (ใช้ window.location.search)
   useEffect(() => {
-    console.log('🔍 [DEBUG] Main useEffect triggered');
-    
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pid = urlParams.get('patient_id');
+      setPatientIdFromUrl(pid);
+      
+      // ✅ Auto-select patient ถ้ามีใน URL
+      if (pid) {
+        setSelectedPatient(pid);
+      }
+    }
+  }, []);
+
+  // ✅ useEffect หลัก - ตรวจสอบ auth และโหลดข้อมูล
+  useEffect(() => {
     const userData = checkSession();
-    console.log('🔍 [DEBUG] User ', userData);
-    
     if (!userData) {
-      console.log('🔍 [DEBUG] No user, redirecting to login');
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadPatients();
     loadQuestions();
-    
-    // ✅ ตรวจสอบ patient_id จาก URL และ auto-select
-    if (patientIdFromUrl) {
-      console.log('🔍 [DEBUG] Found patient_id in URL:', patientIdFromUrl);
-      setSelectedPatient(patientIdFromUrl);
-      // ไม่ต้อง loadPatientData ที่นี่ เพราะจะมี useEffect แยกจัดการ
-    }
-  }, [router, patientIdFromUrl]);
+  }, [router]);
 
   // ✅ useEffect แยก - โหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
   useEffect(() => {
-    console.log('🔍 [DEBUG] Patient useEffect triggered');
-    console.log('🔍 [DEBUG] selectedPatient:', selectedPatient);
-    console.log('🔍 [DEBUG] patients.length:', patients.length);
-    
     if (selectedPatient && patients.length > 0) {
-      console.log('🔍 [DEBUG] Loading patient data for:', selectedPatient);
       loadPatientData(selectedPatient);
     }
   }, [selectedPatient, patients]);
 
   const loadPatients = async () => {
-    console.log('🔍 [DEBUG] Loading patients...');
     try {
       const data = await getPatientList();
-      console.log('🔍 [DEBUG] Patients loaded:', data.length);
       setPatients(data);
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading patients:', error);
+      console.error('Error loading patients:', error);
     }
   };
 
   const loadPatientData = async (patientId: string) => {
-    console.log('🔍 [DEBUG] Loading patient data for ID:', patientId);
     try {
       const patient = patients.find(p => p.id === patientId);
-      console.log('🔍 [DEBUG] Found patient:', patient);
-      
       if (patient) {
         setPatientData(patient);
-        console.log('✅ [DEBUG] Patient data set:', {
-          id: patient.id,
-          name: `${patient.first_name} ${patient.last_name}`,
-          hn: patient.hospital_number,
-          pam_level: patient.pam_level
-        });
-      } else {
-        console.warn('⚠️ [DEBUG] Patient not found in list');
       }
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading patient ', error);
+      console.error('Error loading patient data:', error);
     }
   };
 
   const loadQuestions = async () => {
-    console.log('🔍 [DEBUG] Loading questions...');
     try {
       const pamData = await getScreeningQuestions('pam');
       const promsData = await getScreeningQuestions('proms');
-      console.log('🔍 [DEBUG] PAM questions loaded:', pamData.length);
-      console.log('🔍 [DEBUG] PROMs questions loaded:', promsData.length);
       setPamQuestions(pamData);
       setPromsQuestions(promsData);
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading questions:', error);
+      console.error('Error loading questions:', error);
     } finally {
-      console.log('🔍 [DEBUG] Loading complete, setting loading to false');
       setLoading(false);
     }
   };
@@ -288,21 +265,16 @@ export default function ScreeningPage() {
   };
 
   const handleSubmit = async () => {
-    console.log('🔍 [DEBUG] Submitting screening...');
-    
     if (!selectedPatient) {
-      console.error('❌ [DEBUG] No patient selected');
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
     if (Object.keys(pamAnswers).length === 0) {
-      console.error('❌ [DEBUG] No PAM answers');
       alert('กรุณาตอบคำถาม PAM ให้ครบ');
       return;
     }
 
     if (Object.keys(promsAnswers).length < 4) {
-      console.error('❌ [DEBUG] Incomplete PROMs answers');
       alert('กรุณาตอบคำถาม PROMs ให้ครบทั้ง 4 ข้อ');
       return;
     }
@@ -312,7 +284,6 @@ export default function ScreeningPage() {
     try {
       // คำนวณระดับผู้ป่วย
       const patientLevel = calculatePatientLevel();
-      console.log('📊 [DEBUG] Patient level calculated:', patientLevel);
 
       // ดึงคะแนนแต่ละข้อของ PROMs
       const promsEntries = Object.entries(promsAnswers);
@@ -320,15 +291,6 @@ export default function ScreeningPage() {
       const promsQ2Score = promsEntries.find(([key]) => key.includes('proms2'))?.[1] || 0;
       const promsQ3Score = promsEntries.find(([key]) => key.includes('proms3'))?.[1] || 0;
       const promsQ4Score = promsEntries.find(([key]) => key.includes('proms4'))?.[1] || 0;
-
-      console.log('📊 PROMs Scores:', {
-        q1: promsQ1Score,
-        q2: promsQ2Score,
-        q3: promsQ3Score,
-        q4: promsQ4Score,
-        total: patientLevel.promsTotal,
-        min: patientLevel.promsMin,
-      });
 
       // Prepare responses
       const responses = [
@@ -367,7 +329,6 @@ export default function ScreeningPage() {
 
       if (result.success) {
         // ✅ สร้าง Default Goals อัตโนมัติ
-        console.log('🎯 Creating default goals for patient:', selectedPatient);
         const goalsResult = await createDefaultGoals(
           selectedPatient,
           patientLevel.level, // L1, L2, L3, L4
@@ -406,7 +367,7 @@ export default function ScreeningPage() {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [DEBUG] Error saving screening:', error);
+      console.error('Error saving screening:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
@@ -435,10 +396,7 @@ export default function ScreeningPage() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={() => {
-              console.log('🔍 [DEBUG] Back button clicked');
-              router.back();
-            }}
+            onClick={() => router.back()}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -485,7 +443,7 @@ export default function ScreeningPage() {
         )}
 
         {/* ✅ Select Patient - แสดงเฉพาะเมื่อไม่มี patient_id ใน URL */}
-        {!patientIdFromUrl && (
+        {!patientIdFromUrl && patients.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
               <FileText className="w-5 h-5 text-blue-600" />
@@ -493,10 +451,7 @@ export default function ScreeningPage() {
             </h2>
             <select
               value={selectedPatient}
-              onChange={(e) => {
-                console.log('🔍 [DEBUG] Patient selected:', e.target.value);
-                setSelectedPatient(e.target.value);
-              }}
+              onChange={(e) => setSelectedPatient(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="">-- เลือกผู้ป่วย --</option>
@@ -509,6 +464,7 @@ export default function ScreeningPage() {
           </div>
         )}
 
+        {/* ✅ แสดงฟอร์มประเมินเมื่อเลือกผู้ป่วยแล้ว */}
         {selectedPatient && (
           <>
             {/* PAM Questions - ไม้บรรทัดวัดใจ */}
