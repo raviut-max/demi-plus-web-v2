@@ -1,10 +1,9 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ป่วยตามโครงสร้างตาราง profiles (เหมือนหน้า edit)
-//    2. ไม่แสดงส่วนเป้าหมาย (Goals Section)
-//    3. เพิ่มส่วนผู้ติดต่อฉุกเฉินด้านล่าง
-//    4. แปลงวันที่จาก ค.ศ. → พ.ศ. สำหรับแสดงผล
+//    1. แสดงข้อมูลผู้ติดต่อฉุกเฉิน 1 คน (ตามตาราง profiles)
+//    2. แสดงข้อมูลตามโครงสร้างตาราง profiles ที่ถูกต้อง
+//    3. แปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
 
 'use client';
 
@@ -24,11 +23,10 @@ import {
   Activity,
   ClipboardCheck,
   FileText,
-  Heart,
   Phone,
   User,
   MapPin,
-  Stethoscope
+  Heart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -76,7 +74,7 @@ export default function PatientDetailPage() {
       // ✅ ตรวจสอบสถานะการประเมิน
       await checkAssessmentStatus(patientId);
     } catch (error) {
-      console.error('Error loading ', error);
+      console.error('Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -87,7 +85,7 @@ export default function PatientDetailPage() {
   const checkAssessmentStatus = async (pid: string) => {
     try {
       // ตรวจสอบ Baseline
-      const {  baselineData } = await supabase
+      const { data: baselineData } = await supabase
         .from('baseline')
         .select('id')
         .eq('user_id', pid)
@@ -96,7 +94,7 @@ export default function PatientDetailPage() {
       setHasBaseline(!!baselineData);
 
       // ตรวจสอบ Completed Appointments
-      const {  appointmentsData } = await supabase
+      const { data: appointmentsData } = await supabase
         .from('appointments')
         .select('id')
         .eq('user_id', pid)
@@ -106,7 +104,7 @@ export default function PatientDetailPage() {
       setHasCompletedAppointment((appointmentsData?.length || 0) > 0);
 
       // ตรวจสอบ PAM Assessment (จาก screenings)
-      const {  screeningData } = await supabase
+      const { data: screeningData } = await supabase
         .from('screenings')
         .select('id, pam_total_score')
         .eq('user_id', pid)
@@ -336,7 +334,7 @@ export default function PatientDetailPage() {
 
         {/* 
         ========================================
-        ✅ Patient Info Cards - ข้อมูลผู้ป่วย (ตามหน้า edit)
+        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
         ========================================
         */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -515,7 +513,7 @@ export default function PatientDetailPage() {
 
         {/* 
         ========================================
-        ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน
+        ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน (1 คน)
         ========================================
         */}
         <div className="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -525,11 +523,11 @@ export default function PatientDetailPage() {
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* ผู้ติดต่อคนที่ 1 */}
+            {/* ผู้ติดต่อฉุกเฉิน (1 คน) */}
             <div className="border border-gray-200 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
                 <User className="w-5 h-5 text-blue-600" />
-                <h3 className="font-semibold text-gray-800">ผู้ติดต่อที่ 1</h3>
+                <h3 className="font-semibold text-gray-800">ผู้ติดต่อฉุกเฉิน</h3>
               </div>
               <div className="space-y-2 text-sm">
                 <div>
@@ -548,56 +546,6 @@ export default function PatientDetailPage() {
                   <p className="text-gray-500">เบอร์โทรศัพท์</p>
                   <p className="font-medium text-gray-800">
                     {patient?.emergency_contact_phone || '-'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* ผู้ติดต่อคนที่ 2 (สำรอง) */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <User className="w-5 h-5 text-purple-600" />
-                <h3 className="font-semibold text-gray-800">ผู้ติดต่อที่ 2</h3>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <p className="text-gray-500">ชื่อ-นามสกุล</p>
-                  <p className="font-medium text-gray-400">-</p>
-                </div>
-                <div>
-                  <p className="text-gray-500">ความสัมพันธ์</p>
-                  <p className="font-medium text-gray-400">-</p>
-                </div>
-                <div>
-                  <p className="text-gray-500">เบอร์โทรศัพท์</p>
-                  <p className="font-medium text-gray-400">-</p>
-                </div>
-              </div>
-            </div>
-
-            {/* แพทย์ประจำตัว */}
-            <div className="border border-gray-200 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Stethoscope className="w-5 h-5 text-green-600" />
-                <h3 className="font-semibold text-gray-800">แพทย์ประจำตัว</h3>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div>
-                  <p className="text-gray-500">ชื่อแพทย์</p>
-                  <p className="font-medium text-gray-800">
-                    {patient?.doctor_name || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500">โรงพยาบาล</p>
-                  <p className="font-medium text-gray-800">
-                    {patient?.hospital_name || '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500">เบอร์โทรศัพท์</p>
-                  <p className="font-medium text-gray-800">
-                    {patient?.doctor_phone || '-'}
                   </p>
                 </div>
               </div>
