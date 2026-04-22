@@ -1,6 +1,10 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: เปลี่ยนปุ่มนัดหมาย (สีฟ้า) ให้เป็นลิงก์ไปดูประวัตินัดหมายของผู้ป่วย
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 09:40)
+// ✅ การแก้ไข:
+//    1. ปุ่มสีฟ้า (นัดหมาย) → ลิงก์ไป /admin/patients/${patientId}/appointments
+//    2. ปุ่มสีเขียว (ประเมิน) → ลิงก์ไป /admin/screening?patient_id=${patientId}
+//    3. ปุ่มสีม่วง (ติดตาม) → ลิงก์ไป /admin/patients/${patientId}/screening-history
+//    4. ปุ่มสีส้ม (ความคืบหน้า) → ลิงก์ไป /admin/patients/${patientId}/goals (เหมือนเดิม)
 
 'use client';
 
@@ -493,11 +497,21 @@ export default function PatientDetailPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* Summary Cards - ปุ่มนำทางหลัก 4 ปุ่ม */}
+        {/* 
+        ========================================
+        ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม
+        ========================================
+        */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป (แก้ไขล่าสุด: 22 เม.ย. 2569) */}
-          {/* ✅ การแก้ไข: เปลี่ยนจากแสดงข้อมูลอย่างเดียว → เป็นลิงก์ไปดูประวัตินัดหมายของผู้ป่วย */}
+          {/* 
+          ========================================
+          ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป
+          📅 แก้ไข: 22 เม.ย. 2569
+          🔗 ลิงก์: /admin/patients/${patientId}/appointments
+          📝 คำอธิบาย: คลิกเพื่อดูประวัตินัดหมายทั้งหมดของผู้ป่วยคนนี้
+          ========================================
+          */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -514,8 +528,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
-          {/* ✅ ลิงก์: /admin/screening?patient_id=${patientId} - ไปหน้าทำแบบประเมิน PAM/PROMs */}
+          {/* 
+          ========================================
+          ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด
+          📅 แก้ไข: 22 เม.ย. 2569
+          🔗 ลิงก์: /admin/screening?patient_id=${patientId}
+          📝 คำอธิบาย: คลิกเพื่อไปหน้าทำแบบประเมิน PAM/PROMs สำหรับผู้ป่วยคนนี้
+          ========================================
+          */}
           <div 
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -532,8 +552,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
-          {/* ✅ ลิงก์: /admin/patients/${patientId}/screening-history - ไปหน้าประวัติการติดตาม */}
+          {/* 
+          ========================================
+          ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด
+          📅 แก้ไข: 22 เม.ย. 2569
+          🔗 ลิงก์: /admin/patients/${patientId}/screening-history
+          📝 คำอธิบาย: คลิกเพื่อดูประวัติการติดตามนัดหมายย้อนหลัง
+          ========================================
+          */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -550,8 +576,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า */}
-          {/* ✅ ลิงก์: /admin/patients/${patientId}/goals - ไปหน้าเป้าหมาย (มีการเตือนถ้ายังไม่ได้ประเมิน) */}
+          {/* 
+          ========================================
+          ✅ 4. ปุ่มสีส้ม - ความคืบหน้า
+          📅 ไม่มีการแก้ไข (เหมือนเดิม)
+          🔗 ลิงก์: /admin/patients/${patientId}/goals
+          📝 คำอธิบาย: คลิกเพื่อดูเป้าหมายและความคืบหน้า (มีการเตือนถ้ายังไม่ได้ประเมิน)
+          ========================================
+          */}
           <div 
             onClick={handleViewProgress}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -575,7 +607,11 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* Action Buttons - ปุ่มต่างๆ ที่ต้องทำงานได้ */}
+        {/* 
+        ========================================
+        ✅ ACTION BUTTONS - ปุ่มเพิ่มเติม
+        ========================================
+        */}
         <div className="flex flex-wrap gap-2 mb-6">
           {/* ✅ ปุ่มสีฟ้า - ดูประวัติการประเมิน */}
           <button
