@@ -9,6 +9,7 @@ import {
   getPatientDetail,
   getPatientGoals,
   getGoalRoundCount,
+  createDefaultGoals,
   getProgress
 } from '@/lib/supabase/queries';
 import {
@@ -149,20 +150,15 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันจัดการคลิกปุ่มความคืบหน้า (สีส้ม)
+  // ✅ ฟังก์ชันจัดการคลิกปุ่มความคืบหน้า (สีส้ม) - แค่เตือน แต่ยังให้เข้าได้
   const handleViewProgress = () => {
-    // ✅ ตรวจสอบว่ามีการประเมินหรือยัง
+    // ✅ ตรวจสอบว่ามีการประเมินหรือยัง (แค่เตือน แต่ยังคงให้เข้าได้)
     if (!hasPamAssessment && !hasBaseline) {
-      alert('⚠️ ยังไม่สามารถดูเป้าหมายได้\n\nผู้ป่วยคนนี้ยังไม่ได้ทำการประเมิน\n\nกรุณาทำการประเมินก่อน:\n1. คลิกปุ่ม "แก้ไขข้อมูล"\n2. ไปที่หน้า "แบบประเมิน"\n3. ทำการประเมิน PAM และ PROMs\n4. บันทึกข้อมูลเริ่มต้น\n5. จึงจะสามารถดูเป้าหมายได้');
-      return;
+      alert('⚠️ ผู้ป่วยคนนี้ยังไม่ได้ทำการประเมิน\n\nแนะนำให้ทำการประเมิน PAM/PROMs ก่อนสร้างเป้าหมาย\n\nคุณสามารถไปสร้างเป้าหมายก่อนได้ แต่ควรทำการประเมินโดยเร็ว');
+      // ✅ ยังคงนำทางไปหน้า goals
     }
 
-    if (!hasCompletedAppointment && goals.length === 0) {
-      alert('⚠️ ยังไม่สามารถดูเป้าหมายได้\n\nผู้ป่วยคนนี้ยังไม่มีนัดหมายที่เสร็จสิ้นและยังไม่มีเป้าหมาย\n\nกรุณา:\n1. ทำการประเมินผู้ป่วยก่อน\n2. สร้างเป้าหมายเริ่มต้น\n3. จึงจะสามารถดูความคืบหน้าได้');
-      return;
-    }
-
-    // ✅ ผ่านการตรวจสอบ นำทางไปหน้าเป้าหมาย
+    // ✅ นำทางไปหน้า goals เสมอ
     router.push(`/admin/patients/${patientId}/goals`);
   };
 
@@ -510,8 +506,11 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* การประเมินล่าสุด */}
-          <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6">
+          {/* การประเมินล่าสุด - ปุ่มสีเขียว (ไปทำ PAM) */}
+          <div 
+            onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
+            className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">การประเมินล่าสุด</p>
@@ -524,8 +523,11 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ติดตามล่าสุด */}
-          <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6">
+          {/* ติดตามล่าสุด - ปุ่มสีม่วง */}
+          <div 
+            onClick={() => router.push(`/admin/patients/${patientId}/followup`)}
+            className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">ติดตามล่าสุด</p>
@@ -538,7 +540,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ ความคืบหน้า (สีส้ม) - เพิ่มการตรวจสอบ */}
+          {/* ความคืบหน้า - ปุ่มสีส้ม (แค่เตือน แต่ยังให้เข้าได้) */}
           <div 
             onClick={handleViewProgress}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -562,27 +564,39 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* Action Buttons - ปุ่มต่างๆ ที่ต้องทำงานได้ */}
         <div className="flex flex-wrap gap-2 mb-6">
+          {/* ✅ ปุ่มสีฟ้า - ดูประวัติการประเมิน */}
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/assessments`)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
           >
             <FileText className="w-4 h-4" />
             ดูประวัติการประเมิน (0)
           </button>
           
+          {/* ✅ ปุ่มสีเขียว - ไปหน้า screening/assessment (ทำ PAM) */}
+          <button
+            onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+          >
+            <ClipboardCheck className="w-4 h-4" />
+            ทำแบบประเมิน (PAM/PROMs)
+          </button>
+          
+          {/* ✅ ปุ่มสีม่วง - ดูประวัติเป้าหมาย */}
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
           >
             <Target className="w-4 h-4" />
             ดูประวัติเป้าหมาย (0)
           </button>
           
+          {/* ✅ ปุ่มสีส้ม - ดูประวัตินัดหมาย */}
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all"
+            className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
           >
             <Calendar className="w-4 h-4" />
             ดูประวัตินัดหมาย
