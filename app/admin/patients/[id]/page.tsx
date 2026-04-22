@@ -1,6 +1,9 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: แก้ไขการตรวจสอบสถานะการประเมิน - เปลี่ยนจาก pam_score → pam_total_score
+// ✅ การแก้ไข:
+//    1. เพิ่มส่วนสรุปผลการประเมินล่าสุด (PAM, PROMs, Level, Zone)
+//    2. เอาส่วนเป้าหมายออก (ไม่แสดงในหน้านี้)
+//    3. แสดงสถานะการประเมินจาก screening ล่าสุด
 
 'use client';
 
@@ -10,10 +13,7 @@ import {
   checkSession,
   logout,
   getPatientDetail,
-  getPatientGoals,
-  getGoalRoundCount,
-  createDefaultGoals,
-  getProgress
+  getScreeningHistory
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -22,35 +22,14 @@ import {
   Calendar,
   CheckCircle,
   Clock,
-  Archive,
-  Award,
-  RefreshCw,
-  AlertCircle,
-  FileText,
-  ChevronDown,
-  ChevronUp,
   Edit,
   LogOut,
   Activity,
-  ClipboardCheck
+  ClipboardCheck,
+  FileText,
+  Heart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-
-type ViewMode = 'goals' | 'weekly' | 'calendar';
-
-interface GoalRecord {
-  date: string;
-  isCompleted: boolean;
-  notes?: string;
-}
-
-interface GoalWithRecords {
-  goal: any;
-  completedCount: number;
-  notCompletedCount: number;
-  records: GoalRecord[];
-  percentage: number;
-}
 
 export default function PatientDetailPage() {
   const router = useRouter();
@@ -60,14 +39,7 @@ export default function PatientDetailPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
-  const [goals, setGoals] = useState<any[]>([]);
-  const [goalRounds, setGoalRounds] = useState(1);
-  const [selectedRound, setSelectedRound] = useState(1);
-  const [records, setRecords] = useState<any[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>('goals');
-  const [creatingGoals, setCreatingGoals] = useState(false);
-  const [selectedWeek, setSelectedWeek] = useState(new Date());
-  const [expandedGoals, setExpandedGoals] = useState<Set<string>>(new Set());
+  const [latestScreening, setLatestScreening] = useState<any>(null);
   
   // ✅ State สำหรับตรวจสอบการประเมิน
   const [hasBaseline, setHasBaseline] = useState(false);
@@ -95,337 +67,89 @@ export default function PatientDetailPage() {
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
 
-      const rounds = await getGoalRoundCount(patientId);
-      setGoalRounds(rounds);
-
-      await loadGoals(selectedRound);
-      await loadRecords();
+      // ✅ โหลด screening ล่าสุด
+      await loadLatestScreening(patientId);
       
       // ✅ ตรวจสอบสถานะการประเมิน
       await checkAssessmentStatus(patientId);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน (แก้ไขแล้ว)
+  // ✅ โหลด screening ล่าสุด
+  const loadLatestScreening = async (pid: string) => {
+    try {
+      const {  screeningData } = await supabase
+        .from('screenings')
+        .select('*')
+        .eq('user_id', pid)
+        .order('screening_date', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (screeningData) {
+        setLatestScreening(screeningData);
+        console.log('📋 Latest screening:', screeningData);
+      }
+    } catch (error) {
+      console.error('Error loading latest screening:', error);
+    }
+  };
+
+  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน
   const checkAssessmentStatus = async (pid: string) => {
     try {
-      console.log('🔍 Checking assessment status for patient:', pid);
-      
       // ตรวจสอบ Baseline
-      const { data: baselineData } = await supabase
+      const {  baselineData } = await supabase
         .from('baseline')
         .select('id')
         .eq('user_id', pid)
         .single();
       
-      const hasBaselineData = !!baselineData;
-      console.log('📋 Has baseline:', hasBaselineData);
-      setHasBaseline(hasBaselineData);
+      setHasBaseline(!!baselineData);
 
       // ตรวจสอบ Completed Appointments
-      const { data: appointmentsData } = await supabase
+      const {  appointmentsData } = await supabase
         .from('appointments')
         .select('id')
         .eq('user_id', pid)
         .eq('status', 'completed')
         .limit(1);
       
-      const hasCompletedAppt = (appointmentsData?.length || 0) > 0;
-      console.log('📋 Has completed appointments:', hasCompletedAppt);
-      setHasCompletedAppointment(hasCompletedAppt);
+      setHasCompletedAppointment((appointmentsData?.length || 0) > 0);
 
-      // ✅ แก้ไข: ตรวจสอบ PAM Assessment (จาก screenings)
-      // เปลี่ยนจาก pam_score → pam_total_score
-      const { data: screeningData } = await supabase
+      // ตรวจสอบ PAM Assessment (จาก screenings)
+      const {  screeningData } = await supabase
         .from('screenings')
         .select('id, pam_total_score')
         .eq('user_id', pid)
         .not('pam_total_score', 'is', null)
         .limit(1);
       
-      const hasPamData = (screeningData?.length || 0) > 0;
-      console.log('📋 Has PAM assessment:', hasPamData, screeningData);
-      setHasPamAssessment(hasPamData);
+      setHasPamAssessment((screeningData?.length || 0) > 0);
       
-    } catch (error) {
-      console.error('❌ Error checking assessment status:', error);
-    }
-  };
-
-  // ✅ ฟังก์ชันจัดการคลิกปุ่มความคืบหน้า (สีส้ม) - แค่เตือน แต่ยังให้เข้าได้
-  const handleViewProgress = () => {
-    // ✅ ตรวจสอบว่ามีการประเมินหรือยัง (แค่เตือน แต่ยังคงให้เข้าได้)
-    if (!hasPamAssessment && !hasBaseline) {
-      alert('⚠️ ผู้ป่วยคนนี้ยังไม่ได้ทำการประเมิน\n\nแนะนำให้ทำการประเมิน PAM/PROMs ก่อนสร้างเป้าหมาย\n\nคุณสามารถไปสร้างเป้าหมายก่อนได้ แต่ควรทำการประเมินโดยเร็ว');
-      // ✅ ยังคงนำทางไปหน้า goals
-    }
-
-    // ✅ นำทางไปหน้า goals เสมอ
-    router.push(`/admin/patients/${patientId}/goals`);
-  };
-
-  const loadGoals = async (round: number) => {
-    try {
-      const { data, error } = await supabase
-        .from('goals')
-        .select(`*, activities ( activity_name_th, description_th )`)
-        .eq('user_id', patientId)
-        .eq('round_number', round)
-        .order('priority', { ascending: true });
-
-      if (error) throw error;
-      setGoals(data || []);
-    } catch (error) {
-      console.error('Error loading goals:', error);
-    }
-  };
-
-  const loadRecords = async () => {
-    try {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-
-      const { data, error } = await supabase
-        .from('records')
-        .select(`
-          *,
-          activities (
-            activity_code,
-            activity_name_th
-          )
-        `)
-        .eq('user_id', patientId)
-        .gte('record_date', startDate.toISOString())
-        .order('record_date', { ascending: false });
-
-      if (error) throw error;
-      setRecords(data || []);
-    } catch (error) {
-      console.error('Error loading records:', error);
-    }
-  };
-
-  const handleRoundChange = (round: number) => {
-    setSelectedRound(round);
-    loadGoals(round);
-  };
-
-  const handleCreateDefaultGoals = async () => {
-    if (!patient) return;
-    if (!confirm('ต้องการสร้างเป้าหมายเริ่มต้นตาม PAM Level หรือไม่?\n\nL2/L3: กฎทอง 5 ข้อ\nL4: แชมป์ 8 กิจกรรม')) {
-      return;
-    }
-
-    setCreatingGoals(true);
-
-    try {
-      const result = await createDefaultGoals(
-        patientId,
-        patient.pam_level || 'L2',
-        user.id
-      );
-
-      if (result.success) {
-        alert(`✅ สร้างเป้าหมายสำเร็จ!\n\nจำนวน: ${result.count || 0} กิจกรรม`);
-        loadData();
-      } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
-      }
-    } catch (error: any) {
-      console.error('Error creating goals:', error);
-      alert(error.message || 'เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
-    } finally {
-      setCreatingGoals(false);
-    }
-  };
-
-  const handleArchiveCurrentRound = async () => {
-    if (!confirm('ต้องการเก็บถาวรเป้าหมายรอบปัจจุบันหรือไม่?')) {
-      return;
-    }
-    try {
-      const { error } = await supabase
-        .from('goals')
-        .update({
-          is_current: false,
-          status: 'archived',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', patientId)
-        .eq('goal_type', 'weekly_activity')
-        .eq('status', 'active');
-
-      if (error) throw error;
-
-      alert('✅ เก็บถาวรเป้าหมายสำเร็จ!');
-      loadData();
-    } catch (error) {
-      console.error('Error archiving goals:', error);
-      alert('เกิดข้อผิดพลาดในการเก็บถาวร');
-    }
-  };
-
-  const toggleGoalExpansion = (goalKey: string) => {
-    const newExpanded = new Set(expandedGoals);
-    if (newExpanded.has(goalKey)) {
-      newExpanded.delete(goalKey);
-    } else {
-      newExpanded.add(goalKey);
-    }
-    setExpandedGoals(newExpanded);
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'active':
-        return '🟢 กำลังดำเนินการ';
-      case 'completed':
-        return '✅ สำเร็จ';
-      case 'archived':
-        return '📦 เก็บถาวร';
-      default:
-        return status;
-    }
-  };
-
-  const getGoalIcon = (goalName: string) => {
-    if (goalName?.includes('sweet')) return '🍬';
-    if (goalName?.includes('rice') || goalName?.includes('carb')) return '🍚';
-    if (goalName?.includes('protein') || goalName?.includes('vegetable')) return '🥗';
-    if (goalName?.includes('exercise') || goalName?.includes('walk')) return '🚶';
-    if (goalName?.includes('weight') || goalName?.includes('sugar')) return '⚖️';
-    if (goalName?.includes('water')) return '💧';
-    if (goalName?.includes('sleep')) return '😴';
-    if (goalName?.includes('cardio')) return '🏃';
-    return '🎯';
-  };
-
-  // 🎯 จัดกลุ่มเป้าหมายและคำนวณสถิติ
-  const getGroupedGoals = (): GoalWithRecords[] => {
-    const grouped: Record<string, any[]> = {};
-    goals.forEach(goal => {
-      const key = goal.goal_name || goal.activity_id;
-      if (!grouped[key]) {
-        grouped[key] = [];
-      }
-      grouped[key].push(goal);
-    });
-
-    const goalGroups = Object.values(grouped).sort((a, b) => {
-      const priorityA = a[0]?.priority || 999;
-      const priorityB = b[0]?.priority || 999;
-      return priorityA - priorityB;
-    });
-
-    return goalGroups.map(goalGroup => {
-      const firstGoal = goalGroup[0];
-      
-      const goalRecords = records.filter(record => 
-        record.activity_id === firstGoal.activity_id || 
-        record.activities?.activity_code === firstGoal.goal_name
-      );
-
-      const completedRecords = goalRecords.filter(r => r.is_completed);
-      const notCompletedRecords = goalRecords.filter(r => !r.is_completed);
-
-      const formattedRecords: GoalRecord[] = [
-        ...completedRecords.map(r => ({
-          date: r.record_date,
-          isCompleted: true,
-          notes: r.notes,
-        })),
-        ...notCompletedRecords.map(r => ({
-          date: r.record_date,
-          isCompleted: false,
-          notes: r.notes,
-        })),
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      const totalRecords = goalRecords.length;
-      const percentage = totalRecords > 0 
-        ? Math.round((completedRecords.length / totalRecords) * 100) 
-        : 0;
-
-      return {
-        goal: firstGoal,
-        completedCount: completedRecords.length,
-        notCompletedCount: notCompletedRecords.length,
-        records: formattedRecords,
-        percentage,
-      };
-    });
-  };
-
-  const groupedGoals = getGroupedGoals();
-
-  const stats = {
-    total: goals.length,
-    completed: goals.filter(g => g.is_completed).length,
-    active: goals.filter(g => g.status === 'active').length,
-    progress: goals.length > 0 ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) : 0,
-  };
-
-  const getWeeklyData = () => {
-    const weekData = [];
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      const dayRecords = records.filter(r => r.record_date?.startsWith(dateStr));
-      
-      weekData.push({
-        date: dateStr,
-        dayName: date.toLocaleDateString('th-TH', { weekday: 'short' }),
-        dayNumber: date.getDate(),
-        records: dayRecords,
-        completed: dayRecords.filter(r => r.is_completed).length,
-        total: goals.length,
+      console.log('📋 Assessment Status:', {
+        hasBaseline,
+        hasCompletedAppointment,
+        hasPamAssessment
       });
+    } catch (error) {
+      console.error('Error checking assessment status:', error);
     }
-
-    return weekData;
   };
 
-  const getCalendarData = () => {
-    const today = new Date();
-    const days = [];
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      const dayRecords = records.filter(r => r.record_date?.startsWith(dateStr));
-      const completedCount = dayRecords.filter(r => r.is_completed).length;
-      const totalCount = goals.length || 5;
-      const percentage = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-      
-      days.push({
-        date: dateStr,
-        dayNumber: date.getDate(),
-        month: date.getMonth(),
-        dayOfWeek: date.getDay(),
-        completedCount,
-        totalCount,
-        percentage,
-        color: percentage >= 80 ? 'bg-green-500' :
-               percentage >= 50 ? 'bg-green-300' :
-               percentage >= 20 ? 'bg-yellow-300' :
-               'bg-gray-200',
-      });
-    }
-
-    return days;
+  // ✅ คำนวณคะแนน PROMs รวม
+  const calculatePromsTotal = () => {
+    if (!latestScreening) return 0;
+    return (latestScreening.proms_q1_score || 0) +
+           (latestScreening.proms_q2_score || 0) +
+           (latestScreening.proms_q3_score || 0) +
+           (latestScreening.proms_q4_score || 0);
   };
-
-  const weeklyData = getWeeklyData();
-  const calendarData = getCalendarData();
 
   const handleLogout = () => {
     logout();
@@ -504,14 +228,7 @@ export default function PatientDetailPage() {
         */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* 
-          ========================================
-          ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป
-          📅 แก้ไข: 22 เม.ย. 2569
-          🔗 ลิงก์: /admin/patients/${patientId}/appointments
-          📝 คำอธิบาย: คลิกเพื่อดูประวัตินัดหมายทั้งหมดของผู้ป่วยคนนี้
-          ========================================
-          */}
+          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -528,14 +245,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 
-          ========================================
-          ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด (ประวัติการติดตาม)
-          📅 แก้ไข: 22 เม.ย. 2569 (10:00) - แก้ไขใหม่
-          🔗 ลิงก์: /admin/patients/${patientId}/screening-history
-          📝 คำอธิบาย: คลิกเพื่อดูประวัติการประเมิน/ติดตามทั้งหมด (PAM, PROMs, Screening)
-          ========================================
-          */}
+          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -552,14 +262,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 
-          ========================================
-          ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด
-          📅 แก้ไข: 22 เม.ย. 2569
-          🔗 ลิงก์: /admin/patients/${patientId}/followup-history
-          📝 คำอธิบาย: คลิกเพื่อดูประวัติการติดตามนัดหมายย้อนหลัง
-          ========================================
-          */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -576,29 +279,16 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 
-          ========================================
-          ✅ 4. ปุ่มสีส้ม - ความคืบหน้า
-          📅 ไม่มีการแก้ไข (เหมือนเดิม)
-          🔗 ลิงก์: /admin/patients/${patientId}/goals
-          📝 คำอธิบาย: คลิกเพื่อดูเป้าหมายและความคืบหน้า (มีการเตือนถ้ายังไม่ได้ประเมิน)
-          ========================================
-          */}
+          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า */}
           <div 
-            onClick={handleViewProgress}
+            onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">ความคืบหน้า</p>
-                <p className="text-2xl font-bold">
-                  {goals?.length > 0 ? `${stats.completed}/${stats.total}` : 'ยังไม่มีเป้าหมาย'}
-                </p>
-                <p className="text-xs opacity-75 mt-1">
-                  {goals?.length > 0 
-                    ? `${stats.progress}% ของเป้าหมาย` 
-                    : 'กรุณาตั้งเป้าหมาย'}
-                </p>
+                <p className="text-2xl font-bold">0/5</p>
+                <p className="text-xs opacity-75 mt-1">0% ของเป้าหมาย</p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Target className="w-6 h-6" />
@@ -613,16 +303,6 @@ export default function PatientDetailPage() {
         ========================================
         */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {/* ✅ ปุ่มสีฟ้า - ดูประวัติการประเมิน */}
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}/assessments`)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-          >
-            <FileText className="w-4 h-4" />
-            ดูประวัติการประเมิน (0)
-          </button>
-          
-          {/* ✅ ปุ่มสีเขียว - ไปหน้า screening/assessment (ทำ PAM) */}
           <button
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
@@ -631,16 +311,22 @@ export default function PatientDetailPage() {
             ทำแบบประเมิน (PAM/PROMs)
           </button>
           
-          {/* ✅ ปุ่มสีม่วง - ดูประวัติเป้าหมาย */}
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+            onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
           >
-            <Target className="w-4 h-4" />
-            ดูประวัติเป้าหมาย (0)
+            <FileText className="w-4 h-4" />
+            ดูประวัติการประเมิน
           </button>
           
-          {/* ✅ ปุ่มสีส้ม - ดูประวัตินัดหมาย */}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+          >
+            <Activity className="w-4 h-4" />
+            ดูประวัติการติดตาม
+          </button>
+          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
@@ -650,7 +336,129 @@ export default function PatientDetailPage() {
           </button>
         </div>
 
-        {/* Patient Info Cards */}
+        {/* 
+        ========================================
+        ✅ สรุปผลการประเมินล่าสุด (ใหม่)
+        ========================================
+        */}
+        {latestScreening && (
+          <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-xl shadow-lg p-6 mb-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Activity className="w-6 h-6 text-yellow-600" />
+              <h2 className="text-xl font-bold text-gray-800">📊 สรุปผลการประเมินล่าสุด</h2>
+              <span className="text-sm text-gray-500 ml-2">
+                ({new Date(latestScreening.screening_date).toLocaleDateString('th-TH', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })})
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {/* คะแนน PAM */}
+              <div className="bg-white bg-opacity-75 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <FileText className="w-5 h-5 text-purple-600" />
+                  <p className="text-sm text-gray-600">คะแนน PAM</p>
+                </div>
+                <p className="text-3xl font-bold text-purple-600">
+                  {latestScreening.pam_total_score || 0} / 20
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  เฉลี่ย: {((latestScreening.pam_total_score || 0) / 5).toFixed(1)} / 4
+                </p>
+              </div>
+
+              {/* คะแนน PROMs */}
+              <div className="bg-white bg-opacity-75 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Heart className="w-5 h-5 text-green-600" />
+                  <p className="text-sm text-gray-600">คะแนน PROMs</p>
+                </div>
+                <p className="text-3xl font-bold text-green-600">
+                  {calculatePromsTotal()} / 24
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  เฉลี่ย: {(calculatePromsTotal() / 4).toFixed(1)} / 6
+                </p>
+              </div>
+
+              {/* PAM Level */}
+              <div className="bg-white bg-opacity-75 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="w-5 h-5 text-blue-600" />
+                  <p className="text-sm text-gray-600">PAM Level</p>
+                </div>
+                <p className={`text-2xl font-bold ${
+                  latestScreening.pam_level_result === 'L1' ? 'text-red-600' :
+                  latestScreening.pam_level_result === 'L2' ? 'text-yellow-600' :
+                  latestScreening.pam_level_result === 'L3' ? 'text-blue-600' :
+                  'text-green-600'
+                }`}>
+                  {latestScreening.pam_level_result || 'L1'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">ระดับความพร้อม</p>
+              </div>
+
+              {/* Zone */}
+              <div className="bg-white bg-opacity-75 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="w-5 h-5 text-orange-600" />
+                  <p className="text-sm text-gray-600">Zone</p>
+                </div>
+                <p className={`text-xl font-bold ${
+                  latestScreening.proms_zone === 'Red Zone' ? 'text-red-600' :
+                  latestScreening.proms_zone === 'Yellow Zone' ? 'text-yellow-600' :
+                  'text-green-600'
+                }`}>
+                  {latestScreening.proms_zone || 'Green Zone'}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">โซนความเสี่ยง</p>
+              </div>
+            </div>
+
+            {/* คะแนนรวม */}
+            <div className="mt-4 pt-4 border-t border-yellow-300">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-700">คะแนนรวม</p>
+                <p className="text-lg font-bold text-gray-800">
+                  {(latestScreening.pam_total_score || 0) + calculatePromsTotal()} / 44
+                  {' '}({(((latestScreening.pam_total_score || 0) + calculatePromsTotal()) / 44) * 100).toFixed(1)}%)
+                </p>
+              </div>
+              <div className="mt-2 w-full bg-gray-200 rounded-full h-3">
+                <div 
+                  className="bg-gradient-to-r from-blue-500 to-green-500 h-3 rounded-full transition-all"
+                  style={{ 
+                    width: `${(((latestScreening.pam_total_score || 0) + calculatePromsTotal()) / 44) * 100}%` 
+                  }}
+                ></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ถ้ายังไม่มี screening */}
+        {!latestScreening && (
+          <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-12 text-center mb-6">
+            <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+            <h3 className="text-lg font-bold text-gray-600 mb-2">ยังไม่มีผลการประเมิน</h3>
+            <p className="text-gray-500 mb-4">ผู้ป่วยคนนี้ยังไม่ได้ทำการประเมิน PAM/PROMs</p>
+            <button
+              onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
+              className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+            >
+              เริ่มการประเมินครั้งแรก
+            </button>
+          </div>
+        )}
+
+        {/* 
+        ========================================
+        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
+        ========================================
+        */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -777,176 +585,6 @@ export default function PatientDetailPage() {
             </div>
           </div>
         </div>
-
-        {/* Goals Section (ถ้ามี) */}
-        {goals.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">🎯 เป้าหมายปัจจุบัน</h2>
-            
-            {/* Tab Navigation */}
-            <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-lg p-2 border border-gray-200 overflow-x-auto">
-              <button
-                onClick={() => setViewMode('goals')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-                  viewMode === 'goals' 
-                    ? 'bg-blue-500 text-white shadow-lg' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Target className="w-5 h-5" />
-                ภาพรวม
-              </button>
-              <button
-                onClick={() => setViewMode('weekly')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-                  viewMode === 'weekly' 
-                    ? 'bg-blue-500 text-white shadow-lg' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <TrendingUp className="w-5 h-5" />
-                บันทึกประจำวัน
-              </button>
-              <button
-                onClick={() => setViewMode('calendar')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-                  viewMode === 'calendar' 
-                    ? 'bg-blue-500 text-white shadow-lg' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Calendar className="w-5 h-5" />
-                ปฏิทิน
-              </button>
-            </div>
-
-            {/* Goals Content */}
-            {viewMode === 'goals' && (
-              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                <div className="p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <Target className="w-6 h-6 text-blue-600" />
-                    เป้าหมายรอบที่ {selectedRound}
-                  </h2>
-                </div>
-
-                <div className="divide-y divide-gray-200">
-                  {groupedGoals.map(({ goal, completedCount, notCompletedCount, records: goalRecords, percentage }) => {
-                    const goalKey = goal.goal_name || goal.activity_id || goal.id;
-                    const isExpanded = expandedGoals.has(goalKey);
-
-                    return (
-                      <div key={goalKey} className="p-6">
-                        <div 
-                          className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-3 rounded-lg transition-colors"
-                          onClick={() => toggleGoalExpansion(goalKey)}
-                        >
-                          <div className="flex items-center gap-3 flex-1">
-                            <span className="text-3xl">{getGoalIcon(goal.goal_name)}</span>
-                            <div className="flex-1">
-                              <h3 className="text-lg font-bold text-gray-800">
-                                {goal.goal_name_th || goal.goal_name}
-                              </h3>
-                              <p className="text-sm text-gray-500">
-                                {goal.activities?.activity_name_th || goal.description_th || '-'}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-4">
-                            <div className="text-right">
-                              <div className="flex items-center gap-2 mb-1">
-                                <CheckCircle className="w-4 h-4 text-green-600" />
-                                <span className="text-sm font-bold text-green-600">{completedCount}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-red-600">{notCompletedCount}</span>
-                              </div>
-                            </div>
-                            
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                              percentage >= 80 ? 'bg-green-100' :
-                              percentage >= 50 ? 'bg-yellow-100' :
-                              'bg-red-100'
-                            }`}>
-                              <span className={`text-sm font-bold ${
-                                percentage >= 80 ? 'text-green-600' :
-                                percentage >= 50 ? 'text-yellow-600' :
-                                'text-red-600'
-                              }`}>
-                                {percentage}%
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="mt-4 ml-12 space-y-4">
-                            {completedCount > 0 && (
-                              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <CheckCircle className="w-5 h-5 text-green-600" />
-                                  <h4 className="font-bold text-green-800">
-                                    ทำได้ {completedCount} ครั้ง
-                                  </h4>
-                                </div>
-                                <div className="space-y-2">
-                                  {goalRecords
-                                    .filter(r => r.isCompleted)
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                    .map((record, index) => (
-                                      <div key={index} className="flex items-center gap-3 text-sm">
-                                        <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-                                        <span className="text-green-800">
-                                          {new Date(record.date).toLocaleDateString('th-TH', {
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric'
-                                          })}
-                                        </span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {notCompletedCount > 0 && (
-                              <div className="bg-red-50 rounded-lg p-4 border border-red-200">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <span className="w-5 h-5 text-red-600">❌</span>
-                                  <h4 className="font-bold text-red-800">
-                                    ไม่ได้ {notCompletedCount} ครั้ง
-                                  </h4>
-                                </div>
-                                <div className="space-y-2">
-                                  {goalRecords
-                                    .filter(r => !r.isCompleted)
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                    .map((record, index) => (
-                                      <div key={index} className="flex items-center gap-3 text-sm">
-                                        <span className="text-red-600">❌</span>
-                                        <span className="text-red-800">
-                                          {new Date(record.date).toLocaleDateString('th-TH', {
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric'
-                                          })}
-                                        </span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
