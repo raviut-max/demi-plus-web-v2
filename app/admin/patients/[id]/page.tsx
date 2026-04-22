@@ -1,9 +1,10 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. ลบส่วนเป้าหมายปัจจุบันออก
-//    2. เพิ่มส่วนผู้ติดต่อฉุกเฉิน
-//    3. แสดงเฉพาะข้อมูลผู้ป่วย
+//    1. แสดงข้อมูลผู้ป่วยตามโครงสร้างตาราง profiles (เหมือนหน้า edit)
+//    2. ไม่แสดงส่วนเป้าหมาย (Goals Section)
+//    3. เพิ่มส่วนผู้ติดต่อฉุกเฉินด้านล่าง
+//    4. แปลงวันที่จาก ค.ศ. → พ.ศ. สำหรับแสดงผล
 
 'use client';
 
@@ -12,51 +13,30 @@ import { useRouter, useParams } from 'next/navigation';
 import {
   checkSession,
   logout,
-  getPatientDetail,
-  getPatientGoals,
-  getGoalRoundCount,
-  createDefaultGoals,
-  getProgress
+  getPatientDetail
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
   Target,
-  TrendingUp,
   Calendar,
-  CheckCircle,
-  Clock,
-  Archive,
-  Award,
-  RefreshCw,
-  AlertCircle,
-  FileText,
-  ChevronDown,
-  ChevronUp,
   Edit,
   LogOut,
   Activity,
   ClipboardCheck,
+  FileText,
+  Heart,
   Phone,
   User,
-  Heart
+  MapPin,
+  Stethoscope
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-type ViewMode = 'goals' | 'weekly' | 'calendar';
-
-interface GoalRecord {
-  date: string;
-  isCompleted: boolean;
-  notes?: string;
-}
-
-interface GoalWithRecords {
-  goal: any;
-  completedCount: number;
-  notCompletedCount: number;
-  records: GoalRecord[];
-  percentage: number;
-}
+// เดือนภาษาไทย
+const THAI_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+];
 
 export default function PatientDetailPage() {
   const router = useRouter();
@@ -66,14 +46,6 @@ export default function PatientDetailPage() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
-  const [goals, setGoals] = useState<any[]>([]);
-  const [goalRounds, setGoalRounds] = useState(1);
-  const [selectedRound, setSelectedRound] = useState(1);
-  const [records, setRecords] = useState<any[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>('goals');
-  const [creatingGoals, setCreatingGoals] = useState(false);
-  const [selectedWeek, setSelectedWeek] = useState(new Date());
-  const [expandedGoals, setExpandedGoals] = useState<Set<string>>(new Set());
   
   // ✅ State สำหรับตรวจสอบการประเมิน
   const [hasBaseline, setHasBaseline] = useState(false);
@@ -100,338 +72,82 @@ export default function PatientDetailPage() {
     try {
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
-
-      const rounds = await getGoalRoundCount(patientId);
-      setGoalRounds(rounds);
-
-      await loadGoals(selectedRound);
-      await loadRecords();
       
       // ✅ ตรวจสอบสถานะการประเมิน
       await checkAssessmentStatus(patientId);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน (แก้ไขแล้ว)
+  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน
   const checkAssessmentStatus = async (pid: string) => {
     try {
-      console.log('🔍 Checking assessment status for patient:', pid);
-      
       // ตรวจสอบ Baseline
-      const { data: baselineData } = await supabase
+      const {  baselineData } = await supabase
         .from('baseline')
         .select('id')
         .eq('user_id', pid)
         .single();
       
-      const hasBaselineData = !!baselineData;
-      console.log('📋 Has baseline:', hasBaselineData);
-      setHasBaseline(hasBaselineData);
+      setHasBaseline(!!baselineData);
 
       // ตรวจสอบ Completed Appointments
-      const { data: appointmentsData } = await supabase
+      const {  appointmentsData } = await supabase
         .from('appointments')
         .select('id')
         .eq('user_id', pid)
         .eq('status', 'completed')
         .limit(1);
       
-      const hasCompletedAppt = (appointmentsData?.length || 0) > 0;
-      console.log('📋 Has completed appointments:', hasCompletedAppt);
-      setHasCompletedAppointment(hasCompletedAppt);
+      setHasCompletedAppointment((appointmentsData?.length || 0) > 0);
 
-      // ✅ แก้ไข: ตรวจสอบ PAM Assessment (จาก screenings)
-      // เปลี่ยนจาก pam_score → pam_total_score
-      const { data: screeningData } = await supabase
+      // ตรวจสอบ PAM Assessment (จาก screenings)
+      const {  screeningData } = await supabase
         .from('screenings')
         .select('id, pam_total_score')
         .eq('user_id', pid)
         .not('pam_total_score', 'is', null)
         .limit(1);
       
-      const hasPamData = (screeningData?.length || 0) > 0;
-      console.log('📋 Has PAM assessment:', hasPamData, screeningData);
-      setHasPamAssessment(hasPamData);
-      
+      setHasPamAssessment((screeningData?.length || 0) > 0);
     } catch (error) {
-      console.error('❌ Error checking assessment status:', error);
+      console.error('Error checking assessment status:', error);
     }
   };
 
-  // ✅ ฟังก์ชันจัดการคลิกปุ่มความคืบหน้า (สีส้ม) - แค่เตือน แต่ยังให้เข้าได้
-  const handleViewProgress = () => {
-    // ✅ ตรวจสอบว่ามีการประเมินหรือยัง (แค่เตือน แต่ยังคงให้เข้าได้)
-    if (!hasPamAssessment && !hasBaseline) {
-      alert('⚠️ ผู้ป่วยคนนี้ยังไม่ได้ทำการประเมิน\n\nแนะนำให้ทำการประเมิน PAM/PROMs ก่อนสร้างเป้าหมาย\n\nคุณสามารถไปสร้างเป้าหมายก่อนได้ แต่ควรทำการประเมินโดยเร็ว');
-      // ✅ ยังคงนำทางไปหน้า goals
-    }
-
-    // ✅ นำทางไปหน้า goals เสมอ
-    router.push(`/admin/patients/${patientId}/goals`);
+  // ✅ ฟังก์ชันแปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
+  const formatDateTH = (dateString: string | null) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = THAI_MONTHS[date.getMonth()];
+    const year = date.getFullYear() + 543;
+    return `${day} ${month} ${year}`;
   };
 
-  const loadGoals = async (round: number) => {
-    try {
-      const { data, error } = await supabase
-        .from('goals')
-        .select(`*, activities ( activity_name_th, description_th )`)
-        .eq('user_id', patientId)
-        .eq('round_number', round)
-        .order('priority', { ascending: true });
-
-      if (error) throw error;
-      setGoals(data || []);
-    } catch (error) {
-      console.error('Error loading goals:', error);
-    }
-  };
-
-  const loadRecords = async () => {
-    try {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-
-      const { data, error } = await supabase
-        .from('records')
-        .select(`
-          *,
-          activities (
-            activity_code,
-            activity_name_th
-          )
-        `)
-        .eq('user_id', patientId)
-        .gte('record_date', startDate.toISOString())
-        .order('record_date', { ascending: false });
-
-      if (error) throw error;
-      setRecords(data || []);
-    } catch (error) {
-      console.error('Error loading records:', error);
-    }
-  };
-
-  const handleRoundChange = (round: number) => {
-    setSelectedRound(round);
-    loadGoals(round);
-  };
-
-  const handleCreateDefaultGoals = async () => {
-    if (!patient) return;
-    if (!confirm('ต้องการสร้างเป้าหมายเริ่มต้นตาม PAM Level หรือไม่?\n\nL2/L3: กฎทอง 5 ข้อ\nL4: แชมป์ 8 กิจกรรม')) {
-      return;
-    }
-
-    setCreatingGoals(true);
-
-    try {
-      const result = await createDefaultGoals(
-        patientId,
-        patient.pam_level || 'L2',
-        user.id
-      );
-
-      if (result.success) {
-        alert(`✅ สร้างเป้าหมายสำเร็จ!\n\nจำนวน: ${result.count || 0} กิจกรรม`);
-        loadData();
-      } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
-      }
-    } catch (error: any) {
-      console.error('Error creating goals:', error);
-      alert(error.message || 'เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
-    } finally {
-      setCreatingGoals(false);
-    }
-  };
-
-  const handleArchiveCurrentRound = async () => {
-    if (!confirm('ต้องการเก็บถาวรเป้าหมายรอบปัจจุบันหรือไม่?')) {
-      return;
-    }
-    try {
-      const { error } = await supabase
-        .from('goals')
-        .update({
-          is_current: false,
-          status: 'archived',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', patientId)
-        .eq('goal_type', 'weekly_activity')
-        .eq('status', 'active');
-
-      if (error) throw error;
-
-      alert('✅ เก็บถาวรเป้าหมายสำเร็จ!');
-      loadData();
-    } catch (error) {
-      console.error('Error archiving goals:', error);
-      alert('เกิดข้อผิดพลาดในการเก็บถาวร');
-    }
-  };
-
-  const toggleGoalExpansion = (goalKey: string) => {
-    const newExpanded = new Set(expandedGoals);
-    if (newExpanded.has(goalKey)) {
-      newExpanded.delete(goalKey);
-    } else {
-      newExpanded.add(goalKey);
-    }
-    setExpandedGoals(newExpanded);
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'active':
-        return '🟢 กำลังดำเนินการ';
-      case 'completed':
-        return '✅ สำเร็จ';
-      case 'archived':
-        return '📦 เก็บถาวร';
-      default:
-        return status;
-    }
-  };
-
-  const getGoalIcon = (goalName: string) => {
-    if (goalName?.includes('sweet')) return '🍬';
-    if (goalName?.includes('rice') || goalName?.includes('carb')) return '🍚';
-    if (goalName?.includes('protein') || goalName?.includes('vegetable')) return '🥗';
-    if (goalName?.includes('exercise') || goalName?.includes('walk')) return '🚶';
-    if (goalName?.includes('weight') || goalName?.includes('sugar')) return '⚖️';
-    if (goalName?.includes('water')) return '💧';
-    if (goalName?.includes('sleep')) return '😴';
-    if (goalName?.includes('cardio')) return '🏃';
-    return '🎯';
-  };
-
-  // 🎯 จัดกลุ่มเป้าหมายและคำนวณสถิติ
-  const getGroupedGoals = (): GoalWithRecords[] => {
-    const grouped: Record<string, any[]> = {};
-    goals.forEach(goal => {
-      const key = goal.goal_name || goal.activity_id;
-      if (!grouped[key]) {
-        grouped[key] = [];
-      }
-      grouped[key].push(goal);
-    });
-
-    const goalGroups = Object.values(grouped).sort((a, b) => {
-      const priorityA = a[0]?.priority || 999;
-      const priorityB = b[0]?.priority || 999;
-      return priorityA - priorityB;
-    });
-
-    return goalGroups.map(goalGroup => {
-      const firstGoal = goalGroup[0];
-      
-      const goalRecords = records.filter(record => 
-        record.activity_id === firstGoal.activity_id || 
-        record.activities?.activity_code === firstGoal.goal_name
-      );
-
-      const completedRecords = goalRecords.filter(r => r.is_completed);
-      const notCompletedRecords = goalRecords.filter(r => !r.is_completed);
-
-      const formattedRecords: GoalRecord[] = [
-        ...completedRecords.map(r => ({
-          date: r.record_date,
-          isCompleted: true,
-          notes: r.notes,
-        })),
-        ...notCompletedRecords.map(r => ({
-          date: r.record_date,
-          isCompleted: false,
-          notes: r.notes,
-        })),
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      const totalRecords = goalRecords.length;
-      const percentage = totalRecords > 0 
-        ? Math.round((completedRecords.length / totalRecords) * 100) 
-        : 0;
-
-      return {
-        goal: firstGoal,
-        completedCount: completedRecords.length,
-        notCompletedCount: notCompletedRecords.length,
-        records: formattedRecords,
-        percentage,
-      };
-    });
-  };
-
-  const groupedGoals = getGroupedGoals();
-
-  const stats = {
-    total: goals.length,
-    completed: goals.filter(g => g.is_completed).length,
-    active: goals.filter(g => g.status === 'active').length,
-    progress: goals.length > 0 ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) : 0,
-  };
-
-  const getWeeklyData = () => {
-    const weekData = [];
+  // ✅ ฟังก์ชันคำนวณอายุจากวันเกิด
+  const calculateAge = (birthDate: string | null) => {
+    if (!birthDate) return '-';
     const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      const dayRecords = records.filter(r => r.record_date?.startsWith(dateStr));
-      
-      weekData.push({
-        date: dateStr,
-        dayName: date.toLocaleDateString('th-TH', { weekday: 'short' }),
-        dayNumber: date.getDate(),
-        records: dayRecords,
-        completed: dayRecords.filter(r => r.is_completed).length,
-        total: goals.length,
-      });
+    const birth = new Date(birthDate);
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+      age--;
     }
-
-    return weekData;
+    return age;
   };
 
-  const getCalendarData = () => {
-    const today = new Date();
-    const days = [];
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      
-      const dayRecords = records.filter(r => r.record_date?.startsWith(dateStr));
-      const completedCount = dayRecords.filter(r => r.is_completed).length;
-      const totalCount = goals.length || 5;
-      const percentage = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-      
-      days.push({
-        date: dateStr,
-        dayNumber: date.getDate(),
-        month: date.getMonth(),
-        dayOfWeek: date.getDay(),
-        completedCount,
-        totalCount,
-        percentage,
-        color: percentage >= 80 ? 'bg-green-500' :
-               percentage >= 50 ? 'bg-green-300' :
-               percentage >= 20 ? 'bg-yellow-300' :
-               'bg-gray-200',
-      });
-    }
-
-    return days;
+  // ✅ ฟังก์ชันคำนวณ BMI
+  const calculateBMI = (weight: number | null, height: number | null) => {
+    if (!weight || !height || height === 0) return '-';
+    const heightInM = height / 100;
+    return (weight / (heightInM * heightInM)).toFixed(1);
   };
-
-  const weeklyData = getWeeklyData();
-  const calendarData = getCalendarData();
 
   const handleLogout = () => {
     logout();
@@ -510,14 +226,7 @@ export default function PatientDetailPage() {
         */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* 
-          ========================================
-          ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป
-          📅 แก้ไข: 22 เม.ย. 2569
-          🔗 ลิงก์: /admin/patients/${patientId}/appointments
-          📝 คำอธิบาย: คลิกเพื่อดูประวัตินัดหมายทั้งหมดของผู้ป่วยคนนี้
-          ========================================
-          */}
+          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -534,14 +243,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 
-          ========================================
-          ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด (ประวัติการติดตาม)
-          📅 แก้ไข: 22 เม.ย. 2569 (10:00) - แก้ไขใหม่
-          🔗 ลิงก์: /admin/patients/${patientId}/screening-history
-          📝 คำอธิบาย: คลิกเพื่อดูประวัติการประเมิน/ติดตามทั้งหมด (PAM, PROMs, Screening)
-          ========================================
-          */}
+          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -558,14 +260,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 
-          ========================================
-          ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด
-          📅 แก้ไข: 22 เม.ย. 2569
-          🔗 ลิงก์: /admin/patients/${patientId}/followup-history
-          📝 คำอธิบาย: คลิกเพื่อดูประวัติการติดตามนัดหมายย้อนหลัง
-          ========================================
-          */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -582,29 +277,16 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 
-          ========================================
-          ✅ 4. ปุ่มสีส้ม - ความคืบหน้า
-          📅 ไม่มีการแก้ไข (เหมือนเดิม)
-          🔗 ลิงก์: /admin/patients/${patientId}/goals
-          📝 คำอธิบาย: คลิกเพื่อดูเป้าหมายและความคืบหน้า (มีการเตือนถ้ายังไม่ได้ประเมิน)
-          ========================================
-          */}
+          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า */}
           <div 
-            onClick={handleViewProgress}
+            onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">ความคืบหน้า</p>
-                <p className="text-2xl font-bold">
-                  {goals?.length > 0 ? `${stats.completed}/${stats.total}` : 'ยังไม่มีเป้าหมาย'}
-                </p>
-                <p className="text-xs opacity-75 mt-1">
-                  {goals?.length > 0 
-                    ? `${stats.progress}% ของเป้าหมาย` 
-                    : 'กรุณาตั้งเป้าหมาย'}
-                </p>
+                <p className="text-2xl font-bold">0/5</p>
+                <p className="text-xs opacity-75 mt-1">0% ของเป้าหมาย</p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Target className="w-6 h-6" />
@@ -619,16 +301,6 @@ export default function PatientDetailPage() {
         ========================================
         */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {/* ✅ ปุ่มสีฟ้า - ดูประวัติการประเมิน */}
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}/assessments`)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-          >
-            <FileText className="w-4 h-4" />
-            ดูประวัติการประเมิน (0)
-          </button>
-          
-          {/* ✅ ปุ่มสีเขียว - ไปหน้า screening/assessment (ทำ PAM) */}
           <button
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
@@ -637,16 +309,22 @@ export default function PatientDetailPage() {
             ทำแบบประเมิน (PAM/PROMs)
           </button>
           
-          {/* ✅ ปุ่มสีม่วง - ดูประวัติเป้าหมาย */}
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
-            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+            onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
           >
-            <Target className="w-4 h-4" />
-            ดูประวัติเป้าหมาย (0)
+            <FileText className="w-4 h-4" />
+            ดูประวัติการประเมิน
           </button>
           
-          {/* ✅ ปุ่มสีส้ม - ดูประวัตินัดหมาย */}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+          >
+            <Activity className="w-4 h-4" />
+            ดูประวัติการติดตาม
+          </button>
+          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
@@ -658,10 +336,11 @@ export default function PatientDetailPage() {
 
         {/* 
         ========================================
-        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
+        ✅ Patient Info Cards - ข้อมูลผู้ป่วย (ตามหน้า edit)
         ========================================
         */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -674,19 +353,23 @@ export default function PatientDetailPage() {
               </div>
               <div>
                 <p className="text-gray-500">ชื่อ-นามสกุล</p>
-                <p className="font-semibold">{patient?.first_name} {patient?.last_name}</p>
+                <p className="font-semibold">
+                  {patient?.first_name || '-'} {patient?.last_name || '-'}
+                </p>
               </div>
               <div>
                 <p className="text-gray-500">วันเกิด</p>
-                <p className="font-semibold">{patient?.birth_date || '-'}</p>
+                <p className="font-semibold">{formatDateTH(patient?.birth_date)}</p>
               </div>
               <div>
                 <p className="text-gray-500">อายุ</p>
-                <p className="font-semibold">{patient?.age || '-'} ปี</p>
+                <p className="font-semibold">{calculateAge(patient?.birth_date)} ปี</p>
               </div>
               <div>
                 <p className="text-gray-500">เพศ</p>
-                <p className="font-semibold">{patient?.gender === 'male' ? 'ชาย' : 'หญิง'}</p>
+                <p className="font-semibold">
+                  {patient?.gender === 'male' ? 'ชาย' : patient?.gender === 'female' ? 'หญิง' : '-'}
+                </p>
               </div>
               <div>
                 <p className="text-gray-500">เบอร์โทรศัพท์</p>
@@ -697,8 +380,12 @@ export default function PatientDetailPage() {
                 <p className="font-semibold">{patient?.email || '-'}</p>
               </div>
               <div>
-                <p className="text-gray-500">บัตรประชาชน</p>
-                <p className="font-semibold">{patient?.id_card || '-'}</p>
+                <p className="text-gray-500">อาชีพ</p>
+                <p className="font-semibold">{patient?.occupation || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">ระดับการศึกษา</p>
+                <p className="font-semibold">{patient?.education_level || '-'}</p>
               </div>
             </div>
           </div>
@@ -724,9 +411,7 @@ export default function PatientDetailPage() {
               <div>
                 <p className="text-gray-500">BMI</p>
                 <p className="font-semibold">
-                  {patient?.current_weight && patient?.height 
-                    ? (patient.current_weight / ((patient.height / 100) ** 2)).toFixed(1)
-                    : '-'}
+                  {patient?.bmi || calculateBMI(patient?.current_weight, patient?.height)}
                 </p>
               </div>
               <div>
@@ -735,19 +420,37 @@ export default function PatientDetailPage() {
               </div>
               <div>
                 <p className="text-gray-500">วันที่วินิจฉัย</p>
-                <p className="font-semibold">{patient?.diagnosed_date || '-'}</p>
+                <p className="font-semibold">{formatDateTH(patient?.diagnosis_date)}</p>
               </div>
               <div>
                 <p className="text-gray-500">ค่า HbA1c</p>
                 <p className="font-semibold">{patient?.hba1c_level || '-'}</p>
               </div>
               <div>
-                <p className="text-gray-500">หมายเหตุ</p>
-                <p className="font-semibold">{patient?.notes || '-'}</p>
+                <p className="text-gray-500">ระดับ PAM</p>
+                <p className={`font-semibold ${
+                  patient?.pam_level === 'L1' ? 'text-red-600' :
+                  patient?.pam_level === 'L2' ? 'text-yellow-600' :
+                  patient?.pam_level === 'L3' ? 'text-blue-600' :
+                  patient?.pam_level === 'L4' ? 'text-green-600' :
+                  'text-gray-600'
+                }`}>
+                  {patient?.pam_level || 'L1'}
+                </p>
               </div>
               <div>
-                <p className="text-gray-500">อาชีพ</p>
-                <p className="font-semibold">{patient?.occupation || '-'}</p>
+                <p className="text-gray-500">Zone</p>
+                <p className={`font-semibold ${
+                  patient?.zone === 'Red Zone' ? 'text-red-600' :
+                  patient?.zone === 'Yellow Zone' ? 'text-yellow-600' :
+                  'text-green-600'
+                }`}>
+                  {patient?.zone || 'Green Zone'}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500">หมายเหตุ</p>
+                <p className="font-semibold">{patient?.notes || '-'}</p>
               </div>
             </div>
           </div>
@@ -759,10 +462,28 @@ export default function PatientDetailPage() {
             </h2>
             <div className="space-y-3 text-sm">
               <div>
-                <p className="text-gray-500">ที่อยู่เดิม</p>
-                <p className="font-semibold">
-                  {patient?.house_number} {patient?.address_line1} {patient?.soi} {patient?.road}
-                </p>
+                <p className="text-gray-500">เลขที่</p>
+                <p className="font-semibold">{patient?.house_number || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">ที่อยู่เพิ่มเติม</p>
+                <p className="font-semibold">{patient?.address_line1 || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">หมู่ที่/ชุมชน</p>
+                <p className="font-semibold">{patient?.village_no || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">หมู่บ้าน</p>
+                <p className="font-semibold">{patient?.village_name || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">ซอย</p>
+                <p className="font-semibold">{patient?.soi || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">ถนน</p>
+                <p className="font-semibold">{patient?.road || '-'}</p>
               </div>
               <div>
                 <p className="text-gray-500">ตำบล</p>
@@ -779,6 +500,10 @@ export default function PatientDetailPage() {
               <div>
                 <p className="text-gray-500">รหัสไปรษณีย์</p>
                 <p className="font-semibold">{patient?.postal_code || '-'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500">รพสต.</p>
+                <p className="font-semibold">{patient?.subdistrict_health_center || '-'}</p>
               </div>
               <div>
                 <p className="text-gray-500">โรงพยาบาล</p>
@@ -810,25 +535,25 @@ export default function PatientDetailPage() {
                 <div>
                   <p className="text-gray-500">ชื่อ-นามสกุล</p>
                   <p className="font-medium text-gray-800">
-                    {patient?.emergency_contact_1_name || '-'}
+                    {patient?.emergency_contact_name || '-'}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-500">ความสัมพันธ์</p>
                   <p className="font-medium text-gray-800">
-                    {patient?.emergency_contact_1_relation || '-'}
+                    {patient?.emergency_contact_relationship || '-'}
                   </p>
                 </div>
                 <div>
                   <p className="text-gray-500">เบอร์โทรศัพท์</p>
                   <p className="font-medium text-gray-800">
-                    {patient?.emergency_contact_1_phone || '-'}
+                    {patient?.emergency_contact_phone || '-'}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* ผู้ติดต่อคนที่ 2 */}
+            {/* ผู้ติดต่อคนที่ 2 (สำรอง) */}
             <div className="border border-gray-200 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
                 <User className="w-5 h-5 text-purple-600" />
@@ -837,21 +562,15 @@ export default function PatientDetailPage() {
               <div className="space-y-2 text-sm">
                 <div>
                   <p className="text-gray-500">ชื่อ-นามสกุล</p>
-                  <p className="font-medium text-gray-800">
-                    {patient?.emergency_contact_2_name || '-'}
-                  </p>
+                  <p className="font-medium text-gray-400">-</p>
                 </div>
                 <div>
                   <p className="text-gray-500">ความสัมพันธ์</p>
-                  <p className="font-medium text-gray-800">
-                    {patient?.emergency_contact_2_relation || '-'}
-                  </p>
+                  <p className="font-medium text-gray-400">-</p>
                 </div>
                 <div>
                   <p className="text-gray-500">เบอร์โทรศัพท์</p>
-                  <p className="font-medium text-gray-800">
-                    {patient?.emergency_contact_2_phone || '-'}
-                  </p>
+                  <p className="font-medium text-gray-400">-</p>
                 </div>
               </div>
             </div>
@@ -859,7 +578,7 @@ export default function PatientDetailPage() {
             {/* แพทย์ประจำตัว */}
             <div className="border border-gray-200 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Phone className="w-5 h-5 text-green-600" />
+                <Stethoscope className="w-5 h-5 text-green-600" />
                 <h3 className="font-semibold text-gray-800">แพทย์ประจำตัว</h3>
               </div>
               <div className="space-y-2 text-sm">
