@@ -1,11 +1,22 @@
 // app/admin/appointments/view/page.tsx
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. เพิ่มปุ่ม "บันทึกติดตาม" (สีม่วง) สำหรับนัดหมายที่เสร็จสิ้นแล้วและยังไม่ได้ติดตาม
+//    2. แสดงสถานะ "บันทึกติดตามแล้ว" ถ้ามี followup แล้ว
+//    3. เปลี่ยนปุ่ม "ดูรายละเอียด" ให้เปิด Modal แทนการลิงก์ไปหน้าอื่น (แก้ปัญหารายการไม่พบข้อมูล)
+
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client'; // ✅ แก้ไข: ใช้จาก lib
+import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle, X, Eye } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function ViewAppointmentsPage() {
   const router = useRouter();
@@ -14,6 +25,10 @@ export default function ViewAppointmentsPage() {
   const [patients, setPatients] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // ✅ State สำหรับ Modal รายละเอียด
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   // Filters
   const [filterDate, setFilterDate] = useState('');
@@ -81,12 +96,13 @@ export default function ViewAppointmentsPage() {
 
           return {
             ...apt,
-            patient: userData ? {
-              first_name: userData.first_name || '-',
-              last_name: userData.last_name || '-',
+            users: userData ? {
+              full_name: userData.first_name && userData.last_name
+                ? `${userData.first_name} ${userData.last_name}`
+                : '-',
               hospital_number: userData.hospital_number || '-'
             } : null,
-            doctor: doctorData || null,
+            doctors: doctorData || null,
             hasFollowup: !!followupData  // ✅ มี followup แล้วหรือไม่
           };
         })
@@ -106,7 +122,7 @@ export default function ViewAppointmentsPage() {
         staff.role === 'doctor' || staff.role === 'helper'
       );
 
-      console.log('👨‍️ Doctors/Staff:', filteredStaff.length);
+      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
@@ -240,6 +256,12 @@ export default function ViewAppointmentsPage() {
     }
   };
 
+  // ✅ ฟังก์ชันเปิด Modal รายละเอียด
+  const handleViewDetails = (apt: any) => {
+    setSelectedAppointment(apt);
+    setShowDetailsModal(true);
+  };
+
   // Filter appointments
   const filteredAppointments = appointments.filter(apt => {
     const aptDateObj = new Date(apt.appointment_date);
@@ -258,8 +280,8 @@ export default function ViewAppointmentsPage() {
       return false;
     }
 
-    // ✅ Filter by patient - แก้ไขให้ถูกต้อง
-    if (filterPatient && apt.patient?.id !== filterPatient) {
+    // Filter by patient
+    if (filterPatient && apt.user_id !== filterPatient) {
       return false;
     }
 
@@ -301,7 +323,7 @@ export default function ViewAppointmentsPage() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push('/admin/dashboard')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
@@ -403,7 +425,10 @@ export default function ViewAppointmentsPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">แพทย์</label>
               <select
                 value={filterDoctor}
-                onChange={(e) => setFilterDoctor(e.target.value)}
+                onChange={(e) => {
+                  console.log('🎯 Selected doctor:', e.target.value);
+                  setFilterDoctor(e.target.value);
+                }}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">ทั้งหมด</option>
@@ -495,14 +520,14 @@ export default function ViewAppointmentsPage() {
                 filteredAppointments.map((apt) => (
                   <tr key={apt.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <p className="font-medium text-gray-800">{apt.patient?.first_name} {apt.patient?.last_name}</p>
-                      <p className="text-sm text-gray-500">{apt.patient?.hospital_number}</p>
+                      <p className="font-medium text-gray-800">{apt.users?.full_name || '-'}</p>
+                      <p className="text-sm text-gray-500">{apt.users?.hospital_number}</p>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Stethoscope className="w-4 h-4 text-gray-400" />
                         <span className="text-gray-700">
-                          {apt.doctor?.full_name_th || '-'}
+                          {apt.doctors?.full_name_th || '-'}
                         </span>
                       </div>
                     </td>
@@ -530,25 +555,56 @@ export default function ViewAppointmentsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
-                        {/* ✅ ปุ่มดูรายละเอียด - เพิ่มใหม่ */}
+                        {/* ✅ ปุ่มดูรายละเอียด - เปิด Modal แทนการลิงก์ */}
                         <button
-                          onClick={() => router.push(`/admin/appointments/${apt.id}`)}
+                          onClick={() => handleViewDetails(apt)}
                           className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
                           title="ดูรายละเอียด"
                         >
-                          <FileText className="w-3 h-3" />
+                          <Eye className="w-3 h-3" />
                           ดูรายละเอียด
                         </button>
+
+                        {/* ปุ่มแก้ไข - แสดงเฉพาะ scheduled เท่านั้น */}
+                        {apt.status === 'scheduled' && (
+                          <button
+                            onClick={() => router.push(`/admin/appointments/edit/${apt.id}`)}
+                            className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all"
+                            title="แก้ไขนัดหมาย"
+                          >
+                            แก้ไข
+                          </button>
+                        )}
 
                         {/* ปุ่มเสร็จสิ้น - แสดงเฉพาะ scheduled */}
                         {apt.status === 'scheduled' && (
                           <button
                             onClick={() => handleComplete(apt.id)}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
-                            title="เสร็จสิ้นนัดหมาย"
+                            title={isPastAppointment(apt.appointment_date) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
                           >
                             เสร็จสิ้น
                           </button>
+                        )}
+
+                        {/* ✅ ปุ่มบันทึกติดตาม - แสดงเมื่อเสร็จสิ้นแล้วและยังไม่ได้ติดตาม */}
+                        {apt.status === 'completed' && !apt.hasFollowup && (
+                          <button
+                            onClick={() => router.push(`/admin/appointments/followup/${apt.id}`)}
+                            className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
+                            title="บันทึกผลการติดตาม"
+                          >
+                            <FileText className="w-3 h-3" />
+                            บันทึกติดตาม
+                          </button>
+                        )}
+
+                        {/* ✅ แสดงสถานะเมื่อติดตามแล้ว - ห้ามบันทึกซ้ำ */}
+                        {apt.status === 'completed' && apt.hasFollowup && (
+                          <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs rounded-lg flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            ติดตามแล้ว
+                          </span>
                         )}
 
                         {/* ปุ่มผิดนัด (No-show) - แสดงเฉพาะ scheduled ที่ถึงเวลาแล้ว */}
@@ -593,6 +649,114 @@ export default function ViewAppointmentsPage() {
           <p>แสดง {filteredAppointments.length} จาก {appointments.length} นัดหมาย</p>
         </div>
       </div>
+
+      {/* ✅ Modal รายละเอียดนัดหมาย */}
+      {showDetailsModal && selectedAppointment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <Calendar className="w-6 h-6 text-blue-600" />
+                รายละเอียดนัดหมาย
+              </h2>
+              <button
+                onClick={() => setShowDetailsModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* ข้อมูลผู้ป่วย */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-blue-800 mb-2">👤 ผู้ป่วย</h3>
+                <p className="text-lg font-bold text-blue-900">{selectedAppointment.users?.full_name}</p>
+                <p className="text-sm text-blue-700">HN: {selectedAppointment.users?.hospital_number}</p>
+              </div>
+
+              {/* ข้อมูลนัดหมาย */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-500">ประเภท</p>
+                  <p className="font-medium text-gray-800">{selectedAppointment.appointment_type}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">สถานะ</p>
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedAppointment.status)}`}>
+                    {getStatusText(selectedAppointment.status)}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">วันที่</p>
+                  <p className="font-medium text-gray-800">
+                    {new Date(selectedAppointment.appointment_date).toLocaleDateString('th-TH', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">เวลา</p>
+                  <p className="font-medium text-gray-800">
+                    {new Date(selectedAppointment.appointment_date).toLocaleTimeString('th-TH', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">แพทย์</p>
+                  <p className="font-medium text-gray-800">{selectedAppointment.doctors?.full_name_th || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">หมายเหตุ</p>
+                  <p className="font-medium text-gray-800">{selectedAppointment.notes || '-'}</p>
+                </div>
+              </div>
+
+              {/* สถานะติดตาม */}
+              {selectedAppointment.status === 'completed' && (
+                <div className={`rounded-lg p-4 border-2 ${
+                  selectedAppointment.hasFollowup 
+                    ? 'bg-green-50 border-green-300' 
+                    : 'bg-yellow-50 border-yellow-300'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    {selectedAppointment.hasFollowup ? (
+                      <>
+                        <CheckCircle className="w-6 h-6 text-green-600" />
+                        <div>
+                          <p className="font-bold text-green-800">บันทึกติดตามแล้ว</p>
+                          <p className="text-sm text-green-700">ไม่ต้องบันทึกติดตามซ้ำ รอจนกว่าจะมีนัดหมายรอบใหม่</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="w-6 h-6 text-yellow-600" />
+                        <div>
+                          <p className="font-bold text-yellow-800">ยังไม่ได้บันทึกติดตาม</p>
+                          <p className="text-sm text-yellow-700">กรุณาบันทึกผลการทำกิจวัตรของผู้ป่วย</p>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0 flex justify-end">
+              <button
+                onClick={() => setShowDetailsModal(false)}
+                className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all font-bold"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
