@@ -1,11 +1,11 @@
 // app/admin/screening/page.tsx
-
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening, createDefaultGoals } from '@/lib/supabase/queries';
 import { FileText, Save, ArrowLeft, LogOut, AlertCircle } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 export default function ScreeningPage() {
   const router = useRouter();
@@ -14,22 +14,22 @@ export default function ScreeningPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState('');
-
+  const [patientData, setPatientData] = useState<any>(null);
+  
   // PAM Questions & Answers
   const [pamQuestions, setPamQuestions] = useState<any[]>([]);
   const [pamAnswers, setPamAnswers] = useState<Record<string, number>>({});
-
+  
   // PROMs Questions & Answers
   const [promsQuestions, setPromsQuestions] = useState<any[]>([]);
   const [promsAnswers, setPromsAnswers] = useState<Record<string, number>>({});
-
+  
   // Confidence
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidencePlan, setConfidencePlan] = useState('');
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -44,6 +44,14 @@ export default function ScreeningPage() {
     setUser(userData);
     loadPatients();
     loadQuestions();
+    
+    // ✅ ตรวจสอบ patient_id จาก URL และ auto-select
+    const urlParams = new URLSearchParams(window.location.search);
+    const patientId = urlParams.get('patient_id');
+    if (patientId) {
+      setSelectedPatient(patientId);
+      loadPatientData(patientId);
+    }
   }, [router]);
 
   const loadPatients = async () => {
@@ -52,6 +60,18 @@ export default function ScreeningPage() {
       setPatients(data);
     } catch (error) {
       console.error('Error loading patients:', error);
+    }
+  };
+
+  const loadPatientData = async (patientId: string) => {
+    try {
+      const patient = patients.find(p => p.id === patientId);
+      if (patient) {
+        setPatientData(patient);
+        console.log('✅ Auto-selected patient:', patient);
+      }
+    } catch (error) {
+      console.error('Error loading patient data:', error);
     }
   };
 
@@ -85,24 +105,6 @@ export default function ScreeningPage() {
   // =====================================================
   // 📊 ฟังก์ชันคำนวณระดับผู้ป่วย (ฉบับแก้ไข - PROMs ≤ 8)
   // =====================================================
-  /**
-   * ระบบการประเมินระดับผู้ป่วยแบบมีเงื่อนไข
-   * 
-   * คะแนน:
-   * - PAM: 5 ข้อ × 4 คะแนน = 20 คะแนน (สูงสุด)
-   * - PROMs: 4 ข้อ × 6 คะแนน = 24 คะแนน (สูงสุด)
-   * - รวม: 44 คะแนน
-   * 
-   * เงื่อนไขบังคับ Red Zone (L1):
-   * 1. PAM ≤ 5 → L1 ทันที (ไม่ว่า PROMs จะเป็นเท่าไหร่)
-   * 2. PROMs ข้อใดข้อหนึ่ง ≤ 2 → L1 ทันที
-   * 3. PROMs รวม ≤ 8 → L1 ทันที (แก้ไขจาก ≤10 เป็น ≤8)
-   * 
-   * เงื่อนไขอื่นๆ (PAM > 5 และ PROMs > 8):
-   * - L2: คะแนนรวม < 22 (< 50%)
-   * - L3: คะแนนรวม 22-32 (50-74%)
-   * - L4: คะแนนรวม ≥ 33 (≥ 75%)
-   */
   const calculatePatientLevel = () => {
     // คำนวณคะแนน PAM
     const pamScores = Object.values(pamAnswers);
@@ -120,7 +122,7 @@ export default function ScreeningPage() {
     // ===========================================
     // 🔴 เงื่อนไขบังคับ Red Zone (L1)
     // ===========================================
-    
+
     // 1. PAM ≤ 5 → L1 ทันที
     if (pamTotal <= 5) {
       return {
@@ -157,7 +159,7 @@ export default function ScreeningPage() {
       };
     }
 
-    // 3. PROMs รวม ≤ 8 → L1 ทันที (✅ แก้ไขจาก ≤10 เป็น ≤8)
+    // 3. PROMs รวม ≤ 8 → L1 ทันที
     if (promsTotal <= 8) {
       return {
         level: 'L1',
@@ -244,7 +246,6 @@ export default function ScreeningPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
-
     if (Object.keys(pamAnswers).length === 0) {
       alert('กรุณาตอบคำถาม PAM ให้ครบ');
       return;
@@ -345,12 +346,13 @@ export default function ScreeningPage() {
         );
 
         if (confirmGoToGoals) {
-           // ✅ ไปหน้าตั้งเป้าหมาย (ระบุผู้ป่วยแล้ว)
-            router.push(`/admin/patients/${selectedPatient}/goals/setup`);
+          // ✅ ไปหน้าตั้งเป้าหมาย (ระบุผู้ป่วยแล้ว)
+          router.push(`/admin/patients/${selectedPatient}/goals/setup`);
         } else {
           // ✅ อยู่หน้า Screening ต่อไป
           // Reset form
           setSelectedPatient('');
+          setPatientData(null);
           setPamAnswers({});
           setPromsAnswers({});
           setConfidenceScore(0);
@@ -376,37 +378,37 @@ export default function ScreeningPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.push('/admin/dashboard')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ Dashboard
+          </button>
+          
           <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push('/admin/dashboard')}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                กลับ Dashboard
-              </button>
-              <h1 className="text-2xl font-bold text-gray-800">แบบประเมินผู้ป่วย</h1>
-              <p className="text-sm text-gray-600">แบบประเมิน PAM และ PROMs</p>
+              <h1 className="text-2xl font-bold text-gray-800 mb-1">
+                📝 แบบประเมินผู้ป่วย
+              </h1>
+              <p className="text-gray-600">แบบประเมิน PAM และ PROMs</p>
             </div>
+            
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
             >
-              <LogOut className="w-4 h-4" />
               ออกจากระบบ
             </button>
           </div>
@@ -415,28 +417,45 @@ export default function ScreeningPage() {
 
       {/* Main Content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
-        {/* Select Patient */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-blue-600" />
-            เลือกผู้ป่วย
-          </h2>
-          <select
-            value={selectedPatient}
-            onChange={(e) => setSelectedPatient(e.target.value)}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          >
-            <option value="">-- เลือกผู้ป่วย --</option>
-            {patients.map((patient) => (
-              <option key={patient.id} value={patient.id}>
-                {patient.hospital_number} - {patient.full_name} (PAM: {patient.pam_level})
-              </option>
-            ))}
-          </select>
-        </div>
+        
+        {/* ✅ Select Patient - แสดงเฉพาะเมื่อไม่มี patient_id ใน URL */}
+        {!selectedPatient && (
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-blue-600" />
+              เลือกผู้ป่วย
+            </h2>
+            <select
+              value={selectedPatient}
+              onChange={(e) => {
+                setSelectedPatient(e.target.value);
+                loadPatientData(e.target.value);
+              }}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">-- เลือกผู้ป่วย --</option>
+              {patients.map((patient) => (
+                <option key={patient.id} value={patient.id}>
+                  {patient.hospital_number} - {patient.full_name} (PAM: {patient.pam_level})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
-        {selectedPatient && (
+        {selectedPatient && patientData && (
           <>
+            {/* แสดงข้อมูลผู้ป่วยที่เลือก */}
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+              <p className="text-sm font-semibold text-blue-800 mb-1">
+                👤 ผู้ป่วยที่เลือก:
+              </p>
+              <p className="text-blue-900">
+                {patientData.hospital_number} - {patientData.full_name} 
+                (PAM Level: {patientData.pam_level || 'L1'})
+              </p>
+            </div>
+
             {/* PAM Questions - ไม้บรรทัดวัดใจ */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
               <h2 className="text-xl font-bold text-gray-800 mb-2">แบบประเมิน PAM</h2>
@@ -461,7 +480,7 @@ export default function ScreeningPage() {
                               key={score}
                               onClick={() => handlePamAnswer(q.id, score)}
                               className={`px-3 py-3 rounded-lg border-2 transition-all text-sm ${
-                                pamAnswers[q.id] === score 
+                                pamAnswers[q.id] === score  
                                   ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
                                   : 'border-gray-300 hover:border-gray-400 bg-white'
                               }`}
@@ -519,7 +538,7 @@ export default function ScreeningPage() {
                             key={score}
                             onClick={() => handlePromsAnswer(q.id, score)}
                             className={`px-2 py-3 rounded-lg border-2 transition-all text-xs ${
-                              promsAnswers[q.id] === score 
+                              promsAnswers[q.id] === score  
                                 ? 'border-purple-500 bg-purple-50 text-purple-700 font-semibold'
                                 : 'border-gray-300 hover:border-gray-400 bg-white'
                             }`}
@@ -583,7 +602,7 @@ export default function ScreeningPage() {
                         <div 
                           className="bg-blue-500 h-4 rounded-full transition-all"
                           style={{ width: `${patientLevel.percentage}%` }}
-                        />
+                        ></div>
                       </div>
                       <p className="text-xl font-bold">{patientLevel.totalScore} / {patientLevel.maxScore} ({patientLevel.percentage.toFixed(1)}%)</p>
                     </div>
