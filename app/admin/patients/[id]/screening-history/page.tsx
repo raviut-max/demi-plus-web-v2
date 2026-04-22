@@ -1,9 +1,6 @@
 // app/admin/patients/[id]/screening-history/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข:
-//    1. แก้ไขการแสดงผลคะแนน PROMs ให้แสดงถูกต้อง (ไม่แสดงเป็น 0)
-//    2. เพิ่มการตรวจสอบข้อมูลก่อนแสดงผล
-//    3. เพิ่ม Debug log เพื่อง่ายต่อการตรวจสอบ
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 14:30)
+// ✅ การแก้ไข: แก้ไขการคำนวณคะแนน PROMs ให้ดึงจากฟิลด์ที่บันทึกในฐานข้อมูล
 
 'use client';
 
@@ -71,7 +68,7 @@ export default function ScreeningHistoryPage() {
       setScreenings(screeningsData);
       console.log('📋 [DEBUG] Screenings loaded:', screeningsData.length);
       
-      // Debug: แสดงข้อมูล screenings
+      // Debug: แสดงข้อมูล screenings แต่ละรายการ
       screeningsData.forEach((s: any, index: number) => {
         console.log(`📊 [DEBUG] Screening #${index + 1}:`, {
           id: s.id,
@@ -109,10 +106,10 @@ export default function ScreeningHistoryPage() {
 
   const getPamLevelColor = (level: string) => {
     switch (level) {
-      case 'L1': return 'bg-red-100 text-red-700 border-red-300';
-      case 'L2': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
-      case 'L3': return 'bg-blue-100 text-blue-700 border-blue-300';
-      case 'L4': return 'bg-green-100 text-green-700 border-green-300';
+      case 'Deny': return 'bg-red-100 text-red-700 border-red-300';
+      case 'General': return 'bg-yellow-100 text-yellow-700 border-yellow-300';
+      case 'Intensive': return 'bg-blue-100 text-blue-700 border-blue-300';
+      case 'Champion': return 'bg-green-100 text-green-700 border-green-300';
       default: return 'bg-gray-100 text-gray-700 border-gray-300';
     }
   };
@@ -144,18 +141,20 @@ export default function ScreeningHistoryPage() {
     });
   };
 
-  // ✅ คำนวณคะแนน PROMs รวม
+  // ✅ คำนวณคะแนน PROMs รวม (แก้ไขแล้ว - ดึงจากฟิลด์ในฐานข้อมูล)
   const calculatePromsTotal = (screening: any) => {
-    const total = (screening.proms_q1_score || 0) + 
-                  (screening.proms_q2_score || 0) + 
-                  (screening.proms_q3_score || 0) + 
-                  (screening.proms_q4_score || 0);
+    // ✅ ดึงคะแนนจากฟิลด์ที่บันทึกในฐานข้อมูล
+    const q1 = screening.proms_q1_score || 0;
+    const q2 = screening.proms_q2_score || 0;
+    const q3 = screening.proms_q3_score || 0;
+    const q4 = screening.proms_q4_score || 0;
+    
+    const total = q1 + q2 + q3 + q4;
+    
     console.log('🔍 [DEBUG] PROMs total calculated:', total, {
-      q1: screening.proms_q1_score,
-      q2: screening.proms_q2_score,
-      q3: screening.proms_q3_score,
-      q4: screening.proms_q4_score
+      q1, q2, q3, q4
     });
+    
     return total;
   };
 
@@ -295,7 +294,7 @@ export default function ScreeningHistoryPage() {
             ) : (
               <div className="space-y-4">
                 {screenings.map((screening, index) => {
-                  // ✅ คำนวณคะแนน PROMs รวม
+                  // ✅ คำนวณคะแนน PROMs รวม (ใช้ฟังก์ชันที่แก้ไขแล้ว)
                   const promsTotal = calculatePromsTotal(screening);
                   
                   return (
