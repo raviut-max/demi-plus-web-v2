@@ -1,6 +1,9 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: แก้ไขการตรวจสอบสถานะการประเมิน - เปลี่ยนจาก pam_score → pam_total_score
+// ✅ การแก้ไข:
+//    1. ลบส่วนเป้าหมายปัจจุบันออก
+//    2. เพิ่มส่วนผู้ติดต่อฉุกเฉิน
+//    3. แสดงเฉพาะข้อมูลผู้ป่วย
 
 'use client';
 
@@ -32,7 +35,10 @@ import {
   Edit,
   LogOut,
   Activity,
-  ClipboardCheck
+  ClipboardCheck,
+  Phone,
+  User,
+  Heart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -497,10 +503,21 @@ export default function PatientDetailPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* Summary Cards */}
+        {/* 
+        ========================================
+        ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม
+        ========================================
+        */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
+          {/* 
+          ========================================
+          ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป
+          📅 แก้ไข: 22 เม.ย. 2569
+          🔗 ลิงก์: /admin/patients/${patientId}/appointments
+          📝 คำอธิบาย: คลิกเพื่อดูประวัตินัดหมายทั้งหมดของผู้ป่วยคนนี้
+          ========================================
+          */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -517,7 +534,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ปุ่มสีเขียว - การประเมินล่าสุด */}
+          {/* 
+          ========================================
+          ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด (ประวัติการติดตาม)
+          📅 แก้ไข: 22 เม.ย. 2569 (10:00) - แก้ไขใหม่
+          🔗 ลิงก์: /admin/patients/${patientId}/screening-history
+          📝 คำอธิบาย: คลิกเพื่อดูประวัติการประเมิน/ติดตามทั้งหมด (PAM, PROMs, Screening)
+          ========================================
+          */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -534,7 +558,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ปุ่มสีม่วง - ติดตามล่าสุด */}
+          {/* 
+          ========================================
+          ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด
+          📅 แก้ไข: 22 เม.ย. 2569
+          🔗 ลิงก์: /admin/patients/${patientId}/followup-history
+          📝 คำอธิบาย: คลิกเพื่อดูประวัติการติดตามนัดหมายย้อนหลัง
+          ========================================
+          */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -551,7 +582,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ปุ่มสีส้ม - ความคืบหน้า */}
+          {/* 
+          ========================================
+          ✅ 4. ปุ่มสีส้ม - ความคืบหน้า
+          📅 ไม่มีการแก้ไข (เหมือนเดิม)
+          🔗 ลิงก์: /admin/patients/${patientId}/goals
+          📝 คำอธิบาย: คลิกเพื่อดูเป้าหมายและความคืบหน้า (มีการเตือนถ้ายังไม่ได้ประเมิน)
+          ========================================
+          */}
           <div 
             onClick={handleViewProgress}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -575,8 +613,22 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* Action Buttons */}
+        {/* 
+        ========================================
+        ✅ ACTION BUTTONS - ปุ่มเพิ่มเติม
+        ========================================
+        */}
         <div className="flex flex-wrap gap-2 mb-6">
+          {/* ✅ ปุ่มสีฟ้า - ดูประวัติการประเมิน */}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/assessments`)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+          >
+            <FileText className="w-4 h-4" />
+            ดูประวัติการประเมิน (0)
+          </button>
+          
+          {/* ✅ ปุ่มสีเขียว - ไปหน้า screening/assessment (ทำ PAM) */}
           <button
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
@@ -585,22 +637,16 @@ export default function PatientDetailPage() {
             ทำแบบประเมิน (PAM/PROMs)
           </button>
           
+          {/* ✅ ปุ่มสีม่วง - ดูประวัติเป้าหมาย */}
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-          >
-            <FileText className="w-4 h-4" />
-            ดูประวัติการประเมิน
-          </button>
-          
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
+            onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
           >
-            <Activity className="w-4 h-4" />
-            ดูประวัติการติดตาม
+            <Target className="w-4 h-4" />
+            ดูประวัติเป้าหมาย (0)
           </button>
           
+          {/* ✅ ปุ่มสีส้ม - ดูประวัตินัดหมาย */}
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
@@ -610,7 +656,11 @@ export default function PatientDetailPage() {
           </button>
         </div>
 
-        {/* Patient Info Cards */}
+        {/* 
+        ========================================
+        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
+        ========================================
+        */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -738,175 +788,104 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* Goals Section (ถ้ามี) */}
-        {goals.length > 0 && (
-          <div className="mt-8">
-            <h2 className="text-2xl font-bold text-gray-800 mb-4">🎯 เป้าหมายปัจจุบัน</h2>
-            
-            {/* Tab Navigation */}
-            <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-lg p-2 border border-gray-200 overflow-x-auto">
-              <button
-                onClick={() => setViewMode('goals')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-                  viewMode === 'goals' 
-                    ? 'bg-blue-500 text-white shadow-lg' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Target className="w-5 h-5" />
-                ภาพรวม
-              </button>
-              <button
-                onClick={() => setViewMode('weekly')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-                  viewMode === 'weekly' 
-                    ? 'bg-blue-500 text-white shadow-lg' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <TrendingUp className="w-5 h-5" />
-                บันทึกประจำวัน
-              </button>
-              <button
-                onClick={() => setViewMode('calendar')}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-                  viewMode === 'calendar' 
-                    ? 'bg-blue-500 text-white shadow-lg' 
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                <Calendar className="w-5 h-5" />
-                ปฏิทิน
-              </button>
-            </div>
-
-            {/* Goals Content */}
-            {viewMode === 'goals' && (
-              <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-                <div className="p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <Target className="w-6 h-6 text-blue-600" />
-                    เป้าหมายรอบที่ {selectedRound}
-                  </h2>
+        {/* 
+        ========================================
+        ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน
+        ========================================
+        */}
+        <div className="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+            <Heart className="w-6 h-6 text-red-500" />
+            ผู้ติดต่อฉุกเฉิน
+          </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* ผู้ติดต่อคนที่ 1 */}
+            <div className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <User className="w-5 h-5 text-blue-600" />
+                <h3 className="font-semibold text-gray-800">ผู้ติดต่อที่ 1</h3>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="text-gray-500">ชื่อ-นามสกุล</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.emergency_contact_1_name || '-'}
+                  </p>
                 </div>
-
-                <div className="divide-y divide-gray-200">
-                  {groupedGoals.map(({ goal, completedCount, notCompletedCount, records: goalRecords, percentage }) => {
-                    const goalKey = goal.goal_name || goal.activity_id || goal.id;
-                    const isExpanded = expandedGoals.has(goalKey);
-
-                    return (
-                      <div key={goalKey} className="p-6">
-                        <div 
-                          className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-3 rounded-lg transition-colors"
-                          onClick={() => toggleGoalExpansion(goalKey)}
-                        >
-                          <div className="flex items-center gap-3 flex-1">
-                            <span className="text-3xl">{getGoalIcon(goal.goal_name)}</span>
-                            <div className="flex-1">
-                              <h3 className="text-lg font-bold text-gray-800">
-                                {goal.goal_name_th || goal.goal_name}
-                              </h3>
-                              <p className="text-sm text-gray-500">
-                                {goal.activities?.activity_name_th || goal.description_th || '-'}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-4">
-                            <div className="text-right">
-                              <div className="flex items-center gap-2 mb-1">
-                                <CheckCircle className="w-4 h-4 text-green-600" />
-                                <span className="text-sm font-bold text-green-600">{completedCount}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-red-600">{notCompletedCount}</span>
-                              </div>
-                            </div>
-                            
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                              percentage >= 80 ? 'bg-green-100' :
-                              percentage >= 50 ? 'bg-yellow-100' :
-                              'bg-red-100'
-                            }`}>
-                              <span className={`text-sm font-bold ${
-                                percentage >= 80 ? 'text-green-600' :
-                                percentage >= 50 ? 'text-yellow-600' :
-                                'text-red-600'
-                              }`}>
-                                {percentage}%
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="mt-4 ml-12 space-y-4">
-                            {completedCount > 0 && (
-                              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <CheckCircle className="w-5 h-5 text-green-600" />
-                                  <h4 className="font-bold text-green-800">
-                                    ทำได้ {completedCount} ครั้ง
-                                  </h4>
-                                </div>
-                                <div className="space-y-2">
-                                  {goalRecords
-                                    .filter(r => r.isCompleted)
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                    .map((record, index) => (
-                                      <div key={index} className="flex items-center gap-3 text-sm">
-                                        <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-                                        <span className="text-green-800">
-                                          {new Date(record.date).toLocaleDateString('th-TH', {
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric'
-                                          })}
-                                        </span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {notCompletedCount > 0 && (
-                              <div className="bg-red-50 rounded-lg p-4 border border-red-200">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <span className="w-5 h-5 text-red-600">❌</span>
-                                  <h4 className="font-bold text-red-800">
-                                    ไม่ได้ {notCompletedCount} ครั้ง
-                                  </h4>
-                                </div>
-                                <div className="space-y-2">
-                                  {goalRecords
-                                    .filter(r => !r.isCompleted)
-                                    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                    .map((record, index) => (
-                                      <div key={index} className="flex items-center gap-3 text-sm">
-                                        <span className="text-red-600">❌</span>
-                                        <span className="text-red-800">
-                                          {new Date(record.date).toLocaleDateString('th-TH', {
-                                            year: 'numeric',
-                                            month: 'long',
-                                            day: 'numeric'
-                                          })}
-                                        </span>
-                                      </div>
-                                    ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div>
+                  <p className="text-gray-500">ความสัมพันธ์</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.emergency_contact_1_relation || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">เบอร์โทรศัพท์</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.emergency_contact_1_phone || '-'}
+                  </p>
                 </div>
               </div>
-            )}
+            </div>
+
+            {/* ผู้ติดต่อคนที่ 2 */}
+            <div className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <User className="w-5 h-5 text-purple-600" />
+                <h3 className="font-semibold text-gray-800">ผู้ติดต่อที่ 2</h3>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="text-gray-500">ชื่อ-นามสกุล</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.emergency_contact_2_name || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">ความสัมพันธ์</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.emergency_contact_2_relation || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">เบอร์โทรศัพท์</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.emergency_contact_2_phone || '-'}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* แพทย์ประจำตัว */}
+            <div className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Phone className="w-5 h-5 text-green-600" />
+                <h3 className="font-semibold text-gray-800">แพทย์ประจำตัว</h3>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div>
+                  <p className="text-gray-500">ชื่อแพทย์</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.doctor_name || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">โรงพยาบาล</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.hospital_name || '-'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-500">เบอร์โทรศัพท์</p>
+                  <p className="font-medium text-gray-800">
+                    {patient?.doctor_phone || '-'}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
+        </div>
+
       </div>
     </div>
   );
