@@ -1,4 +1,7 @@
 // app/admin/patients/[id]/page.tsx
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข: เปลี่ยนปุ่มนัดหมาย (สีฟ้า) ให้เป็นลิงก์ไปดูประวัตินัดหมายของผู้ป่วย
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -490,10 +493,15 @@ export default function PatientDetailPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* Summary Cards */}
+        {/* Summary Cards - ปุ่มนำทางหลัก 4 ปุ่ม */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          {/* นัดหมายครั้งถัดไป */}
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6">
+          
+          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป (แก้ไขล่าสุด: 22 เม.ย. 2569) */}
+          {/* ✅ การแก้ไข: เปลี่ยนจากแสดงข้อมูลอย่างเดียว → เป็นลิงก์ไปดูประวัตินัดหมายของผู้ป่วย */}
+          <div 
+            onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
+            className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">นัดหมายครั้งถัดไป</p>
@@ -506,7 +514,8 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* การประเมินล่าสุด - ปุ่มสีเขียว (ไปทำ PAM) */}
+          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
+          {/* ✅ ลิงก์: /admin/screening?patient_id=${patientId} - ไปหน้าทำแบบประเมิน PAM/PROMs */}
           <div 
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -523,9 +532,10 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ติดตามล่าสุด - ปุ่มสีม่วง */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
+          {/* ✅ ลิงก์: /admin/patients/${patientId}/screening-history - ไปหน้าประวัติการติดตาม */}
           <div 
-            onClick={() => router.push(`/admin/patients/${patientId}/followup`)}
+            onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
@@ -540,7 +550,8 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ความคืบหน้า - ปุ่มสีส้ม (แค่เตือน แต่ยังให้เข้าได้) */}
+          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า */}
+          {/* ✅ ลิงก์: /admin/patients/${patientId}/goals - ไปหน้าเป้าหมาย (มีการเตือนถ้ายังไม่ได้ประเมิน) */}
           <div 
             onClick={handleViewProgress}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"

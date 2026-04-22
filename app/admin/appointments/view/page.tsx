@@ -5,12 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
 import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { supabase } from '@/lib/supabase/client'; // ✅ แก้ไข: ใช้จาก lib
 
 export default function ViewAppointmentsPage() {
   const router = useRouter();
@@ -32,7 +27,6 @@ export default function ViewAppointmentsPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -87,13 +81,12 @@ export default function ViewAppointmentsPage() {
 
           return {
             ...apt,
-            users: userData ? {
-              full_name: userData.first_name && userData.last_name
-                ? `${userData.first_name} ${userData.last_name}`
-                : '-',
+            patient: userData ? {
+              first_name: userData.first_name || '-',
+              last_name: userData.last_name || '-',
               hospital_number: userData.hospital_number || '-'
             } : null,
-            doctors: doctorData || null,
+            doctor: doctorData || null,
             hasFollowup: !!followupData  // ✅ มี followup แล้วหรือไม่
           };
         })
@@ -113,7 +106,7 @@ export default function ViewAppointmentsPage() {
         staff.role === 'doctor' || staff.role === 'helper'
       );
 
-      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
+      console.log('👨‍️ Doctors/Staff:', filteredStaff.length);
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
@@ -154,34 +147,6 @@ export default function ViewAppointmentsPage() {
     const now = new Date();
     const aptDate = new Date(appointmentDate);
     return aptDate < now;
-  };
-
-  // ✅ ตรวจสอบว่าสามารถเสร็จสิ้นได้หรือไม่
-  const canComplete = (apt: any) => {
-    if (apt.status !== 'scheduled') return false;
-    const now = new Date();
-    const aptDate = new Date(apt.appointment_date);
-    return aptDate <= now;
-  };
-
-  // ✅ ตรวจสอบว่าควรแสดงปุ่มแก้ไขหรือไม่
-  const canEdit = (apt: any) => {
-    return apt.status === 'scheduled';
-  };
-
-  // ✅ ตรวจสอบว่าควรแสดงปุ่มบันทึกติดตามหรือไม่
-  const canFollowup = (apt: any) => {
-    // กรณีที่ 1: เสร็จสิ้นแล้ว แต่ยังไม่ได้บันทึกติดตาม
-    if (apt.status === 'completed' && !apt.hasFollowup) {
-      return true;
-    }
-    
-    // กรณีที่ 2: ยังไม่เสร็จสิ้น แต่ถึงวันนัดแล้ว (ให้บันทึกเลยแล้วเสร็จสิ้นอัตโนมัติ)
-    if (apt.status === 'scheduled' && isPastAppointment(apt.appointment_date)) {
-      return true;
-    }
-
-    return false;
   };
 
   // ✅ ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
@@ -293,8 +258,8 @@ export default function ViewAppointmentsPage() {
       return false;
     }
 
-    // Filter by patient
-    if (filterPatient && apt.user_id !== filterPatient) {
+    // ✅ Filter by patient - แก้ไขให้ถูกต้อง
+    if (filterPatient && apt.patient?.id !== filterPatient) {
       return false;
     }
 
@@ -324,32 +289,33 @@ export default function ViewAppointmentsPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => router.push('/admin/dashboard')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ Dashboard
+          </button>
+          
+          <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push('/admin/dashboard')}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>กลับ Dashboard</span>
-              </button>
-              <h1 className="text-3xl font-bold text-gray-800">ดูนัดหมาย</h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                📅 ดูนัดหมาย
+              </h1>
               <p className="text-gray-600">ตรวจสอบตารางนัดหมาย</p>
             </div>
-            <div className="flex items-center gap-3">
+            
+            <div className="flex gap-2">
               <button
                 onClick={() => router.push('/admin/appointments/new')}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -357,11 +323,11 @@ export default function ViewAppointmentsPage() {
                 <Plus className="w-4 h-4" />
                 สร้างนัดหมายใหม่
               </button>
+              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
               >
-                <LogOut className="w-4 h-4" />
                 ออกจากระบบ
               </button>
             </div>
@@ -371,6 +337,7 @@ export default function ViewAppointmentsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+        
         {/* Summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
@@ -384,6 +351,7 @@ export default function ViewAppointmentsPage() {
               </div>
             </div>
           </div>
+          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -395,6 +363,7 @@ export default function ViewAppointmentsPage() {
               </div>
             </div>
           </div>
+          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -416,6 +385,7 @@ export default function ViewAppointmentsPage() {
             <Filter className="w-5 h-5 text-gray-600" />
             <h2 className="text-lg font-bold text-gray-800">ตัวกรอง</h2>
           </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             {/* Date Filter */}
             <div>
@@ -433,10 +403,7 @@ export default function ViewAppointmentsPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">แพทย์</label>
               <select
                 value={filterDoctor}
-                onChange={(e) => {
-                  console.log('🎯 Selected doctor:', e.target.value);
-                  setFilterDoctor(e.target.value);
-                }}
+                onChange={(e) => setFilterDoctor(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">ทั้งหมด</option>
@@ -528,14 +495,14 @@ export default function ViewAppointmentsPage() {
                 filteredAppointments.map((apt) => (
                   <tr key={apt.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
-                      <p className="font-medium text-gray-800">{apt.users?.full_name || '-'}</p>
-                      <p className="text-sm text-gray-500">{apt.users?.hospital_number}</p>
+                      <p className="font-medium text-gray-800">{apt.patient?.first_name} {apt.patient?.last_name}</p>
+                      <p className="text-sm text-gray-500">{apt.patient?.hospital_number}</p>
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Stethoscope className="w-4 h-4 text-gray-400" />
                         <span className="text-gray-700">
-                          {apt.doctors?.full_name_th || '-'}
+                          {apt.doctor?.full_name_th || '-'}
                         </span>
                       </div>
                     </td>
@@ -563,49 +530,24 @@ export default function ViewAppointmentsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
-                        {/* ปุ่มแก้ไข - แสดงเฉพาะ scheduled เท่านั้น */}
-                        {canEdit(apt) && (
-                          <button
-                            onClick={() => router.push(`/admin/appointments/edit/${apt.id}`)}
-                            className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all"
-                            title="แก้ไขนัดหมาย"
-                          >
-                            แก้ไข
-                          </button>
-                        )}
+                        {/* ✅ ปุ่มดูรายละเอียด - เพิ่มใหม่ */}
+                        <button
+                          onClick={() => router.push(`/admin/appointments/${apt.id}`)}
+                          className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
+                          title="ดูรายละเอียด"
+                        >
+                          <FileText className="w-3 h-3" />
+                          ดูรายละเอียด
+                        </button>
 
                         {/* ปุ่มเสร็จสิ้น - แสดงเฉพาะ scheduled */}
                         {apt.status === 'scheduled' && (
                           <button
                             onClick={() => handleComplete(apt.id)}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
-                            title={canComplete(apt) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
+                            title="เสร็จสิ้นนัดหมาย"
                           >
                             เสร็จสิ้น
-                          </button>
-                        )}
-
-                        {/* ✅ ปุ่มบันทึกติดตาม - แสดงเมื่อถึงเงื่อนไข */}
-                        {canFollowup(apt) && (
-                          <button
-                            onClick={() => router.push(`/admin/appointments/followup/${apt.id}`)}
-                            className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
-                            title="บันทึกผลการติดตาม"
-                          >
-                            <FileText className="w-3 h-3" />
-                            บันทึกติดตาม
-                          </button>
-                        )}
-
-                        {/* ✅ แสดงปุ่มดูประวัติ - สำหรับนัดหมายที่บันทึกติดตามแล้ว */}
-                        {apt.status === 'completed' && apt.hasFollowup && (
-                          <button
-                            onClick={() => router.push(`/admin/patients/${apt.user_id}/followup-history`)}
-                            className="px-3 py-1 bg-purple-100 text-purple-700 text-xs rounded-lg hover:bg-purple-200 transition-all flex items-center gap-1"
-                            title="ดูประวัติการติดตาม"
-                          >
-                            <FileText className="w-3 h-3" />
-                            ดูประวัติ
                           </button>
                         )}
 
