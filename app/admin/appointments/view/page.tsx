@@ -1,16 +1,13 @@
 // app/admin/appointments/view/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข:
-//    1. เพิ่มปุ่ม "บันทึกติดตาม" (สีม่วง) สำหรับนัดหมายที่เสร็จสิ้นแล้วและยังไม่ได้ติดตาม
-//    2. แสดงสถานะ "บันทึกติดตามแล้ว" ถ้ามี followup แล้ว
-//    3. เปลี่ยนปุ่ม "ดูรายละเอียด" ให้เปิด Modal แทนการลิงก์ไปหน้าอื่น (แก้ปัญหารายการไม่พบข้อมูล)
+// ✅ การแก้ไข: เพิ่ม AlertCircle ใน import และแก้ไข Modal ให้ทำงานถูกต้อง
 
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle, X, Eye } from 'lucide-react';
+import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle, X, Eye, AlertCircle } from 'lucide-react'; // ✅ เพิ่ม AlertCircle
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -258,6 +255,7 @@ export default function ViewAppointmentsPage() {
 
   // ✅ ฟังก์ชันเปิด Modal รายละเอียด
   const handleViewDetails = (apt: any) => {
+    console.log('🔍 Opening details for:', apt);
     setSelectedAppointment(apt);
     setShowDetailsModal(true);
   };
