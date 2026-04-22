@@ -1,19 +1,22 @@
 // app/admin/patients/[id]/screening-history/page.tsx
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข: เอาปุ่ม "เริ่มการประเมินครั้งแรก" ออก เหลือเพียงปุ่ม "ประเมินใหม่" เท่านั้น
+
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  getPatientDetail, 
+import {
+  checkSession,
+  logout,
+  getPatientDetail,
   getScreeningHistory,
   getAllScreeningQuestions
 } from '@/lib/supabase/queries';
-import { 
-  ArrowLeft, 
-  FileText, 
-  TrendingUp, 
+import {
+  ArrowLeft,
+  FileText,
+  TrendingUp,
   Calendar,
   Activity,
   Heart,
@@ -41,7 +44,6 @@ export default function ScreeningHistoryPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -119,11 +121,11 @@ export default function ScreeningHistoryPage() {
   const stats = {
     total: screenings.length,
     latest: screenings[0],
-    pamLevels: screenings.reduce((acc, s) => {
+    pamLevels: screenings.reduce((acc: any, s: any) => {
       acc[s.pam_level_result] = (acc[s.pam_level_result] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
-    zones: screenings.reduce((acc, s) => {
+    zones: screenings.reduce((acc: any, s: any) => {
       acc[s.proms_zone] = (acc[s.proms_zone] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
@@ -132,31 +134,28 @@ export default function ScreeningHistoryPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}`)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            <ArrowLeft className="w-5 h-5" />
-            <span>กลับหน้าผู้ป่วย</span>
+            <ArrowLeft className="w-4 h-4" />
+            กลับหน้าผู้ป่วย
           </button>
           
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                ประวัติการประเมิน
+                📋 ประวัติการประเมิน
               </h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
@@ -164,8 +163,9 @@ export default function ScreeningHistoryPage() {
               </p>
             </div>
             
+            {/* ✅ แก้ไข: ใช้ปุ่ม "ประเมินใหม่" เท่านั้น (ไม่ว่าจะมีประวัติหรือไม่) */}
             <button
-              onClick={() => router.push(`/admin/patients/${patientId}/screening`)}
+              onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
             >
               <Plus className="w-4 h-4" />
@@ -240,15 +240,13 @@ export default function ScreeningHistoryPage() {
           
           <div className="p-6">
             {screenings.length === 0 ? (
+              /* ✅ แก้ไข: เอาปุ่ม "เริ่มการประเมินครั้งแรก" ออก เหลือแค่ข้อความ */
               <div className="text-center py-12">
                 <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500 mb-4">ยังไม่มีการประเมิน</p>
-                <button
-                  onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
-                  className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-                >
-                  เริ่มการประเมินครั้งแรก
-                </button>
+                <p className="text-gray-500 mb-4">ยังไม่มีประวัติการประเมิน</p>
+                <p className="text-sm text-gray-400">
+                  คลิกปุ่ม "ประเมินใหม่" ด้านบนเพื่อเริ่มการประเมินครั้งแรก
+                </p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -288,7 +286,9 @@ export default function ScreeningHistoryPage() {
                           </div>
                           <div>
                             <p className="text-gray-500">คะแนน PROMs</p>
-                            <p className="font-medium text-green-600">{screening.proms_q1_score + screening.proms_q2_score + screening.proms_q3_score + screening.proms_q4_score} / 24</p>
+                            <p className="font-medium text-green-600">
+                              {screening.proms_q1_score + screening.proms_q2_score + screening.proms_q3_score + screening.proms_q4_score} / 24
+                            </p>
                           </div>
                           <div>
                             <p className="text-gray-500">ผู้ประเมิน</p>
