@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, getGoalRoundCount, getLatestGoalRound, saveGoalsNewRound } from '@/lib/supabase/queries';
+import { checkSession, logout, getPatientList, getGoalRoundCount, getLatestGoalRound } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import { ArrowLeft, LogOut, Save, Target, Trophy, Plus, CheckCircle2, Circle, Search, User, History, Calendar } from 'lucide-react';
 
@@ -63,7 +63,6 @@ interface GoalHistory {
 
 export default function AdminGoalsPage() {
   const router = useRouter();
-  
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,8 +78,8 @@ export default function AdminGoalsPage() {
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
-  
-  // ✅ State สำหรับ Round Number (ใหม่)
+
+  // ✅ State สำหรับ Round Number
   const [currentRound, setCurrentRound] = useState(1);
   const [lastRecordedDate, setLastRecordedDate] = useState('');
   const [isSameDay, setIsSameDay] = useState(false);
@@ -94,9 +93,8 @@ export default function AdminGoalsPage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
     const userData = checkSession();
-    
+
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -138,7 +136,7 @@ export default function AdminGoalsPage() {
       setShowSearchDropdown(false);
       return;
     }
-    const filtered = patients.filter(patient => 
+    const filtered = patients.filter(patient =>
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase()) ||
       patient.full_name?.toLowerCase().includes(value.toLowerCase())
     ).slice(0, 10);
@@ -154,7 +152,7 @@ export default function AdminGoalsPage() {
       setShowSearchDropdown(false);
       return;
     }
-    const filtered = patients.filter(patient => 
+    const filtered = patients.filter(patient =>
       patient.full_name?.toLowerCase().includes(value.toLowerCase()) ||
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase())
     ).slice(0, 10);
@@ -194,7 +192,7 @@ export default function AdminGoalsPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน 
+        // ✅ 2. ดึง goals ปัจจุบัน
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -241,7 +239,7 @@ export default function AdminGoalsPage() {
           .order('round_number', { ascending: false })
           .order('created_at', { ascending: false });
 
-        // จัดกลุ่มประวัติตาม round_number
+        // จัดกลุ่มประวัติ ตาม round_number
         const roundsMap = new Map<number, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
           const round = goal.round_number || 1;
@@ -280,7 +278,7 @@ export default function AdminGoalsPage() {
             .select('primary_goal_code')
             .eq('id', patientId)
             .single();
-          
+
           setPrimaryGoal(profileData?.primary_goal_code || '');
         } catch (err) {
           console.error('Error loading primary goal:', err);
@@ -304,15 +302,14 @@ export default function AdminGoalsPage() {
         const latestRound = await getLatestGoalRound(patientId);
         if (latestRound) {
           setLastRecordedDate(latestRound.created_at);
-          
+
           // ✅ ตรวจสอบว่าบันทึกในวันเดิมหรือไม่
           const today = new Date().toISOString().split('T')[0];
           const lastDate = new Date(latestRound.created_at).toISOString().split('T')[0];
           setIsSameDay(today === lastDate);
-          
+
           console.log('📅 Last recorded:', lastDate, '| Today:', today, '| Same day:', today === lastDate);
         }
-
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
@@ -341,11 +338,10 @@ export default function AdminGoalsPage() {
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     setSavingPrimaryGoal(true);
-
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({ 
+        .update({
           primary_goal_code: goalCode,
           updated_at: new Date().toISOString()
         })
@@ -353,7 +349,7 @@ export default function AdminGoalsPage() {
 
       if (error) {
         console.error('Error updating primary goal:', error);
-        
+
         if (error.code === '42P01') {
           alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
         } else if (error.code === '42703') {
@@ -379,7 +375,6 @@ export default function AdminGoalsPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
-
     if (confirm(`ต้องการสร้างเป้าหมายเริ่มต้นสำหรับผู้ป่วยระดับ ${patientPamLevel} หรือไม่?`)) {
       setSaving(true);
 
@@ -455,7 +450,6 @@ export default function AdminGoalsPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
-
     const today = new Date().toISOString().split('T')[0];
     console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
 
@@ -483,7 +477,7 @@ export default function AdminGoalsPage() {
     }
 
     let confirmMessage = 'ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\n';
-    
+
     if (existingToday && existingToday.length > 0) {
       confirmMessage += `⚠️ คุณได้บันทึกเป้าหมายไปแล้ววันนี้ (${existingToday.length} กิจกรรม)\n\n`;
       confirmMessage += 'การบันทึกครั้งนี้จะลบข้อมูลเดิมของวันนี้และบันทึกใหม่\n\n';
@@ -504,7 +498,7 @@ export default function AdminGoalsPage() {
       if (existingToday && existingToday.length > 0) {
         console.log('🗑️ [DEBUG] Deleting goals...');
         console.log('🗑️ [DEBUG] Goal IDs:', existingToday.map(g => g.id));
-        
+
         const { error: deleteError } = await supabase
           .from('goals')
           .delete()
@@ -518,7 +512,7 @@ export default function AdminGoalsPage() {
           console.error('❌ [DEBUG] Delete error:', deleteError);
         } else {
           console.log('✅ [DEBUG] Deleted successfully');
-          
+
           // ✅ ตรวจสอบว่าลบจริงหรือไม่
           const { data: afterDelete } = await supabase
             .from('goals')
@@ -528,7 +522,7 @@ export default function AdminGoalsPage() {
             .eq('is_current', true)
             .gte('created_at', today + 'T00:00:00')
             .lte('created_at', today + 'T23:59:59');
-          
+
           console.log('🔍 [DEBUG] After delete - remaining:', afterDelete?.length || 0);
         }
       }
@@ -536,7 +530,7 @@ export default function AdminGoalsPage() {
       // ✅ 3. Archive goals เดิม (เฉพาะของวันก่อนหน้า)
       if (!existingToday || existingToday.length === 0) {
         console.log('📦 [DEBUG] Archiving old goals...');
-        
+
         const { data: goalsToArchive } = await supabase
           .from('goals')
           .select('id, goal_name, round_number')
@@ -545,11 +539,11 @@ export default function AdminGoalsPage() {
           .eq('is_current', true);
 
         console.log('📦 [DEBUG] Goals to archive:', goalsToArchive?.length || 0);
-        
+
         if (goalsToArchive && goalsToArchive.length > 0) {
           const { error: archiveError } = await supabase
             .from('goals')
-            .update({ 
+            .update({
               is_current: false,
               status: 'archived',
               updated_at: new Date().toISOString(),
@@ -568,7 +562,7 @@ export default function AdminGoalsPage() {
 
       // ✅ 4. นับ round_number ใหม่ (นับจากวันที่ไม่ซ้ำ)
       console.log('🔢 [DEBUG] Calculating new round number...');
-      
+
       let newRoundNumber: number;
 
       if (existingToday && existingToday.length > 0) {
@@ -585,8 +579,8 @@ export default function AdminGoalsPage() {
 
         // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
         const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
-        newRoundNumber = uniqueDates.size;  // ✅ แก้ไข: ไม่ต้องบวก 1
-        
+        newRoundNumber = uniqueDates.size;
+
         console.log('🔢 [DEBUG] Unique dates:', Array.from(uniqueDates));
         console.log('🔢 [DEBUG] New round number:', newRoundNumber);
       }
@@ -596,15 +590,15 @@ export default function AdminGoalsPage() {
 
       const newGoals = activities.map(activity => {
         const edit = editedGoals[activity.activity_code] || { target_days: defaultDays };
-        
+
         return {
           user_id: selectedPatient,
           goal_type: 'weekly_activity' as const,
           goal_name: activity.activity_code,
           goal_name_th: activity.activity_name_th,
           target_days: edit.target_days,
-          target_value: edit.target_value ? parseFloat(edit.target_value) : 
-                       (activity.target_value ? parseFloat(activity.target_value) : null),
+          target_value: edit.target_value ? parseFloat(edit.target_value) :
+            (activity.target_value ? parseFloat(activity.target_value) : null),
           target_unit: activity.unit || (activity.activity_type === 'exercise' ? 'minutes' : null),
           activity_id: activity.id,
           start_date: today,
@@ -634,7 +628,7 @@ export default function AdminGoalsPage() {
       alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
 
       await loadPatientData(selectedPatient);
-      
+
     } catch (error) {
       console.error('❌ [DEBUG] Error:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
@@ -664,7 +658,7 @@ export default function AdminGoalsPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-600">กำลังโหลด...</p>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
@@ -672,20 +666,24 @@ export default function AdminGoalsPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.push('/admin/dashboard')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ Dashboard
+          </button>
+
           <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push('/admin/dashboard')}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                กลับ Dashboard
-              </button>
-              <h1 className="text-2xl font-bold text-gray-800">จัดการเป้าหมาย</h1>
-              <p className="text-sm text-gray-600">กำหนดและจัดการเป้าหมายผู้ป่วย</p>
+              <h1 className="text-2xl font-bold text-gray-800 mb-1">
+                🎯 จัดการเป้าหมาย
+              </h1>
+              <p className="text-gray-600">กำหนดและจัดการเป้าหมายผู้ป่วย</p>
             </div>
+
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -699,6 +697,7 @@ export default function AdminGoalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+
         {/* Select Patient */}
         <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
           <div className="flex items-center justify-between mb-4">
@@ -706,16 +705,7 @@ export default function AdminGoalsPage() {
               <Target className="w-5 h-5 text-blue-600" />
               เลือกผู้ป่วย
             </h2>
-            {selectedPatient && goals.length === 0 && (
-              <button
-                onClick={handleCreateDefaultGoals}
-                disabled={saving}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-                {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
-              </button>
-            )}
+            {/* ✅ ลบปุ่มสร้างเป้าหมายอัตโนมัติออกจากตรงนี้ */}
           </div>
 
           {/* Search by HN */}
@@ -806,14 +796,39 @@ export default function AdminGoalsPage() {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <p className="text-sm text-blue-800">
-                    <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
+                    <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} |
                     <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
                     {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
                     {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
                     {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
                   </p>
-                  
-                  {/* ✅ แสดง Round Number และวันที่บันทึก */}
+
+                  {/* ✅ แสดงข้อความแจ้งเตือนถ้ายังไม่มี goals */}
+                  {goals.length === 0 && (
+                    <div className="mt-3 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-lg animate-pulse">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-shrink-0">
+                          <div className="w-10 h-10 bg-yellow-400 rounded-full flex items-center justify-center">
+                            <span className="text-xl">⚠️</span>
+                          </div>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-yellow-900 mb-1">
+                            ยังไม่มีเป้าหมายสำหรับผู้ป่วยคนนี้
+                          </p>
+                          <p className="text-xs text-yellow-800 mb-2">
+                            กรุณาสร้างเป้าหมายเริ่มต้นก่อนที่จะบันทึกข้อมูลอื่นๆ ผู้ป่วยจะต้องมีเป้าหมายก่อนที่จะทำกิจกรรมหรือติดตามผลได้
+                          </p>
+                          <div className="flex items-center gap-2 text-xs text-yellow-700">
+                            <span className="font-semibold">💡 คำแนะนำ:</span>
+                            <span>กดปุ่ม "สร้างเป้าหมายเริ่มต้น" ด้านขวาเพื่อสร้างเป้าหมายตามระดับ PAM</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* แสดง Round Number และวันที่บันทึก */}
                   <div className="mt-2 flex items-center gap-4">
                     <div className="flex items-center gap-1 text-xs text-blue-600">
                       <History className="w-3 h-3" />
@@ -831,7 +846,7 @@ export default function AdminGoalsPage() {
                       </span>
                     )}
                   </div>
-                  
+
                   {goalHistory[0]?.is_current && (
                     <p className="text-xs text-blue-600 mt-1">
                       📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
@@ -841,14 +856,21 @@ export default function AdminGoalsPage() {
                     💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
                   </p>
                 </div>
-                
+
+                {/* ✅ ปุ่มสร้างเป้าหมาย - แสดงเมื่อไม่มี goals */}
                 {goals.length === 0 && (
                   <button
                     onClick={handleCreateDefaultGoals}
                     disabled={saving}
-                    className="shrink-0 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
+                    className="shrink-0 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
                   >
-                    🎯 สร้างเป้าหมาย
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🎯</span>
+                      <div className="text-left">
+                        <div className="text-sm font-bold">สร้างเป้าหมายเริ่มต้น</div>
+                        <div className="text-xs opacity-90">ตามระดับ PAM</div>
+                      </div>
+                    </div>
                   </button>
                 )}
               </div>
@@ -861,7 +883,7 @@ export default function AdminGoalsPage() {
                 เป้าหมายหลัก 4 ประการ (Core Performance Goals)
                 <span className="text-sm font-normal text-gray-500 ml-2">- เลือก 1 ข้อที่เป็นเป้าหมายหลักของผู้ป่วย</span>
               </h2>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {LONG_TERM_GOALS.map((goal) => {
                   const isSelected = primaryGoal === goal.code;
@@ -924,7 +946,7 @@ export default function AdminGoalsPage() {
                   💡 หมายเหตุนี้จะถูกบันทึกกับเป้าหมายหลักของผู้ป่วย
                 </p>
               </div>
-              
+
               {savingPrimaryGoal && (
                 <p className="text-sm text-gray-500 mt-3 text-center">
                   กำลังบันทึก...
