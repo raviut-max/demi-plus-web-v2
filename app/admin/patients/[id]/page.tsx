@@ -1,10 +1,6 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 10:00)
-// ✅ การแก้ไข:
-//    1. ปุ่มสีฟ้า (นัดหมาย) → /admin/patients/${patientId}/appointments ✅
-//    2. ปุ่มสีเขียว (การประเมินล่าสุด) → /admin/patients/${patientId}/screening-history ✅ (แก้ไขใหม่)
-//    3. ปุ่มสีม่วง (ติดตามล่าสุด) → /admin/patients/${patientId}/followup-history ✅
-//    4. ปุ่มสีส้ม (ความคืบหน้า) → /admin/patients/${patientId}/goals ✅
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข: แก้ไขการตรวจสอบสถานะการประเมิน - เปลี่ยนจาก pam_score → pam_total_score
 
 'use client';
 
@@ -108,24 +104,28 @@ export default function PatientDetailPage() {
       // ✅ ตรวจสอบสถานะการประเมิน
       await checkAssessmentStatus(patientId);
     } catch (error) {
-      console.error('Error loading ', error);
+      console.error('Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน
+  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน (แก้ไขแล้ว)
   const checkAssessmentStatus = async (pid: string) => {
     try {
+      console.log('🔍 Checking assessment status for patient:', pid);
+      
       // ตรวจสอบ Baseline
-      const {  baselineData } = await supabase
+      const { data: baselineData } = await supabase
         .from('baseline')
         .select('id')
         .eq('user_id', pid)
         .single();
       
-      setHasBaseline(!!baselineData);
+      const hasBaselineData = !!baselineData;
+      console.log('📋 Has baseline:', hasBaselineData);
+      setHasBaseline(hasBaselineData);
 
       // ตรวจสอบ Completed Appointments
       const { data: appointmentsData } = await supabase
@@ -135,25 +135,25 @@ export default function PatientDetailPage() {
         .eq('status', 'completed')
         .limit(1);
       
-      setHasCompletedAppointment((appointmentsData?.length || 0) > 0);
+      const hasCompletedAppt = (appointmentsData?.length || 0) > 0;
+      console.log('📋 Has completed appointments:', hasCompletedAppt);
+      setHasCompletedAppointment(hasCompletedAppt);
 
-      // ตรวจสอบ PAM Assessment (จาก screenings หรือ assessments)
-      const {  screeningData } = await supabase
+      // ✅ แก้ไข: ตรวจสอบ PAM Assessment (จาก screenings)
+      // เปลี่ยนจาก pam_score → pam_total_score
+      const { data: screeningData } = await supabase
         .from('screenings')
-        .select('id, pam_score')
+        .select('id, pam_total_score')
         .eq('user_id', pid)
-        .not('pam_score', 'is', null)
+        .not('pam_total_score', 'is', null)
         .limit(1);
       
-      setHasPamAssessment((screeningData?.length || 0) > 0);
+      const hasPamData = (screeningData?.length || 0) > 0;
+      console.log('📋 Has PAM assessment:', hasPamData, screeningData);
+      setHasPamAssessment(hasPamData);
       
-      console.log('📋 Assessment Status:', {
-        hasBaseline,
-        hasCompletedAppointment,
-        hasPamAssessment
-      });
     } catch (error) {
-      console.error('Error checking assessment status:', error);
+      console.error('❌ Error checking assessment status:', error);
     }
   };
 
@@ -475,7 +475,7 @@ export default function PatientDetailPage() {
               </button>
               
               {/* ✅ แสดงปุ่ม "มีการติดตามแล้ว" ถ้ามีการประเมินแล้ว */}
-              {(hasBaseline || hasCompletedAppointment) && (
+              {(hasBaseline || hasCompletedAppointment || hasPamAssessment) && (
                 <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
                   <ClipboardCheck className="w-4 h-4" />
                   <span>มีการติดตามแล้ว</span>
@@ -543,8 +543,8 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">การประเมินล่าสุด</p>
-                <p className="text-2xl font-bold">ยังไม่ประเมิน</p>
-                <p className="text-xs opacity-75 mt-1">0 ครั้ง</p>
+                <p className="text-2xl font-bold">{hasPamAssessment ? 'มีการประเมิน' : 'ยังไม่ประเมิน'}</p>
+                <p className="text-xs opacity-75 mt-1">{hasPamAssessment ? '1 ครั้ง' : '0 ครั้ง'}</p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <FileText className="w-6 h-6" />

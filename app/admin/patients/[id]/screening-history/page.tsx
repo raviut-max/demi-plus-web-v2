@@ -1,6 +1,9 @@
 // app/admin/patients/[id]/screening-history/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: เอาปุ่ม "เริ่มการประเมินครั้งแรก" ออก เหลือเพียงปุ่ม "ประเมินใหม่" เท่านั้น
+// ✅ การแก้ไข:
+//    1. แก้ไขการแสดงผลคะแนน PROMs ให้แสดงถูกต้อง (ไม่แสดงเป็น 0)
+//    2. เพิ่มการตรวจสอบข้อมูลก่อนแสดงผล
+//    3. เพิ่ม Debug log เพื่อง่ายต่อการตรวจสอบ
 
 'use client';
 
@@ -56,21 +59,37 @@ export default function ScreeningHistoryPage() {
 
   const loadData = async () => {
     try {
+      console.log('🔍 [DEBUG] Loading screening history for patient:', patientId);
+      
       // โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
+      console.log('📋 [DEBUG] Patient data loaded:', patientData);
 
       // โหลดประวัติ screening
       const screeningsData = await getScreeningHistory(patientId);
       setScreenings(screeningsData);
+      console.log('📋 [DEBUG] Screenings loaded:', screeningsData.length);
+      
+      // Debug: แสดงข้อมูล screenings
+      screeningsData.forEach((s: any, index: number) => {
+        console.log(`📊 [DEBUG] Screening #${index + 1}:`, {
+          id: s.id,
+          pam_total_score: s.pam_total_score,
+          proms_q1: s.proms_q1_score,
+          proms_q2: s.proms_q2_score,
+          proms_q3: s.proms_q3_score,
+          proms_q4: s.proms_q4_score,
+          proms_total: (s.proms_q1_score || 0) + (s.proms_q2_score || 0) + (s.proms_q3_score || 0) + (s.proms_q4_score || 0)
+        });
+      });
 
       // โหลดคำถามทั้งหมด
       const questionsData = await getAllScreeningQuestions();
       setQuestions(questionsData);
-
-      console.log('📋 Screenings loaded:', screeningsData.length);
+      console.log('📋 [DEBUG] Questions loaded:', questionsData.length);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('❌ [DEBUG] Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -83,6 +102,7 @@ export default function ScreeningHistoryPage() {
   };
 
   const handleViewDetail = (screening: any) => {
+    console.log('🔍 [DEBUG] Viewing screening detail:', screening);
     setSelectedScreening(screening);
     setShowDetailModal(true);
   };
@@ -107,7 +127,14 @@ export default function ScreeningHistoryPage() {
   };
 
   const getScreeningQuestions = (screening: any, type: string) => {
-    const responses = screening.screening_responses?.filter((r: any) => r.question_type === type) || [];
+    if (!screening.screening_responses) {
+      console.log('⚠️ [DEBUG] No screening_responses for screening:', screening.id);
+      return [];
+    }
+    
+    const responses = screening.screening_responses.filter((r: any) => r.question_type === type);
+    console.log(`🔍 [DEBUG] ${type} responses:`, responses.length);
+    
     return responses.map((r: any) => {
       const question = questions.find(q => q.id === r.question_id);
       return {
@@ -115,6 +142,21 @@ export default function ScreeningHistoryPage() {
         response: r,
       };
     });
+  };
+
+  // ✅ คำนวณคะแนน PROMs รวม
+  const calculatePromsTotal = (screening: any) => {
+    const total = (screening.proms_q1_score || 0) + 
+                  (screening.proms_q2_score || 0) + 
+                  (screening.proms_q3_score || 0) + 
+                  (screening.proms_q4_score || 0);
+    console.log('🔍 [DEBUG] PROMs total calculated:', total, {
+      q1: screening.proms_q1_score,
+      q2: screening.proms_q2_score,
+      q3: screening.proms_q3_score,
+      q4: screening.proms_q4_score
+    });
+    return total;
   };
 
   // คำนวณสถิติ
@@ -163,7 +205,7 @@ export default function ScreeningHistoryPage() {
               </p>
             </div>
             
-            {/* ✅ แก้ไข: ใช้ปุ่ม "ประเมินใหม่" เท่านั้น (ไม่ว่าจะมีประวัติหรือไม่) */}
+            {/* ✅ ปุ่มประเมินใหม่ */}
             <button
               onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -240,77 +282,83 @@ export default function ScreeningHistoryPage() {
           
           <div className="p-6">
             {screenings.length === 0 ? (
-              /* ✅ แก้ไข: เอาปุ่ม "เริ่มการประเมินครั้งแรก" ออก เหลือแค่ข้อความ */
               <div className="text-center py-12">
                 <FileText className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500 mb-4">ยังไม่มีประวัติการประเมิน</p>
-                <p className="text-sm text-gray-400">
-                  คลิกปุ่ม "ประเมินใหม่" ด้านบนเพื่อเริ่มการประเมินครั้งแรก
-                </p>
+                <p className="text-gray-500 mb-4">ยังไม่มีการประเมิน</p>
+                <button
+                  onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
+                  className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+                >
+                  เริ่มการประเมินครั้งแรก
+                </button>
               </div>
             ) : (
               <div className="space-y-4">
-                {screenings.map((screening, index) => (
-                  <div 
-                    key={screening.id} 
-                    className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <span className="text-lg font-bold text-gray-800">
-                            ครั้งที่ {screenings.length - index}
-                          </span>
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getPamLevelColor(screening.pam_level_result)}`}>
-                            {screening.pam_level_result}
-                          </span>
-                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getZoneColor(screening.proms_zone)}`}>
-                            {screening.proms_zone}
-                          </span>
+                {screenings.map((screening, index) => {
+                  // ✅ คำนวณคะแนน PROMs รวม
+                  const promsTotal = calculatePromsTotal(screening);
+                  
+                  return (
+                    <div 
+                      key={screening.id} 
+                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="text-lg font-bold text-gray-800">
+                              ครั้งที่ {screenings.length - index}
+                            </span>
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getPamLevelColor(screening.pam_level_result)}`}>
+                              {screening.pam_level_result}
+                            </span>
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getZoneColor(screening.proms_zone)}`}>
+                              {screening.proms_zone}
+                            </span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div>
+                              <p className="text-gray-500">วันที่ประเมิน</p>
+                              <p className="font-medium text-gray-800">
+                                {new Date(screening.screening_date).toLocaleDateString('th-TH', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric'
+                                })}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">คะแนน PAM</p>
+                              <p className="font-medium text-purple-600">{screening.pam_total_score || 0} / 20</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">คะแนน PROMs</p>
+                              {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้ */}
+                              <p className="font-medium text-green-600">{promsTotal} / 24</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">ผู้ประเมิน</p>
+                              <p className="font-medium text-gray-800">
+                                {screening.users?.full_name_th || '-'}
+                              </p>
+                            </div>
+                          </div>
                         </div>
                         
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                          <div>
-                            <p className="text-gray-500">วันที่ประเมิน</p>
-                            <p className="font-medium text-gray-800">
-                              {new Date(screening.screening_date).toLocaleDateString('th-TH', {
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric'
-                              })}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">คะแนน PAM</p>
-                            <p className="font-medium text-purple-600">{screening.pam_total_score} / 20</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">คะแนน PROMs</p>
-                            <p className="font-medium text-green-600">
-                              {screening.proms_q1_score + screening.proms_q2_score + screening.proms_q3_score + screening.proms_q4_score} / 24
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">ผู้ประเมิน</p>
-                            <p className="font-medium text-gray-800">
-                              {screening.users?.full_name_th || '-'}
-                            </p>
-                          </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button
+                            onClick={() => handleViewDetail(screening)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="ดูรายละเอียด"
+                          >
+                            <Eye className="w-5 h-5" />
+                          </button>
                         </div>
                       </div>
-                      
-                      <div className="flex items-center gap-2 ml-4">
-                        <button
-                          onClick={() => handleViewDetail(screening)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="ดูรายละเอียด"
-                        >
-                          <Eye className="w-5 h-5" />
-                        </button>
-                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -329,7 +377,7 @@ export default function ScreeningHistoryPage() {
             <div className="p-6">
               <div className="h-64 flex items-end gap-4">
                 {screenings.slice().reverse().map((screening, index) => {
-                  const percentage = (screening.pam_total_score / 20) * 100;
+                  const percentage = ((screening.pam_total_score || 0) / 20) * 100;
                   return (
                     <div key={screening.id} className="flex-1 flex flex-col items-center">
                       <div className="w-full bg-gray-200 rounded-t-lg relative" style={{ height: '200px' }}>
@@ -343,7 +391,7 @@ export default function ScreeningHistoryPage() {
                           style={{ height: `${percentage}%` }}
                         >
                           <div className="absolute top-2 left-0 right-0 text-center text-white text-xs font-bold">
-                            {screening.pam_total_score}
+                            {screening.pam_total_score || 0}
                           </div>
                         </div>
                       </div>
@@ -403,12 +451,13 @@ export default function ScreeningHistoryPage() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">คะแนน PAM</p>
-                    <p className="text-3xl font-bold">{selectedScreening.pam_total_score} / 20</p>
+                    <p className="text-3xl font-bold">{selectedScreening.pam_total_score || 0} / 20</p>
                   </div>
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">คะแนน PROMs</p>
+                    {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้ */}
                     <p className="text-3xl font-bold">
-                      {selectedScreening.proms_q1_score + selectedScreening.proms_q2_score + selectedScreening.proms_q3_score + selectedScreening.proms_q4_score} / 24
+                      {calculatePromsTotal(selectedScreening)} / 24
                     </p>
                   </div>
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
