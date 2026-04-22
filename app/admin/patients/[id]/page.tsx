@@ -1,9 +1,10 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ติดต่อฉุกเฉิน 1 คน (ตามตาราง profiles)
-//    2. แสดงข้อมูลตามโครงสร้างตาราง profiles ที่ถูกต้อง
-//    3. แปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
+//    1. แสดงข้อมูลผู้ป่วยครบถ้วนตามโครงสร้างตาราง profiles
+//    2. แปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
+//    3. แสดงผู้ติดต่อฉุกเฉิน 1 คน (ตามตาราง profiles)
+//    4. ไม่แสดงส่วนเป้าหมาย (Goals Section)
 
 'use client';
 
@@ -25,7 +26,6 @@ import {
   FileText,
   Phone,
   User,
-  MapPin,
   Heart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';

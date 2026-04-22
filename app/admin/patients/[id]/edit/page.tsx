@@ -1,4 +1,7 @@
 // app/admin/patients/[id]/edit/page.tsx
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข: เอาวันที่วินิจฉัยออก ไม่ต้องใช้แล้ว
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -10,18 +13,8 @@ import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 
 // เดือนภาษาไทย
 const THAI_MONTHS = [
-  'มกราคม',
-  'กุมภาพันธ์',
-  'มีนาคม',
-  'เมษายน',
-  'พฤษภาคม',
-  'มิถุนายน',
-  'กรกฎาคม',
-  'สิงหาคม',
-  'กันยายน',
-  'ตุลาคม',
-  'พฤศจิกายน',
-  'ธันวาคม',
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
 ];
 
 export default function EditPatientPage() {
@@ -50,12 +43,11 @@ export default function EditPatientPage() {
     first_name: '',
     last_name: '',
     hospital_number: '',
-    
     // วันเกิด (แยก 3 ช่อง)
     birth_day: '',
     birth_month: '',
     birth_year: '',
-    
+
     gender: '',
     phone: '',
     email: '',
@@ -65,12 +57,12 @@ export default function EditPatientPage() {
     height: '',
     waist_circumference: '',
     diabetes_type: '',
-    
-    // วันที่วินิจฉัย (แยก 3 ช่อง)
-    diagnosis_day: '',
-    diagnosis_month: '',
-    diagnosis_year: '',
-    
+
+    // ✅ เอาวันที่วินิจฉัยออก - ไม่ต้องใช้แล้ว
+    // diagnosis_day: '',
+    // diagnosis_month: '',
+    // diagnosis_year: '',
+
     hba1c_level: '',
     notes: '',
     occupation: '',
@@ -84,7 +76,7 @@ export default function EditPatientPage() {
     village_no: '',
     village_name: '',
     // province, district, subdistrict, postal_code จะมาจาก addressData
-    
+
     subdistrict_health_center: '',
 
     // ผู้ติดต่อฉุกเฉิน
@@ -95,7 +87,6 @@ export default function EditPatientPage() {
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -129,18 +120,6 @@ export default function EditPatientPage() {
           birthYear = (birthDate.getFullYear() + 543).toString();
         }
         
-        // ✅ แยกวันที่วินิจฉัยเป็น 3 ช่อง (แปลงจาก ค.ศ. เป็น พ.ศ.)
-        let diagnosisDay = '';
-        let diagnosisMonth = '';
-        let diagnosisYear = '';
-        
-        if (data.diagnosis_date) {
-          const diagnosisDate = new Date(data.diagnosis_date);
-          diagnosisDay = diagnosisDate.getDate().toString();
-          diagnosisMonth = (diagnosisDate.getMonth() + 1).toString();
-          diagnosisYear = (diagnosisDate.getFullYear() + 543).toString();
-        }
-        
         setFormData({
           first_name: data.first_name || '',
           last_name: data.last_name || '',
@@ -155,9 +134,7 @@ export default function EditPatientPage() {
           height: data.height?.toString() || '',
           waist_circumference: data.waist_circumference?.toString() || '',
           diabetes_type: data.diabetes_type || '',
-          diagnosis_day: diagnosisDay,
-          diagnosis_month: diagnosisMonth,
-          diagnosis_year: diagnosisYear,
+          // ✅ เอาวันที่วินิจฉัยออก
           hba1c_level: data.hba1c_level?.toString() || '',
           notes: data.notes || '',
           occupation: data.occupation || '',
@@ -203,19 +180,15 @@ export default function EditPatientPage() {
   const validatePhoneNumber = (phone: string): { valid: boolean; message: string } => {
     if (!phone) return { valid: true, message: '' };
     const cleaned = phone.replace(/[\s-]/g, '');
-
     if (!/^\d+$/.test(cleaned)) {
       return { valid: false, message: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น' };
     }
-
     if (cleaned.length < 9 || cleaned.length > 10) {
       return { valid: false, message: 'เบอร์โทรศัพท์ต้องมี 9-10 หลัก' };
     }
-
     if (!cleaned.startsWith('0')) {
       return { valid: false, message: 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0' };
     }
-
     return { valid: true, message: 'เบอร์โทรศัพท์ถูกต้อง' };
   };
 
@@ -226,7 +199,6 @@ export default function EditPatientPage() {
     if (!emailRegex.test(email)) {
       return { valid: false, message: 'รูปแบบอีเมลไม่ถูกต้อง' };
     }
-
     return { valid: true, message: 'อีเมลถูกต้อง' };
   };
 
@@ -245,20 +217,16 @@ export default function EditPatientPage() {
       }
       return { valid: true, message: '' };
     }
-
     const numValue = parseFloat(value);
-
     if (isNaN(numValue)) {
       return { valid: false, message: `${fieldName} ต้องเป็นตัวเลข` };
     }
-
     if (numValue < min || numValue > max) {
       return { 
         valid: false, 
         message: `${fieldName} ต้องอยู่ระหว่าง ${min}-${max} ${unit}` 
       };
     }
-
     return { valid: true, message: `${fieldName} ถูกต้อง` };
   };
 
@@ -314,10 +282,10 @@ export default function EditPatientPage() {
   // ✅ ฟังก์ชันแปลง error messages ให้เข้าใจง่าย
   const getFriendlyErrorMessage = (error: any): string => {
     if (!error) return '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
-
+    
     // ตรวจสอบ diabetes_type
     if (error.message?.includes('profiles_diabetes_type_check')) {
-      return '❌ ประเภทเบาหวานไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกประเภทเบาหวานจากเมนู dropdown\n- ต้องเป็น: Type 1, Type 2, Gestational, หรือ Other เท่านั้น';
+      return '❌ ประเภทเบาหวานไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกประเภทเบาหวานจากเมนู dropdown\n- ต้องเป็น: Type 1, Type 2, Gestational, Other, กลุ่มเสี่ยง, หรือ เบาหวาน เท่านั้น';
     }
 
     // ตรวจสอบ waist_circumference
@@ -343,21 +311,6 @@ export default function EditPatientPage() {
     // ตรวจสอบ gender
     if (error.message?.includes('profiles_gender_check')) {
       return '❌ เพศไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกเพศจากเมนู dropdown\n- ต้องเป็น: ชาย หรือ หญิง เท่านั้น';
-    }
-
-    // ตรวจสอบ pam_level
-    if (error.message?.includes('profiles_pam_level_check')) {
-      return '❌ ระดับ PAM ไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือก PAM Level จากเมนู dropdown\n- ต้องเป็น: L1, L2, L3, หรือ L4 เท่านั้น';
-    }
-
-    // ตรวจสอบ current_step
-    if (error.message?.includes('profiles_current_step_check')) {
-      return '❌ ขั้นตอนปัจจุบันไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือก Current Step จากเมนู dropdown\n- ต้องเป็น: Starter, StepUp, Intensive, หรือ Maintenance เท่านั้น';
-    }
-
-    // ตรวจสอบ status
-    if (error.message?.includes('profiles_status_check')) {
-      return '❌ สถานะไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกสถานะจากเมนู dropdown\n- ต้องเป็น: active, inactive, discharged, หรือ transferred เท่านั้น';
     }
 
     return `❌ เกิดข้อผิดพลาด: ${error.message}\n\n💡 วิธีแก้ไข:\n- ตรวจสอบข้อมูลที่กรอก\n- ลองใหม่อีกครั้ง`;
@@ -443,13 +396,6 @@ export default function EditPatientPage() {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
-      // ✅ รวมวันที่วินิจฉัยเป็น ค.ศ. (ถ้ามี)
-      let diagnosisDate = null;
-      if (formData.diagnosis_day && formData.diagnosis_month && formData.diagnosis_year) {
-        const diagnosisYearAD = parseInt(formData.diagnosis_year) - 543;
-        diagnosisDate = `${diagnosisYearAD}-${formData.diagnosis_month.padStart(2, '0')}-${formData.diagnosis_day.padStart(2, '0')}`;
-      }
-
       const updateData: any = {
         first_name: formData.first_name,
         last_name: formData.last_name,
@@ -463,7 +409,8 @@ export default function EditPatientPage() {
         height: formData.height ? parseFloat(formData.height) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         diabetes_type: formData.diabetes_type,
-        diagnosis_date: diagnosisDate,
+        // ✅ เอาวันที่วินิจฉัยออก - ไม่ต้องส่งแล้ว
+        // diagnosis_date: diagnosisDate,
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : null,
         notes: formData.notes,
         occupation: formData.occupation,
@@ -524,33 +471,34 @@ export default function EditPatientPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}`)}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ
+          </button>
+          
+          <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push(`/admin/patients/${patientId}`)}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-5 h-5" />
-                <span>กลับ</span>
-              </button>
-              <h1 className="text-3xl font-bold text-gray-800">แก้ไขข้อมูลผู้ป่วย</h1>
+              <h1 className="text-2xl font-bold text-gray-800 mb-1">
+                ✏️ แก้ไขข้อมูลผู้ป่วย
+              </h1>
               <p className="text-gray-600">
                 HN: {patient?.hospital_number} | {patient?.first_name} {patient?.last_name}
               </p>
             </div>
+            
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -827,7 +775,7 @@ export default function EditPatientPage() {
                 )}
               </div>
               
-              {/* ✅ ประเภทเบาหวาน + วันที่วินิจฉัย (บรรทัดเดียวกัน) */}
+              {/* ✅ ประเภทเบาหวาน */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   ประเภทเบาหวาน
@@ -842,51 +790,9 @@ export default function EditPatientPage() {
                   <option value="Type 2">Type 2</option>
                   <option value="Gestational">Gestational</option>
                   <option value="Other">Other</option>
+                  <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
+                  <option value="เบาหวาน">เบาหวาน</option>
                 </select>
-              </div>
-              
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  วันที่วินิจฉัย
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <select
-                    value={formData.diagnosis_day}
-                    onChange={(e) => setFormData({...formData, diagnosis_day: e.target.value})}
-                    className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
-                    <option value="">วัน</option>
-                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                      <option key={day} value={day}>
-                        {day}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={formData.diagnosis_month}
-                    onChange={(e) => setFormData({...formData, diagnosis_month: e.target.value})}
-                    className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
-                    <option value="">เดือน</option>
-                    {THAI_MONTHS.map((month, index) => (
-                      <option key={index + 1} value={index + 1}>
-                        {month}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={formData.diagnosis_year}
-                    onChange={(e) => setFormData({...formData, diagnosis_year: e.target.value})}
-                    className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
-                    <option value="">ปี พ.ศ.</option>
-                    {Array.from({ length: 30 }, (_, i) => 2567 - i).map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    ))}
-                  </select>
-                </div>
               </div>
 
               <div>

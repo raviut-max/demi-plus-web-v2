@@ -1,13 +1,16 @@
 // app/admin/appointments/view/page.tsx
 // ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: เพิ่ม AlertCircle ใน import และแก้ไข Modal ให้ทำงานถูกต้อง
+// ✅ การแก้ไข:
+//    1. เพิ่มลิงก์ที่ชื่อผู้ป่วย → คลิกแล้วไปหน้ารายละเอียดผู้ป่วย (/admin/patients/[id])
+//    2. เพิ่ม hover effect ให้ชื่อผู้ป่วยเพื่อสื่อว่าคลิกได้
+//    3. คงปุ่ม "ดูรายละเอียด" ไว้สำหรับดูรายละเอียดนัดหมาย (Modal)
 
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle, X, Eye, AlertCircle } from 'lucide-react'; // ✅ เพิ่ม AlertCircle
+import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle, X, Eye } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
@@ -54,7 +57,7 @@ export default function ViewAppointmentsPage() {
       console.log('📡 Loading appointments...');
       
       // ดึงข้อมูลนัดหมาย
-      const { data: aptData, error: aptError } = await supabase
+      const {  aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: true });
@@ -67,7 +70,7 @@ export default function ViewAppointmentsPage() {
       const appointmentsWithDetails = await Promise.all(
         (aptData || []).map(async (apt: any) => {
           // ดึงข้อมูลผู้ป่วย
-          const { data: userData } = await supabase
+          const {  userData } = await supabase
             .from('profiles')
             .select('first_name, last_name, hospital_number')
             .eq('id', apt.user_id)
@@ -76,7 +79,7 @@ export default function ViewAppointmentsPage() {
           // ดึงข้อมูลแพทย์
           let doctorData = null;
           if (apt.doctor_id) {
-            const { data: docData } = await supabase
+            const {  docData } = await supabase
               .from('doctors')
               .select('user_id, full_name_th, specialization_th')
               .eq('user_id', apt.doctor_id)
@@ -85,7 +88,7 @@ export default function ViewAppointmentsPage() {
           }
 
           // ✅ ตรวจสอบว่ามีการบันทึกติดตามแล้วหรือไม่
-          const { data: followupData } = await supabase
+          const {  followupData } = await supabase
             .from('appointment_followups')
             .select('id')
             .eq('appointment_id', apt.id)
@@ -119,11 +122,11 @@ export default function ViewAppointmentsPage() {
         staff.role === 'doctor' || staff.role === 'helper'
       );
 
-      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
+      console.log('👨‍️ Doctors/Staff:', filteredStaff.length);
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -517,10 +520,20 @@ export default function ViewAppointmentsPage() {
               ) : (
                 filteredAppointments.map((apt) => (
                   <tr key={apt.id} className="hover:bg-gray-50">
+                    {/* ✅ แก้ไข: คอลัมน์ผู้ป่วย - คลิกแล้วไปหน้ารายละเอียดผู้ป่วย */}
                     <td className="px-6 py-4">
-                      <p className="font-medium text-gray-800">{apt.users?.full_name || '-'}</p>
-                      <p className="text-sm text-gray-500">{apt.users?.hospital_number}</p>
+                      <button
+                        onClick={() => router.push(`/admin/patients/${apt.user_id}`)}
+                        className="text-left group"
+                        title="ไปหน้ารายละเอียดผู้ป่วย"
+                      >
+                        <p className="font-medium text-gray-800 group-hover:text-blue-600 group-hover:underline transition-colors">
+                          {apt.users?.full_name || '-'}
+                        </p>
+                        <p className="text-sm text-gray-500">{apt.users?.hospital_number}</p>
+                      </button>
                     </td>
+
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2">
                         <Stethoscope className="w-4 h-4 text-gray-400" />
@@ -553,11 +566,11 @@ export default function ViewAppointmentsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
-                        {/* ✅ ปุ่มดูรายละเอียด - เปิด Modal แทนการลิงก์ */}
+                        {/* ✅ ปุ่มดูรายละเอียดนัดหมาย (Modal) */}
                         <button
                           onClick={() => handleViewDetails(apt)}
                           className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
-                          title="ดูรายละเอียด"
+                          title="ดูรายละเอียดนัดหมาย"
                         >
                           <Eye className="w-3 h-3" />
                           ดูรายละเอียด
