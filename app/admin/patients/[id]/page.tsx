@@ -1,10 +1,10 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 09:40)
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 10:00)
 // ✅ การแก้ไข:
-//    1. ปุ่มสีฟ้า (นัดหมาย) → ลิงก์ไป /admin/patients/${patientId}/appointments
-//    2. ปุ่มสีเขียว (ประเมิน) → ลิงก์ไป /admin/screening?patient_id=${patientId}
-//    3. ปุ่มสีม่วง (ติดตาม) → ลิงก์ไป /admin/patients/${patientId}/screening-history
-//    4. ปุ่มสีส้ม (ความคืบหน้า) → ลิงก์ไป /admin/patients/${patientId}/goals (เหมือนเดิม)
+//    1. ปุ่มสีฟ้า (นัดหมาย) → /admin/patients/${patientId}/appointments ✅
+//    2. ปุ่มสีเขียว (การประเมินล่าสุด) → /admin/patients/${patientId}/screening-history ✅ (แก้ไขใหม่)
+//    3. ปุ่มสีม่วง (ติดตามล่าสุด) → /admin/patients/${patientId}/followup-history ✅
+//    4. ปุ่มสีส้ม (ความคืบหน้า) → /admin/patients/${patientId}/goals ✅
 
 'use client';
 
@@ -108,7 +108,7 @@ export default function PatientDetailPage() {
       // ✅ ตรวจสอบสถานะการประเมิน
       await checkAssessmentStatus(patientId);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -119,7 +119,7 @@ export default function PatientDetailPage() {
   const checkAssessmentStatus = async (pid: string) => {
     try {
       // ตรวจสอบ Baseline
-      const { data: baselineData } = await supabase
+      const {  baselineData } = await supabase
         .from('baseline')
         .select('id')
         .eq('user_id', pid)
@@ -138,7 +138,7 @@ export default function PatientDetailPage() {
       setHasCompletedAppointment((appointmentsData?.length || 0) > 0);
 
       // ตรวจสอบ PAM Assessment (จาก screenings หรือ assessments)
-      const { data: screeningData } = await supabase
+      const {  screeningData } = await supabase
         .from('screenings')
         .select('id, pam_score')
         .eq('user_id', pid)
@@ -530,14 +530,14 @@ export default function PatientDetailPage() {
 
           {/* 
           ========================================
-          ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด
-          📅 แก้ไข: 22 เม.ย. 2569
-          🔗 ลิงก์: /admin/screening?patient_id=${patientId}
-          📝 คำอธิบาย: คลิกเพื่อไปหน้าทำแบบประเมิน PAM/PROMs สำหรับผู้ป่วยคนนี้
+          ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด (ประวัติการติดตาม)
+          📅 แก้ไข: 22 เม.ย. 2569 (10:00) - แก้ไขใหม่
+          🔗 ลิงก์: /admin/patients/${patientId}/screening-history
+          📝 คำอธิบาย: คลิกเพื่อดูประวัติการประเมิน/ติดตามทั้งหมด (PAM, PROMs, Screening)
           ========================================
           */}
           <div 
-            onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
+            onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
@@ -556,12 +556,12 @@ export default function PatientDetailPage() {
           ========================================
           ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด
           📅 แก้ไข: 22 เม.ย. 2569
-          🔗 ลิงก์: /admin/patients/${patientId}/screening-history
+          🔗 ลิงก์: /admin/patients/${patientId}/followup-history
           📝 คำอธิบาย: คลิกเพื่อดูประวัติการติดตามนัดหมายย้อนหลัง
           ========================================
           */}
           <div 
-            onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
+            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
