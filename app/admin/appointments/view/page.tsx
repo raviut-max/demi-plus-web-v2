@@ -1,50 +1,67 @@
 // app/admin/appointments/view/page.tsx
 // ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขการแสดงผลชื่อแพทย์ - เช็คทั้ง full_name_th และ full_name
-//    2. เพิ่ม fallback สำหรับกรณีไม่มีข้อมูลแพทย์
-//    3. ปรับปรุงการดึงข้อมูลแพทย์ให้ถูกต้อง
+//    1. แสดงผู้ป่วยทุกคน (รวมถึงผู้ที่ยังไม่มีนัดหมาย)
+//    2. เพิ่มสถานะ "ไม่มีนัดหมาย" สำหรับผู้ที่ยังไม่มีนัดหมาย
+//    3. แสดงปุ่ม "สร้างนัดหมาย" สำหรับผู้ที่ยังไม่มีนัดหมาย
+//    4. เพิ่ม Filter "ไม่มีนัดหมาย"
 
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import {
-  Calendar,
-  Filter,
-  LogOut,
-  ArrowLeft,
-  Clock,
-  User,
-  Stethoscope,
-  Plus,
-  FileText,
-  CheckCircle,
+import { 
+  Calendar, 
+  Filter, 
+  LogOut, 
+  ArrowLeft, 
+  Clock, 
+  User, 
+  Stethoscope, 
+  Plus, 
+  FileText, 
+  CheckCircle, 
   Eye,
   AlertCircle,
   Edit,
-  X
+  X,
+  CalendarX
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+// ✅ Interface สำหรับข้อมูลผู้ป่วยพร้อมนัดหมาย
+interface PatientWithAppointment {
+  patient_id: string;
+  patient_name: string;
+  hospital_number: string;
+  appointment_id?: string;
+  appointment_date?: string;
+  appointment_type?: string;
+  doctor_id?: string;
+  doctor_name?: string;
+  status?: string;
+  hasFollowup?: boolean;
+  hasAppointment: boolean; // ✅ มีนัดหมายหรือไม่
+}
 
 export default function ViewAppointmentsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [appointments, setAppointments] = useState<any[]>([]);
-  const [patients, setPatients] = useState<any[]>([]);
+  const [patientsWithAppointments, setPatientsWithAppointments] = useState<PatientWithAppointment[]>([]);
+  const [allPatients, setAllPatients] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // ✅ State สำหรับ Modal รายละเอียด
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedPatient, setSelectedPatient] = useState<any>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
   // Filters
   const [filterDate, setFilterDate] = useState('');
   const [filterDoctor, setFilterDoctor] = useState('');
   const [filterPatient, setFilterPatient] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all'); // ✅ เพิ่ม 'no_appointment'
 
   useEffect(() => {
     const userData = checkSession();
@@ -64,10 +81,24 @@ export default function ViewAppointmentsPage() {
 
   const loadData = async () => {
     try {
-      console.log('📡 Loading appointments...');
+      console.log('📡 Loading patients and appointments...');
       
-      // ดึงข้อมูลนัดหมาย
-      const {  aptData, error: aptError } = await supabase
+      // ✅ 1. ดึงข้อมูลผู้ป่วยทั้งหมด
+      const { data: patientsData, error: patientsError } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, hospital_number')
+        .order('first_name', { ascending: true });
+
+      if (patientsError) {
+        console.error('❌ Error fetching patients:', patientsError);
+        throw patientsError;
+      }
+
+      console.log('📋 Total patients:', patientsData?.length);
+      setAllPatients(patientsData || []);
+
+      // ✅ 2. ดึงข้อมูลนัดหมายทั้งหมด
+      const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: true });
@@ -77,79 +108,72 @@ export default function ViewAppointmentsPage() {
         throw aptError;
       }
 
-      console.log('📋 Raw appointments:', aptData?.length);
+      console.log('📋 Total appointments:', aptData?.length);
 
-      // ดึงรายละเอียดผู้ป่วยและแพทย์ + ตรวจสอบว่ามี followup แล้วหรือไม่
-      const appointmentsWithDetails = await Promise.all(
-        (aptData || []).map(async (apt: any) => {
-          try {
-            // ดึงข้อมูลผู้ป่วย
-            const {  userData } = await supabase
-              .from('profiles')
-              .select('first_name, last_name, hospital_number')
-              .eq('id', apt.user_id)
-              .single();
+      // ✅ 3. สร้าง Map ของนัดหมายตาม patient_id
+      const appointmentMap = new Map();
+      if (aptData) {
+        aptData.forEach((apt: any) => {
+          if (!appointmentMap.has(apt.user_id)) {
+            appointmentMap.set(apt.user_id, []);
+          }
+          appointmentMap.get(apt.user_id).push(apt);
+        });
+      }
 
-            // ดึงข้อมูลแพทย์
-            let doctorData = null;
-            if (apt.doctor_id) {
-              const {  docData } = await supabase
-                .from('doctors')
-                .select('user_id, full_name_th, full_name, specialization_th')
-                .eq('user_id', apt.doctor_id)
-                .single();
-              doctorData = docData;
-            }
+      // ✅ 4. รวมข้อมูล: ผู้ป่วยที่มีนัดหมาย + ผู้ป่วยที่ไม่มีนัดหมาย
+      const combined: PatientWithAppointment[] = patientsData?.map((patient: any) => {
+        const patientAppointments = appointmentMap.get(patient.id) || [];
+        const latestAppointment = patientAppointments.length > 0 
+          ? patientAppointments[patientAppointments.length - 1] // นัดหมายล่าสุด
+          : null;
 
-            // ✅ ตรวจสอบว่ามีการบันทึกติดตามแล้วหรือไม่
-            const {  followupData } = await supabase
+        return {
+          patient_id: patient.id,
+          patient_name: `${patient.first_name} ${patient.last_name}`,
+          hospital_number: patient.hospital_number,
+          appointment_id: latestAppointment?.id,
+          appointment_date: latestAppointment?.appointment_date,
+          appointment_type: latestAppointment?.appointment_type,
+          doctor_id: latestAppointment?.doctor_id,
+          doctor_name: latestAppointment?.doctor_id || '',
+          status: latestAppointment?.status,
+          hasFollowup: false, // จะตรวจสอบทีหลัง
+          hasAppointment: !!latestAppointment, // ✅ มีนัดหมายหรือไม่
+        };
+      }) || [];
+
+      // ✅ 5. ตรวจสอบ followup สำหรับนัดหมายที่มี
+      const patientsWithFollowupStatus = await Promise.all(
+        combined.map(async (patient) => {
+          if (patient.hasAppointment && patient.appointment_id) {
+            const { data: followupData } = await supabase
               .from('appointment_followups')
               .select('id')
-              .eq('appointment_id', apt.id)
+              .eq('appointment_id', patient.appointment_id)
               .maybeSingle();
-
+            
             return {
-              ...apt,
-              users: userData ? {
-                full_name: userData.first_name && userData.last_name
-                  ? `${userData.first_name} ${userData.last_name}`
-                  : '-',
-                hospital_number: userData.hospital_number || '-'
-              } : null,
-              doctors: doctorData || null,
-              hasFollowup: !!followupData  // ✅ มี followup แล้วหรือไม่
-            };
-          } catch (err) {
-            console.error(`❌ Error processing appointment ${apt.id}:`, err);
-            return {
-              ...apt,
-              users: null,
-              doctors: null,
-              hasFollowup: false
+              ...patient,
+              hasFollowup: !!followupData,
             };
           }
+          return patient;
         })
       );
 
-      console.log('✅ Appointments with details:', appointmentsWithDetails.length);
-      setAppointments(appointmentsWithDetails);
+      console.log('✅ Combined data:', patientsWithFollowupStatus.length);
+      setPatientsWithAppointments(patientsWithFollowupStatus);
 
-      // ดึงข้อมูลผู้ป่วยและแพทย์สำหรับ filter
-      const [patientsData, allStaff] = await Promise.all([
-        getPatientList(),
-        getStaffList()
-      ]);
-
-      // กรองเอาเฉพาะ doctor และ helper (ไม่เอา admin)
+      // ✅ 6. ดึงข้อมูลแพทย์สำหรับ filter
+      const allStaff = await getStaffList();
       const filteredStaff = allStaff.filter(staff =>
         staff.role === 'doctor' || staff.role === 'helper'
       );
-
-      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
-      setPatients(patientsData);
       setDoctors(filteredStaff);
+
     } catch (error) {
-      console.error('❌ Error loading ', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -161,17 +185,19 @@ export default function ViewAppointmentsPage() {
     router.push('/admin/login');
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string | null) => {
+    if (!status) return 'bg-gray-100 text-gray-700 border border-gray-300';
     switch (status) {
       case 'scheduled': return 'bg-blue-100 text-blue-700';
       case 'completed': return 'bg-green-100 text-green-700';
       case 'cancelled': return 'bg-red-100 text-red-700';
       case 'no_show': return 'bg-orange-100 text-orange-700';
-      default: return 'bg-gray-100 text-gray-700';
+      default: return 'bg-gray-100 text-gray-700 border border-gray-300';
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string | null) => {
+    if (!status) return 'ไม่มีนัดหมาย';
     switch (status) {
       case 'scheduled': return 'นัดหมาย';
       case 'completed': return 'เสร็จสิ้น';
@@ -190,14 +216,13 @@ export default function ViewAppointmentsPage() {
 
   // ✅ ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
   const handleComplete = async (aptId: string) => {
-    const apt = appointments.find(a => a.id === aptId);
-    if (!apt) return;
+    const patient = patientsWithAppointments.find(p => p.appointment_id === aptId);
+    if (!patient || !patient.appointment_date) return;
 
-    const aptDate = new Date(apt.appointment_date);
+    const aptDate = new Date(patient.appointment_date);
     const now = new Date();
     const isPastOrOnTime = aptDate <= now;
 
-    // ถ้ายังไม่ถึงวันนัด ให้ถามยืนยันก่อน
     if (!isPastOrOnTime) {
       const timeDiff = aptDate.getTime() - now.getTime();
       const daysLeft = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
@@ -213,14 +238,10 @@ export default function ViewAppointmentsPage() {
         `คุณต้องการเสร็จสิ้นนัดหมายนี้จริงๆ หรือไม่?`
       );
 
-      if (!confirmEarly) {
-        return;
-      }
+      if (!confirmEarly) return;
     } else {
       const confirmComplete = confirm('ยืนยันว่านัดหมายนี้เสร็จสิ้นแล้ว?');
-      if (!confirmComplete) {
-        return;
-      }
+      if (!confirmComplete) return;
     }
 
     const { error } = await supabase
@@ -280,52 +301,52 @@ export default function ViewAppointmentsPage() {
   };
 
   // ✅ ฟังก์ชันเปิด Modal รายละเอียด
-  const handleViewDetails = (apt: any) => {
-    console.log('🔍 Opening details for:', apt);
-    setSelectedAppointment(apt);
+  const handleViewDetails = (patient: PatientWithAppointment) => {
+    console.log('🔍 Opening details for:', patient);
+    setSelectedPatient(patient);
     setShowDetailsModal(true);
   };
 
-  // Filter appointments
-  const filteredAppointments = appointments.filter(apt => {
-    if (!apt || !apt.appointment_date) return false;
-    
-    const aptDateObj = new Date(apt.appointment_date);
-    const year = aptDateObj.getFullYear();
-    const month = String(aptDateObj.getMonth() + 1).padStart(2, '0');
-    const day = String(aptDateObj.getDate()).padStart(2, '0');
-    const aptDate = `${year}-${month}-${day}`;
-
-    // Filter by date
-    if (filterDate && aptDate !== filterDate) {
+  // ✅ Filter ข้อมูล
+  const filteredPatients = patientsWithAppointments.filter(patient => {
+    // Filter by patient name
+    if (filterPatient && patient.patient_id !== filterPatient) {
       return false;
     }
 
-    // Filter by doctor
-    if (filterDoctor && apt.doctor_id !== filterDoctor) {
+    // Filter by doctor (เฉพาะผู้ที่มีนัดหมาย)
+    if (filterDoctor && patient.doctor_id !== filterDoctor) {
       return false;
     }
 
-    // Filter by patient
-    if (filterPatient && apt.user_id !== filterPatient) {
-      return false;
+    // Filter by date (เฉพาะผู้ที่มีนัดหมาย)
+    if (filterDate && patient.appointment_date) {
+      const aptDate = new Date(patient.appointment_date).toISOString().split('T')[0];
+      if (aptDate !== filterDate) return false;
     }
 
     // Filter by status
-    if (filterStatus !== 'all' && apt.status !== filterStatus) {
-      return false;
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'no_appointment') {
+        // ✅ แสดงเฉพาะผู้ที่ยังไม่มีนัดหมาย
+        return !patient.hasAppointment;
+      } else if (filterStatus === 'scheduled' || filterStatus === 'completed' || 
+                 filterStatus === 'cancelled' || filterStatus === 'no_show') {
+        // ✅ แสดงเฉพาะผู้ที่มีนัดหมายและตรงกับสถานะ
+        return patient.hasAppointment && patient.status === filterStatus;
+      }
     }
 
     return true;
   });
 
-  // วันนี้
-  const today = new Date().toISOString().split('T')[0];
-  const todayAppointments = appointments.filter(apt => {
-    if (!apt || !apt.appointment_date) return false;
-    const aptDate = new Date(apt.appointment_date).toISOString().split('T')[0];
-    return aptDate === today && apt.status === 'scheduled';
-  });
+  // ✅ นับสถิติ
+  const stats = {
+    total: patientsWithAppointments.length,
+    hasAppointment: patientsWithAppointments.filter(p => p.hasAppointment).length,
+    noAppointment: patientsWithAppointments.filter(p => !p.hasAppointment).length,
+    scheduled: patientsWithAppointments.filter(p => p.status === 'scheduled').length,
+  };
 
   // Clear filters
   const clearFilters = () => {
@@ -361,7 +382,7 @@ export default function ViewAppointmentsPage() {
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
                 📅 ดูนัดหมาย
               </h1>
-              <p className="text-gray-600">ตรวจสอบตารางนัดหมาย</p>
+              <p className="text-gray-600">ตรวจสอบตารางนัดหมายและผู้ป่วยที่ยังไม่มีนัดหมาย</p>
             </div>
             
             <div className="flex gap-2">
@@ -388,15 +409,15 @@ export default function ViewAppointmentsPage() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         
         {/* Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-blue-600" />
+                <User className="w-5 h-5 text-blue-600" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">นัดหมายทั้งหมด</p>
-                <p className="text-2xl font-bold text-gray-800">{filteredAppointments.length}</p>
+                <p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
               </div>
             </div>
           </div>
@@ -404,11 +425,23 @@ export default function ViewAppointmentsPage() {
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                <Clock className="w-5 h-5 text-green-600" />
+                <Calendar className="w-5 h-5 text-green-600" />
               </div>
               <div>
-                <p className="text-sm text-gray-500">นัดหมายวันนี้</p>
-                <p className="text-2xl font-bold text-gray-800">{todayAppointments.length}</p>
+                <p className="text-sm text-gray-500">มีนัดหมาย</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.hasAppointment}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <CalendarX className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">ไม่มีนัดหมาย</p>
+                <p className="text-2xl font-bold text-gray-800">{stats.noAppointment}</p>
               </div>
             </div>
           </div>
@@ -416,13 +449,11 @@ export default function ViewAppointmentsPage() {
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                <User className="w-5 h-5 text-blue-600" />
+                <Clock className="w-5 h-5 text-blue-600" />
               </div>
               <div>
                 <p className="text-sm text-gray-500">รอดำเนินการ</p>
-                <p className="text-2xl font-bold text-gray-800">
-                  {filteredAppointments.filter(a => a.status === 'scheduled').length}
-                </p>
+                <p className="text-2xl font-bold text-gray-800">{stats.scheduled}</p>
               </div>
             </div>
           </div>
@@ -461,7 +492,7 @@ export default function ViewAppointmentsPage() {
                 <option value="">ทั้งหมด</option>
                 {doctors.map((doctor: any) => {
                   const doctorId = doctor.id;
-                  const doctorName = doctor.doctors?.full_name_th || doctor.full_name_th || doctor.doctors?.full_name || doctor.full_name || '-';
+                  const doctorName = doctor.doctors?.full_name_th || doctor.full_name_th || '-';
                   const doctorRole = doctor.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่';
                   return (
                     <option key={doctorId} value={doctorId}>
@@ -481,9 +512,9 @@ export default function ViewAppointmentsPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">ทั้งหมด</option>
-                {patients.map((patient) => (
+                {allPatients.map((patient) => (
                   <option key={patient.id} value={patient.id}>
-                    {patient.full_name} ({patient.hospital_number})
+                    {patient.first_name} {patient.last_name} ({patient.hospital_number})
                   </option>
                 ))}
               </select>
@@ -498,6 +529,7 @@ export default function ViewAppointmentsPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
                 <option value="all">ทั้งหมด</option>
+                <option value="no_appointment">ไม่มีนัดหมาย</option>
                 <option value="scheduled">รอดำเนินการ</option>
                 <option value="completed">เสร็จสิ้น</option>
                 <option value="cancelled">ยกเลิก</option>
@@ -533,59 +565,66 @@ export default function ViewAppointmentsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {filteredAppointments.length === 0 ? (
+              {filteredPatients.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                     <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                    <p>ไม่พบข้อมูลนัดหมาย</p>
+                    <p>ไม่พบข้อมูล</p>
                     {(filterDate || filterDoctor || filterPatient || filterStatus !== 'all') && (
                       <p className="text-sm mt-2 text-gray-400">ลองปรับแต่งตัวกรอง</p>
                     )}
                   </td>
                 </tr>
               ) : (
-                filteredAppointments.map((apt) => (
-                  <tr key={apt.id} className="hover:bg-gray-50">
+                filteredPatients.map((patient) => (
+                  <tr key={patient.patient_id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <button
-                        onClick={() => router.push(`/admin/patients/${apt.user_id}`)}
+                        onClick={() => router.push(`/admin/patients/${patient.patient_id}?from=appointments`)}
                         className="text-left group"
                         title="ไปหน้ารายละเอียดผู้ป่วย"
                       >
                         <p className="font-medium text-gray-800 group-hover:text-blue-600 group-hover:underline transition-colors">
-                          {apt.users?.full_name || '-'}
+                          {patient.patient_name}
                         </p>
-                        <p className="text-sm text-gray-500">{apt.users?.hospital_number}</p>
+                        <p className="text-sm text-gray-500">{patient.hospital_number}</p>
                       </button>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <Stethoscope className="w-4 h-4 text-gray-400" />
-                        <span className="text-gray-700">
-                          {/* ✅ แก้ไข: แสดงชื่อแพทย์โดยเช็คหลายฟิลด์ */}
-                          {apt.doctors?.full_name_th || 
-                           apt.doctors?.full_name || 
-                           apt.doctor_name || 
-                           '-'}
-                        </span>
-                      </div>
+                      {patient.hasAppointment ? (
+                        <div className="flex items-center gap-2">
+                          <Stethoscope className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-700">
+                            {patient.doctor_name || '-'}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-700">{apt.appointment_type}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">
+                      {patient.appointment_type || '-'}
+                    </td>
                     <td className="px-6 py-4 text-sm">
-                      <p className="text-gray-800">{new Date(apt.appointment_date).toLocaleDateString('th-TH')}</p>
-                      <p className="text-gray-500">
-                        {new Date(apt.appointment_date).toLocaleTimeString('th-TH', {
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        })}
-                      </p>
+                      {patient.appointment_date ? (
+                        <>
+                          <p className="text-gray-800">{new Date(patient.appointment_date).toLocaleDateString('th-TH')}</p>
+                          <p className="text-gray-500">
+                            {new Date(patient.appointment_date).toLocaleTimeString('th-TH', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
-                      <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(apt.status)}`}>
-                        {getStatusText(apt.status)}
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(patient.status)}`}>
+                        {getStatusText(patient.status)}
                       </span>
-                      {/* ✅ แสดงสถานะว่าบันทึกติดตามแล้วหรือไม่ */}
-                      {apt.hasFollowup && (
+                      {patient.hasFollowup && (
                         <div className="mt-1 flex items-center gap-1 text-xs text-green-600">
                           <CheckCircle className="w-3 h-3" />
                           <span>บันทึกติดตามแล้ว</span>
@@ -594,85 +633,90 @@ export default function ViewAppointmentsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
-                        {/* ✅ ปุ่มดูรายละเอียดนัดหมาย (Modal) - แสดงทุกราย */}
+                        {/* ✅ ปุ่มดูรายละเอียด */}
                         <button
-                          onClick={() => handleViewDetails(apt)}
+                          onClick={() => handleViewDetails(patient)}
                           className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
-                          title="ดูรายละเอียดนัดหมาย"
+                          title="ดูรายละเอียด"
                         >
                           <Eye className="w-3 h-3" />
                           ดูรายละเอียด
                         </button>
 
-                        {/* ปุ่มแก้ไข - แสดงเฉพาะ scheduled เท่านั้น */}
-                        {apt.status === 'scheduled' && (
+                        {/* ✅ ปุ่มสร้างนัดหมาย - สำหรับผู้ที่ยังไม่มีนัดหมาย */}
+                        {!patient.hasAppointment && (
                           <button
-                            onClick={() => router.push(`/admin/appointments/edit/${apt.id}`)}
-                            className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all"
-                            title="แก้ไขนัดหมาย"
+                            onClick={() => router.push(`/admin/appointments/new?patient_id=${patient.patient_id}`)}
+                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all flex items-center gap-1"
+                            title="สร้างนัดหมายใหม่"
                           >
-                            แก้ไข
+                            <Plus className="w-3 h-3" />
+                            สร้างนัดหมาย
                           </button>
                         )}
 
-                        {/* ปุ่มเสร็จสิ้น - แสดงเฉพาะ scheduled */}
-                        {apt.status === 'scheduled' && (
-                          <button
-                            onClick={() => handleComplete(apt.id)}
-                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
-                            title={isPastAppointment(apt.appointment_date) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
-                          >
-                            เสร็จสิ้น
-                          </button>
-                        )}
+                        {/* ปุ่มจัดการสำหรับผู้มีนัดหมาย */}
+                        {patient.hasAppointment && patient.appointment_id && (
+                          <>
+                            {patient.status === 'scheduled' && (
+                              <>
+                                <button
+                                  onClick={() => router.push(`/admin/appointments/edit/${patient.appointment_id}`)}
+                                  className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all"
+                                  title="แก้ไขนัดหมาย"
+                                >
+                                  แก้ไข
+                                </button>
+                                <button
+                                  onClick={() => handleComplete(patient.appointment_id!)}
+                                  className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
+                                  title={isPastAppointment(patient.appointment_date!) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
+                                >
+                                  เสร็จสิ้น
+                                </button>
+                                {isPastAppointment(patient.appointment_date!) && (
+                                  <button
+                                    onClick={() => handleNoShow(patient.appointment_id!)}
+                                    className="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition-all"
+                                    title="บันทึกว่าผิดนัด"
+                                  >
+                                    ผิดนัด
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleCancel(patient.appointment_id!)}
+                                  className="px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition-all"
+                                  title="ยกเลิกนัดหมาย"
+                                >
+                                  ยกเลิก
+                                </button>
+                              </>
+                            )}
 
-                        {/* ✅ ปุ่มบันทึกติดตาม - แสดงเมื่อเสร็จสิ้นแล้วและยังไม่ได้ติดตาม */}
-                        {apt.status === 'completed' && !apt.hasFollowup && (
-                          <button
-                            onClick={() => router.push(`/admin/appointments/followup/${apt.id}`)}
-                            className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
-                            title="บันทึกผลการติดตาม"
-                          >
-                            <FileText className="w-3 h-3" />
-                            บันทึกติดตาม
-                          </button>
-                        )}
+                            {patient.status === 'completed' && !patient.hasFollowup && (
+                              <button
+                                onClick={() => router.push(`/admin/appointments/followup/${patient.appointment_id}`)}
+                                className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
+                                title="บันทึกผลการติดตาม"
+                              >
+                                <FileText className="w-3 h-3" />
+                                บันทึกติดตาม
+                              </button>
+                            )}
 
-                        {/* ✅ แสดงสถานะเมื่อติดตามแล้ว - ห้ามบันทึกซ้ำ */}
-                        {apt.status === 'completed' && apt.hasFollowup && (
-                          <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs rounded-lg flex items-center gap-1">
-                            <CheckCircle className="w-3 h-3" />
-                            ติดตามแล้ว
-                          </span>
-                        )}
+                            {patient.status === 'completed' && patient.hasFollowup && (
+                              <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs rounded-lg flex items-center gap-1">
+                                <CheckCircle className="w-3 h-3" />
+                                ติดตามแล้ว
+                              </span>
+                            )}
 
-                        {/* ปุ่มผิดนัด (No-show) - แสดงเฉพาะ scheduled ที่ถึงเวลาแล้ว */}
-                        {apt.status === 'scheduled' && isPastAppointment(apt.appointment_date) && (
-                          <button
-                            onClick={() => handleNoShow(apt.id)}
-                            className="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition-all"
-                            title="บันทึกว่าผิดนัด"
-                          >
-                            ผิดนัด
-                          </button>
-                        )}
-
-                        {/* ปุ่มยกเลิก - แสดงเฉพาะ scheduled เท่านั้น */}
-                        {apt.status === 'scheduled' && (
-                          <button
-                            onClick={() => handleCancel(apt.id)}
-                            className="px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition-all"
-                            title="ยกเลิกนัดหมาย"
-                          >
-                            ยกเลิก
-                          </button>
-                        )}
-
-                        {/* แสดงสถานะสำหรับ completed, cancelled, no_show */}
-                        {(apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'no_show') && (
-                          <span className="text-xs text-gray-500 italic">
-                            ไม่สามารถแก้ไขได้
-                          </span>
+                            {(patient.status === 'completed' || patient.status === 'cancelled' || patient.status === 'no_show') && (
+                              <span className="text-xs text-gray-500 italic">
+                                ไม่สามารถแก้ไขได้
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
@@ -685,18 +729,23 @@ export default function ViewAppointmentsPage() {
 
         {/* Footer */}
         <div className="mt-6 text-center text-sm text-gray-500">
-          <p>แสดง {filteredAppointments.length} จาก {appointments.length} นัดหมาย</p>
+          <p>แสดง {filteredPatients.length} จาก {patientsWithAppointments.length} ผู้ป่วย</p>
+          {filterStatus === 'no_appointment' && (
+            <p className="text-red-600 font-medium mt-1">
+              ⚠️ แสดงเฉพาะผู้ป่วยที่ยังไม่มีนัดหมาย
+            </p>
+          )}
         </div>
       </div>
 
-      {/* ✅ Modal รายละเอียดนัดหมาย */}
-      {showDetailsModal && selectedAppointment && (
+      {/* ✅ Modal รายละเอียด */}
+      {showDetailsModal && selectedPatient && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
               <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                 <Calendar className="w-6 h-6 text-blue-600" />
-                รายละเอียดนัดหมาย
+                รายละเอียด
               </h2>
               <button
                 onClick={() => setShowDetailsModal(false)}
@@ -710,83 +759,68 @@ export default function ViewAppointmentsPage() {
               {/* ข้อมูลผู้ป่วย */}
               <div className="bg-blue-50 rounded-lg p-4">
                 <h3 className="text-sm font-bold text-blue-800 mb-2">👤 ผู้ป่วย</h3>
-                <p className="text-lg font-bold text-blue-900">{selectedAppointment.users?.full_name}</p>
-                <p className="text-sm text-blue-700">HN: {selectedAppointment.users?.hospital_number}</p>
+                <p className="text-lg font-bold text-blue-900">{selectedPatient.patient_name}</p>
+                <p className="text-sm text-blue-700">HN: {selectedPatient.hospital_number}</p>
               </div>
 
-              {/* ข้อมูลนัดหมาย */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-gray-500">ประเภท</p>
-                  <p className="font-medium text-gray-800">{selectedAppointment.appointment_type}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">สถานะ</p>
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedAppointment.status)}`}>
-                    {getStatusText(selectedAppointment.status)}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">วันที่</p>
-                  <p className="font-medium text-gray-800">
-                    {new Date(selectedAppointment.appointment_date).toLocaleDateString('th-TH', {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">เวลา</p>
-                  <p className="font-medium text-gray-800">
-                    {new Date(selectedAppointment.appointment_date).toLocaleTimeString('th-TH', {
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">แพทย์</p>
-                  <p className="font-medium text-gray-800">
-                    {/* ✅ แก้ไข: แสดงชื่อแพทย์ใน Modal */}
-                    {selectedAppointment.doctors?.full_name_th || 
-                     selectedAppointment.doctors?.full_name || 
-                     selectedAppointment.doctor_name || 
-                     '-'}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">หมายเหตุ</p>
-                  <p className="font-medium text-gray-800">{selectedAppointment.notes || '-'}</p>
-                </div>
-              </div>
-
-              {/* สถานะติดตาม */}
-              {selectedAppointment.status === 'completed' && (
-                <div className={`rounded-lg p-4 border-2 ${
-                  selectedAppointment.hasFollowup 
-                    ? 'bg-green-50 border-green-300' 
-                    : 'bg-yellow-50 border-yellow-300'
-                }`}>
-                  <div className="flex items-center gap-2">
-                    {selectedAppointment.hasFollowup ? (
-                      <>
-                        <CheckCircle className="w-6 h-6 text-green-600" />
-                        <div>
-                          <p className="font-bold text-green-800">บันทึกติดตามแล้ว</p>
-                          <p className="text-sm text-green-700">ไม่ต้องบันทึกติดตามซ้ำ รอจนกว่าจะมีนัดหมายรอบใหม่</p>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="w-6 h-6 text-yellow-600" />
-                        <div>
-                          <p className="font-bold text-yellow-800">ยังไม่ได้บันทึกติดตาม</p>
-                          <p className="text-sm text-yellow-700">กรุณาบันทึกผลการทำกิจวัตรของผู้ป่วย</p>
-                        </div>
-                      </>
-                    )}
+              {/* สถานะนัดหมาย */}
+              {selectedPatient.hasAppointment ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">ประเภท</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.appointment_type || '-'}</p>
                   </div>
+                  <div>
+                    <p className="text-sm text-gray-500">สถานะ</p>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedPatient.status)}`}>
+                      {getStatusText(selectedPatient.status)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">วันที่</p>
+                    <p className="font-medium text-gray-800">
+                      {selectedPatient.appointment_date 
+                        ? new Date(selectedPatient.appointment_date).toLocaleDateString('th-TH', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })
+                        : '-'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">เวลา</p>
+                    <p className="font-medium text-gray-800">
+                      {selectedPatient.appointment_date
+                        ? new Date(selectedPatient.appointment_date).toLocaleTimeString('th-TH', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })
+                        : '-'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">แพทย์</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.doctor_name || '-'}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 text-center">
+                  <CalendarX className="w-12 h-12 mx-auto mb-3 text-red-500" />
+                  <h3 className="text-lg font-bold text-red-800 mb-2">ยังไม่มีนัดหมาย</h3>
+                  <p className="text-red-600 mb-4">ผู้ป่วยคนนี้ยังไม่มีนัดหมายในระบบ</p>
+                  <button
+                    onClick={() => {
+                      setShowDetailsModal(false);
+                      router.push(`/admin/appointments/new?patient_id=${selectedPatient.patient_id}`);
+                    }}
+                    className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+                  >
+                    <Plus className="w-4 h-4 inline mr-2" />
+                    สร้างนัดหมายใหม่
+                  </button>
                 </div>
               )}
             </div>
