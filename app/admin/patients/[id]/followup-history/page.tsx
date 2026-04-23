@@ -1,8 +1,14 @@
 // app/admin/patients/[id]/followup-history/page.tsx
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. เพิ่มระบบตรวจสอบว่ามาจากไหน (view หรือ patient detail)
+//    2. ปุ่มกลับจะกลับไปตามที่มาอย่างถูกต้อง
+//    3. ใช้ URL query parameter '?from=view' เพื่อระบุที่มา
+
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getPatientDetail, getPatientFollowupHistory } from '@/lib/supabase/queries';
 import { ArrowLeft, Calendar, Activity, Heart, TrendingUp, FileText, Download, Printer } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -10,7 +16,11 @@ import { supabase } from '@/lib/supabase/client';
 export default function FollowupHistoryPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams(); // ✅ ดึง query parameters
   const patientId = params.id as string;
+  
+  // ✅ ตรวจสอบว่ามาจากไหน (view หรือ patient)
+  const fromPage = searchParams.get('from') || 'patient'; // ค่าเริ่มต้น: 'patient'
   
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -19,12 +29,16 @@ export default function FollowupHistoryPage() {
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
 
   useEffect(() => {
+    console.log('🔍 [DEBUG] Followup History - from:', fromPage);
+    console.log('🔍 [DEBUG] Patient ID:', patientId);
+  }, [fromPage, patientId]);
+
+  useEffect(() => {
     const userData = checkSession();
     if (!userData) {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -47,7 +61,7 @@ export default function FollowupHistoryPage() {
 
       console.log('📋 Followup History:', followupData.length);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -57,6 +71,19 @@ export default function FollowupHistoryPage() {
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
+  };
+
+  // ✅ ฟังก์ชันกลับไปตามที่มา
+  const handleGoBack = () => {
+    console.log('🔙 [DEBUG] Going back, from:', fromPage);
+    
+    if (fromPage === 'view') {
+      // ✅ กลับไปหน้าดูนัดหมาย
+      router.push('/admin/appointments/view');
+    } else {
+      // ✅ กลับไปหน้ารายละเอียดผู้ป่วย
+      router.push(`/admin/patients/${patientId}`);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -102,7 +129,6 @@ export default function FollowupHistoryPage() {
   // ✅ คำนวณความก้าวหน้า (เปรียบเทียบครั้งล่าสุดกับครั้งแรก)
   const calculateProgress = () => {
     if (followups.length < 2) return null;
-
     const first = followups[followups.length - 1]; // ครั้งแรก
     const latest = followups[0]; // ครั้งล่าสุด
 
@@ -152,30 +178,29 @@ export default function FollowupHistoryPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}`)}
+            onClick={handleGoBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            <ArrowLeft className="w-5 h-5" />
-            <span>กลับหน้าผู้ป่วย</span>
+            <ArrowLeft className="w-4 h-4" />
+            กลับ{fromPage === 'view' ? 'หน้าดูนัดหมาย' : 'หน้าผู้ป่วย'}
           </button>
+          
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                ประวัติการติดตามนัดหมาย
+                📋 ประวัติการติดตามนัดหมาย
               </h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
@@ -183,6 +208,7 @@ export default function FollowupHistoryPage() {
                 ทั้งหมด: {followups.length} ครั้ง
               </p>
             </div>
+            
             <div className="flex gap-2">
               <button
                 onClick={() => setViewMode('table')}
@@ -415,7 +441,6 @@ export default function FollowupHistoryPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-sm">
-                          {/* ✅ แก้ไขแล้ว: ไปหน้า view แทนหน้า form */}
                           <button
                             onClick={() => router.push(`/admin/appointments/followup/${followup.id}/view`)}
                             className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
@@ -449,7 +474,7 @@ export default function FollowupHistoryPage() {
                       className="w-full bg-blue-500 rounded-t-lg transition-all hover:bg-blue-600"
                       style={{
                         height: followup.weight ? `${(followup.weight / 150) * 100}%` : '0%',
-                        minHeight: followup.weight ? '20px' : '0'
+                        minHeight: followup.weight ? '20px' : '0' 
                       }}
                     ></div>
                     <p className="text-xs text-gray-600 mt-2 text-center">
