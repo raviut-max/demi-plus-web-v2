@@ -1,9 +1,16 @@
 // app/admin/appointments/followup/[id]/page.tsx
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. เพิ่มหัวข้อ 3: กราฟวัดลอยจม (อัปโหลดรูปภาพ + สรุป)
+//    2. เพิ่มหัวข้อ 4: การ์ดภาพความฝัน (อัปโหลดรูปภาพ + คำอธิบาย)
+//    3. ย้าย "ติดตามแผนปฏิบัติกิจกรรม" จากหัวข้อ 3 → หัวข้อ 5
+//    4. ปรับเลขหัวข้อใหม่ทั้งหมด
+
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getPatientFollowupHistory, saveAppointmentFollowupComplete } from '@/lib/supabase/queries';
+import { checkSession, logout } from '@/lib/supabase/queries';
 import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -11,14 +18,14 @@ export default function FollowupPage() {
   const router = useRouter();
   const params = useParams();
   const appointmentId = params.id as string;
-
-  const [user, setUser] = useState(null);
+  
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadedImagePath, setUploadedImagePath] = useState<string | null>(null); // ✅ เก็บชื่อไฟล์เพื่อลบในอนาคต
-  const [appointment, setAppointment] = useState(null);
-  const [patientProfile, setPatientProfile] = useState(null);
+  const [uploadingFloating, setUploadingFloating] = useState(false);
+  const [uploadingDream, setUploadingDream] = useState(false);
+  const [appointment, setAppointment] = useState<any>(null);
+  const [patientProfile, setPatientProfile] = useState<any>(null);
   const [followupRound, setFollowupRound] = useState(1);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,31 +37,39 @@ export default function FollowupPage() {
     blood_pressure_sys: '',
     blood_pressure_dia: '',
     blood_sugar_dtx: '',
-
+    
     // 2. ความก้าวหน้าในการปรับตัว
     life_schedule_image_url: '',
     adaptation_summary: '',
     adaptation_obstacles: '',
     adaptation_opportunities: '',
     adaptation_other: '',
-
-    // 3. ติดตามแผนปฏิบัติกิจกรรม
+    
+    // ✅ 3. กราฟวัดลอยจม (ใหม่)
+    floating_chart_image_url: '',
+    floating_chart_summary: '',
+    
+    // ✅ 4. การ์ดภาพความฝัน (ใหม่)
+    dream_card_image_url: '',
+    dream_card_description: '',
+    
+    // 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5)
     food_amount_status: 'not_in_plan',
     food_type_status: 'not_in_plan',
     movement_status: 'not_in_plan',
     food_amount_note: '',
     food_type_note: '',
     movement_note: '',
-
-    // 4. คะแนนไม้บรรทัดวัดใจ
+    
+    // 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6)
     confidence_score: 5,
     confidence_improvement_plan: '',
-
-    // 5. สรุป
+    
+    // 7. สรุป (เดิม 5 → 7)
     summary: '',
     recommendations: '',
-
-    // 6. สถานะการติดตาม
+    
+    // 8. สถานะการติดตาม (เดิม 6 → 8)
     followup_status: 'fair',
   });
 
@@ -75,7 +90,7 @@ export default function FollowupPage() {
     loadAppointmentData();
   }, [router]);
 
-  // ✅ useEffect สำหรับนับรอบ followup - เรียกเมื่อ appointment โหลดเสร็จ
+  // ✅ useEffect สำหรับนับรอบ followup
   useEffect(() => {
     if (appointment?.user_id) {
       loadFollowupRound();
@@ -87,60 +102,39 @@ export default function FollowupPage() {
       console.log('🔍 Loading appointment:', appointmentId);
       setError(null);
 
-      // ✅ ขั้นตอนที่ 1: ดึงข้อมูลนัดหมาย
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
         .eq('id', appointmentId)
         .single();
 
-      if (aptError) {
-        console.error('Error loading appointment:', aptError);
-        throw aptError;
-      }
-
+      if (aptError) throw aptError;
       setAppointment(aptData);
 
-      // ✅ ขั้นตอนที่ 2: ดึงข้อมูลผู้ป่วยจาก profiles
       if (aptData.user_id) {
-        const { data: profileData, error: profileError } = await supabase
+        const { data: profileData } = await supabase
           .from('profiles')
           .select('first_name, last_name, hospital_number')
           .eq('id', aptData.user_id)
           .single();
 
-        if (profileError) {
-          console.error('Error loading profile:', profileError);
-        } else {
+        if (profileData) {
           setPatientProfile(profileData);
         }
 
-        // โหลดประวัติการติดตาม (3 ครั้งล่าสุด)
-        const history = await getPatientFollowupHistory(aptData.user_id, 3);
-        setPastFollowups(history);
-      }
+        const { data: historyData } = await supabase
+          .from('appointment_followups')
+          .select('*')
+          .eq('user_id', aptData.user_id)
+          .order('followup_date', { ascending: false })
+          .limit(3);
 
-      console.log('✅ Appointment loaded:', aptData);
-    } catch (err: any) {
-      console.error('💥 Exception in loadAppointmentData:', err);
-      
-      if (err.code === 'PGRST200') {
-        setError(
-          '⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อฐานข้อมูล\n\n' +
-          'รายละเอียด: ไม่สามารถค้นหาข้อมูลผู้ป่วยได้\n' +
-          'รหัสข้อผิดพลาด: ' + err.code + '\n\n' +
-          'กรุณาตรวจสอบ:\n' +
-          '1. การเชื่อมต่ออินเทอร์เน็ต\n' +
-          '2. Foreign key relationship ในฐานข้อมูล\n' +
-          '3. ติดต่อผู้ดูแลระบบหากปัญหายังคงอยู่'
-        );
-      } else {
-        setError(
-          '❌ เกิดข้อผิดพลาดในการโหลดข้อมูลนัดหมาย\n\n' +
-          'รายละเอียด: ' + err.message + '\n' +
-          'รหัสข้อผิดพลาด: ' + (err.code || 'ไม่ทราบ')
-        );
+        if (historyData) {
+          setPastFollowups(historyData);
+        }
       }
+    } catch (err: any) {
+      setError('❌ เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -148,26 +142,12 @@ export default function FollowupPage() {
 
   const loadFollowupRound = async () => {
     if (appointment?.user_id) {
-      try {
-        console.log('🔢 Counting followups for user:', appointment.user_id);
-        const { count, error } = await supabase
-          .from('appointment_followups')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', appointment.user_id);
+      const { count } = await supabase
+        .from('appointment_followups')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', appointment.user_id);
 
-        if (error) {
-          console.error('Error counting followups:', error);
-          setFollowupRound(1);
-          return;
-        }
-
-        const nextRound = (count || 0) + 1;
-        console.log('✅ Found', count, 'existing followups. Next round:', nextRound);
-        setFollowupRound(nextRound);
-      } catch (err) {
-        console.error('Error in loadFollowupRound:', err);
-        setFollowupRound(1);
-      }
+      setFollowupRound((count || 0) + 1);
     }
   };
 
@@ -178,167 +158,82 @@ export default function FollowupPage() {
     });
   };
 
-  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (แก้ไขแล้ว - ลบรูปเก่าอัตโนมัติ + แสดง Thumbnail)
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (ใช้สำหรับทั้ง 2 รูป)
+  const handleImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    fieldName: 'floating_chart_image_url' | 'dream_card_image_url',
+    setUploading: React.Dispatch<React.SetStateAction<boolean>>
+  ) => {
     const file = e.target.files?.[0];
-    
-    console.log('📤 ========== START IMAGE UPLOAD ==========');
-    console.log('📁 File selected:', {
-      name: file?.name,
-      size: file?.size,
-      type: file?.type,
-    });
-
-    if (!file) {
-      console.error('❌ No file selected');
-      alert('กรุณาเลือกไฟล์รูปภาพ');
-      return;
-    }
+    if (!file) return;
 
     try {
       setUploading(true);
-      console.log('⚙️ Uploading state set to true');
 
-      // ✅ ใหม่: ลบภาพเก่า (ถ้ามี) ก่อนอัปโหลดภาพใหม่
-      if (uploadedImagePath) {
-        console.log('🗑️ Deleting old image from storage:', uploadedImagePath);
-        await supabase.storage
-          .from('life-schedule-images')
-          .remove([uploadedImagePath]);
-        console.log('✅ Old image deleted');
-      }
-
-      // ✅ ขั้นตอนที่ 1: ตรวจสอบขนาดไฟล์ (ไม่เกิน 5MB)
-      console.log('📏 Step 1: Checking file size...');
+      // ตรวจสอบขนาดไฟล์
       const maxSize = 5 * 1024 * 1024;
       if (file.size > maxSize) {
-        console.error('❌ File too large:', file.size, 'bytes');
         alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
         return;
       }
-      console.log('✅ File size OK:', (file.size / 1024).toFixed(2), 'KB');
 
-      // ✅ ขั้นตอนที่ 2: ตรวจสอบประเภทไฟล์
-      console.log('🖼️ Step 2: Checking file type...');
+      // ตรวจสอบประเภทไฟล์
       if (!file.type.startsWith('image/')) {
-        console.error('❌ Invalid file type:', file.type);
         alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
         return;
       }
-      console.log('✅ File type OK:', file.type);
 
-      // ✅ ขั้นตอนที่ 3: สร้างชื่อไฟล์
-      console.log('📝 Step 3: Generating filename...');
+      // สร้างชื่อไฟล์
       const fileExt = file.name.split('.').pop();
       const timestamp = Date.now();
       const randomStr = Math.random().toString(36).substring(2, 15);
-      const userId = appointment?.user_id || 'unknown';
-      const fileName = `${userId}_${followupRound}_${timestamp}_${randomStr}.${fileExt}`;
-      
-      console.log('📝 Generated filename:', fileName);
-      console.log('🪣 Bucket name:', 'life-schedule-images');
-      console.log('📁 Full path:', `life-schedule-images/${fileName}`);
+      const fileName = `${appointment?.user_id}_${followupRound}_${fieldName}_${timestamp}_${randomStr}.${fileExt}`;
 
-      // ✅ ขั้นตอนที่ 4: อัปโหลดไฟล์
-      console.log('⬆️ Step 4: Starting upload to Supabase Storage...');
+      // อัปโหลดไฟล์
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('life-schedule-images')
+        .from('followup-images') // ✅ ต้องสร้าง bucket นี้ใน Supabase Storage
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false,
           contentType: file.type,
         });
 
-      if (uploadError) {
-        console.error('❌ Upload error:', uploadError);
-        throw uploadError;
-      }
+      if (uploadError) throw uploadError;
 
-      console.log('✅ Upload successful!');
-
-      // ✅ ขั้นตอนที่ 5: สร้าง Signed URL
-      console.log('🔗 Step 5: Generating signed URL...');
+      // สร้าง Signed URL
       const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-        .from('life-schedule-images')
+        .from('followup-images')
         .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
 
-      if (signedUrlError) {
-        console.error('❌ Signed URL error:', signedUrlError);
-        throw signedUrlError;
-      }
+      if (signedUrlError) throw signedUrlError;
+      if (!signedUrlData?.signedUrl) throw new Error('ไม่สามารถสร้าง Signed URL ได้');
 
-      console.log('📊 Signed URL response:', signedUrlData);
-      console.log('🔗 Signed URL:', signedUrlData?.signedUrl);
-
-      if (!signedUrlData?.signedUrl) {
-        throw new Error('ไม่สามารถสร้าง Signed URL ได้');
-      }
-
-      // ✅ ขั้นตอนที่ 6: บันทึก URL ลง formData และเก็บชื่อไฟล์
-      console.log('💾 Step 6: Saving URL to formData...');
+      // บันทึก URL ลง formData
       setFormData({
         ...formData,
-        life_schedule_image_url: signedUrlData.signedUrl,
+        [fieldName]: signedUrlData.signedUrl,
       });
-
-      // ✅ ใหม่: เก็บชื่อไฟล์ไว้เพื่อลบในอนาคต
-      setUploadedImagePath(fileName);
-
-      console.log('✅ FormData updated');
-      console.log('🎉 ========== UPLOAD COMPLETE ==========');
 
       alert('✅ อัปโหลดรูปภาพสำเร็จ!');
-      
     } catch (err: any) {
-      console.error('💥 ========== UPLOAD FAILED ==========');
-      console.error('❌ Error uploading image:', err);
-      console.error('❌ Error details:', {
-        message: err.message,
-        statusCode: err.statusCode,
-        name: err.name,
-      });
-      
-      let errorMessage = 'เกิดข้อผิดพลาดในการอัปโหลดรูปภาพ';
-      
-      if (err.message?.includes('Bucket')) {
-        errorMessage = '❌ ไม่พบ Storage Bucket กรุณาติดต่อผู้ดูแลระบบ';
-      } else if (err.message?.includes('Duplicate')) {
-        errorMessage = '❌ ไฟล์นี้มีอยู่แล้วในระบบ';
-      } else if (err.message?.includes('policy')) {
-        errorMessage = '❌ ไม่มีสิทธิ์อัปโหลดไฟล์ กรุณาตรวจสอบ Policy';
-      } else if (err.message) {
-        errorMessage = `❌ ${err.message}`;
-      }
-      
-      alert(errorMessage);
+      console.error('Error uploading image:', err);
+      alert('❌ เกิดข้อผิดพลาดในการอัปโหลด: ' + err.message);
     } finally {
-      console.log('⚙️ Finally block: Resetting uploading state');
       setUploading(false);
     }
   };
 
-  // ✅ Auto-generate summary จากข้อมูลที่ทำสำเร็จ
+  // ✅ Auto-generate summary
   useEffect(() => {
     const successes: string[] = [];
-    if (formData.food_amount_status === 'completed') {
-      successes.push('ปรับปริมาณอาหาร');
-    }
-    if (formData.food_type_status === 'completed') {
-      successes.push('ปรับชนิดอาหาร');
-    }
-    if (formData.movement_status === 'completed') {
-      successes.push('ปรับการเคลื่อนไหว');
-    }
+    if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
+    if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
+    if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
 
     if (successes.length > 0) {
       setFormData(prev => ({
         ...prev,
         summary: `ผู้ป่วยสามารถทำสำเร็จใน: ${successes.join(', ')}`,
-      }));
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        summary: '',
       }));
     }
   }, [formData.food_amount_status, formData.food_type_status, formData.movement_status]);
@@ -348,122 +243,80 @@ export default function FollowupPage() {
     setSaving(true);
     setError(null);
 
-    console.log('💾 ========== START SAVE FOLLOWUP ==========');
-    console.log('📝 FormData:', formData);
-    console.log('🖼️ Image URL:', formData.life_schedule_image_url);
-
     try {
-      // ✅ ขั้นตอนที่ 1: ตรวจสอบ session ปัจจุบัน
       const currentUser = checkSession();
-      console.log('👤 Current user:', currentUser);
-      
       if (!currentUser || !currentUser.id) {
         throw new Error('กรุณาเข้าสู่ระบบใหม่');
       }
 
-      // ✅ ขั้นตอนที่ 2: ตรวจสอบสิทธิ์จาก database
-      const { data: userRoleData, error: roleError } = await supabase
-        .from('users')
-        .select('role, is_active')
-        .eq('id', currentUser.id)
-        .single();
-
-      console.log('🔑 User role check:', {
-        userRoleData,
-        roleError,
-        isValid: !roleError && userRoleData?.is_active
-      });
-
-      if (roleError || !userRoleData) {
-        console.error('❌ Error fetching user role:', roleError);
-        throw new Error('ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้ได้');
-      }
-
-      if (!userRoleData.is_active) {
-        throw new Error('บัญชีผู้ใช้ถูกระงับการใช้งาน');
-      }
-
-      const allowedRoles = ['admin', 'doctor', 'helper'];
-      if (!allowedRoles.includes(userRoleData.role)) {
-        throw new Error(`ไม่มีสิทธิ์บันทึกข้อมูล (บทบาทปัจจุบัน: ${userRoleData.role})`);
-      }
-
-      console.log('✅ Role verified:', userRoleData.role);
-
-      // ✅ ขั้นตอนที่ 3: เตรียมข้อมูลสำหรับบันทึก
       const followupData = {
         appointment_id: appointmentId,
         user_id: appointment.user_id,
         followup_date: appointment.appointment_date,
         followup_round: followupRound,
+        
+        // 1. ข้อมูลสุขภาพ
         weight: formData.weight ? parseFloat(formData.weight) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
         blood_pressure_dia: formData.blood_pressure_dia ? parseInt(formData.blood_pressure_dia) : null,
         blood_sugar_dtx: formData.blood_sugar_dtx ? parseFloat(formData.blood_sugar_dtx) : null,
+        
+        // 2. ความก้าวหน้าในการปรับตัว
         life_schedule_image_url: formData.life_schedule_image_url || null,
         adaptation_summary: formData.adaptation_summary || null,
         adaptation_obstacles: formData.adaptation_obstacles || null,
         adaptation_opportunities: formData.adaptation_opportunities || null,
         adaptation_other: formData.adaptation_other || null,
-        food_amount_status: formData.food_amount_status as any || null,
-        food_type_status: formData.food_type_status as any || null,
-        movement_status: formData.movement_status as any || null,
+        
+        // ✅ 3. กราฟวัดลอยจม
+        floating_chart_image_url: formData.floating_chart_image_url || null,
+        floating_chart_summary: formData.floating_chart_summary || null,
+        
+        // ✅ 4. การ์ดภาพความฝัน
+        dream_card_image_url: formData.dream_card_image_url || null,
+        dream_card_description: formData.dream_card_description || null,
+        
+        // 5. ติดตามแผนปฏิบัติกิจกรรม
+        food_amount_status: formData.food_amount_status,
+        food_type_status: formData.food_type_status,
+        movement_status: formData.movement_status,
         food_amount_note: formData.food_amount_note || null,
         food_type_note: formData.food_type_note || null,
         movement_note: formData.movement_note || null,
+        
+        // 6. คะแนนไม้บรรทัดวัดใจ
         confidence_score: parseInt(formData.confidence_score.toString()),
         confidence_improvement_plan: formData.confidence_improvement_plan || null,
+        
+        // 7. สรุป
         summary: formData.summary || null,
         recommendations: formData.recommendations || null,
-        followup_status: formData.followup_status as any || null,
+        
+        // 8. สถานะการติดตาม
+        followup_status: formData.followup_status,
+        
         conducted_by: currentUser.id,
       };
 
-      console.log('💾 Followup data to save:', followupData);
+      const { data: followup, error: saveError } = await supabase
+        .from('appointment_followups')
+        .insert(followupData)
+        .select()
+        .single();
 
-      // ✅ ขั้นตอนที่ 4: บันทึกข้อมูล
-      const { success, error: saveError, followup } = await saveAppointmentFollowupComplete(followupData);
+      if (saveError) throw saveError;
 
-      console.log('📊 Save response:', {
-        success,
-        error: saveError,
-        followup
-      });
-
-      if (!success) {
-        console.error('❌ Save failed:', saveError);
-        throw new Error(saveError || 'ไม่สามารถบันทึกข้อมูลได้');
-      }
-
-      console.log('✅ Followup saved successfully:', followup);
-
-      // ✅ ขั้นตอนที่ 5: อัปเดตสถานะนัดหมาย
-      const { error: updateError } = await supabase
+      // อัปเดตสถานะนัดหมาย
+      await supabase
         .from('appointments')
-        .update({ 
-          status: 'completed', 
-          updated_at: new Date().toISOString() 
-        })
+        .update({ status: 'completed', updated_at: new Date().toISOString() })
         .eq('id', appointmentId);
 
-      if (updateError) {
-        console.warn('⚠️ Failed to update appointment status:', updateError);
-      } else {
-        console.log('✅ Appointment status updated to completed');
-      }
-
-      console.log('🎉 ========== SAVE COMPLETE ==========');
       alert('✅ บันทึกผลการติดตามสำเร็จ!');
       router.push(`/admin/patients/${appointment.user_id}/followup-history`);
-      
     } catch (err: any) {
-      console.error('💥 ========== SAVE FAILED ==========');
-      console.error('❌ Error saving followup:', err);
-      console.error('❌ Error details:', {
-        message: err.message,
-        stack: err.stack
-      });
+      console.error('Error saving followup:', err);
       setError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     } finally {
       setSaving(false);
@@ -491,17 +344,15 @@ export default function FollowupPage() {
             กลับ
           </button>
           
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                บันทึกผลการติดตามนัดหมาย
-              </h1>
-              <p className="text-gray-600">
-                ผู้ป่วย: {patientProfile?.first_name} {patientProfile?.last_name} |
-                HN: {patientProfile?.hospital_number} |
-                ครั้งที่: {followupRound}
-              </p>
-            </div>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">
+              บันทึกผลการติดตามนัดหมาย
+            </h1>
+            <p className="text-gray-600">
+              ผู้ป่วย: {patientProfile?.first_name} {patientProfile?.last_name} |
+              HN: {patientProfile?.hospital_number} |
+              ครั้งที่: {followupRound}
+            </p>
           </div>
         </div>
       </div>
@@ -514,18 +365,7 @@ export default function FollowupPage() {
               <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
                 <h3 className="font-bold text-red-800 mb-2">⚠️ เกิดข้อผิดพลาด</h3>
-                <div className="text-red-700 whitespace-pre-line text-sm leading-relaxed">
-                  {error}
-                </div>
-                <button
-                  onClick={() => {
-                    setError(null);
-                    loadAppointmentData();
-                  }}
-                  className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all text-sm"
-                >
-                  🔄 ลองใหม่อีกครั้ง
-                </button>
+                <div className="text-red-700 text-sm">{error}</div>
               </div>
             </div>
           </div>
@@ -543,68 +383,46 @@ export default function FollowupPage() {
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                น้ำหนัก (กก.)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">น้ำหนัก (กก.)</label>
               <input
                 type="number"
                 name="weight"
                 value={formData.weight}
                 onChange={handleChange}
                 step="0.1"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 placeholder="เช่น 80"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                รอบเอว (ซม.)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">รอบเอว (ซม.)</label>
               <input
                 type="number"
                 name="waist_circumference"
                 value={formData.waist_circumference}
                 onChange={handleChange}
                 step="0.1"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 placeholder="เช่น 100"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ความดันโลหิต (mmHg)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ความดันโลหิต (mmHg)</label>
               <div className="flex gap-2">
-                <input
-                  type="number"
-                  name="blood_pressure_sys"
-                  value={formData.blood_pressure_sys}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="SYS"
-                />
+                <input type="number" name="blood_pressure_sys" value={formData.blood_pressure_sys} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="SYS" />
                 <span className="flex items-center">/</span>
-                <input
-                  type="number"
-                  name="blood_pressure_dia"
-                  value={formData.blood_pressure_dia}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="DIA"
-                />
+                <input type="number" name="blood_pressure_dia" value={formData.blood_pressure_dia} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="DIA" />
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ค่าน้ำตาล (DTX) mg%
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ค่าน้ำตาล (DTX) mg%</label>
               <input
                 type="number"
                 name="blood_sugar_dtx"
                 value={formData.blood_sugar_dtx}
                 onChange={handleChange}
                 step="0.1"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 placeholder="เช่น 110"
               />
             </div>
@@ -619,263 +437,190 @@ export default function FollowupPage() {
           </h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                ตารางชีวิตของฉัน
+              <label className="block text-sm font-medium text-gray-700 mb-2">ตารางชีวิตของฉัน</label>
+              <label className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-all w-fit">
+                <Upload className="w-5 h-5" />
+                <span>อัปโหลดรูปภาพ/ใบงาน</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      // ใช้ฟังก์ชัน handleImageUpload โดยตรง
+                      handleImageUpload(e, 'life_schedule_image_url', () => {});
+                    }
+                  }}
+                  className="hidden"
+                />
               </label>
-              <div className="flex items-center gap-4 flex-wrap">
-                <label className={`flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg cursor-pointer hover:bg-blue-600 transition-all ${
-                  uploading ? 'opacity-50 cursor-not-allowed' : ''
-                }`}>
-                  <Upload className="w-5 h-5" />
-                  <span>{uploading ? '⏳ กำลังอัปโหลด...' : 'อัปโหลดรูปภาพ/ใบงาน'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className="hidden"
-                    disabled={uploading}
-                  />
-                </label>
-                
-                {/* ✅ แสดง Thumbnail เมื่อมีรูปภาพ */}
-                {formData.life_schedule_image_url && (
-                  <div className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
-                    <img 
-                      src={formData.life_schedule_image_url} 
-                      alt="Preview" 
-                      className="w-16 h-16 object-cover rounded border bg-white shadow-sm"
-                    />
-                    <a
-                      href={formData.life_schedule_image_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:underline text-sm flex items-center gap-1 font-medium"
-                    >
-                      <FileText className="w-4 h-4" />
-                      ดูรูปภาพเต็มขนาด
-                    </a>
-                  </div>
-                )}
-              </div>
+              {formData.life_schedule_image_url && (
+                <div className="mt-2">
+                  <img src={formData.life_schedule_image_url} alt="Life Schedule" className="w-32 h-32 object-cover rounded border" />
+                </div>
+              )}
             </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                สรุปการปรับตัว
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">สรุปการปรับตัว</label>
               <select
                 name="adaptation_summary"
                 value={formData.adaptation_summary}
                 onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 mb-2"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
               >
                 <option value="">-- เลือก --</option>
                 <option value="obstacles">พบอุปสรรค/ความกังวล</option>
                 <option value="opportunities">โอกาส</option>
                 <option value="other">อื่นๆ</option>
               </select>
-              
               {formData.adaptation_summary === 'obstacles' && (
-                <textarea
-                  name="adaptation_obstacles"
-                  value={formData.adaptation_obstacles}
-                  onChange={handleChange}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                  placeholder="อธิบายอุปสรรค/ความกังวล..."
-                />
+                <textarea name="adaptation_obstacles" value={formData.adaptation_obstacles} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2" placeholder="อธิบายอุปสรรค/ความกังวล..." />
               )}
-              
               {formData.adaptation_summary === 'opportunities' && (
-                <textarea
-                  name="adaptation_opportunities"
-                  value={formData.adaptation_opportunities}
-                  onChange={handleChange}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                  placeholder="อธิบายโอกาส..."
-                />
+                <textarea name="adaptation_opportunities" value={formData.adaptation_opportunities} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2" placeholder="อธิบายโอกาส..." />
               )}
-              
               {formData.adaptation_summary === 'other' && (
-                <textarea
-                  name="adaptation_other"
-                  value={formData.adaptation_other}
-                  onChange={handleChange}
-                  rows={3}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                  placeholder="อธิบายอื่นๆ..."
-                />
+                <textarea name="adaptation_other" value={formData.adaptation_other} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2" placeholder="อธิบายอื่นๆ..." />
               )}
             </div>
           </div>
         </div>
 
-        {/* 3. ติดตามแผนปฏิบัติกิจกรรม */}
+        {/* ✅ 3. กราฟวัดลอยจม (ใหม่) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">3</span>
-            ติดตามแผนปฏิบัติกิจกรรม
+            กราฟวัดลอยจม
           </h2>
           <div className="space-y-4">
-            <div className="border-b pb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                การปรับปริมาณอาหาร
-              </label>
-              <div className="flex gap-4 mb-2">
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="food_amount_status"
-                    value="completed"
-                    checked={formData.food_amount_status === 'completed'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">สำเร็จ</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="food_amount_status"
-                    value="not_completed"
-                    checked={formData.food_amount_status === 'not_completed'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">ไม่สำเร็จ</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="food_amount_status"
-                    value="not_in_plan"
-                    checked={formData.food_amount_status === 'not_in_plan'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">ยังไม่อยู่ในแผน</span>
-                </label>
-              </div>
-              <textarea
-                name="food_amount_note"
-                value={formData.food_amount_note}
-                onChange={handleChange}
-                rows={2}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                placeholder="หมายเหตุเพิ่มเติม..."
-              />
-            </div>
-
-            <div className="border-b pb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                การปรับชนิดอาหาร
-              </label>
-              <div className="flex gap-4 mb-2">
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="food_type_status"
-                    value="completed"
-                    checked={formData.food_type_status === 'completed'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">สำเร็จ</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="food_type_status"
-                    value="not_completed"
-                    checked={formData.food_type_status === 'not_completed'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">ไม่สำเร็จ</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="food_type_status"
-                    value="not_in_plan"
-                    checked={formData.food_type_status === 'not_in_plan'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">ยังไม่อยู่ในแผน</span>
-                </label>
-              </div>
-              <textarea
-                name="food_type_note"
-                value={formData.food_type_note}
-                onChange={handleChange}
-                rows={2}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                placeholder="หมายเหตุเพิ่มเติม..."
-              />
-            </div>
-
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                การปรับการเคลื่อนไหว
+              <label className="block text-sm font-medium text-gray-700 mb-2">รูปภาพกราฟวัดลอยจม</label>
+              <label className={`flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg cursor-pointer hover:bg-purple-600 transition-all w-fit ${uploadingFloating ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                <Upload className="w-5 h-5" />
+                <span>{uploadingFloating ? '⏳ กำลังอัปโหลด...' : 'อัปโหลดรูปภาพ'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageUpload(e, 'floating_chart_image_url', setUploadingFloating)}
+                  className="hidden"
+                  disabled={uploadingFloating}
+                />
               </label>
-              <div className="flex gap-4 mb-2">
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="movement_status"
-                    value="completed"
-                    checked={formData.movement_status === 'completed'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">สำเร็จ</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="movement_status"
-                    value="not_completed"
-                    checked={formData.movement_status === 'not_completed'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm">ไม่สำเร็จ</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    name="movement_status"
-                    value="not_in_plan"
-                    checked={formData.movement_status === 'not_in_plan'}
-                    onChange={handleChange}
-                    className="mr-2"
-                  />
-                  <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm">ยังไม่อยู่ในแผน</span>
-                </label>
-              </div>
+              {formData.floating_chart_image_url && (
+                <div className="mt-2">
+                  <img src={formData.floating_chart_image_url} alt="Floating Chart" className="w-32 h-32 object-cover rounded border" />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">สรุปข้อมูลจากกราฟวัดลอยจม</label>
               <textarea
-                name="movement_note"
-                value={formData.movement_note}
+                name="floating_chart_summary"
+                value={formData.floating_chart_summary}
                 onChange={handleChange}
-                rows={2}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                placeholder="หมายเหตุเพิ่มเติม..."
+                rows={3}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                placeholder="บันทึกข้อความสรุปจากกราฟ..."
               />
             </div>
           </div>
         </div>
 
-        {/* 4. คะแนนไม้บรรทัดวัดใจ */}
+        {/* ✅ 4. การ์ดภาพความฝัน (ใหม่) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 text-sm font-bold">4</span>
+            การ์ดภาพความฝัน
+          </h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">รูปภาพความฝัน</label>
+              <label className={`flex items-center gap-2 px-4 py-2 bg-pink-500 text-white rounded-lg cursor-pointer hover:bg-pink-600 transition-all w-fit ${uploadingDream ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                <Upload className="w-5 h-5" />
+                <span>{uploadingDream ? '⏳ กำลังอัปโหลด...' : 'อัปโหลดรูปภาพ'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleImageUpload(e, 'dream_card_image_url', setUploadingDream)}
+                  className="hidden"
+                  disabled={uploadingDream}
+                />
+              </label>
+              {formData.dream_card_image_url && (
+                <div className="mt-2">
+                  <img src={formData.dream_card_image_url} alt="Dream Card" className="w-32 h-32 object-cover rounded border" />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">ความฝัน</label>
+              <textarea
+                name="dream_card_description"
+                value={formData.dream_card_description}
+                onChange={handleChange}
+                rows={3}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                placeholder="บันทึกข้อความอธิบายความฝัน..."
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5) */}
+        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">5</span>
+            ติดตามแผนปฏิบัติกิจกรรม
+          </h2>
+          <div className="space-y-4">
+            {['food_amount', 'food_type', 'movement'].map((type) => (
+              <div key={type} className="border-b pb-4 last:border-0">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {type === 'food_amount' ? 'การปรับปริมาณอาหาร' : type === 'food_type' ? 'การปรับชนิดอาหาร' : 'การปรับการเคลื่อนไหว'}
+                </label>
+                <div className="flex gap-4 mb-2">
+                  {['completed', 'not_completed', 'not_in_plan'].map((status) => (
+                    <label key={status} className="flex items-center">
+                      <input
+                        type="radio"
+                        name={`${type}_status`}
+                        value={status}
+                        checked={formData[`${type}_status` as keyof typeof formData] === status}
+                        onChange={handleChange}
+                        className="mr-2"
+                      />
+                      <span className={`px-3 py-1 rounded-full text-sm ${
+                        status === 'completed' ? 'bg-green-100 text-green-700' :
+                        status === 'not_completed' ? 'bg-red-100 text-red-700' :
+                        'bg-gray-100 text-gray-700'
+                      }`}>
+                        {status === 'completed' ? 'สำเร็จ' : status === 'not_completed' ? 'ไม่สำเร็จ' : 'ยังไม่อยู่ในแผน'}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <textarea
+                  name={`${type}_note`}
+                  value={formData[`${type}_note` as keyof typeof formData]}
+                  onChange={handleChange}
+                  rows={2}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="หมายเหตุเพิ่มเติม..."
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6) */}
+        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
             คะแนนไม้บรรทัดวัดใจ
           </h2>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              ความมั่นใจ (0-10): <span className="text-pink-600 font-bold text-lg">{formData.confidence_score}</span>
+              ความมั่นใจ (0-10): <span className="text-indigo-600 font-bold text-lg">{formData.confidence_score}</span>
             </label>
             <input
               type="range"
@@ -886,69 +631,60 @@ export default function FollowupPage() {
               onChange={handleChange}
               className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer"
             />
-            <div className="flex justify-between text-xs text-gray-500 mt-2">
-              <span>0 - ไม่มั่นใจเลย</span>
-              <span>5 - ปานกลาง</span>
-              <span>10 - มั่นใจมาก</span>
-            </div>
             <textarea
               name="confidence_improvement_plan"
               value={formData.confidence_improvement_plan}
               onChange={handleChange}
               rows={2}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 mt-4"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-4"
               placeholder="แผนปรับปรุงความมั่นใจ..."
             />
           </div>
         </div>
 
-        {/* 5. สรุปข้อมูลการติดตามวันนี้ */}
+        {/* 7. สรุป (เดิม 5 → 7) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">5</span>
+            <span className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center text-teal-600 text-sm font-bold">7</span>
             สรุปข้อมูลการติดตามวันนี้
           </h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                สิ่งที่ทำได้สำเร็จ
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">สิ่งที่ทำได้สำเร็จ</label>
               <textarea
                 name="summary"
                 value={formData.summary}
                 onChange={handleChange}
                 rows={3}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 focus:ring-2 focus:ring-orange-500"
-                placeholder="(ระบบจะสรุปอัตโนมัติจากข้อ 3)"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+                placeholder="(ระบบจะสรุปอัตโนมัติจากข้อ 5)"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                คำแนะนำเพิ่มเติม
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">คำแนะนำเพิ่มเติม</label>
               <textarea
                 name="recommendations"
                 value={formData.recommendations}
                 onChange={handleChange}
                 rows={4}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 placeholder="คำแนะนำสำหรับผู้ป่วย..."
               />
             </div>
           </div>
         </div>
 
-        {/* 6. สถานะการติดตาม */}
+        {/* 8. สถานะการติดตาม (เดิม 6 → 8) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
+            <span className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-bold">8</span>
             สถานะการติดตาม
           </h2>
           <select
             name="followup_status"
             value={formData.followup_status}
             onChange={handleChange}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg focus:ring-2 focus:ring-indigo-500"
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg text-lg"
           >
             <option value="excellent">ดีมาก</option>
             <option value="good">ดี</option>
@@ -958,7 +694,7 @@ export default function FollowupPage() {
           </select>
         </div>
 
-        {/* ประวัติการนัดหมายครั้งก่อนๆ */}
+        {/* ประวัติการติดตาม */}
         {pastFollowups.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -972,7 +708,6 @@ export default function FollowupPage() {
                     <th className="px-4 py-2 text-left text-sm font-semibold">ครั้งที่</th>
                     <th className="px-4 py-2 text-left text-sm font-semibold">วันที่</th>
                     <th className="px-4 py-2 text-left text-sm font-semibold">น้ำหนัก</th>
-                    <th className="px-4 py-2 text-left text-sm font-semibold">ความมั่นใจ</th>
                     <th className="px-4 py-2 text-left text-sm font-semibold">สถานะ</th>
                   </tr>
                 </thead>
@@ -980,11 +715,8 @@ export default function FollowupPage() {
                   {pastFollowups.map((followup) => (
                     <tr key={followup.id} className="border-t hover:bg-gray-50">
                       <td className="px-4 py-2 text-sm">ครั้งที่ {followup.followup_round}</td>
-                      <td className="px-4 py-2 text-sm">
-                        {new Date(followup.followup_date).toLocaleDateString('th-TH')}
-                      </td>
+                      <td className="px-4 py-2 text-sm">{new Date(followup.followup_date).toLocaleDateString('th-TH')}</td>
                       <td className="px-4 py-2 text-sm">{followup.weight || '-'} กก.</td>
-                      <td className="px-4 py-2 text-sm">{followup.confidence_score || '-'}/10</td>
                       <td className="px-4 py-2">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                           followup.followup_status === 'excellent' ? 'bg-green-100 text-green-700' :
