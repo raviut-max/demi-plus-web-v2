@@ -1,9 +1,9 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เปลี่ยนการตรวจสอบจาก completed_appointments → appointment_followups
-//    2. แยกสถานะ "มีการประเมิน" (screening) ออกจาก "มีการติดตาม" (followup)
-//    3. แสดงปุ่ม "มีการติดตามแล้ว" เฉพาะเมื่อมีบันทึกใน appointment_followups จริงๆ
+//    1. เมื่อคลิกปุ่มติดตาม (สีม่วง) และยังไม่มีการติดตาม → แสดง confirm dialog
+//    2. ถ้าตอบ Yes → ไปหน้าบันทึกผลการติดตามนัดหมาย (app/admin/appointments/followup/[id])
+//    3. ถ้าตอบ No → ไปหน้าประวัติการติดตาม (followup-history)
 
 'use client';
 
@@ -48,6 +48,7 @@ export default function PatientDetailPage() {
   const [hasScreening, setHasScreening] = useState(false);        // มีการประเมิน PAM/PROMs
   const [hasFollowup, setHasFollowup] = useState(false);          // มีการติดตามผลจริง
   const [followupCount, setFollowupCount] = useState(0);          // จำนวนครั้งที่ติดตาม
+  const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null); // ✅ ID นัดหมายล่าสุดที่ยังไม่ได้ followup
 
   useEffect(() => {
     const userData = checkSession();
@@ -86,7 +87,7 @@ export default function PatientDetailPage() {
       console.log('🔍 Checking patient status for:', pid);
       
       // 1. ✅ ตรวจสอบการประเมิน (Screening - PAM/PROMs)
-      const {  screeningData } = await supabase
+      const { data: screeningData } = await supabase
         .from('screenings')
         .select('id, pam_total_score')
         .eq('user_id', pid)
@@ -98,9 +99,9 @@ export default function PatientDetailPage() {
       setHasScreening(hasScreeningData);
 
       // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup - จาก appointment_followups)
-      const {  followupData } = await supabase
+      const { data: followupData } = await supabase
         .from('appointment_followups')
-        .select('id, followup_round')
+        .select('id, followup_round, appointment_id')
         .eq('user_id', pid)
         .order('followup_round', { ascending: false });
       
@@ -108,9 +109,62 @@ export default function PatientDetailPage() {
       console.log('📋 Has followup:', hasFollowupData, 'Count:', followupData?.length);
       setHasFollowup(hasFollowupData);
       setFollowupCount(followupData?.length || 0);
+
+      // 3. ✅ หา appointment ล่าสุดที่ยังไม่ได้ followup
+      // ดึง appointment ทั้งหมดของผู้ป่วยที่ status = 'completed'
+      const { data: appointmentsData } = await supabase
+        .from('appointments')
+        .select('id, appointment_date, status')
+        .eq('user_id', pid)
+        .eq('status', 'completed')
+        .order('appointment_date', { ascending: false })
+        .limit(1);
+
+      if (appointmentsData && appointmentsData.length > 0) {
+        const latestApt = appointmentsData[0];
+        
+        // ตรวจสอบว่า appointment นี้มี followup หรือยัง
+        const { data: existingFollowup } = await supabase
+          .from('appointment_followups')
+          .select('id')
+          .eq('appointment_id', latestApt.id)
+          .single();
+
+        if (!existingFollowup) {
+          // ยังไม่มี followup → เก็บ ID ไว้
+          setLatestAppointmentId(latestApt.id);
+          console.log('📅 Latest appointment without followup:', latestApt.id);
+        }
+      }
       
     } catch (error) {
       console.error('❌ Error checking patient status:', error);
+    }
+  };
+
+  // ✅ ฟังก์ชันจัดการคลิกปุ่มติดตาม (สีม่วง)
+  const handleFollowupClick = () => {
+    if (!hasFollowup && latestAppointmentId) {
+      // ยังไม่เคยติดตาม และมี appointment ที่ยังไม่ได้ followup
+      const confirmFollowup = confirm(
+        '📋 ผู้ป่วยคนนี้ยังไม่ได้ทำการติดตาม\n\n' +
+        'คุณต้องการบันทึกผลการติดตามนัดหมายตอนนี้เลยหรือไม่?\n\n' +
+        '• กด "ตกลง" → ไปหน้าบันทึกผลการติดตาม\n' +
+        '• กด "ยกเลิก" → ไปหน้าประวัติการติดตาม'
+      );
+
+      if (confirmFollowup) {
+        // ✅ ไปหน้าบันทึกผลการติดตามนัดหมาย
+        console.log('🔗 Navigating to followup form:', latestAppointmentId);
+        router.push(`/admin/appointments/followup/${latestAppointmentId}`);
+      } else {
+        // ✅ ไปหน้าประวัติการติดตาม
+        console.log('🔗 Navigating to followup history');
+        router.push(`/admin/patients/${patientId}/followup-history`);
+      }
+    } else {
+      // มีการติดตามแล้ว → ไปหน้าประวัติการติดตาม
+      router.push(`/admin/patients/${patientId}/followup-history`);
     }
   };
 
@@ -255,9 +309,9 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด (แก้ไขแล้ว) */}
           <div 
-            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
+            onClick={handleFollowupClick}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
@@ -313,7 +367,7 @@ export default function PatientDetailPage() {
           </button>
           
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
+            onClick={handleFollowupClick}
             className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
           >
             <Activity className="w-4 h-4" />
