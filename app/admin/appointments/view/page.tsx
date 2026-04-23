@@ -1,10 +1,11 @@
 // app/admin/appointments/view/page.tsx
 // ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มการ import AlertCircle ที่ขาดหาย
-//    2. แก้ไขการดึงข้อมูลแพทย์ให้แสดงผลถูกต้อง
-//    3. แก้ไข Modal ให้เปิดได้ทุกราย
-//    4. ปรับปรุง logic การแสดงปุ่มต่างๆ
+//    1. แสดงรายการนัดหมายทั้งหมด
+//    2. ระบบกรอง (วันที่, แพทย์, ผู้ป่วย, สถานะ)
+//    3. ปุ่มจัดการนัดหมาย (เสร็จสิ้น, ผิดนัด, ยกเลิก, บันทึกติดตาม)
+//    4. Modal ดูรายละเอียดนัดหมาย
+//    5. แสดงสถานะการติดตาม
 
 'use client';
 
@@ -68,7 +69,7 @@ export default function ViewAppointmentsPage() {
       console.log('📡 Loading appointments...');
       
       // ดึงข้อมูลนัดหมาย
-      const { data: aptData, error: aptError } = await supabase
+      const {  aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: true });
@@ -85,7 +86,7 @@ export default function ViewAppointmentsPage() {
         (aptData || []).map(async (apt: any) => {
           try {
             // ดึงข้อมูลผู้ป่วย
-            const { data: userData } = await supabase
+            const {  userData } = await supabase
               .from('profiles')
               .select('first_name, last_name, hospital_number')
               .eq('id', apt.user_id)
@@ -94,7 +95,7 @@ export default function ViewAppointmentsPage() {
             // ดึงข้อมูลแพทย์
             let doctorData = null;
             if (apt.doctor_id) {
-              const { data: docData } = await supabase
+              const {  docData } = await supabase
                 .from('doctors')
                 .select('user_id, full_name_th, specialization_th')
                 .eq('user_id', apt.doctor_id)
@@ -103,7 +104,7 @@ export default function ViewAppointmentsPage() {
             }
 
             // ✅ ตรวจสอบว่ามีการบันทึกติดตามแล้วหรือไม่
-            const { data: followupData } = await supabase
+            const {  followupData } = await supabase
               .from('appointment_followups')
               .select('id')
               .eq('appointment_id', apt.id)
@@ -146,11 +147,11 @@ export default function ViewAppointmentsPage() {
         staff.role === 'doctor' || staff.role === 'helper'
       );
 
-      console.log('👨‍⚕️ Doctors/Staff:', filteredStaff.length);
+      console.log('👨‍️ Doctors/Staff:', filteredStaff.length);
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
-      console.error('❌ Error loading data:', error);
+      console.error('❌ Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -549,7 +550,7 @@ export default function ViewAppointmentsPage() {
                   <tr key={apt.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4">
                       <button
-                        onClick={() => router.push(`/admin/patients/${apt.user_id}`)}
+                        onClick={() => router.push(`/admin/patients/${apt.user_id}?from=appointments`)}
                         className="text-left group"
                         title="ไปหน้ารายละเอียดผู้ป่วย"
                       >
