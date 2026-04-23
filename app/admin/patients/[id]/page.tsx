@@ -1,10 +1,9 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ป่วยครบถ้วนตามโครงสร้างตาราง profiles
-//    2. แปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
-//    3. แสดงผู้ติดต่อฉุกเฉิน 1 คน (ตามตาราง profiles)
-//    4. ไม่แสดงส่วนเป้าหมาย (Goals Section)
+//    1. เปลี่ยนการตรวจสอบจาก completed_appointments → appointment_followups
+//    2. แยกสถานะ "มีการประเมิน" (screening) ออกจาก "มีการติดตาม" (followup)
+//    3. แสดงปุ่ม "มีการติดตามแล้ว" เฉพาะเมื่อมีบันทึกใน appointment_followups จริงๆ
 
 'use client';
 
@@ -45,10 +44,10 @@ export default function PatientDetailPage() {
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   
-  // ✅ State สำหรับตรวจสอบการประเมิน
-  const [hasBaseline, setHasBaseline] = useState(false);
-  const [hasCompletedAppointment, setHasCompletedAppointment] = useState(false);
-  const [hasPamAssessment, setHasPamAssessment] = useState(false);
+  // ✅ State สำหรับตรวจสอบสถานะ (แยกชัดเจน)
+  const [hasScreening, setHasScreening] = useState(false);        // มีการประเมิน PAM/PROMs
+  const [hasFollowup, setHasFollowup] = useState(false);          // มีการติดตามผลจริง
+  const [followupCount, setFollowupCount] = useState(0);          // จำนวนครั้งที่ติดตาม
 
   useEffect(() => {
     const userData = checkSession();
@@ -71,8 +70,8 @@ export default function PatientDetailPage() {
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
       
-      // ✅ ตรวจสอบสถานะการประเมิน
-      await checkAssessmentStatus(patientId);
+      // ✅ ตรวจสอบสถานะการประเมินและการติดตาม
+      await checkPatientStatus(patientId);
     } catch (error) {
       console.error('Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
@@ -81,39 +80,37 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสถานะการประเมิน
-  const checkAssessmentStatus = async (pid: string) => {
+  // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย (แก้ไขแล้ว)
+  const checkPatientStatus = async (pid: string) => {
     try {
-      // ตรวจสอบ Baseline
-      const { data: baselineData } = await supabase
-        .from('baseline')
-        .select('id')
-        .eq('user_id', pid)
-        .single();
+      console.log('🔍 Checking patient status for:', pid);
       
-      setHasBaseline(!!baselineData);
-
-      // ตรวจสอบ Completed Appointments
-      const { data: appointmentsData } = await supabase
-        .from('appointments')
-        .select('id')
-        .eq('user_id', pid)
-        .eq('status', 'completed')
-        .limit(1);
-      
-      setHasCompletedAppointment((appointmentsData?.length || 0) > 0);
-
-      // ตรวจสอบ PAM Assessment (จาก screenings)
-      const { data: screeningData } = await supabase
+      // 1. ✅ ตรวจสอบการประเมิน (Screening - PAM/PROMs)
+      const {  screeningData } = await supabase
         .from('screenings')
         .select('id, pam_total_score')
         .eq('user_id', pid)
         .not('pam_total_score', 'is', null)
         .limit(1);
       
-      setHasPamAssessment((screeningData?.length || 0) > 0);
+      const hasScreeningData = (screeningData?.length || 0) > 0;
+      console.log('📋 Has screening:', hasScreeningData);
+      setHasScreening(hasScreeningData);
+
+      // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup - จาก appointment_followups)
+      const {  followupData } = await supabase
+        .from('appointment_followups')
+        .select('id, followup_round')
+        .eq('user_id', pid)
+        .order('followup_round', { ascending: false });
+      
+      const hasFollowupData = (followupData?.length || 0) > 0;
+      console.log('📋 Has followup:', hasFollowupData, 'Count:', followupData?.length);
+      setHasFollowup(hasFollowupData);
+      setFollowupCount(followupData?.length || 0);
+      
     } catch (error) {
-      console.error('Error checking assessment status:', error);
+      console.error('❌ Error checking patient status:', error);
     }
   };
 
@@ -194,11 +191,11 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
               
-              {/* ✅ แสดงปุ่ม "มีการติดตามแล้ว" ถ้ามีการประเมินแล้ว */}
-              {(hasBaseline || hasCompletedAppointment || hasPamAssessment) && (
+              {/* ✅ แสดงปุ่ม "มีการติดตามแล้ว" เฉพาะเมื่อมี followup จริงๆ */}
+              {hasFollowup && (
                 <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
                   <ClipboardCheck className="w-4 h-4" />
-                  <span>มีการติดตามแล้ว</span>
+                  <span>มีการติดตามแล้ว ({followupCount} ครั้ง)</span>
                 </div>
               )}
               
@@ -249,8 +246,8 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">การประเมินล่าสุด</p>
-                <p className="text-2xl font-bold">{hasPamAssessment ? 'มีการประเมิน' : 'ยังไม่ประเมิน'}</p>
-                <p className="text-xs opacity-75 mt-1">{hasPamAssessment ? '1 ครั้ง' : '0 ครั้ง'}</p>
+                <p className="text-2xl font-bold">{hasScreening ? 'มีการประเมิน' : 'ยังไม่ประเมิน'}</p>
+                <p className="text-xs opacity-75 mt-1">{hasScreening ? '1 ครั้ง' : '0 ครั้ง'}</p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <FileText className="w-6 h-6" />
@@ -266,8 +263,8 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">ติดตามล่าสุด</p>
-                <p className="text-2xl font-bold">21 เม.ย.</p>
-                <p className="text-xs opacity-75 mt-1">ดี</p>
+                <p className="text-2xl font-bold">{hasFollowup ? `${followupCount} ครั้ง` : 'ยังไม่ติดตาม'}</p>
+                <p className="text-xs opacity-75 mt-1">{hasFollowup ? 'มีข้อมูล' : 'ไม่มีข้อมูล'}</p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Activity className="w-6 h-6" />
