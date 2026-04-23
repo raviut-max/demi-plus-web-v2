@@ -1,9 +1,10 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มระบบตรวจสอบว่ามาจากไหน (patient list หรือ appointments view)
-//    2. ปุ่มกลับจะกลับไปตามที่มาอย่างถูกต้อง
-//    3. ใช้ URL query parameter '?from=appointments' หรือ '?from=patients'
+//    1. ดึงข้อมูลนัดหมายครั้งถัดไปจากฐานข้อมูล (ไม่ใช่ค่าคงที่)
+//    2. แสดง "ไม่มีนัดหมาย" เมื่อผู้ป่วยยังไม่มีนัดหมาย
+//    3. เพิ่ม confirm dialog เมื่อคลิกปุ่มนัดหมายแต่ยังไม่มีนัดหมาย
+//    4. ตรวจสอบการกลับหน้าให้ถูกต้องตามที่มา
 
 'use client';
 
@@ -35,28 +36,34 @@ const THAI_MONTHS = [
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
 
+// ✅ Interface สำหรับนัดหมายครั้งถัดไป
+interface NextAppointment {
+  id: string;
+  appointment_date: string;
+  appointment_type: string;
+  status: string;
+}
+
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams(); // ✅ ดึง query parameters
+  const searchParams = useSearchParams();
   const patientId = params.id as string;
   
   // ✅ ตรวจสอบว่ามาจากไหน
-  const fromPage = searchParams.get('from') || 'patients'; // ค่าเริ่มต้น: 'patients'
+  const fromPage = searchParams.get('from') || 'patients';
   
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   
-  // ✅ State สำหรับตรวจสอบสถานะ (แยกชัดเจน)
-  const [hasScreening, setHasScreening] = useState(false);        // มีการประเมิน PAM/PROMs
-  const [hasFollowup, setHasFollowup] = useState(false);          // มีการติดตามผลจริง
-  const [followupCount, setFollowupCount] = useState(0);          // จำนวนครั้งที่ติดตาม
-
-  useEffect(() => {
-    console.log('🔍 [DEBUG] Patient Detail - from:', fromPage);
-    console.log('🔍 [DEBUG] Patient ID:', patientId);
-  }, [fromPage, patientId]);
+  // ✅ State สำหรับนัดหมายครั้งถัดไป
+  const [nextAppointment, setNextAppointment] = useState<NextAppointment | null>(null);
+  
+  // ✅ State สำหรับตรวจสอบสถานะ
+  const [hasScreening, setHasScreening] = useState(false);
+  const [hasFollowup, setHasFollowup] = useState(false);
+  const [followupCount, setFollowupCount] = useState(0);
 
   useEffect(() => {
     const userData = checkSession();
@@ -69,61 +76,119 @@ export default function PatientDetailPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadData();
   }, [router]);
 
   const loadData = async () => {
     try {
+      console.log('🔍 Loading patient detail:', patientId);
+      
+      // โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
       
-      // ✅ ตรวจสอบสถานะการประเมินและการติดตาม
+      // ✅ โหลดนัดหมายครั้งถัดไป
+      await loadNextAppointment(patientId);
+      
+      // ตรวจสอบสถานะการประเมินและการติดตาม
       await checkPatientStatus(patientId);
     } catch (error) {
-      console.error('Error loading ', error);
+      console.error('Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
+  // ✅ ฟังก์ชันดึงนัดหมายครั้งถัดไป
+  const loadNextAppointment = async (pid: string) => {
+    try {
+      console.log('📅 Fetching next appointment for:', pid);
+      
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('id, appointment_date, appointment_type, status')
+        .eq('user_id', pid)
+        .eq('status', 'scheduled')
+        .gte('appointment_date', new Date().toISOString())
+        .order('appointment_date', { ascending: true })
+        .limit(1)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Error fetching next appointment:', error);
+      }
+
+      console.log('📋 Next appointment:', data);
+      setNextAppointment(data || null);
+    } catch (err) {
+      console.error('Error in loadNextAppointment:', err);
+      setNextAppointment(null);
+    }
+  };
+
   // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย
   const checkPatientStatus = async (pid: string) => {
     try {
-      console.log('🔍 Checking patient status for:', pid);
-      
-      // 1. ✅ ตรวจสอบการประเมิน (Screening - PAM/PROMs)
-      const {  screeningData } = await supabase
+      // ตรวจสอบการประเมิน (Screening)
+      const { data: screeningData } = await supabase
         .from('screenings')
         .select('id, pam_total_score')
         .eq('user_id', pid)
         .not('pam_total_score', 'is', null)
         .limit(1);
       
-      const hasScreeningData = (screeningData?.length || 0) > 0;
-      console.log('📋 Has screening:', hasScreeningData);
-      setHasScreening(hasScreeningData);
+      setHasScreening((screeningData?.length || 0) > 0);
 
-      // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup - จาก appointment_followups)
-      const {  followupData } = await supabase
+      // ตรวจสอบการติดตามผล (Followup)
+      const { data: followupData } = await supabase
         .from('appointment_followups')
         .select('id, followup_round')
         .eq('user_id', pid)
         .order('followup_round', { ascending: false });
       
-      const hasFollowupData = (followupData?.length || 0) > 0;
-      console.log('📋 Has followup:', hasFollowupData, 'Count:', followupData?.length);
-      setHasFollowup(hasFollowupData);
+      setHasFollowup((followupData?.length || 0) > 0);
       setFollowupCount(followupData?.length || 0);
-      
     } catch (error) {
-      console.error('❌ Error checking patient status:', error);
+      console.error('Error checking patient status:', error);
     }
   };
 
-  // ✅ ฟังก์ชันแปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
+  // ✅ ฟังก์ชันจัดการคลิกปุ่มนัดหมาย
+  const handleAppointmentClick = () => {
+    if (!nextAppointment) {
+      // ✅ ไม่มีนัดหมาย → แสดงยืนยันก่อน
+      const confirmCreate = confirm(
+        '📋 ผู้ป่วยคนนี้ยังไม่มีนัดหมายในระบบ\n\n' +
+        'คุณต้องการสร้างนัดหมายใหม่ตอนนี้เลยหรือไม่?\n\n' +
+        '• กด "ตกลง" → ไปหน้าสร้างนัดหมายใหม่\n' +
+        '• กด "ยกเลิก" → ไปหน้าประวัตินัดหมาย'
+      );
+      
+      if (confirmCreate) {
+        // ✅ ไปหน้าสร้างนัดหมายใหม่ พร้อมระบุผู้ป่วย
+        router.push(`/admin/appointments/new?patient_id=${patientId}`);
+      } else {
+        // ✅ ไปหน้าประวัตินัดหมาย
+        router.push(`/admin/patients/${patientId}/appointments`);
+      }
+    } else {
+      // ✅ มีนัดหมายแล้ว → ไปหน้าประวัตินัดหมาย
+      router.push(`/admin/patients/${patientId}/appointments`);
+    }
+  };
+
+  // ✅ ฟังก์ชันจัดการปุ่มกลับ
+  const handleGoBack = () => {
+    if (fromPage === 'appointments') {
+      router.push('/admin/appointments/view');
+    } else {
+      router.push('/admin/patients');
+    }
+  };
+
+  // ✅ ฟังก์ชันแปลงวันที่ ค.ศ. → พ.ศ.
   const formatDateTH = (dateString: string | null) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -133,7 +198,26 @@ export default function PatientDetailPage() {
     return `${day} ${month} ${year}`;
   };
 
-  // ✅ ฟังก์ชันคำนวณอายุจากวันเกิด
+  // ✅ ฟังก์ชันแปลงวันที่สำหรับแสดงสั้นๆ (เช่น "28 เม.ย.")
+  const formatShortDate = (dateString: string | null) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = THAI_MONTHS[date.getMonth()].substring(0, 3);
+    return `${day} ${month}`;
+  };
+
+  // ✅ ฟังก์ชันแปลงเวลา (เช่น "17:26")
+  const formatTime = (dateString: string | null) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  // ✅ ฟังก์ชันคำนวณอายุ
   const calculateAge = (birthDate: string | null) => {
     if (!birthDate) return '-';
     const today = new Date();
@@ -151,19 +235,6 @@ export default function PatientDetailPage() {
     if (!weight || !height || height === 0) return '-';
     const heightInM = height / 100;
     return (weight / (heightInM * heightInM)).toFixed(1);
-  };
-
-  // ✅ ฟังก์ชันจัดการปุ่มกลับ - กลับไปตามที่มา
-  const handleGoBack = () => {
-    console.log('🔙 [DEBUG] Going back, from:', fromPage);
-    
-    if (fromPage === 'appointments') {
-      // ✅ กลับไปหน้าดูนัดหมาย
-      router.push('/admin/appointments/view');
-    } else {
-      // ✅ กลับไปหน้ารายการผู้ป่วย
-      router.push('/admin/patients');
-    }
   };
 
   const handleLogout = () => {
@@ -184,7 +255,7 @@ export default function PatientDetailPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
+          {/* ✅ ปุ่มกลับ */}
           <button
             onClick={handleGoBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
@@ -244,16 +315,21 @@ export default function PatientDetailPage() {
         */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
+          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป (แก้ไขแล้ว) */}
           <div 
-            onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
+            onClick={handleAppointmentClick}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">นัดหมายครั้งถัดไป</p>
-                <p className="text-2xl font-bold">28 เม.ย.</p>
-                <p className="text-xs opacity-75 mt-1">17:26</p>
+                {/* ✅ แสดงวันที่/เวลาจากฐานข้อมูล หรือ "ไม่มีนัดหมาย" */}
+                <p className="text-2xl font-bold">
+                  {nextAppointment ? formatShortDate(nextAppointment.appointment_date) : 'ไม่มี'}
+                </p>
+                <p className="text-xs opacity-75 mt-1">
+                  {nextAppointment ? formatTime(nextAppointment.appointment_date) : 'นัดหมาย'}
+                </p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Calendar className="w-6 h-6" />
