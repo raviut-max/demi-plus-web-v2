@@ -1,7 +1,14 @@
+// app/admin/appointments/new/page.tsx
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. ตรวจสอบ query parameter 'returnUrl' เพื่อกลับหน้าถูกต้อง
+//    2. หลังสร้างนัดหมายเสร็จ → กลับไปตามที่มา (patient detail หรือ appointments view)
+//    3. เพิ่ม debug log ครบถ้วน
+
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
 import { ArrowLeft, LogOut, Save, Calendar, Clock, User, Stethoscope } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
@@ -13,11 +20,21 @@ const supabase = createClient(
 
 export default function NewAppointmentPage() {
   const router = useRouter();
+  const searchParams = useSearchParams(); // ✅ ดึง query parameters
+  
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // ✅ ดึง returnUrl จาก query parameter
+  const returnUrl = searchParams.get('returnUrl');
+  const patientIdFromQuery = searchParams.get('patient_id');
+  
+  console.log('🔍 [DEBUG] New Appointment Page');
+  console.log('🔗 returnUrl:', returnUrl);
+  console.log('👤 patient_id from query:', patientIdFromQuery);
 
   // ตั้งค่าเริ่มต้นเป็นวันพรุ่งนี้ 08:00
   const tomorrow = new Date();
@@ -25,7 +42,7 @@ export default function NewAppointmentPage() {
   tomorrow.setHours(8, 0, 0, 0);
 
   const [formData, setFormData] = useState({
-    user_id: '',
+    user_id: patientIdFromQuery || '', // ✅ ถ้ามี patient_id จาก query ให้ตั้งเป็นค่าเริ่มต้น
     doctor_id: '',
     appointment_type: 'followup',
     appointment_date: tomorrow.toISOString().slice(0, 16),
@@ -37,7 +54,6 @@ export default function NewAppointmentPage() {
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -57,7 +73,7 @@ export default function NewAppointmentPage() {
     try {
       const [patientsData, allStaff] = await Promise.all([
         getPatientList(),
-        getStaffList() // ✅ ดึงเจ้าหน้าที่ทั้งหมด (ไม่ระบุ role)
+        getStaffList()
       ]);
 
       // ✅ กรองเอาเฉพาะ doctor และ helper (ไม่เอา admin)
@@ -68,7 +84,7 @@ export default function NewAppointmentPage() {
       setPatients(patientsData);
       setStaffList(filteredStaff);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -83,6 +99,10 @@ export default function NewAppointmentPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    
+    console.log('💾 [DEBUG] Submitting appointment...');
+    console.log('📝 FormData:', formData);
+    console.log('🔗 returnUrl:', returnUrl);
 
     try {
       const { error } = await supabase
@@ -102,8 +122,17 @@ export default function NewAppointmentPage() {
 
       if (error) throw error;
 
+      console.log('✅ Appointment created successfully!');
       alert('สร้างนัดหมายสำเร็จ!');
-      router.push('/admin/appointments/view');
+      
+      // ✅ กลับไปตามที่มา
+      if (returnUrl) {
+        console.log('🔙 Redirecting to returnUrl:', returnUrl);
+        router.push(decodeURIComponent(returnUrl));
+      } else {
+        console.log('🔙 Redirecting to appointments view');
+        router.push('/admin/appointments/view');
+      }
     } catch (error) {
       console.error('Error creating appointment:', error);
       alert('เกิดข้อผิดพลาด: ' + (error as any).message);
@@ -114,32 +143,33 @@ export default function NewAppointmentPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-4xl mx-auto px-4 py-4">
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.back()}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ
+          </button>
+          
           <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push('/admin/appointments/view')}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                กลับ
-              </button>
-              <h1 className="text-2xl font-bold text-gray-800">สร้างนัดหมายใหม่</h1>
-              <p className="text-sm text-gray-600">กำหนดนัดหมายผู้ป่วย</p>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                สร้างนัดหมายใหม่
+              </h1>
+              <p className="text-gray-600">กำหนดนัดหมายผู้ป่วย</p>
             </div>
+            
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -154,6 +184,7 @@ export default function NewAppointmentPage() {
       {/* Form */}
       <div className="max-w-4xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
+          
           {/* ผู้ป่วย */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -294,7 +325,7 @@ export default function NewAppointmentPage() {
             </button>
             <button
               type="button"
-              onClick={() => router.push('/admin/appointments/view')}
+              onClick={() => router.back()}
               className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600"
             >
               ยกเลิก
