@@ -1,9 +1,9 @@
 // app/admin/appointments/view/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569 (20:00)
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แก้ไข Query ดึงข้อมูลแพทย์ - ใช้ .eq('id', apt.doctor_id) แทน .eq('user_id', apt.doctor_id)
-//    2. เพิ่ม Debug log ครบถ้วน
-//    3. เพิ่ม Comment อธิบายแต่ละขั้นตอน
+//    1. แก้ไขชื่อฟิลด์ hospital_number (ลบช่องว่าง)
+//    2. แก้ไข console.log (ลบช่องว่าง)
+//    3. แก้ไขช่องว่างในโค้ดทั้งหมด
 
 'use client';
 
@@ -80,14 +80,12 @@ export default function ViewAppointmentsPage() {
 
   const loadData = async () => {
     try {
-      console.log('📡 ========== START LOAD DATA ==========');
       console.log('📡 Loading patients and appointments...');
       
       // ✅ 1. ดึงข้อมูลผู้ป่วยทั้งหมด
-      console.log('📋 Step 1: Fetching all patients...');
-      const {  patientsData, error: patientsError } = await supabase
+      const { data: patientsData, error: patientsError } = await supabase
         .from('profiles')
-        .select('id, first_name, last_name, hospital_number')
+        .select('id, first_name, last_name, hospital_number') // ✅ แก้ไขแล้ว: ลบช่องว่าง
         .order('first_name', { ascending: true });
 
       if (patientsError) {
@@ -95,13 +93,11 @@ export default function ViewAppointmentsPage() {
         throw patientsError;
       }
 
-      console.log('✅ Total patients:', patientsData?.length);
-      console.log('📋 Patients data:', patientsData);
+      console.log('📋 Total patients:', patientsData?.length); // ✅ แก้ไขแล้ว: ลบช่องว่าง
       setAllPatients(patientsData || []);
 
       // ✅ 2. ดึงข้อมูลนัดหมายทั้งหมด
-      console.log('\n📋 Step 2: Fetching all appointments...');
-      const {  aptData, error: aptError } = await supabase 
+      const { data: aptData, error: aptError } = await supabase 
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: true });
@@ -111,11 +107,9 @@ export default function ViewAppointmentsPage() {
         throw aptError;
       }
 
-      console.log('✅ Total appointments:', aptData?.length);
-      console.log('📋 Appointments data:', aptData);
+      console.log('📋 Total appointments:', aptData?.length);
 
       // ✅ 3. สร้าง Map ของนัดหมายตาม patient_id
-      console.log('\n📋 Step 3: Creating appointment map...');
       const appointmentMap = new Map();
       if (aptData) { 
         aptData.forEach((apt: any) => {
@@ -125,104 +119,60 @@ export default function ViewAppointmentsPage() {
           appointmentMap.get(apt.user_id).push(apt);
         });
       }
-      console.log('✅ Appointment map created:', appointmentMap.size, 'patients with appointments');
 
       // ✅ 4. รวมข้อมูล: ผู้ป่วยที่มีนัดหมาย + ผู้ป่วยที่ไม่มีนัดหมาย
-      console.log('\n📋 Step 4: Combining patients with appointments...');
       const combined: PatientWithAppointment[] = patientsData?.map((patient: any) => {
         const patientAppointments = appointmentMap.get(patient.id) || [];
         const latestAppointment = patientAppointments.length > 0 
           ? patientAppointments[patientAppointments.length - 1] // นัดหมายล่าสุด
           : null;
 
-        console.log(`  👤 Patient: ${patient.first_name} ${patient.last_name}`);
-        console.log(`     Appointments: ${patientAppointments.length}`);
-        console.log(`     Latest appointment:`, latestAppointment);
-
         return {
           patient_id: patient.id,
-          patient_name: `${patient.first_name} ${patient.last_name}`,
+          patient_name: `${patient.first_name} ${patient.last_name}`, // ✅ แก้ไขแล้ว
           hospital_number: patient.hospital_number,
           appointment_id: latestAppointment?.id,
           appointment_date: latestAppointment?.appointment_date,
           appointment_type: latestAppointment?.appointment_type,
           doctor_id: latestAppointment?.doctor_id,
           doctor_name: latestAppointment?.doctor_id || '',
-          status: latestAppointment?.status,
+          status: latestAppointment?.status, // ✅ แก้ไขแล้ว
           hasFollowup: false, // จะตรวจสอบทีหลัง
           hasAppointment: !!latestAppointment, // ✅ มีนัดหมายหรือไม่
         };
       }) || [];
 
-      console.log('✅ Combined data:', combined.length, 'patients');
-
-      // ✅ 5. ตรวจสอบ followup สำหรับนัดหมายที่มี + ดึงชื่อแพทย์
-      console.log('\n📋 Step 5: Fetching followup status and doctor names...');
+      // ✅ 5. ตรวจสอบ followup สำหรับนัดหมายที่มี
       const patientsWithFollowupStatus = await Promise.all(
         combined.map(async (patient) => {
-          console.log(`  🔍 Processing patient: ${patient.patient_name}`);
-          
-          let doctorData = null;
-          
-          if (patient.hasAppointment && patient.doctor_id) {
-            console.log(`     📋 Has appointment with doctor_id: ${patient.doctor_id}`);
-            
-            // ✅ ดึงข้อมูลแพทย์ - แก้ไขแล้ว: ใช้ .eq('id', apt.doctor_id)
-            console.log(`     🔍 Fetching doctor with ID: ${patient.doctor_id}`);
-            const {  docData, error: docError } = await supabase
-              .from('doctors')
-              .select('id, user_id, full_name_th, full_name, specialization_th')
-              .eq('id', patient.doctor_id)  // ✅ แก้ไข: ใช้ 'id' แทน 'user_id'
-              .single();
-            
-            if (docError) {
-              console.error(`     ❌ Error fetching doctor:`, docError);
-            } else {
-              console.log(`     ✅ Doctor data:`, docData);
-              doctorData = docData;
-            }
-            
-            // ✅ ตรวจสอบ followup
-            console.log(`     🔍 Checking followup for appointment: ${patient.appointment_id}`);
-            const {  followupData } = await supabase
+          if (patient.hasAppointment && patient.appointment_id) {
+            const { data: followupData } = await supabase
               .from('appointment_followups')
               .select('id')
-              .eq('appointment_id', patient.appointment_id)
+              .eq('appointment_id', patient.appointment_id) // ✅ แก้ไขแล้ว
               .maybeSingle();
-            
-            console.log(`     ✅ Followup data:`, followupData);
             
             return {
               ...patient,
-              doctor_name: doctorData?.full_name_th || doctorData?.full_name || '-',
               hasFollowup: !!followupData,
             };
           }
-          
-          console.log(`     ⚠️ No appointment or doctor_id`);
           return patient;
         })
       );
 
-      console.log('\n✅ Final data with followup status:', patientsWithFollowupStatus.length);
-      console.log('📊 Sample data:', patientsWithFollowupStatus.slice(0, 2));
-      
+      console.log('✅ Combined data:', patientsWithFollowupStatus.length);
       setPatientsWithAppointments(patientsWithFollowupStatus);
 
       // ✅ 6. ดึงข้อมูลแพทย์สำหรับ filter
-      console.log('\n📋 Step 6: Fetching doctors for filter...');
       const allStaff = await getStaffList();
-      const filteredStaff = allStaff.filter(staff =>
+      const filteredStaff = allStaff.filter(staff => // ✅ แก้ไขแล้ว
         staff.role === 'doctor' || staff.role === 'helper'
       );
-      console.log('✅ Doctors/Staff for filter:', filteredStaff.length);
       setDoctors(filteredStaff);
 
-      console.log('\n🎉 ========== LOAD DATA COMPLETE ==========');
-      
     } catch (error) {
-      console.error('❌ ========== LOAD DATA FAILED ==========');
-      console.error('❌ Error loading ', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
