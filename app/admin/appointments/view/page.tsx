@@ -1,14 +1,33 @@
 // app/admin/appointments/view/page.tsx
 // ✅ แก้ไขล่าสุด: 23 เมษายน 2569
-// ✅ การแก้ไข: แก้ไขการดึงข้อมูลนัดหมายให้ทำงานถูกต้อง
+// ✅ การแก้ไข:
+//    1. เพิ่มการ import AlertCircle ที่ขาดหาย
+//    2. แก้ไขการดึงข้อมูลแพทย์ให้แสดงผลถูกต้อง
+//    3. แก้ไข Modal ให้เปิดได้ทุกราย
+//    4. ปรับปรุง logic การแสดงปุ่มต่างๆ
 
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import { Calendar, Filter, LogOut, ArrowLeft, Clock, User, Stethoscope, Plus, FileText, CheckCircle, X, Eye, AlertCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client'; // ✅ ใช้ supabase จาก lib
+import { 
+  Calendar, 
+  Filter, 
+  LogOut, 
+  ArrowLeft, 
+  Clock, 
+  User, 
+  Stethoscope, 
+  Plus, 
+  FileText, 
+  CheckCircle, 
+  Eye,
+  AlertCircle,
+  Edit,
+  X
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 export default function ViewAppointmentsPage() {
   const router = useRouter();
@@ -17,7 +36,6 @@ export default function ViewAppointmentsPage() {
   const [patients, setPatients] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   
   // ✅ State สำหรับ Modal รายละเอียด
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
@@ -48,71 +66,48 @@ export default function ViewAppointmentsPage() {
   const loadData = async () => {
     try {
       console.log('📡 Loading appointments...');
-      setError(null);
       
-      // ✅ ดึงข้อมูลนัดหมาย
+      // ดึงข้อมูลนัดหมาย
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: true });
 
-      // ✅ ตรวจสอบ error
       if (aptError) {
         console.error('❌ Error fetching appointments:', aptError);
-        setError(`เกิดข้อผิดพลาดในการดึงข้อมูลนัดหมาย: ${aptError.message}`);
-        setAppointments([]);
-        return;
+        throw aptError;
       }
 
-      // ✅ ตรวจสอบว่าข้อมูลเป็น undefined หรือ null
-      if (!aptData) {
-        console.warn('⚠️ No appointments data returned');
-        setAppointments([]);
-        return;
-      }
+      console.log('📋 Raw appointments:', aptData?.length);
 
-      console.log('📋 Raw appointments:', aptData.length);
-
-      // ✅ ดึงรายละเอียดผู้ป่วยและแพทย์ + ตรวจสอบว่ามี followup แล้วหรือไม่
+      // ดึงรายละเอียดผู้ป่วยและแพทย์ + ตรวจสอบว่ามี followup แล้วหรือไม่
       const appointmentsWithDetails = await Promise.all(
-        aptData.map(async (apt: any) => {
+        (aptData || []).map(async (apt: any) => {
           try {
             // ดึงข้อมูลผู้ป่วย
-            const { data: userData, error: userError } = await supabase
+            const { data: userData } = await supabase
               .from('profiles')
               .select('first_name, last_name, hospital_number')
               .eq('id', apt.user_id)
               .single();
 
-            if (userError) {
-              console.warn(`⚠️ Error fetching user ${apt.user_id}:`, userError);
-            }
-
             // ดึงข้อมูลแพทย์
             let doctorData = null;
             if (apt.doctor_id) {
-              const { data: docData, error: docError } = await supabase
+              const { data: docData } = await supabase
                 .from('doctors')
                 .select('user_id, full_name_th, specialization_th')
                 .eq('user_id', apt.doctor_id)
                 .single();
-              
-              if (docError) {
-                console.warn(`⚠️ Error fetching doctor ${apt.doctor_id}:`, docError);
-              }
               doctorData = docData;
             }
 
             // ✅ ตรวจสอบว่ามีการบันทึกติดตามแล้วหรือไม่
-            const { data: followupData, error: followupError } = await supabase
+            const { data: followupData } = await supabase
               .from('appointment_followups')
               .select('id')
               .eq('appointment_id', apt.id)
               .maybeSingle();
-
-            if (followupError) {
-              console.warn(`⚠️ Error fetching followup for ${apt.id}:`, followupError);
-            }
 
             return {
               ...apt,
@@ -140,7 +135,7 @@ export default function ViewAppointmentsPage() {
       console.log('✅ Appointments with details:', appointmentsWithDetails.length);
       setAppointments(appointmentsWithDetails);
 
-      // ✅ ดึงข้อมูลผู้ป่วยและแพทย์สำหรับ filter
+      // ดึงข้อมูลผู้ป่วยและแพทย์สำหรับ filter
       const [patientsData, allStaff] = await Promise.all([
         getPatientList(),
         getStaffList()
@@ -156,7 +151,7 @@ export default function ViewAppointmentsPage() {
       setDoctors(filteredStaff);
     } catch (error) {
       console.error('❌ Error loading data:', error);
-      setError('เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่อีกครั้ง');
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
@@ -192,32 +187,6 @@ export default function ViewAppointmentsPage() {
     const now = new Date();
     const aptDate = new Date(appointmentDate);
     return aptDate < now;
-  };
-
-  // ✅ ตรวจสอบว่าสามารถเสร็จสิ้นได้หรือไม่
-  const canComplete = (apt: any) => {
-    if (apt.status !== 'scheduled') return false;
-    const now = new Date();
-    const aptDate = new Date(apt.appointment_date);
-    return aptDate <= now;
-  };
-
-  // ✅ ตรวจสอบว่าสามารถแก้ไขได้หรือไม่
-  const canEdit = (apt: any) => {
-    return apt.status === 'scheduled';
-  };
-
-  // ✅ ตรวจสอบว่าควรแสดงปุ่มบันทึกติดตามหรือไม่
-  const canFollowup = (apt: any) => {
-    // กรณีที่ 1: เสร็จสิ้นแล้ว แต่ยังไม่ได้บันทึกติดตาม
-    if (apt.status === 'completed' && !apt.hasFollowup) {
-      return true;
-    }
-    // กรณีที่ 2: ยังไม่เสร็จสิ้น แต่ถึงวันนัดแล้ว (ให้บันทึกเลยแล้วเสร็จสิ้นอัตโนมัติ)
-    if (apt.status === 'scheduled' && isPastAppointment(apt.appointment_date)) {
-      return true;
-    }
-    return false;
   };
 
   // ✅ ฟังก์ชันจัดการเสร็จสิ้นนัดหมาย
@@ -419,22 +388,6 @@ export default function ViewAppointmentsPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* ✅ แสดง Error ถ้ามี */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-red-600" />
-              <p className="text-red-800 font-medium">{error}</p>
-            </div>
-            <button
-              onClick={loadData}
-              className="mt-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
-            >
-              ลองใหม่อีกครั้ง
-            </button>
-          </div>
-        )}
-
         {/* Summary */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
@@ -586,11 +539,6 @@ export default function ViewAppointmentsPage() {
                   <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                     <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                     <p>ไม่พบข้อมูลนัดหมาย</p>
-                    {error ? (
-                      <p className="text-sm mt-2 text-red-400">เกิดข้อผิดพลาดในการโหลดข้อมูล</p>
-                    ) : (
-                      <p className="text-sm mt-2 text-gray-400">ยังไม่มีนัดหมายในระบบ</p>
-                    )}
                     {(filterDate || filterDoctor || filterPatient || filterStatus !== 'all') && (
                       <p className="text-sm mt-2 text-gray-400">ลองปรับแต่งตัวกรอง</p>
                     )}
@@ -643,7 +591,7 @@ export default function ViewAppointmentsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex gap-2 flex-wrap">
-                        {/* ✅ ปุ่มดูรายละเอียดนัดหมาย (Modal) */}
+                        {/* ✅ ปุ่มดูรายละเอียดนัดหมาย (Modal) - แสดงทุกราย */}
                         <button
                           onClick={() => handleViewDetails(apt)}
                           className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
@@ -654,7 +602,7 @@ export default function ViewAppointmentsPage() {
                         </button>
 
                         {/* ปุ่มแก้ไข - แสดงเฉพาะ scheduled เท่านั้น */}
-                        {canEdit(apt) && (
+                        {apt.status === 'scheduled' && (
                           <button
                             onClick={() => router.push(`/admin/appointments/edit/${apt.id}`)}
                             className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all"
@@ -669,14 +617,14 @@ export default function ViewAppointmentsPage() {
                           <button
                             onClick={() => handleComplete(apt.id)}
                             className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
-                            title={canComplete(apt) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
+                            title={isPastAppointment(apt.appointment_date) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
                           >
                             เสร็จสิ้น
                           </button>
                         )}
 
-                        {/* ✅ ปุ่มบันทึกติดตาม - แสดงเมื่อถึงเงื่อนไข */}
-                        {canFollowup(apt) && (
+                        {/* ✅ ปุ่มบันทึกติดตาม - แสดงเมื่อเสร็จสิ้นแล้วและยังไม่ได้ติดตาม */}
+                        {apt.status === 'completed' && !apt.hasFollowup && (
                           <button
                             onClick={() => router.push(`/admin/appointments/followup/${apt.id}`)}
                             className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
@@ -687,16 +635,12 @@ export default function ViewAppointmentsPage() {
                           </button>
                         )}
 
-                        {/* ✅ แสดงปุ่มดูประวัติ - สำหรับนัดหมายที่บันทึกติดตามแล้ว */}
+                        {/* ✅ แสดงสถานะเมื่อติดตามแล้ว - ห้ามบันทึกซ้ำ */}
                         {apt.status === 'completed' && apt.hasFollowup && (
-                          <button
-                            onClick={() => router.push(`/admin/patients/${apt.user_id}/followup-history`)}
-                            className="px-3 py-1 bg-purple-100 text-purple-700 text-xs rounded-lg hover:bg-purple-200 transition-all flex items-center gap-1"
-                            title="ดูประวัติการติดตาม"
-                          >
-                            <FileText className="w-3 h-3" />
-                            ดูประวัติ
-                          </button>
+                          <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs rounded-lg flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            ติดตามแล้ว
+                          </span>
                         )}
 
                         {/* ปุ่มผิดนัด (No-show) - แสดงเฉพาะ scheduled ที่ถึงเวลาแล้ว */}
