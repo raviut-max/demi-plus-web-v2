@@ -1,41 +1,40 @@
 // app/admin/appointments/new/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569 (22:15)
 // ✅ การแก้ไข:
-//    1. ตรวจสอบ query parameter 'returnUrl' เพื่อกลับหน้าถูกต้อง
-//    2. หลังสร้างนัดหมายเสร็จ → กลับไปตามที่มา (patient detail หรือ appointments view)
-//    3. เพิ่ม debug log ครบถ้วน
+//    1. เปลี่ยนจาก useSearchParams() → ใช้ searchParams props
+//    2. เพิ่ม TypeScript interface สำหรับ props
+//    3. แก้ไขการ redirect กลับไปตาม returnUrl ที่ถูกต้อง
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
 import { ArrowLeft, LogOut, Save, Calendar, Clock, User, Stethoscope } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase/client';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// ✅ Interface สำหรับ props ของหน้านี้
+interface NewAppointmentPageProps {
+  searchParams?: { [key: string]: string | string[] | undefined };
+}
 
-export default function NewAppointmentPage() {
+export default function NewAppointmentPage({ searchParams }: NewAppointmentPageProps) {
   const router = useRouter();
-  const searchParams = useSearchParams(); // ✅ ดึง query parameters
   
+  // ✅ ดึง returnUrl และ patient_id จาก searchParams props (ไม่ใช่ hook)
+  const returnUrl = searchParams?.returnUrl as string || '';
+  const patientIdFromQuery = searchParams?.patient_id as string || '';
+  
+  console.log('🔍 [DEBUG] New Appointment Page');
+  console.log('🔗 returnUrl:', returnUrl);
+  console.log('👤 patient_id from query:', patientIdFromQuery);
+
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  // ✅ ดึง returnUrl จาก query parameter
-  const returnUrl = searchParams.get('returnUrl');
-  const patientIdFromQuery = searchParams.get('patient_id');
-  
-  console.log('🔍 [DEBUG] New Appointment Page');
-  console.log('🔗 returnUrl:', returnUrl);
-  console.log('👤 patient_id from query:', patientIdFromQuery);
-
   // ตั้งค่าเริ่มต้นเป็นวันพรุ่งนี้ 08:00
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
@@ -117,7 +116,7 @@ export default function NewAppointmentPage() {
           location_detail: formData.location_detail,
           status: 'scheduled',
           notes: formData.notes,
-          created_by: user.id,
+          created_by: user?.id,
         });
 
       if (error) throw error;
