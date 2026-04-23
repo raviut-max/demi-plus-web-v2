@@ -1,5 +1,5 @@
 // app/admin/appointments/view/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569 (19:00)
 // ✅ การแก้ไข:
 //    1. แก้ไขการดึงข้อมูลแพทย์ - ใช้ doctors.id แทน doctors.user_id
 //    2. แสดงชื่อแพทย์ถูกต้อง (full_name_th)
@@ -67,7 +67,7 @@ export default function ViewAppointmentsPage() {
       console.log('📡 Loading appointments...');
       
       // ดึงข้อมูลนัดหมาย
-      const {  aptData, error: aptError } = await supabase
+      const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
         .order('appointment_date', { ascending: true });
@@ -84,7 +84,7 @@ export default function ViewAppointmentsPage() {
         (aptData || []).map(async (apt: any) => {
           try {
             // ดึงข้อมูลผู้ป่วย
-            const {  userData } = await supabase
+            const { data: userData } = await supabase
               .from('profiles')
               .select('first_name, last_name, hospital_number')
               .eq('id', apt.user_id)
@@ -94,7 +94,7 @@ export default function ViewAppointmentsPage() {
             let doctorData = null;
             if (apt.doctor_id) {
               console.log('🔍 Fetching doctor for ID:', apt.doctor_id);
-              const {  docData, error: docError } = await supabase
+              const { data: docData, error: docError } = await supabase
                 .from('doctors')
                 .select('id, user_id, full_name_th, full_name, specialization_th')
                 .eq('id', apt.doctor_id)  // ✅ แก้ไข: ใช้ 'id' แทน 'user_id'
@@ -110,7 +110,7 @@ export default function ViewAppointmentsPage() {
             }
 
             // ✅ ตรวจสอบว่ามีการบันทึกติดตามแล้วหรือไม่
-            const {  followupData } = await supabase
+            const { data: followupData } = await supabase
               .from('appointment_followups')
               .select('id')
               .eq('appointment_id', apt.id)
@@ -157,7 +157,7 @@ export default function ViewAppointmentsPage() {
       setPatients(patientsData);
       setDoctors(filteredStaff);
     } catch (error) {
-      console.error('❌ Error loading ', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
