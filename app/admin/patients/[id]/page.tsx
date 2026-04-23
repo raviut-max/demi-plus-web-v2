@@ -1,15 +1,13 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569 (22:30)
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. ตรวจสอบว่ามีนัดหมายหรือไม่ก่อนคลิก
-//    2. แสดง confirm dialog ถ้ายังไม่มีนัดหมาย
-//    3. ส่ง returnUrl เพื่อกลับหน้าถูกต้องหลังสร้างนัดหมาย
-//    4. เพิ่ม debug log ครบถ้วน
-
+//    1. ตรวจสอบการนัดหมายก่อนแสดงปุ่มติดตาม
+//    2. แยกกรณี: มีการนัดหมายแล้ว vs ยังไม่มีการนัดหมาย
+//    3. แสดง confirm dialog ถ้ายังไม่มีนัดหมาย
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -36,40 +34,20 @@ const THAI_MONTHS = [
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
 
-// ✅ Interface สำหรับนัดหมายครั้งถัดไป
-interface NextAppointment {
-  id: string;
-  appointment_date: string;
-  appointment_type: string;
-  status: string;
-}
-
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams();
   const patientId = params.id as string;
-  
-  // ✅ ตรวจสอบว่ามาจากไหน
-  const fromPage = searchParams.get('from') || 'patients';
-  
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   
-  // ✅ State สำหรับตรวจสอบสถานะ
-  const [hasScreening, setHasScreening] = useState(false);
-  const [hasFollowup, setHasFollowup] = useState(false);
-  const [followupCount, setFollowupCount] = useState(0);
-  const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null);
-  
-  // ✅ State สำหรับนัดหมายครั้งถัดไป
-  const [nextAppointment, setNextAppointment] = useState<NextAppointment | null>(null);
-
-  useEffect(() => {
-    console.log('🔍 [DEBUG] Patient Detail - from:', fromPage);
-    console.log('🔍 [DEBUG] Patient ID:', patientId);
-  }, [fromPage, patientId]);
+  // ✅ State สำหรับตรวจสอบสถานะ (แยกชัดเจน)
+  const [hasScreening, setHasScreening] = useState(false);        // มีการประเมิน PAM/PROMs
+  const [hasFollowup, setHasFollowup] = useState(false);          // มีการติดตามผลจริง
+  const [followupCount, setFollowupCount] = useState(0);          // จำนวนครั้งที่ติดตาม
+  const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null); // ✅ ID นัดหมายล่าสุดที่ยังไม่ได้ followup
+  const [hasAppointment, setHasAppointment] = useState(false);    // ✅ มีการนัดหมายหรือไม่
 
   useEffect(() => {
     const userData = checkSession();
@@ -89,52 +67,20 @@ export default function PatientDetailPage() {
 
   const loadData = async () => {
     try {
-      console.log('📡 Loading patient detail:', patientId);
-      
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
       
       // ✅ ตรวจสอบสถานะการประเมินและการติดตาม
       await checkPatientStatus(patientId);
-      
-      // ✅ โหลดนัดหมายครั้งถัดไป
-      await loadNextAppointment(patientId);
     } catch (error) {
-      console.error('❌ Error loading ', error);
+      console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันดึงนัดหมายครั้งถัดไป
-  const loadNextAppointment = async (pid: string) => {
-    try {
-      console.log('📅 Fetching next appointment for:', pid);
-      
-      const { data, error } = await supabase
-        .from('appointments')
-        .select('id, appointment_date, appointment_type, status')
-        .eq('user_id', pid)
-        .eq('status', 'scheduled')
-        .gte('appointment_date', new Date().toISOString())
-        .order('appointment_date', { ascending: true })
-        .limit(1)
-        .single();
-
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        console.error('Error fetching next appointment:', error);
-      }
-
-      console.log('📋 Next appointment:', data);
-      setNextAppointment(data || null);
-    } catch (err) {
-      console.error('Error in loadNextAppointment:', err);
-      setNextAppointment(null);
-    }
-  };
-
-  // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย
+  // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย (แก้ไขแล้ว)
   const checkPatientStatus = async (pid: string) => {
     try {
       console.log('🔍 Checking patient status for:', pid);
@@ -151,7 +97,7 @@ export default function PatientDetailPage() {
       console.log('📋 Has screening:', hasScreeningData);
       setHasScreening(hasScreeningData);
 
-      // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup)
+      // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup - จาก appointment_followups)
       const {  followupData } = await supabase
         .from('appointment_followups')
         .select('id, followup_round, appointment_id')
@@ -163,18 +109,23 @@ export default function PatientDetailPage() {
       setHasFollowup(hasFollowupData);
       setFollowupCount(followupData?.length || 0);
 
-      // 3. ✅ หา appointment ล่าสุดที่ยังไม่ได้ followup
+      // 3. ✅ ตรวจสอบว่ามีการนัดหมายหรือไม่
       const {  appointmentsData } = await supabase
         .from('appointments')
         .select('id, appointment_date, status')
         .eq('user_id', pid)
-        .eq('status', 'completed')
         .order('appointment_date', { ascending: false })
         .limit(1);
+      
+      const hasAppointmentData = (appointmentsData?.length || 0) > 0;
+      console.log('📅 Has appointment:', hasAppointmentData);
+      setHasAppointment(hasAppointmentData);
 
-      if (appointmentsData && appointmentsData.length > 0) {
+      // 4. ✅ หา appointment ล่าสุดที่ยังไม่ได้ followup (ถ้ามีการนัดหมายแล้ว)
+      if (hasAppointmentData && appointmentsData && appointmentsData.length > 0) {
         const latestApt = appointmentsData[0];
         
+        // ตรวจสอบว่า appointment นี้มี followup หรือยัง
         const {  existingFollowup } = await supabase
           .from('appointment_followups')
           .select('id')
@@ -182,6 +133,7 @@ export default function PatientDetailPage() {
           .single();
 
         if (!existingFollowup) {
+          // ยังไม่มี followup → เก็บ ID ไว้
           setLatestAppointmentId(latestApt.id);
           console.log('📅 Latest appointment without followup:', latestApt.id);
         }
@@ -192,54 +144,44 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันจัดการคลิกปุ่มติดตาม (สีม่วง)
+  // ✅ ฟังก์ชันจัดการคลิกปุ่มติดตาม (สีม่วง) - แก้ไขแล้ว
   const handleFollowupClick = () => {
-    if (!hasFollowup && latestAppointmentId) {
-      const confirmFollowup = confirm(
-        '📋 ผู้ป่วยคนนี้ยังไม่ได้ทำการติดตาม\n\n' +
-        'คุณต้องการบันทึกผลการติดตามนัดหมายตอนนี้เลยหรือไม่?\n\n' +
-        '• กด "ตกลง" → ไปหน้าบันทึกผลการติดตาม\n' +
+    console.log('🔴 Followup button clicked');
+    console.log('  hasFollowup:', hasFollowup);
+    console.log('  hasAppointment:', hasAppointment);
+    console.log('  latestAppointmentId:', latestAppointmentId);
+
+    if (hasFollowup) {
+      // ✅ มีการติดตามแล้ว → ไปหน้าประวัติการติดตาม
+      console.log('🔗 Has followup → Navigate to followup history');
+      router.push(`/admin/patients/${patientId}/followup-history`);
+    } else if (hasAppointment && latestAppointmentId) {
+      // ✅ มีการนัดหมายแล้ว แต่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม
+      console.log('🔗 Has appointment but no followup → Navigate to followup form');
+      router.push(`/admin/appointments/followup/${latestAppointmentId}`);
+    } else {
+      // ✅ ยังไม่มีการนัดหมาย → แสดง confirm dialog
+      console.log('🔗 No appointment → Show confirm dialog');
+      const confirmCreate = confirm(
+        '📋 ผู้ป่วยคนนี้ยังไม่มีนัดหมายในระบบ\n\n' +
+        'คุณต้องการบันทึกข้อมูลการติดตาม (ก่อนนัดหมาย) ตอนนี้เลยหรือไม่?\n\n' +
+        '• กด "ตกลง" → ไปหน้าบันทึกข้อมูลการติดตาม\n' +
         '• กด "ยกเลิก" → ไปหน้าประวัติการติดตาม'
       );
 
-      if (confirmFollowup) {
-        console.log('🔗 Navigating to followup form:', latestAppointmentId);
-        router.push(`/admin/appointments/followup/${latestAppointmentId}`);
+      if (confirmCreate) {
+        // ✅ ไปหน้าบันทึกผลการติดตาม (แบบไม่มีนัดหมาย)
+        console.log('🔗 Navigate to followup form (no appointment)');
+        router.push(`/admin/appointments/followup/new?patient_id=${patientId}`);
       } else {
-        console.log('🔗 Navigating to followup history');
+        // ✅ ไปหน้าประวัติการติดตาม
+        console.log('🔗 Navigate to followup history');
         router.push(`/admin/patients/${patientId}/followup-history`);
       }
-    } else {
-      router.push(`/admin/patients/${patientId}/followup-history`);
     }
   };
 
-  // ✅ ฟังก์ชันจัดการคลิกปุ่มนัดหมาย (สีฟ้า)
-  const handleAppointmentClick = () => {
-    if (!nextAppointment) {
-      // ✅ ไม่มีนัดหมาย → แสดงยืนยันก่อน
-      const confirmCreate = confirm(
-        '📋 ผู้ป่วยคนนี้ยังไม่มีนัดหมายในระบบ\n\n' +
-        'คุณต้องการสร้างนัดหมายใหม่ตอนนี้เลยหรือไม่?\n\n' +
-        '• กด "ตกลง" → ไปหน้าสร้างนัดหมายใหม่\n' +
-        '• กด "ยกเลิก" → ไปหน้าประวัตินัดหมาย'
-      );
-      
-      if (confirmCreate) {
-        // ✅ ไปหน้าสร้างนัดหมายใหม่ พร้อมระบุผู้ป่วย
-        const returnUrl = `/admin/patients/${patientId}?from=appointments`;
-        router.push(`/admin/appointments/new?patient_id=${patientId}&returnUrl=${encodeURIComponent(returnUrl)}`);
-      } else {
-        // ✅ ไปหน้าประวัตินัดหมาย
-        router.push(`/admin/patients/${patientId}/appointments`);
-      }
-    } else {
-      // ✅ มีนัดหมายแล้ว → ไปหน้าประวัตินัดหมาย
-      router.push(`/admin/patients/${patientId}/appointments`);
-    }
-  };
-
-  // ✅ ฟังก์ชันแปลงวันที่ ค.ศ. → พ.ศ.
+  // ✅ ฟังก์ชันแปลงวันที่ ค.ศ. → พ.ศ. สำหรับแสดงผล
   const formatDateTH = (dateString: string | null) => {
     if (!dateString) return '-';
     const date = new Date(dateString);
@@ -249,26 +191,7 @@ export default function PatientDetailPage() {
     return `${day} ${month} ${year}`;
   };
 
-  // ✅ ฟังก์ชันแปลงวันที่สำหรับแสดงสั้นๆ (เช่น "28 เม.ย.")
-  const formatShortDate = (dateString: string | null) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    const day = date.getDate();
-    const month = THAI_MONTHS[date.getMonth()].substring(0, 3);
-    return `${day} ${month}`;
-  };
-
-  // ✅ ฟังก์ชันแปลงเวลา (เช่น "17:26")
-  const formatTime = (dateString: string | null) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('th-TH', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  // ✅ ฟังก์ชันคำนวณอายุ
+  // ✅ ฟังก์ชันคำนวณอายุจากวันเกิด
   const calculateAge = (birthDate: string | null) => {
     if (!birthDate) return '-';
     const today = new Date();
@@ -286,16 +209,6 @@ export default function PatientDetailPage() {
     if (!weight || !height || height === 0) return '-';
     const heightInM = height / 100;
     return (weight / (heightInM * heightInM)).toFixed(1);
-  };
-
-  // ✅ ฟังก์ชันจัดการปุ่มกลับ
-  const handleGoBack = () => {
-    console.log('🔙 [DEBUG] Going back, from:', fromPage);
-    if (fromPage === 'appointments') {
-      router.push('/admin/appointments/view');
-    } else {
-      router.push('/admin/patients');
-    }
   };
 
   const handleLogout = () => {
@@ -316,13 +229,12 @@ export default function PatientDetailPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={handleGoBack}
+            onClick={() => router.push('/admin/patients')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ{fromPage === 'appointments' ? 'หน้าดูนัดหมาย' : 'รายการผู้ป่วย'}
+            กลับรายการผู้ป่วย
           </button>
           
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -346,7 +258,7 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
               
-              {/* ✅ แสดงปุ่ม "มีการติดตามแล้ว" เฉพาะเมื่อมี followup */}
+              {/* ✅ แสดงปุ่ม "มีการติดตามแล้ว" เฉพาะเมื่อมี followup จริงๆ */}
               {hasFollowup && (
                 <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
                   <ClipboardCheck className="w-4 h-4" />
@@ -369,24 +281,23 @@ export default function PatientDetailPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* SUMMARY CARDS */}
+        {/* 
+        ========================================
+        ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม
+        ========================================
+        */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป (แก้ไขแล้ว) */}
+          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
           <div 
-            onClick={handleAppointmentClick}
+            onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">นัดหมายครั้งถัดไป</p>
-                {/* ✅ แสดงวันที่/เวลาจากฐานข้อมูล หรือ "ไม่มี" */}
-                <p className="text-2xl font-bold">
-                  {nextAppointment ? formatShortDate(nextAppointment.appointment_date) : 'ไม่มี'}
-                </p>
-                <p className="text-xs opacity-75 mt-1">
-                  {nextAppointment ? formatTime(nextAppointment.appointment_date) : 'นัดหมาย'}
-                </p>
+                <p className="text-2xl font-bold">28 เม.ย.</p>
+                <p className="text-xs opacity-75 mt-1">17:26</p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Calendar className="w-6 h-6" />
@@ -394,7 +305,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
+          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -411,7 +322,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 3. ปุ่มสีม่วง - ติดตามล่าสุด (แก้ไขแล้ว) */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด (แก้ไขแล้ว) */}
           <div 
             onClick={handleFollowupClick}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -428,7 +339,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* 4. ปุ่มสีส้ม - ความคืบหน้า */}
+          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -446,7 +357,11 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* ACTION BUTTONS */}
+        {/* 
+        ========================================
+        ✅ ACTION BUTTONS - ปุ่มเพิ่มเติม
+        ========================================
+        */}
         <div className="flex flex-wrap gap-2 mb-6">
           <button
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
@@ -481,7 +396,11 @@ export default function PatientDetailPage() {
           </button>
         </div>
 
-        {/* Patient Info Cards */}
+        {/* 
+        ========================================
+        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
+        ========================================
+        */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           
           {/* ข้อมูลส่วนตัว */}
@@ -656,7 +575,11 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* Emergency Contact */}
+        {/* 
+        ========================================
+        ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน (1 คน)
+        ========================================
+        */}
         <div className="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
             <Heart className="w-6 h-6 text-red-500" />
@@ -664,6 +587,7 @@ export default function PatientDetailPage() {
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* ผู้ติดต่อฉุกเฉิน (1 คน) */}
             <div className="border border-gray-200 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-3">
                 <User className="w-5 h-5 text-blue-600" />
