@@ -1,8 +1,8 @@
 // app/admin/appointments/view/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569 (20:30)
+// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แก้ไข Query ดึงข้อมูลแพทย์ - ใช้ doctors.id แทน doctors.user_id
-//    2. แก้ไขช่องว่างในโค้ดทั้งหมด (typos)
+//    1. แก้ไขช่องว่างในโค้ดทั้งหมด (แก้ Syntax Error)
+//    2. แก้ไข Query ดึงข้อมูลแพทย์ - ใช้ doctors.id แทน doctors.user_id
 //    3. แสดงชื่อแพทย์ถูกต้องจากตาราง doctors
 
 'use client';
@@ -29,7 +29,6 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ✅ Interface สำหรับข้อมูลผู้ป่วยพร้อมนัดหมาย
 interface PatientWithAppointment {
   patient_id: string;
   patient_name: string;
@@ -71,7 +70,6 @@ export default function ViewAppointmentsPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadData();
   }, [router]);
@@ -133,7 +131,7 @@ export default function ViewAppointmentsPage() {
           appointment_date: latestAppointment?.appointment_date,
           appointment_type: latestAppointment?.appointment_type,
           doctor_id: latestAppointment?.doctor_id,
-          doctor_name: '', // จะดึงชื่อแพทย์ทีหลัง
+          doctor_name: '',
           status: latestAppointment?.status,
           hasFollowup: false,
           hasAppointment: !!latestAppointment,
@@ -144,26 +142,23 @@ export default function ViewAppointmentsPage() {
       const patientsWithFollowupStatus = await Promise.all(
         combined.map(async (patient) => {
           if (patient.hasAppointment && patient.appointment_id && patient.doctor_id) {
-            // ✅ ตรวจสอบ followup
+            // ตรวจสอบ followup
             const { data: followupData } = await supabase
               .from('appointment_followups')
               .select('id')
               .eq('appointment_id', patient.appointment_id)
               .maybeSingle();
             
-            // ✅ ดึงข้อมูลแพทย์ - แก้ไขแล้ว: ใช้ doctors.id
+            // ✅ ดึงข้อมูลแพทย์ - ใช้ doctors.id (ไม่ใช่ user_id)
             let doctorName = '-';
             const { data: docData } = await supabase
               .from('doctors')
               .select('id, full_name_th, full_name')
-              .eq('id', patient.doctor_id)  // ✅ แก้ไข: ใช้ 'id' แทน 'user_id'
+              .eq('id', patient.doctor_id)
               .single();
             
             if (docData) {
               doctorName = docData.full_name_th || docData.full_name || '-';
-              console.log('✅ Doctor found:', doctorName);
-            } else {
-              console.log('⚠️ No doctor found for ID:', patient.doctor_id);
             }
             
             return {
@@ -554,4 +549,278 @@ export default function ViewAppointmentsPage() {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ผู้ป่วย</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">แพทย์</th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ประเภท</th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">วันที่
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">วันที่/เวลา</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {filteredPatients.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                    <p>ไม่พบข้อมูล</p>
+                    {(filterDate || filterDoctor || filterPatient || filterStatus !== 'all') && (
+                      <p className="text-sm mt-2 text-gray-400">ลองปรับแต่งตัวกรอง</p>
+                    )}
+                  </td>
+                </tr>
+              ) : (
+                filteredPatients.map((patient) => (
+                  <tr key={patient.patient_id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => router.push(`/admin/patients/${patient.patient_id}?from=appointments`)}
+                        className="text-left group"
+                        title="ไปหน้ารายละเอียดผู้ป่วย"
+                      >
+                        <p className="font-medium text-gray-800 group-hover:text-blue-600 group-hover:underline transition-colors">
+                          {patient.patient_name}
+                        </p>
+                        <p className="text-sm text-gray-500">{patient.hospital_number}</p>
+                      </button>
+                    </td>
+                    <td className="px-6 py-4">
+                      {patient.hasAppointment ? (
+                        <div className="flex items-center gap-2">
+                          <Stethoscope className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-700">
+                            {patient.doctor_name || '-'}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-700">
+                      {patient.appointment_type || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      {patient.appointment_date ? (
+                        <>
+                          <p className="text-gray-800">{new Date(patient.appointment_date).toLocaleDateString('th-TH')}</p>
+                          <p className="text-gray-500">
+                            {new Date(patient.appointment_date).toLocaleTimeString('th-TH', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                        </>
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(patient.status)}`}>
+                        {getStatusText(patient.status)}
+                      </span>
+                      {patient.hasFollowup && (
+                        <div className="mt-1 flex items-center gap-1 text-xs text-green-600">
+                          <CheckCircle className="w-3 h-3" />
+                          <span>บันทึกติดตามแล้ว</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => handleViewDetails(patient)}
+                          className="px-3 py-1 bg-blue-500 text-white text-xs rounded-lg hover:bg-blue-600 transition-all flex items-center gap-1"
+                          title="ดูรายละเอียด"
+                        >
+                          <Eye className="w-3 h-3" />
+                          ดูรายละเอียด
+                        </button>
+
+                        {!patient.hasAppointment && (
+                          <button
+                            onClick={() => router.push(`/admin/appointments/new?patient_id=${patient.patient_id}`)}
+                            className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all flex items-center gap-1"
+                            title="สร้างนัดหมายใหม่"
+                          >
+                            <Plus className="w-3 h-3" />
+                            สร้างนัดหมาย
+                          </button>
+                        )}
+
+                        {patient.hasAppointment && patient.appointment_id && (
+                          <>
+                            {patient.status === 'scheduled' && (
+                              <>
+                                <button
+                                  onClick={() => router.push(`/admin/appointments/edit/${patient.appointment_id}`)}
+                                  className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all"
+                                  title="แก้ไขนัดหมาย"
+                                >
+                                  แก้ไข
+                                </button>
+                                <button
+                                  onClick={() => handleComplete(patient.appointment_id!)}
+                                  className="px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
+                                  title={isPastAppointment(patient.appointment_date!) ? 'เสร็จสิ้นนัดหมาย' : 'เสร็จสิ้นก่อนกำหนด'}
+                                >
+                                  เสร็จสิ้น
+                                </button>
+                                {isPastAppointment(patient.appointment_date!) && (
+                                  <button
+                                    onClick={() => handleNoShow(patient.appointment_id!)}
+                                    className="px-3 py-1 bg-orange-500 text-white text-xs rounded-lg hover:bg-orange-600 transition-all"
+                                    title="บันทึกว่าผิดนัด"
+                                  >
+                                    ผิดนัด
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleCancel(patient.appointment_id!)}
+                                  className="px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition-all"
+                                  title="ยกเลิกนัดหมาย"
+                                >
+                                  ยกเลิก
+                                </button>
+                              </>
+                            )}
+
+                            {patient.status === 'completed' && !patient.hasFollowup && (
+                              <button
+                                onClick={() => router.push(`/admin/appointments/followup/${patient.appointment_id}`)}
+                                className="px-3 py-1 bg-purple-500 text-white text-xs rounded-lg hover:bg-purple-600 transition-all flex items-center gap-1"
+                                title="บันทึกผลการติดตาม"
+                              >
+                                <FileText className="w-3 h-3" />
+                                บันทึกติดตาม
+                              </button>
+                            )}
+
+                            {patient.status === 'completed' && patient.hasFollowup && (
+                              <span className="px-3 py-1 bg-gray-100 text-gray-500 text-xs rounded-lg flex items-center gap-1">
+                                <CheckCircle className="w-3 h-3" />
+                                ติดตามแล้ว
+                              </span>
+                            )}
+
+                            {(patient.status === 'completed' || patient.status === 'cancelled' || patient.status === 'no_show') && (
+                              <span className="text-xs text-gray-500 italic">
+                                ไม่สามารถแก้ไขได้
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>แสดง {filteredPatients.length} จาก {patientsWithAppointments.length} ผู้ป่วย</p>
+          {filterStatus === 'no_appointment' && (
+            <p className="text-red-600 font-medium mt-1">
+              ⚠️ แสดงเฉพาะผู้ป่วยที่ยังไม่มีนัดหมาย
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Modal รายละเอียด */}
+      {showDetailsModal && selectedPatient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <Calendar className="w-6 h-6 text-blue-600" />
+                รายละเอียด
+              </h2>
+              <button
+                onClick={() => setShowDetailsModal(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-blue-800 mb-2">👤 ผู้ป่วย</h3>
+                <p className="text-lg font-bold text-blue-900">{selectedPatient.patient_name}</p>
+                <p className="text-sm text-blue-700">HN: {selectedPatient.hospital_number}</p>
+              </div>
+
+              {selectedPatient.hasAppointment ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">ประเภท</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.appointment_type || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">สถานะ</p>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(selectedPatient.status)}`}>
+                      {getStatusText(selectedPatient.status)}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">วันที่</p>
+                    <p className="font-medium text-gray-800">
+                      {selectedPatient.appointment_date 
+                        ? new Date(selectedPatient.appointment_date).toLocaleDateString('th-TH', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric'
+                          })
+                        : '-'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">เวลา</p>
+                    <p className="font-medium text-gray-800">
+                      {selectedPatient.appointment_date
+                        ? new Date(selectedPatient.appointment_date).toLocaleTimeString('th-TH', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })
+                        : '-'
+                      }
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">แพทย์</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.doctor_name || '-'}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 text-center">
+                  <CalendarX className="w-12 h-12 mx-auto mb-3 text-red-500" />
+                  <h3 className="text-lg font-bold text-red-800 mb-2">ยังไม่มีนัดหมาย</h3>
+                  <p className="text-red-600 mb-4">ผู้ป่วยคนนี้ยังไม่มีนัดหมายในระบบ</p>
+                  <button
+                    onClick={() => {
+                      setShowDetailsModal(false);
+                      router.push(`/admin/appointments/new?patient_id=${selectedPatient.patient_id}`);
+                    }}
+                    className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+                  >
+                    <Plus className="w-4 h-4 inline mr-2" />
+                    สร้างนัดหมายใหม่
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0 flex justify-end">
+              <button
+                onClick={() => setShowDetailsModal(false)}
+                className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all font-bold"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
