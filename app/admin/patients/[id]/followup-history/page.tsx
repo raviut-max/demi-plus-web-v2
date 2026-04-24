@@ -1,37 +1,31 @@
 // app/admin/patients/[id]/followup-history/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มระบบตรวจสอบว่ามาจากไหน (view หรือ patient detail)
-//    2. ปุ่มกลับจะกลับไปตามที่มาอย่างถูกต้อง
-//    3. ใช้ URL query parameter '?from=view' เพื่อระบุที่มา
+//    1. เพิ่มปุ่ม "บันทึกติดตามใหม่" ด้านบนหน้า
+//    2. ตรวจสอบว่ามีการนัดหมายที่ยังไม่ได้ติดตามหรือไม่
+//    3. แยกกรณี: มีนัดหมาย → ไปหน้าบันทึกผลการติดตาม / ไม่มีนัดหมาย → แสดง confirm
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { checkSession, logout, getPatientDetail, getPatientFollowupHistory } from '@/lib/supabase/queries';
-import { ArrowLeft, Calendar, Activity, Heart, TrendingUp, FileText, Download, Printer } from 'lucide-react';
+import { ArrowLeft, Calendar, Activity, Heart, TrendingUp, FileText, Download, Printer, Plus } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function FollowupHistoryPage() {
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams(); // ✅ ดึง query parameters
   const patientId = params.id as string;
-  
-  // ✅ ตรวจสอบว่ามาจากไหน (view หรือ patient)
-  const fromPage = searchParams.get('from') || 'patient'; // ค่าเริ่มต้น: 'patient'
-  
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   const [followups, setFollowups] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
-
-  useEffect(() => {
-    console.log('🔍 [DEBUG] Followup History - from:', fromPage);
-    console.log('🔍 [DEBUG] Patient ID:', patientId);
-  }, [fromPage, patientId]);
+  
+  // ✅ State สำหรับตรวจสอบการนัดหมาย
+  const [hasUnfollowedAppointment, setHasUnfollowedAppointment] = useState(false);
+  const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null);
 
   useEffect(() => {
     const userData = checkSession();
@@ -44,7 +38,6 @@ export default function FollowupHistoryPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadData();
   }, [router]);
@@ -59,6 +52,9 @@ export default function FollowupHistoryPage() {
       const followupData = await getPatientFollowupHistory(patientId);
       setFollowups(followupData);
 
+      // ✅ ตรวจสอบการนัดหมายที่ยังไม่ได้ติดตาม
+      await checkUnfollowedAppointments(patientId);
+
       console.log('📋 Followup History:', followupData.length);
     } catch (error) {
       console.error('Error loading ', error);
@@ -68,21 +64,72 @@ export default function FollowupHistoryPage() {
     }
   };
 
+  // ✅ ฟังก์ชันตรวจสอบการนัดหมายที่ยังไม่ได้ติดตาม
+  const checkUnfollowedAppointments = async (pid: string) => {
+    try {
+      console.log('🔍 Checking unfollowed appointments for:', pid);
+      
+      // ดึงนัดหมายที่เสร็จสิ้นแล้วทั้งหมด
+      const {  appointmentsData } = await supabase
+        .from('appointments')
+        .select('id, appointment_date, status')
+        .eq('user_id', pid)
+        .eq('status', 'completed')
+        .order('appointment_date', { ascending: false })
+        .limit(1);
+
+      if (appointmentsData && appointmentsData.length > 0) {
+        const latestApt = appointmentsData[0];
+        
+        // ตรวจสอบว่ามี followup แล้วหรือยัง
+        const {  existingFollowup } = await supabase
+          .from('appointment_followups')
+          .select('id')
+          .eq('appointment_id', latestApt.id)
+          .single();
+
+        if (!existingFollowup) {
+          // ยังไม่มี followup
+          setHasUnfollowedAppointment(true);
+          setLatestAppointmentId(latestApt.id);
+          console.log('📅 Found unfollowed appointment:', latestApt.id);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking unfollowed appointments:', error);
+    }
+  };
+
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันกลับไปตามที่มา
-  const handleGoBack = () => {
-    console.log('🔙 [DEBUG] Going back, from:', fromPage);
-    
-    if (fromPage === 'view') {
-      // ✅ กลับไปหน้าดูนัดหมาย
-      router.push('/admin/appointments/view');
+  // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่
+  const handleNewFollowup = () => {
+    console.log('🔴 New Followup button clicked');
+    console.log('  hasUnfollowedAppointment:', hasUnfollowedAppointment);
+    console.log('  latestAppointmentId:', latestAppointmentId);
+
+    if (hasUnfollowedAppointment && latestAppointmentId) {
+      // ✅ มีการนัดหมายที่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม
+      console.log('🔗 Has unfollowed appointment → Navigate to followup form');
+      router.push(`/admin/appointments/followup/${latestAppointmentId}`);
     } else {
-      // ✅ กลับไปหน้ารายละเอียดผู้ป่วย
-      router.push(`/admin/patients/${patientId}`);
+      // ✅ ไม่มีนัดหมายที่ยังไม่ได้ติดตาม → แสดง confirm dialog
+      console.log('🔗 No unfollowed appointment → Show confirm dialog');
+      const confirmCreate = confirm(
+        '📋 ไม่พบนัดหมายที่ยังไม่ได้ติดตาม\n\n' +
+        'คุณต้องการบันทึกข้อมูลการติดตาม (ก่อนนัดหมาย) ตอนนี้เลยหรือไม่?\n\n' +
+        '• กด "ตกลง" → ไปหน้าบันทึกข้อมูลการติดตาม\n' +
+        '• กด "ยกเลิก" → ยกเลิก'
+      );
+
+      if (confirmCreate) {
+        // ✅ ไปหน้าบันทึกผลการติดตาม (แบบไม่มีนัดหมาย)
+        console.log('🔗 Navigate to followup form (no appointment)');
+        router.push(`/admin/appointments/followup/new?patient_id=${patientId}`);
+      }
     }
   };
 
@@ -131,7 +178,6 @@ export default function FollowupHistoryPage() {
     if (followups.length < 2) return null;
     const first = followups[followups.length - 1]; // ครั้งแรก
     const latest = followups[0]; // ครั้งล่าสุด
-
     const progress: any = {};
 
     if (first.weight && latest.weight) {
@@ -188,13 +234,13 @@ export default function FollowupHistoryPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
+          {/* ปุ่มกลับ */}
           <button
-            onClick={handleGoBack}
+            onClick={() => router.push(`/admin/patients/${patientId}`)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ{fromPage === 'view' ? 'หน้าดูนัดหมาย' : 'หน้าผู้ป่วย'}
+            กลับหน้าผู้ป่วย
           </button>
           
           <div className="flex items-center justify-between">
@@ -210,6 +256,15 @@ export default function FollowupHistoryPage() {
             </div>
             
             <div className="flex gap-2">
+              {/* ✅ ปุ่มบันทึกติดตามใหม่ */}
+              <button
+                onClick={handleNewFollowup}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                บันทึกติดตามใหม่
+              </button>
+            
               <button
                 onClick={() => setViewMode('table')}
                 className={`px-4 py-2 rounded-lg transition-all ${
@@ -362,7 +417,7 @@ export default function FollowupHistoryPage() {
                       </td>
                     </tr>
                   ) : (
-                    followups.map((followup, index) => (
+                    followups.map((followup) => (
                       <tr key={followup.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-sm">
                           <span className="font-bold text-blue-600">ครั้งที่ {followup.followup_round}</span>
@@ -468,13 +523,13 @@ export default function FollowupHistoryPage() {
                 แนวโน้มน้ำหนัก
               </h3>
               <div className="h-64 flex items-end gap-4">
-                {followups.slice().reverse().map((followup, index) => (
+                {followups.slice().reverse().map((followup) => (
                   <div key={followup.id} className="flex-1 flex flex-col items-center">
                     <div
                       className="w-full bg-blue-500 rounded-t-lg transition-all hover:bg-blue-600"
                       style={{
                         height: followup.weight ? `${(followup.weight / 150) * 100}%` : '0%',
-                        minHeight: followup.weight ? '20px' : '0' 
+                        minHeight: followup.weight ? '20px' : '0'
                       }}
                     ></div>
                     <p className="text-xs text-gray-600 mt-2 text-center">
@@ -495,7 +550,7 @@ export default function FollowupHistoryPage() {
                 แนวโน้มความมั่นใจ
               </h3>
               <div className="h-64 flex items-end gap-4">
-                {followups.slice().reverse().map((followup, index) => (
+                {followups.slice().reverse().map((followup) => (
                   <div key={followup.id} className="flex-1 flex flex-col items-center">
                     <div
                       className="w-full bg-pink-500 rounded-t-lg transition-all hover:bg-pink-600"
@@ -538,6 +593,7 @@ export default function FollowupHistoryPage() {
             <p><strong>ลำดับสัญลักษณ์:</strong> ปริมาณอาหาร | ชนิดอาหาร | การเคลื่อนไหว</p>
           </div>
         </div>
+
       </div>
 
       {/* Print Styles */}
