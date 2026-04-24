@@ -2194,24 +2194,27 @@ export async function getGoalsCount(patientId: string) {
 // 🏥 ฟังก์ชันจัดการโรงพยาบาล
 // =====================================================
 
-// ดึงโรงพยาบาลทั้งหมด
-export async function getHospitals(parentId?: string) {
+// =====================================================
+// 🏥 ฟังก์ชันจัดการโรงพยาบาล
+// =====================================================
+// ดึงโรงพยาบาลทั้งหมด (แก้ไขแล้ว - แสดงทั้งหมดไม่กรอง parent_id)
+export async function getHospitals() {
   try {
-    let query = supabase
+    console.log('🏥 Fetching all hospitals...');
+    
+    const { data, error } = await supabase
       .from('hospitals')
       .select('*')
-      .eq('is_active', true)
-      .order('type', { ascending: true })
-      .order('name', { ascending: true });
+      .eq('is_active', true)  // ✅ เอาเฉพาะที่ active
+      .order('type', { ascending: true })  // ✅ เรียงตาม type (main ก่อน sub)
+      .order('name', { ascending: true });  // ✅ แล้วเรียงตามชื่อ
 
-    if (parentId) {
-      query = query.eq('parent_id', parentId);
-    } else {
-      query = query.is('parent_id', null);
+    if (error) {
+      console.error('❌ Error fetching hospitals:', error);
+      return [];
     }
 
-    const { data, error } = await query;
-    if (error) throw error;
+    console.log('✅ Hospitals loaded:', data?.length || 0);
     return data || [];
   } catch (err) {
     console.error('Get hospitals error:', err);

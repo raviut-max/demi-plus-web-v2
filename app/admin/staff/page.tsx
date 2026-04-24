@@ -1,8 +1,8 @@
 // app/admin/staff/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่ม dropdown เลือกโรงพยาบาล
-//    2. ดึงรายการโรงพยาบาลจากฐานข้อมูล
+//    1. แสดงโรงพยาบาลทั้งหมด (แม่ข่าย + ลูกข่าย + รพสต.)
+//    2. เพิ่ม dropdown เลือกโรงพยาบาลในฟอร์ม
 //    3. บันทึก hospital_id ลงใน users table
 
 'use client';
@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals } from '@/lib/supabase/queries';
 import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 export default function StaffManagementPage() {
   const router = useRouter();
@@ -21,7 +22,7 @@ export default function StaffManagementPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
-  const [selectedStaff, setSelectedStaff] = useState<any>(null);
+  const [selectedStaff, setSelectedStaff] = useState(null);
 
   useEffect(() => {
     const userData = checkSession();
@@ -38,7 +39,7 @@ export default function StaffManagementPage() {
 
     setUser(userData);
     loadStaffList();
-    loadHospitals(); // ✅ โหลดรายการโรงพยาบาล
+    loadHospitals(); // ✅ โหลดโรงพยาบาลทั้งหมด
   }, [router]);
 
   const loadHospitals = async () => {
@@ -272,7 +273,7 @@ export default function StaffManagementPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th> {/* ✅ เพิ่มคอลัมน์ */}
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
@@ -316,7 +317,6 @@ export default function StaffManagementPage() {
                            staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
                         </span>
                       </td>
-                      {/* ✅ แสดงชื่อโรงพยาบาล */}
                       <td className="px-6 py-4">
                         <span className="text-sm text-gray-600">
                           {staff.hospitals?.name || '-'}
@@ -619,7 +619,7 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
             </div>
           </div>
 
-          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แสดงทั้งหมด */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โรงพยาบาลสังกัด
@@ -633,6 +633,7 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
               {hospitals.map((hospital) => (
                 <option key={hospital.id} value={hospital.id}>
                   {hospital.name} ({hospital.code})
+                  {hospital.type === 'main' ? ' - แม่ข่าย' : ' - ลูกข่าย'}
                 </option>
               ))}
             </select>
@@ -706,6 +707,18 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
     setLoading(true);
 
     try {
+      // ✅ อัปเดต hospital_id ในตาราง users
+      if (formData.hospital_id) {
+        const { error: userError } = await supabase
+          .from('users')
+          .update({ hospital_id: formData.hospital_id })
+          .eq('id', staff.id);
+
+        if (userError) {
+          console.error('Error updating user hospital:', userError);
+        }
+      }
+
       const result = await updateStaff(staff.id, formData);
       if (result.success) {
         alert('แก้ไขข้อมูลสำเร็จ!');
@@ -753,7 +766,7 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
             />
           </div>
 
-          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แสดงทั้งหมด */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โรงพยาบาลสังกัด
@@ -767,6 +780,7 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
               {hospitals.map((hospital) => (
                 <option key={hospital.id} value={hospital.id}>
                   {hospital.name} ({hospital.code})
+                  {hospital.type === 'main' ? ' - แม่ข่าย' : ' - ลูกข่าย'}
                 </option>
               ))}
             </select>
