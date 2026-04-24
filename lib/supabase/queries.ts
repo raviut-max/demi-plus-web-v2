@@ -674,9 +674,109 @@ export async function getDashboardStats() {
   }
 }
 
-// =====================================================
-// ฟังก์ชันดึงรายการเจ้าหน้าที่ทั้งหมด (Admin เท่านั้น)
-// =====================================================
+// ✅ แก้ไขฟังก์ชัน addStaff
+export async function addStaff(data: {
+  id_card: string;
+  password: string;
+  full_name_th: string;
+  role: 'doctor' | 'helper';
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;  // ✅ เพิ่ม field นี้
+  created_by: string;
+}) {
+  try {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id_card: data.id_card,
+        password_hash: data.password,
+        role: data.role,
+        is_active: true,
+        created_by: data.created_by,
+        hospital_id: data.hospital_id || null,  // ✅ บันทึก hospital_id
+      })
+      .select()
+      .single();
+
+    if (userError) {
+      console.error('Error creating user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    if (data.role === 'doctor' || data.role === 'helper') {
+      const { error: doctorError } = await supabase
+        .from('doctors')
+        .insert({
+          user_id: user.id,
+          full_name: data.id_card,
+          full_name_th: data.full_name_th,
+          specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
+          is_active: true,
+          is_verified: false,
+        });
+
+      if (doctorError) {
+        console.error('Error creating doctor profile:', doctorError);
+        await supabase.from('users').delete().eq('id', user.id);
+        return { success: false, error: doctorError.message };
+      }
+    }
+
+    return { success: true, user };
+  } catch (err) {
+    console.error('Add staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการเพิ่มเจ้าหน้าที่' };
+  }
+}
+
+// ✅ แก้ไขฟังก์ชัน updateStaff
+export async function updateStaff(userId: string, data: {
+  full_name_th?: string;
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;  // ✅ เพิ่ม field นี้
+  is_active?: boolean;
+}) {
+  try {
+    // ✅ อัปเดต hospital_id ในตาราง users
+    if (data.hospital_id !== undefined) {
+      const { error: userError } = await supabase
+        .from('users')
+        .update({ hospital_id: data.hospital_id })
+        .eq('id', userId);
+
+      if (userError) {
+        console.error('Error updating user hospital:', userError);
+      }
+    }
+
+    // ✅ อัปเดตข้อมูลในตาราง doctors
+    const { error } = await supabase
+      .from('doctors')
+      .update({
+        full_name_th: data.full_name_th,
+        specialization_th: data.specialization_th,
+        is_active: data.is_active,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error updating staff:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Update staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
+  }
+}
+
+// ✅ แก้ไขฟังก์ชัน getStaffList ให้ดึงข้อมูลโรงพยาบาลมาด้วย
 export async function getStaffList(role?: string) {
   try {
     let query = supabase
@@ -718,101 +818,11 @@ export async function getStaffList(role?: string) {
       hospital_code: staff.hospitals?.code || '-',
     })) || [];
 
-    console.log(' Staff List Data:', staffWithData.length);
+    console.log('📊 Staff List Data:', staffWithData.length);
     return staffWithData;
   } catch (err) {
     console.error('Get staff list error:', err);
     return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันเพิ่มเจ้าหน้าที่ใหม่ (Admin เท่านั้น)
-// =====================================================
-export async function addStaff(data: {
-  id_card: string;
-  password: string;
-  full_name_th: string;
-  role: 'doctor' | 'helper';
-  specialization_th?: string;
-  phone?: string;
-  email?: string;
-  created_by: string;
-}) {
-  try {
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .insert({
-        id_card: data.id_card,
-        password_hash: data.password,
-        role: data.role,
-        is_active: true,
-        created_by: data.created_by,
-      })
-      .select()
-      .single();
-
-    if (userError) {
-      console.error('Error creating user:', userError);
-      return { success: false, error: userError.message };
-    }
-
-    if (data.role === 'doctor' || data.role === 'helper') {
-      const { error: doctorError } = await supabase
-        .from('doctors')
-        .insert({
-          user_id: user.id,
-          full_name: data.id_card,
-          full_name_th: data.full_name_th,
-          specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
-          is_active: true,
-          is_verified: false,
-        });
-
-      if (doctorError) {
-        console.error('Error creating doctor profile:', doctorError);
-        await supabase.from('users').delete().eq('id', user.id);
-        return { success: false, error: doctorError.message };
-      }
-    }
-
-    return { success: true, user };
-  } catch (err) {
-    console.error('Add staff error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการเพิ่มเจ้าหน้าที่' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันแก้ไขข้อมูลเจ้าหน้าที่
-// =====================================================
-export async function updateStaff(userId: string, data: {
-  full_name_th?: string;
-  specialization_th?: string;
-  phone?: string;
-  email?: string;
-  is_active?: boolean;
-}) {
-  try {
-    const { error } = await supabase
-      .from('doctors')
-      .update({
-        full_name_th: data.full_name_th,
-        specialization_th: data.specialization_th,
-        is_active: data.is_active,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('Error updating staff:', error);
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch (err) {
-    console.error('Update staff error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
   }
 }
 
