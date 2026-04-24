@@ -223,7 +223,6 @@ export default function StaffManagementPage() {
               </div>
             </div>
           </div>
-          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
@@ -237,7 +236,6 @@ export default function StaffManagementPage() {
               </div>
             </div>
           </div>
-          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -251,7 +249,6 @@ export default function StaffManagementPage() {
               </div>
             </div>
           </div>
-          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -275,7 +272,7 @@ export default function StaffManagementPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th> {/* ✅ เพิ่มคอลัมน์ */}
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
@@ -319,9 +316,10 @@ export default function StaffManagementPage() {
                            staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
                         </span>
                       </td>
+                      {/* ✅ แสดงชื่อโรงพยาบาล */}
                       <td className="px-6 py-4">
                         <span className="text-sm text-gray-600">
-                          {staff.hospital_name || '-'}
+                          {staff.hospitals?.name || '-'}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -459,7 +457,7 @@ export default function StaffManagementPage() {
                           <div className="text-sm text-gray-600 space-y-1">
                             <p>ID Card: {staff.id_card}</p>
                             <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
-                            <p>โรงพยาบาล: {staff.hospital_name || '-'}</p>
+                            <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
                             <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at).toLocaleString('th-TH')}</p>
                           </div>
                         </div>
@@ -504,7 +502,12 @@ export default function StaffManagementPage() {
 }
 
 // Add Staff Modal Component
-function AddStaffModal({ hospitals, onClose, onSuccess, userId }: { hospitals: any[]; onClose: () => void; onSuccess: () => void; userId: string }) {
+function AddStaffModal({ hospitals, onClose, onSuccess, userId }: { 
+  hospitals: any[]; 
+  onClose: () => void; 
+  onSuccess: () => void; 
+  userId: string 
+}) {
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -683,7 +686,12 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: { hospitals: a
 }
 
 // Edit Staff Modal Component
-function EditStaffModal({ staff, hospitals, onClose, onSuccess }: { staff: any; hospitals: any[]; onClose: () => void; onSuccess: () => void }) {
+function EditStaffModal({ staff, hospitals, onClose, onSuccess }: { 
+  staff: any; 
+  hospitals: any[]; 
+  onClose: () => void; 
+  onSuccess: () => void 
+}) {
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
