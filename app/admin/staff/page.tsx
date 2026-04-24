@@ -1,8 +1,14 @@
-'use client';
+// app/admin/staff/page.tsx
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. เพิ่ม dropdown เลือกโรงพยาบาล
+//    2. ดึงรายการโรงพยาบาลจากฐานข้อมูล
+//    3. บันทึก hospital_id ลงใน users table
 
+'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff } from '@/lib/supabase/queries';
+import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals } from '@/lib/supabase/queries';
 import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw } from 'lucide-react';
 
 export default function StaffManagementPage() {
@@ -10,6 +16,7 @@ export default function StaffManagementPage() {
   const [user, setUser] = useState<any>(null);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
+  const [hospitals, setHospitals] = useState<any[]>([]); // ✅ State สำหรับโรงพยาบาล
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -18,7 +25,6 @@ export default function StaffManagementPage() {
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
@@ -32,7 +38,19 @@ export default function StaffManagementPage() {
 
     setUser(userData);
     loadStaffList();
+    loadHospitals(); // ✅ โหลดรายการโรงพยาบาล
   }, [router]);
+
+  const loadHospitals = async () => {
+    try {
+      console.log('🏥 Loading hospitals...');
+      const data = await getHospitals();
+      console.log('✅ Hospitals loaded:', data.length);
+      setHospitals(data);
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
+    }
+  };
 
   const loadStaffList = async () => {
     try {
@@ -134,33 +152,34 @@ export default function StaffManagementPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-4">
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.push('/admin/dashboard')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ Dashboard
+          </button>
+          
           <div className="flex items-center justify-between">
             <div>
-              <button
-                onClick={() => router.push('/admin/dashboard')}
-                className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                กลับ Dashboard
-              </button>
-              <h1 className="text-2xl font-bold text-gray-800">จัดการเจ้าหน้าที่</h1>
-              <p className="text-sm text-gray-600">จัดการผู้ดูแลระบบ แพทย์ และเจ้าหน้าที่</p>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                👥 จัดการเจ้าหน้าที่
+              </h1>
+              <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ และเจ้าหน้าที่</p>
             </div>
-            <div className="flex items-center gap-4">
+            
+            <div className="flex gap-2">
               <button
                 onClick={handleOpenDeactivatedModal}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
@@ -168,6 +187,7 @@ export default function StaffManagementPage() {
                 <Archive className="w-4 h-4" />
                 ที่ปิดการใช้งาน ({deactivatedStaff.length})
               </button>
+              
               <button
                 onClick={() => setShowAddModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -175,6 +195,7 @@ export default function StaffManagementPage() {
                 <Plus className="w-4 h-4" />
                 เพิ่มเจ้าหน้าที่
               </button>
+              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -202,6 +223,7 @@ export default function StaffManagementPage() {
               </div>
             </div>
           </div>
+          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
@@ -215,6 +237,7 @@ export default function StaffManagementPage() {
               </div>
             </div>
           </div>
+          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -228,6 +251,7 @@ export default function StaffManagementPage() {
               </div>
             </div>
           </div>
+          
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -251,6 +275,7 @@ export default function StaffManagementPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
@@ -261,7 +286,7 @@ export default function StaffManagementPage() {
               <tbody className="divide-y divide-gray-200">
                 {staffList.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลเจ้าหน้าที่</p>
                     </td>
@@ -292,6 +317,11 @@ export default function StaffManagementPage() {
                         }`}>
                           {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
                            staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-600">
+                          {staff.hospital_name || '-'}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -354,6 +384,7 @@ export default function StaffManagementPage() {
       {/* Add Staff Modal */}
       {showAddModal && (
         <AddStaffModal
+          hospitals={hospitals}
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
@@ -367,6 +398,7 @@ export default function StaffManagementPage() {
       {showEditModal && selectedStaff && (
         <EditStaffModal
           staff={selectedStaff}
+          hospitals={hospitals}
           onClose={() => {
             setShowEditModal(false);
             setSelectedStaff(null);
@@ -427,6 +459,7 @@ export default function StaffManagementPage() {
                           <div className="text-sm text-gray-600 space-y-1">
                             <p>ID Card: {staff.id_card}</p>
                             <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
+                            <p>โรงพยาบาล: {staff.hospital_name || '-'}</p>
                             <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at).toLocaleString('th-TH')}</p>
                           </div>
                         </div>
@@ -471,7 +504,7 @@ export default function StaffManagementPage() {
 }
 
 // Add Staff Modal Component
-function AddStaffModal({ onClose, onSuccess, userId }: { onClose: () => void; onSuccess: () => void; userId: string }) {
+function AddStaffModal({ hospitals, onClose, onSuccess, userId }: { hospitals: any[]; onClose: () => void; onSuccess: () => void; userId: string }) {
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -480,6 +513,7 @@ function AddStaffModal({ onClose, onSuccess, userId }: { onClose: () => void; on
     specialization_th: '',
     phone: '',
     email: '',
+    hospital_id: '', // ✅ เพิ่ม hospital_id
   });
   const [loading, setLoading] = useState(false);
 
@@ -582,6 +616,25 @@ function AddStaffModal({ onClose, onSuccess, userId }: { onClose: () => void; on
             </div>
           </div>
 
+          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              โรงพยาบาลสังกัด
+            </label>
+            <select
+              value={formData.hospital_id}
+              onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- เลือกโรงพยาบาล --</option>
+              {hospitals.map((hospital) => (
+                <option key={hospital.id} value={hospital.id}>
+                  {hospital.name} ({hospital.code})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -630,12 +683,13 @@ function AddStaffModal({ onClose, onSuccess, userId }: { onClose: () => void; on
 }
 
 // Edit Staff Modal Component
-function EditStaffModal({ staff, onClose, onSuccess }: { staff: any; onClose: () => void; onSuccess: () => void }) {
+function EditStaffModal({ staff, hospitals, onClose, onSuccess }: { staff: any; hospitals: any[]; onClose: () => void; onSuccess: () => void }) {
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
     phone: staff.doctors?.phone || '',
     email: staff.doctors?.email || '',
+    hospital_id: staff.hospital_id || '', // ✅ เพิ่ม hospital_id
   });
   const [loading, setLoading] = useState(false);
 
@@ -689,6 +743,25 @@ function EditStaffModal({ staff, onClose, onSuccess }: { staff: any; onClose: ()
               onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
+          </div>
+
+          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              โรงพยาบาลสังกัด
+            </label>
+            <select
+              value={formData.hospital_id}
+              onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- เลือกโรงพยาบาล --</option>
+              {hospitals.map((hospital) => (
+                <option key={hospital.id} value={hospital.id}>
+                  {hospital.name} ({hospital.code})
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
