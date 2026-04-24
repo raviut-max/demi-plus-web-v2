@@ -1,9 +1,10 @@
 // app/admin/patients/[id]/edit/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เปลี่ยนไปใช้ getHospitalsWithHierarchy
-//    2. จัดกลุ่มโรงพยาบาลแบบ แม่ข่าย → ลูกข่าย (เหมือนหน้า Staff)
-//    3. แสดง Dropdown แบบมีลำดับชั้น
+//    1. ลบฟิลด์ รพสต ออก
+//    2. เพิ่ม dropdown เลือกโรงพยาบาล (แบบเดียวกับ Staff)
+//    3. จัดกลุ่มโรงพยาบาลแบบ แม่ข่าย → ลูกข่าย
+//    4. บันทึก hospital_id แทน subdistrict_health_center
 
 'use client';
 import { useState, useEffect } from 'react';
@@ -23,11 +24,11 @@ export default function EditPatientPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [patient, setPatient] = useState(null);
-  const [hospitals, setHospitals] = useState<any[]>([]); // ✅ State สำหรับโรงพยาบาล
+  const [patient, setPatient] = useState<any>(null);
+  const [hospitals, setHospitals] = useState<any[]>([]);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
@@ -41,11 +42,10 @@ export default function EditPatientPage() {
   });
 
   const [formData, setFormData] = useState({
-    // ข้อมูลส่วนตัว (แยกชื่อ-นามสกุล)
+    // ข้อมูลส่วนตัว
     first_name: '',
     last_name: '',
     hospital_number: '',
-    // วันเกิด (แยก 3 ช่อง)
     birth_day: '',
     birth_month: '',
     birth_year: '',
@@ -63,16 +63,15 @@ export default function EditPatientPage() {
     occupation: '',
     education_level: '',
 
-    // ที่อยู่ (แยกส่วน) - ที่เหลือจะมาจาก addressData
+    // ที่อยู่
     house_number: '',
     address_line1: '',
     soi: '',
     road: '',
     village_no: '',
     village_name: '',
-    // province, district, subdistrict, postal_code จะมาจาก addressData
 
-    // ✅ hospital_id
+    // ✅ เปลี่ยนจาก subdistrict_health_center → hospital_id
     hospital_id: '',
 
     // ผู้ติดต่อฉุกเฉิน
@@ -95,7 +94,7 @@ export default function EditPatientPage() {
 
     setUser(userData);
     loadPatientData();
-    loadHospitals(); // ✅ โหลดรายการโรงพยาบาล
+    loadHospitals();
   }, [router]);
 
   // ✅ โหลดรายการโรงพยาบาล (แบบมีลำดับชั้น)
@@ -152,13 +151,12 @@ export default function EditPatientPage() {
           road: data.road || '',
           village_no: data.village_no || '',
           village_name: data.village_name || '',
-          hospital_id: data.hospital_id || '', // ✅ ใช้ hospital_id
+          hospital_id: data.hospital_id || '',
           emergency_contact_name: data.emergency_contact_name || '',
           emergency_contact_phone: data.emergency_contact_phone || '',
           emergency_contact_relationship: data.emergency_contact_relationship || '',
         });
 
-        // ✅ ตั้งค่าเริ่มต้นสำหรับ ThaiAddressSelector
         setAddressData({
           province: data.province || '',
           district: data.district || '',
@@ -173,7 +171,6 @@ export default function EditPatientPage() {
     }
   };
 
-  // ✅ Handler สำหรับรับข้อมูลจาก ThaiAddressSelector
   const handleAddressChange = (data: {
     province: string;
     district: string;
@@ -188,7 +185,6 @@ export default function EditPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
 
-    // สร้าง Map ของแม่ข่าย → ลูกข่าย
     const hospitalGroups = new Map<string, any[]>();
 
     subHospitals.forEach((sub) => {
@@ -262,7 +258,6 @@ export default function EditPatientPage() {
     const errors: Record<string, string> = {};
     const success: Record<string, boolean> = {};
 
-    // ตรวจสอบเบอร์โทรศัพท์
     const phoneResult = validatePhoneNumber(formData.phone);
     if (!phoneResult.valid) {
       errors.phone = phoneResult.message;
@@ -270,7 +265,6 @@ export default function EditPatientPage() {
       success.phone = true;
     }
 
-    // ตรวจสอบอีเมล
     const emailResult = validateEmail(formData.email);
     if (!emailResult.valid) {
       errors.email = emailResult.message;
@@ -278,7 +272,6 @@ export default function EditPatientPage() {
       success.email = true;
     }
 
-    // ตรวจสอบน้ำหนัก (30-200 kg)
     const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
     if (!weightResult.valid) {
       errors.current_weight = weightResult.message;
@@ -286,7 +279,6 @@ export default function EditPatientPage() {
       success.current_weight = true;
     }
 
-    // ตรวจสอบส่วนสูง (100-250 cm)
     const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
     if (!heightResult.valid) {
       errors.height = heightResult.message;
@@ -294,7 +286,6 @@ export default function EditPatientPage() {
       success.height = true;
     }
 
-    // ตรวจสอบรอบเอว (26-200 cm)
     const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
     if (!waistResult.valid) {
       errors.waist_circumference = waistResult.message;
@@ -310,32 +301,26 @@ export default function EditPatientPage() {
   const getFriendlyErrorMessage = (error: any): string => {
     if (!error) return '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
 
-    // ตรวจสอบ diabetes_type
     if (error.message?.includes('profiles_diabetes_type_check')) {
       return '❌ ประเภทเบาหวานไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกประเภทเบาหวานจากเมนู dropdown\n- ต้องเป็น: Type 1, Type 2, Gestational, Other, กลุ่มเสี่ยง, หรือ เบาหวาน เท่านั้น';
     }
 
-    // ตรวจสอบ waist_circumference
     if (error.message?.includes('waist_circumference')) {
       return '❌ รอบเอวต้องอยู่ระหว่าง 26-200 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่ารอบเอวที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
 
-    // ตรวจสอบ current_weight
     if (error.message?.includes('current_weight')) {
       return '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 กก.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าน้ำหนักที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
 
-    // ตรวจสอบ height
     if (error.message?.includes('height')) {
       return '❌ ส่วนสูงต้องอยู่ระหว่าง 100-250 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าส่วนสูงที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
 
-    // ตรวจสอบ HN ซ้ำ
     if (error.message?.includes('hospital_number')) {
       return '❌ เลข HN (Hospital Number) ซ้ำกับผู้ป่วยคนอื่น\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลข HN ให้ถูกต้อง\n- หรือใช้เลข HN ใหม่ที่ไม่ซ้ำ';
     }
 
-    // ตรวจสอบ gender
     if (error.message?.includes('profiles_gender_check')) {
       return '❌ เพศไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกเพศจากเมนู dropdown\n- ต้องเป็น: ชาย หรือ หญิง เท่านั้น';
     }
@@ -347,25 +332,20 @@ export default function EditPatientPage() {
     e.preventDefault();
     setError('');
 
-    // ✅ ตรวจสอบข้อมูลก่อนบันทึก
     const errors: string[] = [];
 
-    // ตรวจสอบ HN
     if (!formData.hospital_number) {
       errors.push('• HN เป็นข้อมูลจำเป็น');
     }
 
-    // ตรวจสอบวันเกิด
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       errors.push('• กรุณากรอกวันเกิดให้ครบถ้วน');
     }
 
-    // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       errors.push('• กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
     }
 
-    // ตรวจสอบเบอร์โทรศัพท์
     if (formData.phone) {
       const phoneResult = validatePhoneNumber(formData.phone);
       if (!phoneResult.valid) {
@@ -373,7 +353,6 @@ export default function EditPatientPage() {
       }
     }
 
-    // ตรวจสอบอีเมล
     if (formData.email) {
       const emailResult = validateEmail(formData.email);
       if (!emailResult.valid) {
@@ -381,7 +360,6 @@ export default function EditPatientPage() {
       }
     }
 
-    // ตรวจสอบน้ำหนัก
     if (formData.current_weight) {
       const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
       if (!weightResult.valid) {
@@ -389,7 +367,6 @@ export default function EditPatientPage() {
       }
     }
 
-    // ตรวจสอบส่วนสูง
     if (formData.height) {
       const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
       if (!heightResult.valid) {
@@ -397,7 +374,6 @@ export default function EditPatientPage() {
       }
     }
 
-    // ตรวจสอบรอบเอว
     if (formData.waist_circumference) {
       const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
       if (!waistResult.valid) {
@@ -405,7 +381,6 @@ export default function EditPatientPage() {
       }
     }
 
-    // แสดง error ถ้ามี
     if (errors.length > 0) {
       setError(
         `❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\n` +
@@ -419,7 +394,6 @@ export default function EditPatientPage() {
     setSaving(true);
 
     try {
-      // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
@@ -440,19 +414,18 @@ export default function EditPatientPage() {
         occupation: formData.occupation,
         education_level: formData.education_level,
 
-        // ที่อยู่แยกส่วน
         house_number: formData.house_number,
         address_line1: formData.address_line1,
         soi: formData.soi,
         road: formData.road,
         village_no: formData.village_no,
         village_name: formData.village_name,
-        subdistrict: addressData.subdistrict, // ✅ จาก ThaiAddressSelector
-        district: addressData.district, // ✅ จาก ThaiAddressSelector
-        province: addressData.province, // ✅ จาก ThaiAddressSelector
-        postal_code: addressData.postalCode, // ✅ จาก ThaiAddressSelector
+        subdistrict: addressData.subdistrict,
+        district: addressData.district,
+        province: addressData.province,
+        postal_code: addressData.postalCode,
 
-        // ✅ hospital_id
+        // ✅ เปลี่ยนจาก subdistrict_health_center → hospital_id
         hospital_id: formData.hospital_id || null,
 
         emergency_contact_name: formData.emergency_contact_name,
@@ -465,14 +438,11 @@ export default function EditPatientPage() {
 
       if (error) {
         console.error('❌ Error updating patient:', error);
-
-        // ✅ ใช้ฟังก์ชันแปลง error message
         const friendlyError = getFriendlyErrorMessage(error);
         setError(friendlyError);
         return;
       }
 
-      // ✅ แสดงความสำเร็จ
       setError('✅ แก้ไขข้อมูลผู้ป่วยสำเร็จ!');
       setTimeout(() => {
         router.push(`/admin/patients/${patientId}`);
@@ -499,7 +469,6 @@ export default function EditPatientPage() {
     );
   }
 
-  // ✅ จัดกลุ่มโรงพยาบาลสำหรับแสดงผล
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
 
   return (
@@ -564,7 +533,6 @@ export default function EditPatientPage() {
                 />
               </div>
 
-              {/* ✅ HN + วันเกิด (บรรทัดเดียวกัน) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">HN (Hospital Number) *</label>
                 <input
@@ -793,7 +761,6 @@ export default function EditPatientPage() {
                 )}
               </div>
 
-              {/* ✅ ประเภทเบาหวาน */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทเบาหวาน</label>
                 <select
@@ -802,10 +769,6 @@ export default function EditPatientPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 >
                   <option value="">-- เลือกประเภท --</option>
-                  <option value="Type 1">Type 1</option>
-                  <option value="Type 2">Type 2</option>
-                  <option value="Gestational">Gestational</option>
-                  <option value="Other">Other</option>
                   <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
                   <option value="เบาหวาน">เบาหวาน</option>
                 </select>
@@ -842,7 +805,6 @@ export default function EditPatientPage() {
             <h2 className="text-xl font-bold text-gray-800 mb-4">ที่อยู่</h2>
 
             <div className="space-y-4">
-              {/* เลขที่ + ที่อยู่เพิ่มเติม */}
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">เลขที่</label>
@@ -866,7 +828,6 @@ export default function EditPatientPage() {
                 </div>
               </div>
 
-              {/* หมู่ที่ + หมู่บ้าน */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">หมู่ที่/ชุมชน</label>
@@ -890,7 +851,6 @@ export default function EditPatientPage() {
                 </div>
               </div>
 
-              {/* ซอย + ถนน */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">ซอย</label>
@@ -914,7 +874,6 @@ export default function EditPatientPage() {
                 </div>
               </div>
 
-              {/* ✅ ThaiAddressSelector - เลือก จังหวัด/อำเภอ/ตำบล/รหัสไปรษณีย์ */}
               <div>
                 <ThaiAddressSelector
                   onAddressChange={handleAddressChange}
@@ -938,11 +897,11 @@ export default function EditPatientPage() {
                   <option value="">-- เลือกโรงพยาบาล --</option>
 
                   {/* ✅ แม่ข่าย */}
-                  {mainHospitals.map((hospital) => (
+                  {mainHospitals.map((hospital: any) => (
                     <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
                       <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
                       {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
-                      {hospitalGroups.get(hospital.id)?.map((sub) => (
+                      {hospitalGroups.get(hospital.id)?.map((sub: any) => (
                         <option key={sub.id} value={sub.id}>
                           {'   '}└─ {sub.name} ({sub.code})
                         </option>
@@ -996,7 +955,7 @@ export default function EditPatientPage() {
             </div>
           </div>
 
-          {/* ✅ Error/Success Message - แสดงใน UI แทน alert */}
+          {/* ✅ Error/Success Message */}
           {error && (
             <div
               className={`rounded-xl p-6 border-2 ${
