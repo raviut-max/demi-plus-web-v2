@@ -1,12 +1,14 @@
 // app/admin/patients/[id]/edit/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: เอาวันที่วินิจฉัยออก ไม่ต้องใช้แล้ว
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. ลบฟิลด์ รพสต ออก
+//    2. เพิ่ม dropdown เลือกโรงพยาบาล (แบบเดียวกับ Staff)
+//    3. บันทึก hospital_id แทน subdistrict_health_center
 
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getPatientDetail } from '@/lib/supabase/queries';
+import { checkSession, logout, getPatientDetail, getHospitals } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import { ArrowLeft, LogOut, Save, AlertCircle, CheckCircle } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
@@ -21,11 +23,11 @@ export default function EditPatientPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [patient, setPatient] = useState<any>(null);
+  const [hospitals, setHospitals] = useState<any[]>([]); // ✅ State สำหรับโรงพยาบาล
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
@@ -47,7 +49,6 @@ export default function EditPatientPage() {
     birth_day: '',
     birth_month: '',
     birth_year: '',
-
     gender: '',
     phone: '',
     email: '',
@@ -57,12 +58,6 @@ export default function EditPatientPage() {
     height: '',
     waist_circumference: '',
     diabetes_type: '',
-
-    // ✅ เอาวันที่วินิจฉัยออก - ไม่ต้องใช้แล้ว
-    // diagnosis_day: '',
-    // diagnosis_month: '',
-    // diagnosis_year: '',
-
     hba1c_level: '',
     notes: '',
     occupation: '',
@@ -77,7 +72,8 @@ export default function EditPatientPage() {
     village_name: '',
     // province, district, subdistrict, postal_code จะมาจาก addressData
 
-    subdistrict_health_center: '',
+    // ✅ เปลี่ยนจาก subdistrict_health_center → hospital_id
+    hospital_id: '',
 
     // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
@@ -91,7 +87,6 @@ export default function EditPatientPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -100,7 +95,20 @@ export default function EditPatientPage() {
 
     setUser(userData);
     loadPatientData();
+    loadHospitals(); // ✅ โหลดรายการโรงพยาบาล
   }, [router]);
+
+  // ✅ โหลดรายการโรงพยาบาล
+  const loadHospitals = async () => {
+    try {
+      console.log('🏥 Loading hospitals...');
+      const data = await getHospitals();
+      console.log('✅ Hospitals loaded:', data.length);
+      setHospitals(data);
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
+    }
+  };
 
   const loadPatientData = async () => {
     try {
@@ -134,7 +142,6 @@ export default function EditPatientPage() {
           height: data.height?.toString() || '',
           waist_circumference: data.waist_circumference?.toString() || '',
           diabetes_type: data.diabetes_type || '',
-          // ✅ เอาวันที่วินิจฉัยออก
           hba1c_level: data.hba1c_level?.toString() || '',
           notes: data.notes || '',
           occupation: data.occupation || '',
@@ -145,7 +152,7 @@ export default function EditPatientPage() {
           road: data.road || '',
           village_no: data.village_no || '',
           village_name: data.village_name || '',
-          subdistrict_health_center: data.subdistrict_health_center || '',
+          hospital_id: data.hospital_id || '', // ✅ ใช้ hospital_id
           emergency_contact_name: data.emergency_contact_name || '',
           emergency_contact_phone: data.emergency_contact_phone || '',
           emergency_contact_relationship: data.emergency_contact_relationship || '',
@@ -222,9 +229,9 @@ export default function EditPatientPage() {
       return { valid: false, message: `${fieldName} ต้องเป็นตัวเลข` };
     }
     if (numValue < min || numValue > max) {
-      return { 
-        valid: false, 
-        message: `${fieldName} ต้องอยู่ระหว่าง ${min}-${max} ${unit}` 
+      return {
+        valid: false,
+        message: `${fieldName} ต้องอยู่ระหว่าง ${min}-${max} ${unit}`
       };
     }
     return { valid: true, message: `${fieldName} ถูกต้อง` };
@@ -399,7 +406,6 @@ export default function EditPatientPage() {
       const updateData: any = {
         first_name: formData.first_name,
         last_name: formData.last_name,
-        // ✅ ไม่ส่ง full_name แล้ว (ใช้ first_name + last_name แทน)
         hospital_number: formData.hospital_number,
         birth_date: birthDate,
         gender: formData.gender,
@@ -409,8 +415,6 @@ export default function EditPatientPage() {
         height: formData.height ? parseFloat(formData.height) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         diabetes_type: formData.diabetes_type,
-        // ✅ เอาวันที่วินิจฉัยออก - ไม่ต้องส่งแล้ว
-        // diagnosis_date: diagnosisDate,
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : null,
         notes: formData.notes,
         occupation: formData.occupation,
@@ -427,7 +431,9 @@ export default function EditPatientPage() {
         district: addressData.district,        // ✅ จาก ThaiAddressSelector
         province: addressData.province,        // ✅ จาก ThaiAddressSelector
         postal_code: addressData.postalCode,   // ✅ จาก ThaiAddressSelector
-        subdistrict_health_center: formData.subdistrict_health_center,
+        
+        // ✅ เปลี่ยนจาก subdistrict_health_center → hospital_id
+        hospital_id: formData.hospital_id || null,
         
         emergency_contact_name: formData.emergency_contact_name,
         emergency_contact_phone: formData.emergency_contact_phone,
@@ -927,19 +933,31 @@ export default function EditPatientPage() {
                 />
               </div>
               
-              {/* รพสต */}
+              {/* ✅ เปลี่ยนจาก รพสต → เลือกโรงพยาบาล */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  🏥 รพสต (โรงพยาบาลส่งเสริมสุขภาพตำบล)
+                  🏥 โรงพยาบาลสังกัด
                 </label>
-                <input
-                  type="text"
-                  value={formData.subdistrict_health_center}
-                  onChange={(e) => setFormData({...formData, subdistrict_health_center: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                  placeholder="เช่น รพสต.คลองเตย, รพสต.สุขใจ"
-                />
-                <p className="text-xs text-gray-500 mt-1">กรอกชื่อโรงพยาบาลส่งเสริมสุขภาพตำบลที่ผู้ป่วยสังกัด</p>
+                <select
+                  value={formData.hospital_id}
+                  onChange={(e) => setFormData({...formData, hospital_id: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">-- เลือกโรงพยาบาล --</option>
+                  {hospitals.map((hospital: any) => (
+                    <option key={hospital.id} value={hospital.id}>
+                      {hospital.name} ({hospital.code})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
+                </p>
+                {hospitals.length === 0 && (
+                  <p className="text-xs text-orange-500 mt-1">
+                    ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
+                  </p>
+                )}
               </div>
             </div>
           </div>
