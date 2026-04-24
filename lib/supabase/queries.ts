@@ -2463,3 +2463,38 @@ export async function getSubdistricts(province: string, district: string) {
     return [];
   }
 }
+
+// =====================================================
+// 🏥 ฟังก์ชันดึงโรงพยาบาลแบบ Hierarchical (พร้อมลูกข่าย)
+// =====================================================
+export async function getHospitalsWithHierarchy() {
+  try {
+    console.log('🏥 Fetching hospitals with hierarchy...');
+    
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select(`
+        *,
+        parent_hospital:hospitals!parent_id (
+          id,
+          name,
+          code
+        )
+      `)
+      .eq('is_active', true)
+      .order('type', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('❌ Error fetching hospitals:', error);
+      return [];
+    }
+
+    console.log('✅ Hospitals with hierarchy fetched:', data?.length || 0);
+    return data || [];
+  } catch (err) {
+    console.error('❌ Get hospitals with hierarchy error:', err);
+    return [];
+  }
+}
+
