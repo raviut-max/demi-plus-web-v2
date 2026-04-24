@@ -3,7 +3,7 @@
 // ✅ การแก้ไข:
 //    1. เพิ่มปุ่ม "บันทึกติดตามใหม่" ด้านบนหน้า
 //    2. ตรวจสอบว่ามีการนัดหมายที่ยังไม่ได้ติดตามหรือไม่
-//    3. แยกกรณี: มีนัดหมาย → ไปหน้าบันทึกผลการติดตาม / ไม่มีนัดหมาย → แสดง confirm
+//    3. แสดง confirm dialog แบบง่าย (ไม่ต้องแจ้งว่าไม่พบนัดหมาย)
 
 'use client';
 
@@ -105,21 +105,20 @@ export default function FollowupHistoryPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่
+  // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่ (แก้ไขแล้ว - ลบข้อความไม่พบนัดหมาย)
   const handleNewFollowup = () => {
     console.log('🔴 New Followup button clicked');
-    console.log('  hasUnfollowedAppointment:', hasUnfollowedAppointment);
-    console.log('  latestAppointmentId:', latestAppointmentId);
+    console.log('hasUnfollowedAppointment:', hasUnfollowedAppointment);
+    console.log('latestAppointmentId:', latestAppointmentId);
 
     if (hasUnfollowedAppointment && latestAppointmentId) {
       // ✅ มีการนัดหมายที่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม
       console.log('🔗 Has unfollowed appointment → Navigate to followup form');
       router.push(`/admin/appointments/followup/${latestAppointmentId}`);
     } else {
-      // ✅ ไม่มีนัดหมายที่ยังไม่ได้ติดตาม → แสดง confirm dialog
+      // ✅ ยังไม่มีการนัดหมาย → แสดง confirm dialog (แบบง่าย)
       console.log('🔗 No unfollowed appointment → Show confirm dialog');
       const confirmCreate = confirm(
-        '📋 ไม่พบนัดหมายที่ยังไม่ได้ติดตาม\n\n' +
         'คุณต้องการบันทึกข้อมูลการติดตาม (ก่อนนัดหมาย) ตอนนี้เลยหรือไม่?\n\n' +
         '• กด "ตกลง" → ไปหน้าบันทึกข้อมูลการติดตาม\n' +
         '• กด "ยกเลิก" → ยกเลิก'
