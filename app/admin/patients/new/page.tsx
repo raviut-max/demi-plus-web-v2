@@ -1,9 +1,14 @@
 // app/admin/patients/new/page.tsx
-'use client';
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. เปลี่ยนจาก input รพสต → dropdown เลือกโรงพยาบาล
+//    2. จัดกลุ่มโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
+//    3. บันทึก hospital_id แทน subdistrict_health_center
 
+'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, registerPatient, getCoaches } from '@/lib/supabase/queries';
+import { checkSession, logout, registerPatient, getCoaches, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
 import { UserPlus, AlertCircle, Loader2, ArrowLeft } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 import { supabase } from '@/lib/supabase/client';
@@ -26,16 +31,24 @@ const THAI_MONTHS = [
   'ธันวาคม',
 ];
 
+// ✅ Interface สำหรับโรงพยาบาล
+interface Hospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+}
+
 export default function NewPatientPage() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [coaches, setCoaches] = useState<any[]>([]);
-  const [hospitals, setHospitals] = useState<any[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]); // ✅ State สำหรับโรงพยาบาล
   const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
@@ -69,14 +82,14 @@ export default function NewPatientPage() {
     road: '',
     village_no: '',
     village_name: '',
-    subdistrict_health_center: '',
+    // ✅ เปลี่ยนจาก subdistrict_health_center → hospital_id
+    hospital_id: '',
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
     occupation: '',
     education_level: '',
     coach_id: '',
-    hospital_id: '',
     village_id: '',
   });
 
@@ -91,11 +104,22 @@ export default function NewPatientPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadCoaches();
-    loadHospitals();
+    loadHospitals(); // ✅ โหลดรายการโรงพยาบาล
   }, [router]);
+
+  // ✅ โหลดรายการโรงพยาบาล (แบบมีลำดับชั้น)
+  const loadHospitals = async () => {
+    try {
+      console.log('🏥 Loading hospitals with hierarchy...');
+      const data = await getHospitalsWithHierarchy();
+      console.log('✅ Hospitals loaded:', data.length);
+      setHospitals(data);
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
+    }
+  };
 
   const loadCoaches = async () => {
     try {
@@ -103,21 +127,6 @@ export default function NewPatientPage() {
       setCoaches(data);
     } catch (error) {
       console.error('Error loading coaches:', error);
-    }
-  };
-
-  const loadHospitals = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('hospitals')
-        .select('*')
-        .eq('is_active', true)
-        .order('name');
-      
-      if (error) throw error;
-      setHospitals(data || []);
-    } catch (error) {
-      console.error('Error loading hospitals:', error);
     }
   };
 
@@ -139,7 +148,7 @@ export default function NewPatientPage() {
         console.error('Error loading villages:', error);
       }
     };
-    
+
     loadVillages();
   };
 
@@ -177,6 +186,26 @@ export default function NewPatientPage() {
     postalCode: string;
   }) => {
     setAddressData(data);
+  };
+
+  // ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+  const getGroupedHospitals = () => {
+    const mainHospitals = hospitals.filter((h) => h.type === 'main');
+    const subHospitals = hospitals.filter((h) => h.type === 'sub');
+
+    // สร้าง Map ของแม่ข่าย → ลูกข่าย
+    const hospitalGroups = new Map<string, Hospital[]>();
+
+    subHospitals.forEach((sub) => {
+      if (sub.parent_id) {
+        if (!hospitalGroups.has(sub.parent_id)) {
+          hospitalGroups.set(sub.parent_id, []);
+        }
+        hospitalGroups.get(sub.parent_id)!.push(sub);
+      }
+    });
+
+    return { mainHospitals, hospitalGroups };
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -243,7 +272,9 @@ export default function NewPatientPage() {
         district: addressData.district || undefined,
         province: addressData.province || undefined,
         postal_code: addressData.postalCode || undefined,
-        subdistrict_health_center: formData.subdistrict_health_center || undefined,
+        
+        // ✅ เปลี่ยนจาก subdistrict_health_center → hospital_id
+        hospital_id: formData.hospital_id || undefined,
         
         emergency_contact_name: formData.emergency_contact_name || undefined,
         emergency_contact_phone: formData.emergency_contact_phone || undefined,
@@ -251,13 +282,12 @@ export default function NewPatientPage() {
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
         
-        hospital_id: formData.hospital_id || undefined,
         village_id: formData.village_id || undefined,
         
         pam_level: 'L0',
         pam_score: 0,
         zone: 'Zero Zone',
-        
+         
         created_by: user?.id,
       });
 
@@ -280,19 +310,16 @@ export default function NewPatientPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-cyan-50">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 text-center max-w-md">
-          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">ลงทะเบียนสำเร็จ!</h2>
-          <p className="text-gray-600 mb-4">กำลังไปยังหน้ารายการผู้ป่วย...</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div className="bg-blue-500 h-2 rounded-full animate-pulse w-full"></div>
-          </div>
-          <p className="text-sm text-gray-500 mt-4">กรุณารอสักครู่</p>
+          <p className="text-gray-600">กำลังไปยังหน้ารายการผู้ป่วย...</p>
+          <p className="text-sm text-gray-500 mt-2">กรุณารอสักครู่</p>
         </div>
       </div>
     );
@@ -306,10 +333,13 @@ export default function NewPatientPage() {
     );
   }
 
+  const { mainHospitals, hospitalGroups } = getGroupedHospitals();
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-cyan-50">
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-5xl mx-auto px-4 py-6">
+        <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.back()}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 transition-colors"
@@ -320,7 +350,7 @@ export default function NewPatientPage() {
           
           <div>
             <h1 className="text-3xl font-bold text-gray-800 mb-2">
-              ลงทะเบียนผู้ป่วยใหม่
+              📝 ลงทะเบียนผู้ป่วยใหม่
             </h1>
             <p className="text-gray-600">
               กรอกข้อมูลผู้ป่วยเพื่อสร้างบัญชีและโปรไฟล์
@@ -662,26 +692,45 @@ export default function NewPatientPage() {
             ที่อยู่และโรงพยาบาลสังกัด
           </h2>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                โรงพยาบาลสังกัด
-              </label>
-              <select
-                name="hospital_id"
-                value={formData.hospital_id}
-                onChange={(e) => handleHospitalChange(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-              >
-                <option value="">-- เลือกโรงพยาบาล --</option>
-                {hospitals.map(hospital => (
-                  <option key={hospital.id} value={hospital.id}>
-                    {hospital.name} ({hospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              🏥 โรงพยาบาลสังกัด
+            </label>
+            <select
+              name="hospital_id"
+              value={formData.hospital_id}
+              onChange={(e) => handleHospitalChange(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent max-h-64 overflow-y-auto"
+            >
+              <option value="">-- เลือกโรงพยาบาล --</option>
+              
+              {/* ✅ แม่ข่าย */}
+              {mainHospitals.map((hospital) => (
+                <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
+                  <option value={hospital.id}>
+                    └ {hospital.name} ({hospital.code}) - แม่ข่าย
                   </option>
-                ))}
-              </select>
-            </div>
-
+                  {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
+                  {hospitalGroups.get(hospital.id)?.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {'   '}└─ {sub.name} ({sub.code})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
+            </p>
+            {hospitals.length === 0 && (
+              <p className="text-xs text-orange-500 mt-1">
+                ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
+              </p>
+            )}
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             {formData.hospital_id && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -798,23 +847,6 @@ export default function NewPatientPage() {
                 onAddressChange={handleAddressChange}
               />
             </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                🏥 รพสต (โรงพยาบาลส่งเสริมสุขภาพตำบล)
-              </label>
-              <input
-                type="text"
-                name="subdistrict_health_center"
-                value={formData.subdistrict_health_center}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                placeholder="เช่น รพสต.คลองเตย, รพสต.สุขใจ"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                💡 กรอกชื่อโรงพยาบาลส่งเสริมสุขภาพตำบลที่ผู้ป่วยสังกัด
-              </p>
-            </div>
           </div>
         </div>
 
@@ -902,34 +934,34 @@ export default function NewPatientPage() {
           </div>
         )}
 
-        <div className="flex items-center gap-4">
-          <button
+         <div className="flex items-center gap-4">
+           <button
             type="submit"
             disabled={loading}
             className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
+           >
             {loading ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
+               <>
+                 <Loader2 className="w-5 h-5 animate-spin" />
                 กำลังลงทะเบียน...
-              </>
+               </>
             ) : (
-              <>
-                <UserPlus className="w-5 h-5" />
+               <>
+                 <UserPlus className="w-5 h-5" />
                 ลงทะเบียนผู้ป่วย
-              </>
+               </>
             )}
-          </button>
+           </button>
           
-          <button
+           <button
             type="button"
             onClick={() => router.back()}
             className="px-6 py-4 bg-gray-500 text-white font-bold rounded-xl hover:bg-gray-600 transition-all"
-          >
+           >
             ยกเลิก
-          </button>
-        </div>
-      </form>
-    </div>
+           </button>
+         </div>
+       </form>
+     </div>
   );
 }
