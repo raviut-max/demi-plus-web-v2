@@ -120,6 +120,7 @@ export async function getProfile(userId: string) {
   return data;
 }
 
+
 // =====================================================
 // ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin)
 // =====================================================
@@ -127,7 +128,20 @@ export async function getPatientList(search?: string, pamLevel?: string) {
   try {
     let query = supabase
       .from('profiles')
-      .select(`*, users!profiles_id_fkey ( id_card, role, is_active, created_at )`)
+      .select(`
+        *, 
+        users!profiles_id_fkey ( 
+          id_card, 
+          role, 
+          is_active, 
+          created_at 
+        ),
+        hospitals (
+          id,
+          name,
+          code
+        )
+      `)
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
