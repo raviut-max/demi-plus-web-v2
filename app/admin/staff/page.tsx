@@ -1,14 +1,14 @@
 // app/admin/staff/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. จัดกลุ่มโรงพยาบาล แม่ข่าย/ลูกข่าย ใน dropdown
-//    2. แสดงชื่อโรงพยาบาลพร้อมประเภท (แม่ข่าย/ลูกข่าย)
-//    3. เรียงลำดับ แม่ข่ายก่อน แล้วตามด้วยลูกข่าย
+//    1. แสดงโรงพยาบาลแบบลำดับชั้น (แม่ข่าย + ลูกข่าย)
+//    2. ลูกข่ายไปอยู่ใต้แม่ข่ายของตัวเอง
+//    3. ใช้ optgroup จัดกลุ่มให้ชัดเจน
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals } from '@/lib/supabase/queries';
+import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals, groupHospitalsByParent } from '@/lib/supabase/queries';
 import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -501,14 +501,6 @@ export default function StaffManagementPage() {
   );
 }
 
-// ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล
-const groupHospitals = (hospitals: any[]) => {
-  const mainHospitals = hospitals.filter(h => h.type === 'main');
-  const subHospitals = hospitals.filter(h => h.type === 'sub');
-  
-  return { mainHospitals, subHospitals };
-};
-
 // Add Staff Modal Component
 function AddStaffModal({ hospitals, onClose, onSuccess, userId }: { 
   hospitals: any[]; 
@@ -552,8 +544,8 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
     }
   };
 
-  // ✅ จัดกลุ่มโรงพยาบาล
-  const { mainHospitals, subHospitals } = groupHospitals(hospitals);
+  // ✅ จัดกลุ่มโรงพยาบาลแบบลำดับชั้น
+  const { groupedHospitals, standaloneMains, orphanSubs } = groupHospitalsByParent(hospitals);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -630,7 +622,7 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
             </div>
           </div>
 
-          {/* ✅ Dropdown เลือกโรงพยาบาล - จัดกลุ่ม แม่ข่าย/ลูกข่าย */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบลำดับชั้น */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โรงพยาบาลสังกัด
@@ -642,10 +634,24 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
               
-              {/* ✅ แม่ข่าย */}
-              {mainHospitals.length > 0 && (
-                <optgroup label="🏥 โรงพยาบาลแม่ข่าย">
-                  {mainHospitals.map((hospital) => (
+              {/* ✅ แม่ข่ายที่มีลูกข่าย */}
+              {groupedHospitals.map((hospital) => (
+                <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
+                  <option value={hospital.id}>
+                     └ {hospital.name} ({hospital.code}) - แม่ข่าย
+                  </option>
+                  {hospital.subHospitals.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                       └─ {sub.name} ({sub.code})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              
+              {/* ✅ แม่ข่ายที่ไม่มีลูกข่าย */}
+              {standaloneMains.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลแม่ข่ายอื่นๆ">
+                  {standaloneMains.map((hospital) => (
                     <option key={hospital.id} value={hospital.id}>
                       {hospital.name} ({hospital.code})
                     </option>
@@ -653,10 +659,10 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
                 </optgroup>
               )}
               
-              {/* ✅ ลูกข่าย */}
-              {subHospitals.length > 0 && (
-                <optgroup label="🏥 โรงพยาบาลลูกข่าย">
-                  {subHospitals.map((hospital) => (
+              {/* ✅ ลูกข่ายที่ไม่มีแม่ข่าย */}
+              {orphanSubs.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลลูกข่ายอื่นๆ">
+                  {orphanSubs.map((hospital) => (
                     <option key={hospital.id} value={hospital.id}>
                       {hospital.name} ({hospital.code})
                     </option>
@@ -665,7 +671,8 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
               )}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              💡 แม่ข่าย: {mainHospitals.length} แห่ง | ลูกข่าย: {subHospitals.length} แห่ง
+              💡 แม่ข่าย: {groupedHospitals.length + standaloneMains.length} แห่ง | 
+              ลูกข่าย: {orphanSubs.length + groupedHospitals.reduce((acc, h) => acc + h.subHospitals.length, 0)} แห่ง
             </p>
           </div>
 
@@ -763,8 +770,8 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
     }
   };
 
-  // ✅ จัดกลุ่มโรงพยาบาล
-  const { mainHospitals, subHospitals } = groupHospitals(hospitals);
+  // ✅ จัดกลุ่มโรงพยาบาลแบบลำดับชั้น
+  const { groupedHospitals, standaloneMains, orphanSubs } = groupHospitalsByParent(hospitals);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -798,7 +805,7 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
             />
           </div>
 
-          {/* ✅ Dropdown เลือกโรงพยาบาล - จัดกลุ่ม แม่ข่าย/ลูกข่าย */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบลำดับชั้น */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โรงพยาบาลสังกัด
@@ -810,10 +817,24 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
               
-              {/* ✅ แม่ข่าย */}
-              {mainHospitals.length > 0 && (
-                <optgroup label="🏥 โรงพยาบาลแม่ข่าย">
-                  {mainHospitals.map((hospital) => (
+              {/* ✅ แม่ข่ายที่มีลูกข่าย */}
+              {groupedHospitals.map((hospital) => (
+                <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
+                  <option value={hospital.id}>
+                     └ {hospital.name} ({hospital.code}) - แม่ข่าย
+                  </option>
+                  {hospital.subHospitals.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                       └─ {sub.name} ({sub.code})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              
+              {/* ✅ แม่ข่ายที่ไม่มีลูกข่าย */}
+              {standaloneMains.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลแม่ข่ายอื่นๆ">
+                  {standaloneMains.map((hospital) => (
                     <option key={hospital.id} value={hospital.id}>
                       {hospital.name} ({hospital.code})
                     </option>
@@ -821,10 +842,10 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
                 </optgroup>
               )}
               
-              {/* ✅ ลูกข่าย */}
-              {subHospitals.length > 0 && (
-                <optgroup label="🏥 โรงพยาบาลลูกข่าย">
-                  {subHospitals.map((hospital) => (
+              {/* ✅ ลูกข่ายที่ไม่มีแม่ข่าย */}
+              {orphanSubs.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลลูกข่ายอื่นๆ">
+                  {orphanSubs.map((hospital) => (
                     <option key={hospital.id} value={hospital.id}>
                       {hospital.name} ({hospital.code})
                     </option>
@@ -833,7 +854,8 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
               )}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              💡 แม่ข่าย: {mainHospitals.length} แห่ง | ลูกข่าย: {subHospitals.length} แห่ง
+              💡 แม่ข่าย: {groupedHospitals.length + standaloneMains.length} แห่ง | 
+              ลูกข่าย: {orphanSubs.length + groupedHospitals.reduce((acc, h) => acc + h.subHospitals.length, 0)} แห่ง
             </p>
           </div>
 
