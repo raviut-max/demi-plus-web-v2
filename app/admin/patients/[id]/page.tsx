@@ -1,13 +1,14 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 23 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. ตรวจสอบการนัดหมายก่อนแสดงปุ่มติดตาม
-//    2. แยกกรณี: มีการนัดหมายแล้ว vs ยังไม่มีการนัดหมาย
-//    3. แสดง confirm dialog ถ้ายังไม่มีนัดหมาย
+//    1. เพิ่มระบบตรวจสอบว่ามาจากไหน (patient list หรือ appointments view)
+//    2. ปุ่มกลับจะกลับไปตามที่มาอย่างถูกต้อง
+//    3. ใช้ URL query parameter '?from=appointments' หรือ '?from=patients'
+
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -37,7 +38,12 @@ const THAI_MONTHS = [
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams(); // ✅ ดึง query parameters
   const patientId = params.id as string;
+  
+  // ✅ ตรวจสอบว่ามาจากไหน
+  const fromPage = searchParams.get('from') || 'patients'; // ค่าเริ่มต้น: 'patients'
+  
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
@@ -46,8 +52,11 @@ export default function PatientDetailPage() {
   const [hasScreening, setHasScreening] = useState(false);        // มีการประเมิน PAM/PROMs
   const [hasFollowup, setHasFollowup] = useState(false);          // มีการติดตามผลจริง
   const [followupCount, setFollowupCount] = useState(0);          // จำนวนครั้งที่ติดตาม
-  const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null); // ✅ ID นัดหมายล่าสุดที่ยังไม่ได้ followup
-  const [hasAppointment, setHasAppointment] = useState(false);    // ✅ มีการนัดหมายหรือไม่
+
+  useEffect(() => {
+    console.log('🔍 [DEBUG] Patient Detail - from:', fromPage);
+    console.log('🔍 [DEBUG] Patient ID:', patientId);
+  }, [fromPage, patientId]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -80,7 +89,7 @@ export default function PatientDetailPage() {
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย (แก้ไขแล้ว)
+  // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย
   const checkPatientStatus = async (pid: string) => {
     try {
       console.log('🔍 Checking patient status for:', pid);
@@ -100,7 +109,7 @@ export default function PatientDetailPage() {
       // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup - จาก appointment_followups)
       const {  followupData } = await supabase
         .from('appointment_followups')
-        .select('id, followup_round, appointment_id')
+        .select('id, followup_round')
         .eq('user_id', pid)
         .order('followup_round', { ascending: false });
       
@@ -108,76 +117,9 @@ export default function PatientDetailPage() {
       console.log('📋 Has followup:', hasFollowupData, 'Count:', followupData?.length);
       setHasFollowup(hasFollowupData);
       setFollowupCount(followupData?.length || 0);
-
-      // 3. ✅ ตรวจสอบว่ามีการนัดหมายหรือไม่
-      const {  appointmentsData } = await supabase
-        .from('appointments')
-        .select('id, appointment_date, status')
-        .eq('user_id', pid)
-        .order('appointment_date', { ascending: false })
-        .limit(1);
-      
-      const hasAppointmentData = (appointmentsData?.length || 0) > 0;
-      console.log('📅 Has appointment:', hasAppointmentData);
-      setHasAppointment(hasAppointmentData);
-
-      // 4. ✅ หา appointment ล่าสุดที่ยังไม่ได้ followup (ถ้ามีการนัดหมายแล้ว)
-      if (hasAppointmentData && appointmentsData && appointmentsData.length > 0) {
-        const latestApt = appointmentsData[0];
-        
-        // ตรวจสอบว่า appointment นี้มี followup หรือยัง
-        const {  existingFollowup } = await supabase
-          .from('appointment_followups')
-          .select('id')
-          .eq('appointment_id', latestApt.id)
-          .single();
-
-        if (!existingFollowup) {
-          // ยังไม่มี followup → เก็บ ID ไว้
-          setLatestAppointmentId(latestApt.id);
-          console.log('📅 Latest appointment without followup:', latestApt.id);
-        }
-      }
       
     } catch (error) {
       console.error('❌ Error checking patient status:', error);
-    }
-  };
-
-  // ✅ ฟังก์ชันจัดการคลิกปุ่มติดตาม (สีม่วง) - แก้ไขแล้ว
-  const handleFollowupClick = () => {
-    console.log('🔴 Followup button clicked');
-    console.log('  hasFollowup:', hasFollowup);
-    console.log('  hasAppointment:', hasAppointment);
-    console.log('  latestAppointmentId:', latestAppointmentId);
-
-    if (hasFollowup) {
-      // ✅ มีการติดตามแล้ว → ไปหน้าประวัติการติดตาม
-      console.log('🔗 Has followup → Navigate to followup history');
-      router.push(`/admin/patients/${patientId}/followup-history`);
-    } else if (hasAppointment && latestAppointmentId) {
-      // ✅ มีการนัดหมายแล้ว แต่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม
-      console.log('🔗 Has appointment but no followup → Navigate to followup form');
-      router.push(`/admin/appointments/followup/${latestAppointmentId}`);
-    } else {
-      // ✅ ยังไม่มีการนัดหมาย → แสดง confirm dialog
-      console.log('🔗 No appointment → Show confirm dialog');
-      const confirmCreate = confirm(
-        '📋 ผู้ป่วยคนนี้ยังไม่มีนัดหมายในระบบ\n\n' +
-        'คุณต้องการบันทึกข้อมูลการติดตาม (ก่อนนัดหมาย) ตอนนี้เลยหรือไม่?\n\n' +
-        '• กด "ตกลง" → ไปหน้าบันทึกข้อมูลการติดตาม\n' +
-        '• กด "ยกเลิก" → ไปหน้าประวัติการติดตาม'
-      );
-
-      if (confirmCreate) {
-        // ✅ ไปหน้าบันทึกผลการติดตาม (แบบไม่มีนัดหมาย)
-        console.log('🔗 Navigate to followup form (no appointment)');
-        router.push(`/admin/appointments/followup/new?patient_id=${patientId}`);
-      } else {
-        // ✅ ไปหน้าประวัติการติดตาม
-        console.log('🔗 Navigate to followup history');
-        router.push(`/admin/patients/${patientId}/followup-history`);
-      }
     }
   };
 
@@ -211,6 +153,19 @@ export default function PatientDetailPage() {
     return (weight / (heightInM * heightInM)).toFixed(1);
   };
 
+  // ✅ ฟังก์ชันจัดการปุ่มกลับ - กลับไปตามที่มา
+  const handleGoBack = () => {
+    console.log('🔙 [DEBUG] Going back, from:', fromPage);
+    
+    if (fromPage === 'appointments') {
+      // ✅ กลับไปหน้าดูนัดหมาย
+      router.push('/admin/appointments/view');
+    } else {
+      // ✅ กลับไปหน้ารายการผู้ป่วย
+      router.push('/admin/patients');
+    }
+  };
+
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
@@ -229,12 +184,13 @@ export default function PatientDetailPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={() => router.push('/admin/patients')}
+            onClick={handleGoBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับรายการผู้ป่วย
+            กลับ{fromPage === 'appointments' ? 'หน้าดูนัดหมาย' : 'รายการผู้ป่วย'}
           </button>
           
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -322,9 +278,9 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด (แก้ไขแล้ว) */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
           <div 
-            onClick={handleFollowupClick}
+            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
           >
             <div className="flex items-center justify-between">
@@ -380,7 +336,7 @@ export default function PatientDetailPage() {
           </button>
           
           <button
-            onClick={handleFollowupClick}
+            onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
           >
             <Activity className="w-4 h-4" />
