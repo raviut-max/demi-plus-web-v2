@@ -378,10 +378,17 @@ export async function registerPatient(data: {
 export async function getPatientDetail(userId: string) {
   try {
     console.log('🔍 Fetching patient detail for ID:', userId);
-
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select(`
+        *,
+        hospitals (
+          id,
+          name,
+          code,
+          type
+        )
+      `)
       .eq('id', userId)
       .single();
 
