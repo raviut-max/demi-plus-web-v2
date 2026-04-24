@@ -1,23 +1,31 @@
 // app/admin/staff/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มการโหลดโรงพยาบาลจากฐานข้อมูล
-//    2. เพิ่ม dropdown เลือกโรงพยาบาลในฟอร์ม
+//    1. เพิ่ม dropdown เลือกโรงพยาบาล
+//    2. จัดกลุ่มโรงพยาบาล แม่ข่าย/ลูกข่าย
 //    3. บันทึก hospital_id ลงใน users table
-//    4. เพิ่ม debug log ครบถ้วน
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals } from '@/lib/supabase/queries';
 import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+
+// ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล
+const groupHospitals = (hospitals: any[]) => {
+  const mainHospitals = hospitals.filter(h => h.type === 'main');
+  const subHospitals = hospitals.filter(h => h.type === 'sub');
+  
+  return { mainHospitals, subHospitals };
+};
 
 export default function StaffManagementPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
-  const [hospitals, setHospitals] = useState<any[]>([]); // ✅ State สำหรับเก็บรายการโรงพยาบาล
+  const [hospitals, setHospitals] = useState<any[]>([]); // ✅ State สำหรับโรงพยาบาล
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -39,29 +47,26 @@ export default function StaffManagementPage() {
 
     setUser(userData);
     loadStaffList();
-    loadHospitals(); // ✅ โหลดรายการโรงพยาบาลเมื่อหน้าโหลด
+    loadHospitals(); // ✅ โหลดรายการโรงพยาบาล
   }, [router]);
 
-  // ✅ ฟังก์ชันโหลดรายการโรงพยาบาลจากฐานข้อมูล
   const loadHospitals = async () => {
     try {
-      console.log('🏥 [DEBUG] Loading hospitals...');
+      console.log('🏥 Loading hospitals...');
       const data = await getHospitals();
-      console.log('✅ [DEBUG] Hospitals loaded:', data.length, 'hospitals');
-      console.log('📋 [DEBUG] Hospitals data:', data);
+      console.log('✅ Hospitals loaded:', data.length);
       setHospitals(data);
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading hospitals:', error);
+      console.error('Error loading hospitals:', error);
     }
   };
 
   const loadStaffList = async () => {
     try {
       const data = await getStaffList();
-      console.log('👥 [DEBUG] Staff list loaded:', data.length, 'staff members');
       setStaffList(data);
     } catch (error) {
-      console.error('❌ [DEBUG] Error loading staff list:', error);
+      console.error('Error loading staff list:', error);
     } finally {
       setLoading(false);
     }
@@ -145,7 +150,6 @@ export default function StaffManagementPage() {
   };
 
   const handleEdit = (staff: any) => {
-    console.log('✏️ [DEBUG] Editing staff:', staff);
     setSelectedStaff(staff);
     setShowEditModal(true);
   };
@@ -277,7 +281,6 @@ export default function StaffManagementPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
@@ -288,7 +291,7 @@ export default function StaffManagementPage() {
               <tbody className="divide-y divide-gray-200">
                 {staffList.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลเจ้าหน้าที่</p>
                     </td>
@@ -319,12 +322,6 @@ export default function StaffManagementPage() {
                         }`}>
                           {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
                            staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
-                        </span>
-                      </td>
-                      {/* ✅ แสดงชื่อโรงพยาบาล */}
-                      <td className="px-6 py-4">
-                        <span className="text-sm text-gray-600">
-                          {staff.hospitals?.name || '-'}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -387,7 +384,7 @@ export default function StaffManagementPage() {
       {/* Add Staff Modal */}
       {showAddModal && (
         <AddStaffModal
-          hospitals={hospitals} // ✅ ส่งรายการโรงพยาบาลไปยัง Modal
+          hospitals={hospitals}
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
@@ -401,7 +398,7 @@ export default function StaffManagementPage() {
       {showEditModal && selectedStaff && (
         <EditStaffModal
           staff={selectedStaff}
-          hospitals={hospitals} // ✅ ส่งรายการโรงพยาบาลไปยัง Modal
+          hospitals={hospitals}
           onClose={() => {
             setShowEditModal(false);
             setSelectedStaff(null);
@@ -462,7 +459,6 @@ export default function StaffManagementPage() {
                           <div className="text-sm text-gray-600 space-y-1">
                             <p>ID Card: {staff.id_card}</p>
                             <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
-                            <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
                             <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at).toLocaleString('th-TH')}</p>
                           </div>
                         </div>
@@ -506,7 +502,7 @@ export default function StaffManagementPage() {
   );
 }
 
-// ✅ Add Staff Modal Component
+// Add Staff Modal Component
 function AddStaffModal({ hospitals, onClose, onSuccess, userId }: { 
   hospitals: any[]; 
   onClose: () => void; 
@@ -521,17 +517,16 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
     specialization_th: '',
     phone: '',
     email: '',
-    hospital_id: '', // ✅ เพิ่ม field hospital_id
+    hospital_id: '', // ✅ เพิ่ม hospital_id
   });
   const [loading, setLoading] = useState(false);
 
-  console.log('🏥 [DEBUG] AddStaffModal - Hospitals received:', hospitals.length);
+  // ✅ จัดกลุ่มโรงพยาบาล
+  const { mainHospitals, subHospitals } = groupHospitals(hospitals);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
-    console.log('💾 [DEBUG] Submitting staff data:', formData);
 
     try {
       const result = await addStaff({
@@ -540,15 +535,13 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
       });
 
       if (result.success) {
-        console.log('✅ [DEBUG] Staff added successfully');
         alert('เพิ่มเจ้าหน้าที่สำเร็จ!');
         onSuccess();
       } else {
-        console.error('❌ [DEBUG] Error adding staff:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [DEBUG] Error adding staff:', error);
+      console.error('Error adding staff:', error);
       alert('เกิดข้อผิดพลาด');
     } finally {
       setLoading(false);
@@ -630,31 +623,43 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
             </div>
           </div>
 
-          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - จัดกลุ่ม แม่ข่าย/ลูกข่าย */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โรงพยาบาลสังกัด
             </label>
             <select
               value={formData.hospital_id}
-              onChange={(e) => {
-                console.log('🏥 [DEBUG] Selected hospital ID:', e.target.value);
-                setFormData({ ...formData, hospital_id: e.target.value });
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
-              {hospitals.map((hospital) => (
-                <option key={hospital.id} value={hospital.id}>
-                  {hospital.name} ({hospital.code})
-                </option>
-              ))}
+              
+              {/* ✅ แม่ข่าย */}
+              {mainHospitals.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลแม่ข่าย">
+                  {mainHospitals.map((hospital) => (
+                    <option key={hospital.id} value={hospital.id}>
+                      {hospital.name} ({hospital.code})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              
+              {/* ✅ ลูกข่าย */}
+              {subHospitals.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลลูกข่าย">
+                  {subHospitals.map((hospital) => (
+                    <option key={hospital.id} value={hospital.id}>
+                      {hospital.name} ({hospital.code})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
-            {hospitals.length === 0 && (
-              <p className="text-xs text-red-500 mt-1">
-                ⚠️ ไม่พบข้อมูลโรงพยาบาล กรุณาเพิ่มโรงพยาบาลก่อน
-              </p>
-            )}
+            <p className="text-xs text-gray-500 mt-1">
+              💡 แม่ข่าย: {mainHospitals.length} แห่ง | ลูกข่าย: {subHospitals.length} แห่ง
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -704,7 +709,7 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
   );
 }
 
-// ✅ Edit Staff Modal Component
+// Edit Staff Modal Component
 function EditStaffModal({ staff, hospitals, onClose, onSuccess }: { 
   staff: any; 
   hospitals: any[]; 
@@ -716,19 +721,16 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
     specialization_th: staff.doctors?.specialization_th || '',
     phone: staff.doctors?.phone || '',
     email: staff.doctors?.email || '',
-    hospital_id: staff.hospital_id || '', // ✅ เพิ่ม field hospital_id
+    hospital_id: staff.hospital_id || '', // ✅ เพิ่ม hospital_id
   });
   const [loading, setLoading] = useState(false);
 
-  console.log('🏥 [DEBUG] EditStaffModal - Hospitals received:', hospitals.length);
-  console.log('👤 [DEBUG] EditStaffModal - Staff data:', staff);
-  console.log('🏥 [DEBUG] EditStaffModal - Current hospital_id:', staff.hospital_id);
+  // ✅ จัดกลุ่มโรงพยาบาล
+  const { mainHospitals, subHospitals } = groupHospitals(hospitals);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
-    console.log('💾 [DEBUG] Updating staff data:', formData);
 
     try {
       // ✅ อัปเดต hospital_id ในตาราง users
@@ -739,23 +741,19 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
           .eq('id', staff.id);
 
         if (userError) {
-          console.error('❌ [DEBUG] Error updating user hospital:', userError);
-        } else {
-          console.log('✅ [DEBUG] User hospital updated successfully');
+          console.error('Error updating user hospital:', userError);
         }
       }
 
       const result = await updateStaff(staff.id, formData);
       if (result.success) {
-        console.log('✅ [DEBUG] Staff updated successfully');
         alert('แก้ไขข้อมูลสำเร็จ!');
         onSuccess();
       } else {
-        console.error('❌ [DEBUG] Error updating staff:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [DEBUG] Error updating staff:', error);
+      console.error('Error updating staff:', error);
       alert('เกิดข้อผิดพลาด');
     } finally {
       setLoading(false);
@@ -794,31 +792,43 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
             />
           </div>
 
-          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - จัดกลุ่ม แม่ข่าย/ลูกข่าย */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โรงพยาบาลสังกัด
             </label>
             <select
               value={formData.hospital_id}
-              onChange={(e) => {
-                console.log('🏥 [DEBUG] Selected hospital ID:', e.target.value);
-                setFormData({ ...formData, hospital_id: e.target.value });
-              }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
-              {hospitals.map((hospital) => (
-                <option key={hospital.id} value={hospital.id}>
-                  {hospital.name} ({hospital.code})
-                </option>
-              ))}
+              
+              {/* ✅ แม่ข่าย */}
+              {mainHospitals.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลแม่ข่าย">
+                  {mainHospitals.map((hospital) => (
+                    <option key={hospital.id} value={hospital.id}>
+                      {hospital.name} ({hospital.code})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              
+              {/* ✅ ลูกข่าย */}
+              {subHospitals.length > 0 && (
+                <optgroup label="🏥 โรงพยาบาลลูกข่าย">
+                  {subHospitals.map((hospital) => (
+                    <option key={hospital.id} value={hospital.id}>
+                      {hospital.name} ({hospital.code})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
-            {hospitals.length === 0 && (
-              <p className="text-xs text-red-500 mt-1">
-                ⚠️ ไม่พบข้อมูลโรงพยาบาล กรุณาเพิ่มโรงพยาบาลก่อน
-              </p>
-            )}
+            <p className="text-xs text-gray-500 mt-1">
+              💡 แม่ข่าย: {mainHospitals.length} แห่ง | ลูกข่าย: {subHospitals.length} แห่ง
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
