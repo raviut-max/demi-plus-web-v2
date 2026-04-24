@@ -681,11 +681,25 @@ export async function getStaffList(role?: string) {
   try {
     let query = supabase
       .from('users')
-      .select(`*, doctors ( id, full_name_th, specialization_th, is_active, is_verified )`)
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          is_active,
+          is_verified
+        ),
+        hospitals (
+          id,
+          name,
+          code
+        )
+      `)
       .in('role', ['admin', 'doctor', 'helper'])
       .eq('is_active', true)
       .order('created_at', { ascending: false });
-
+    
     if (role) {
       query = query.eq('role', role);
     }
@@ -697,7 +711,15 @@ export async function getStaffList(role?: string) {
       return [];
     }
 
-    return data || [];
+    // ✅ เพิ่ม hospital_name จาก hospitals table
+    const staffWithData = data?.map(staff => ({
+      ...staff,
+      hospital_name: staff.hospitals?.name || '-',
+      hospital_code: staff.hospitals?.code || '-',
+    })) || [];
+
+    console.log(' Staff List Data:', staffWithData.length);
+    return staffWithData;
   } catch (err) {
     console.error('Get staff list error:', err);
     return [];
