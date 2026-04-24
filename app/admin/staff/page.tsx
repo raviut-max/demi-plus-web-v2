@@ -1,16 +1,43 @@
 // app/admin/staff/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. แสดงโรงพยาบาลแบบลำดับชั้น (แม่ข่าย + ลูกข่าย)
-//    2. ลูกข่ายไปอยู่ใต้แม่ข่ายของตัวเอง
-//    3. ใช้ optgroup จัดกลุ่มให้ชัดเจน
+//    1. เพิ่มฟังก์ชัน groupHospitalsByParent ในไฟล์นี้
+//    2. แสดงโรงพยาบาลแบบลำดับชั้น (แม่ข่าย + ลูกข่าย)
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals, groupHospitalsByParent } from '@/lib/supabase/queries';
+import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitals } from '@/lib/supabase/queries';
 import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+// ✅ เพิ่มฟังก์ชันนี้ - จัดกลุ่มโรงพยาบาลตาม parent_id
+const groupHospitalsByParent = (hospitals: any[]) => {
+  const mainHospitals = hospitals.filter(h => h.type === 'main');
+  const subHospitals = hospitals.filter(h => h.type === 'sub');
+  
+  // จัดกลุ่มลูกข่ายตามแม่ข่าย
+  const groupedHospitals = mainHospitals.map(main => ({
+    ...main,
+    subHospitals: subHospitals.filter(sub => sub.parent_id === main.id)
+  }));
+  
+  // แม่ข่ายที่ไม่มีลูกข่าย
+  const standaloneMains = mainHospitals.filter(main => 
+    !groupedHospitals.find(g => g.id === main.id)
+  );
+  
+  // ลูกข่ายที่ไม่มีแม่ข่าย (parent_id ไม่ตรงหรือ null)
+  const orphanSubs = subHospitals.filter(sub => 
+    !mainHospitals.find(main => main.id === sub.parent_id)
+  );
+  
+  return {
+    groupedHospitals,
+    standaloneMains,
+    orphanSubs
+  };
+};
 
 export default function StaffManagementPage() {
   const router = useRouter();
@@ -273,7 +300,6 @@ export default function StaffManagementPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
@@ -284,7 +310,7 @@ export default function StaffManagementPage() {
               <tbody className="divide-y divide-gray-200">
                 {staffList.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลเจ้าหน้าที่</p>
                     </td>
@@ -315,11 +341,6 @@ export default function StaffManagementPage() {
                         }`}>
                           {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
                            staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="text-sm text-gray-600">
-                          {staff.hospitals?.name || '-'}
                         </span>
                       </td>
                       <td className="px-6 py-4">
@@ -457,7 +478,6 @@ export default function StaffManagementPage() {
                           <div className="text-sm text-gray-600 space-y-1">
                             <p>ID Card: {staff.id_card}</p>
                             <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
-                            <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
                             <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at).toLocaleString('th-TH')}</p>
                           </div>
                         </div>
@@ -544,7 +564,7 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
     }
   };
 
-  // ✅ จัดกลุ่มโรงพยาบาลแบบลำดับชั้น
+  // ✅ จัดกลุ่มโรงพยาบาล
   const { groupedHospitals, standaloneMains, orphanSubs } = groupHospitalsByParent(hospitals);
 
   return (
@@ -640,7 +660,7 @@ function AddStaffModal({ hospitals, onClose, onSuccess, userId }: {
                   <option value={hospital.id}>
                      └ {hospital.name} ({hospital.code}) - แม่ข่าย
                   </option>
-                  {hospital.subHospitals.map((sub) => (
+                  {hospital.subHospitals.map((sub: any) => (
                     <option key={sub.id} value={sub.id}>
                        └─ {sub.name} ({sub.code})
                     </option>
@@ -770,7 +790,7 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
     }
   };
 
-  // ✅ จัดกลุ่มโรงพยาบาลแบบลำดับชั้น
+  // ✅ จัดกลุ่มโรงพยาบาล
   const { groupedHospitals, standaloneMains, orphanSubs } = groupHospitalsByParent(hospitals);
 
   return (
@@ -823,7 +843,7 @@ function EditStaffModal({ staff, hospitals, onClose, onSuccess }: {
                   <option value={hospital.id}>
                      └ {hospital.name} ({hospital.code}) - แม่ข่าย
                   </option>
-                  {hospital.subHospitals.map((sub) => (
+                  {hospital.subHospitals.map((sub: any) => (
                     <option key={sub.id} value={sub.id}>
                        └─ {sub.name} ({sub.code})
                     </option>
