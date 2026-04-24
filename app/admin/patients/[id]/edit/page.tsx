@@ -1,10 +1,9 @@
 // app/admin/patients/[id]/edit/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. โหลดโรงพยาบาลก่อน → แล้วค่อยโหลดข้อมูลผู้ป่วย
-//    2. เก็บค่า hospital_id → ให้ dropdown แสดงค่าที่เลือกไว้
-//    3. เก็บค่าที่อยู่ → ส่งให้ ThaiAddressSelector แสดงค่าเดิม
-//    4. เพิ่ม useEffect → อัพเดท formData เมื่อ hospitals โหลดเสร็จ
+//    1. เพิ่มฟิลด์ blood_sugar (ค่าน้ำตาล)
+//    2. แก้ไข ThaiAddressSelector ให้รับ initialData ถูกต้อง
+//    3. โหลดข้อมูล blood_sugar จากฐานข้อมูล
 
 'use client';
 import { useState, useEffect } from 'react';
@@ -58,6 +57,7 @@ export default function EditPatientPage() {
     height: '',
     waist_circumference: '',
     diabetes_type: '',
+    blood_sugar: '',  // ✅ เพิ่มฟิลด์ค่าน้ำตาล
     hba1c_level: '',
     notes: '',
     occupation: '',
@@ -71,7 +71,7 @@ export default function EditPatientPage() {
     village_no: '',
     village_name: '',
 
-    // ✅ โรงพยาบาล
+    // โรงพยาบาล
     hospital_id: '',
 
     // ผู้ติดต่อฉุกเฉิน
@@ -93,24 +93,9 @@ export default function EditPatientPage() {
     }
 
     setUser(userData);
-    loadPageData(); // ✅ โหลดข้อมูลหน้า
+    loadPatientData();
+    loadHospitals();
   }, [router]);
-
-  // ✅ โหลดข้อมูลหน้า (โรงพยาบาลก่อน → แล้วค่อยโหลดข้อมูลผู้ป่วย)
-  const loadPageData = async () => {
-    try {
-      console.log('🏥 Loading hospitals first...');
-      await loadHospitals(); // ✅ โหลดโรงพยาบาลก่อน
-      
-      console.log('📋 Loading patient data...');
-      await loadPatientData(); // ✅ แล้วค่อยโหลดข้อมูลผู้ป่วย
-    } catch (error) {
-      console.error('❌ Error loading page ', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // ✅ โหลดรายการโรงพยาบาล (แบบมีลำดับชั้น)
   const loadHospitals = async () => {
@@ -120,7 +105,7 @@ export default function EditPatientPage() {
       console.log('✅ Hospitals loaded:', data.length);
       setHospitals(data);
     } catch (error) {
-      console.error('❌ Error loading hospitals:', error);
+      console.error('Error loading hospitals:', error);
     }
   };
 
@@ -143,7 +128,6 @@ export default function EditPatientPage() {
           birthYear = (birthDate.getFullYear() + 543).toString();
         }
 
-        // ✅ ตั้งค่า formData
         setFormData({
           first_name: data.first_name || '',
           last_name: data.last_name || '',
@@ -158,6 +142,7 @@ export default function EditPatientPage() {
           height: data.height?.toString() || '',
           waist_circumference: data.waist_circumference?.toString() || '',
           diabetes_type: data.diabetes_type || '',
+          blood_sugar: data.blood_sugar?.toString() || '',  // ✅ โหลดค่าน้ำตาล
           hba1c_level: data.hba1c_level?.toString() || '',
           notes: data.notes || '',
           occupation: data.occupation || '',
@@ -168,13 +153,13 @@ export default function EditPatientPage() {
           road: data.road || '',
           village_no: data.village_no || '',
           village_name: data.village_name || '',
-          hospital_id: data.hospital_id || '', // ✅ เก็บ hospital_id
+          hospital_id: data.hospital_id || '',
           emergency_contact_name: data.emergency_contact_name || '',
           emergency_contact_phone: data.emergency_contact_phone || '',
           emergency_contact_relationship: data.emergency_contact_relationship || '',
         });
 
-        // ✅ ตั้งค่าที่อยู่สำหรับ ThaiAddressSelector
+        // ✅ ตั้งค่าเริ่มต้นสำหรับ ThaiAddressSelector (อำเภอ/ตำบล จะกลับมา)
         setAddressData({
           province: data.province || '',
           district: data.district || '',
@@ -183,11 +168,17 @@ export default function EditPatientPage() {
         });
 
         console.log('✅ Patient data loaded:', data);
-        console.log('🏥 Hospital ID:', data.hospital_id);
-        console.log('📍 Address:', data.province, data.district, data.subdistrict);
+        console.log('📍 Address data:', {
+          province: data.province,
+          district: data.district,
+          subdistrict: data.subdistrict,
+          postal_code: data.postal_code,
+        });
       }
     } catch (error) {
-      console.error('❌ Error loading patient ', error);
+      console.error('Error loading patient data:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -198,6 +189,7 @@ export default function EditPatientPage() {
     subdistrict: string;
     postalCode: string;
   }) => {
+    console.log('📍 Address changed:', data);
     setAddressData(data);
   };
 
@@ -205,7 +197,6 @@ export default function EditPatientPage() {
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
-
     const hospitalGroups = new Map<string, any[]>();
 
     subHospitals.forEach((sub) => {
@@ -430,12 +421,13 @@ export default function EditPatientPage() {
         height: formData.height ? parseFloat(formData.height) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         diabetes_type: formData.diabetes_type,
+        blood_sugar: formData.blood_sugar ? parseFloat(formData.blood_sugar) : null,  // ✅ บันทึกค่าน้ำตาล
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : null,
         notes: formData.notes,
         occupation: formData.occupation,
         education_level: formData.education_level,
 
-        // ที่อยู่
+        // ที่อยู่แยกส่วน
         house_number: formData.house_number,
         address_line1: formData.address_line1,
         soi: formData.soi,
@@ -447,7 +439,7 @@ export default function EditPatientPage() {
         province: addressData.province,
         postal_code: addressData.postalCode,
 
-        // ✅ โรงพยาบาล
+        // โรงพยาบาล
         hospital_id: formData.hospital_id || null,
 
         emergency_contact_name: formData.emergency_contact_name,
@@ -470,7 +462,7 @@ export default function EditPatientPage() {
         router.push(`/admin/patients/${patientId}`);
       }, 1500);
     } catch (error: any) {
-      console.error('❌ Exception during update:', error);
+      console.error('Exception during update:', error);
       const friendlyError = getFriendlyErrorMessage(error);
       setError(friendlyError);
     } finally {
@@ -795,6 +787,20 @@ export default function EditPatientPage() {
                   <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
                   <option value="เบาหวาน">เบาหวาน</option>
                 </select>
+              </div>
+
+              {/* ✅ ค่าน้ำตาล (เพิ่มใหม่) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ค่าน้ำตาล (mg/dL)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={formData.blood_sugar}
+                  onChange={(e) => setFormData({ ...formData, blood_sugar: e.target.value })}
+                  placeholder="เช่น 110"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                />
+                <p className="text-xs text-gray-500 mt-1">ค่าปกติ: 70-100 mg/dL (งดอาหาร 8 ชม.)</p>
               </div>
 
               <div>
