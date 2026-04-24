@@ -1,14 +1,15 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มระบบตรวจสอบว่ามาจากไหน (patient list หรือ appointments view)
-//    2. ปุ่มกลับจะกลับไปตามที่มาอย่างถูกต้อง
-//    3. ใช้ URL query parameter '?from=appointments' หรือ '?from=patients'
+//    1. ดึงข้อมูลนัดหมายครั้งถัดไปจากฐานข้อมูลจริง (ไม่ใช่ค่าคงที่)
+//    2. นับจำนวนครั้งการประเมินจากฐานข้อมูล
+//    3. นับจำนวนครั้งการติดตามจากฐานข้อมูล
+//    4. แสดงสถานะที่ถูกต้องตามข้อมูลจริง
 
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -35,28 +36,25 @@ const THAI_MONTHS = [
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
 
+// ✅ Interface สำหรับนัดหมายครั้งถัดไป
+interface NextAppointment {
+  appointment_date: string;
+  appointment_type: string;
+  status: string;
+}
+
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams(); // ✅ ดึง query parameters
   const patientId = params.id as string;
-  
-  // ✅ ตรวจสอบว่ามาจากไหน
-  const fromPage = searchParams.get('from') || 'patients'; // ค่าเริ่มต้น: 'patients'
-  
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   
-  // ✅ State สำหรับตรวจสอบสถานะ (แยกชัดเจน)
-  const [hasScreening, setHasScreening] = useState(false);        // มีการประเมิน PAM/PROMs
-  const [hasFollowup, setHasFollowup] = useState(false);          // มีการติดตามผลจริง
-  const [followupCount, setFollowupCount] = useState(0);          // จำนวนครั้งที่ติดตาม
-
-  useEffect(() => {
-    console.log('🔍 [DEBUG] Patient Detail - from:', fromPage);
-    console.log('🔍 [DEBUG] Patient ID:', patientId);
-  }, [fromPage, patientId]);
+  // ✅ State สำหรับข้อมูลจริงจากฐานข้อมูล
+  const [nextAppointment, setNextAppointment] = useState<NextAppointment | null>(null);
+  const [screeningCount, setScreeningCount] = useState<number>(0);
+  const [followupCount, setFollowupCount] = useState<number>(0);
 
   useEffect(() => {
     const userData = checkSession();
@@ -76,50 +74,96 @@ export default function PatientDetailPage() {
 
   const loadData = async () => {
     try {
+      console.log('📡 Loading patient detail:', patientId);
+      
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
       
-      // ✅ ตรวจสอบสถานะการประเมินและการติดตาม
-      await checkPatientStatus(patientId);
+      // ✅ โหลดข้อมูลจริงจากฐานข้อมูล
+      await Promise.all([
+        loadNextAppointment(patientId),
+        loadScreeningCount(patientId),
+        loadFollowupCount(patientId)
+      ]);
     } catch (error) {
-      console.error('Error loading ', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสถานะผู้ป่วย
-  const checkPatientStatus = async (pid: string) => {
+  // ✅ 1. ดึงข้อมูลนัดหมายครั้งถัดไปจากฐานข้อมูล
+  const loadNextAppointment = async (pid: string) => {
     try {
-      console.log('🔍 Checking patient status for:', pid);
+      console.log('📅 Loading next appointment for:', pid);
       
-      // 1. ✅ ตรวจสอบการประเมิน (Screening - PAM/PROMs)
-      const {  screeningData } = await supabase
-        .from('screenings')
-        .select('id, pam_total_score')
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('appointment_date, appointment_type, status')
         .eq('user_id', pid)
-        .not('pam_total_score', 'is', null)
-        .limit(1);
-      
-      const hasScreeningData = (screeningData?.length || 0) > 0;
-      console.log('📋 Has screening:', hasScreeningData);
-      setHasScreening(hasScreeningData);
+        .eq('status', 'scheduled')
+        .gte('appointment_date', new Date().toISOString())
+        .order('appointment_date', { ascending: true })
+        .limit(1)
+        .single();
 
-      // 2. ✅ ตรวจสอบการติดตามผลจริง (Followup - จาก appointment_followups)
-      const {  followupData } = await supabase
-        .from('appointment_followups')
-        .select('id, followup_round')
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Error fetching next appointment:', error);
+      }
+
+      console.log('📋 Next appointment:', data);
+      setNextAppointment(data || null);
+    } catch (err) {
+      console.error('Error in loadNextAppointment:', err);
+      setNextAppointment(null);
+    }
+  };
+
+  // ✅ 2. นับจำนวนครั้งการประเมินจากฐานข้อมูล
+  const loadScreeningCount = async (pid: string) => {
+    try {
+      console.log('📊 Loading screening count for:', pid);
+      
+      const { count, error } = await supabase
+        .from('screenings')
+        .select('*', { count: 'exact', head: true })
         .eq('user_id', pid)
-        .order('followup_round', { ascending: false });
+        .not('pam_total_score', 'is', null);
+
+      if (error) {
+        console.error('Error counting screenings:', error);
+        setScreeningCount(0);
+      } else {
+        console.log('✅ Screening count:', count);
+        setScreeningCount(count || 0);
+      }
+    } catch (err) {
+      console.error('Error in loadScreeningCount:', err);
+      setScreeningCount(0);
+    }
+  };
+
+  // ✅ 3. นับจำนวนครั้งการติดตามจากฐานข้อมูล
+  const loadFollowupCount = async (pid: string) => {
+    try {
+      console.log('📊 Loading followup count for:', pid);
       
-      const hasFollowupData = (followupData?.length || 0) > 0;
-      console.log('📋 Has followup:', hasFollowupData, 'Count:', followupData?.length);
-      setHasFollowup(hasFollowupData);
-      setFollowupCount(followupData?.length || 0);
-      
-    } catch (error) {
-      console.error('❌ Error checking patient status:', error);
+      const { count, error } = await supabase
+        .from('appointment_followups')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', pid);
+
+      if (error) {
+        console.error('Error counting followups:', error);
+        setFollowupCount(0);
+      } else {
+        console.log('✅ Followup count:', count);
+        setFollowupCount(count || 0);
+      }
+    } catch (err) {
+      console.error('Error in loadFollowupCount:', err);
+      setFollowupCount(0);
     }
   };
 
@@ -131,6 +175,25 @@ export default function PatientDetailPage() {
     const month = THAI_MONTHS[date.getMonth()];
     const year = date.getFullYear() + 543;
     return `${day} ${month} ${year}`;
+  };
+
+  // ✅ ฟังก์ชันแปลงวันที่สำหรับแสดงสั้นๆ (เช่น "28 เม.ย.")
+  const formatShortDate = (dateString: string | null) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    const day = date.getDate();
+    const month = THAI_MONTHS[date.getMonth()].substring(0, 3);
+    return `${day} ${month}`;
+  };
+
+  // ✅ ฟังก์ชันแปลงเวลา (เช่น "17:26")
+  const formatTime = (dateString: string | null) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   // ✅ ฟังก์ชันคำนวณอายุจากวันเกิด
@@ -153,19 +216,6 @@ export default function PatientDetailPage() {
     return (weight / (heightInM * heightInM)).toFixed(1);
   };
 
-  // ✅ ฟังก์ชันจัดการปุ่มกลับ - กลับไปตามที่มา
-  const handleGoBack = () => {
-    console.log('🔙 [DEBUG] Going back, from:', fromPage);
-    
-    if (fromPage === 'appointments') {
-      // ✅ กลับไปหน้าดูนัดหมาย
-      router.push('/admin/appointments/view');
-    } else {
-      // ✅ กลับไปหน้ารายการผู้ป่วย
-      router.push('/admin/patients');
-    }
-  };
-
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
@@ -184,13 +234,12 @@ export default function PatientDetailPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={handleGoBack}
+            onClick={() => router.push('/admin/patients')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ{fromPage === 'appointments' ? 'หน้าดูนัดหมาย' : 'รายการผู้ป่วย'}
+            กลับรายการผู้ป่วย
           </button>
           
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -214,14 +263,6 @@ export default function PatientDetailPage() {
                 แก้ไขข้อมูล
               </button>
               
-              {/* ✅ แสดงปุ่ม "มีการติดตามแล้ว" เฉพาะเมื่อมี followup จริงๆ */}
-              {hasFollowup && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg border border-green-200">
-                  <ClipboardCheck className="w-4 h-4" />
-                  <span>มีการติดตามแล้ว ({followupCount} ครั้ง)</span>
-                </div>
-              )}
-              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -239,12 +280,12 @@ export default function PatientDetailPage() {
         
         {/* 
         ========================================
-        ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม
+        ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม (แก้ไขแล้ว)
         ========================================
         */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           
-          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
+          {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป (แก้ไขแล้ว - ดึงข้อมูลจริง) */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -252,8 +293,13 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">นัดหมายครั้งถัดไป</p>
-                <p className="text-2xl font-bold">28 เม.ย.</p>
-                <p className="text-xs opacity-75 mt-1">17:26</p>
+                {/* ✅ แสดงวันที่จากฐานข้อมูล หรือ "ไม่มีนัดหมาย" */}
+                <p className="text-2xl font-bold">
+                  {nextAppointment ? formatShortDate(nextAppointment.appointment_date) : 'ไม่มี'}
+                </p>
+                <p className="text-xs opacity-75 mt-1">
+                  {nextAppointment ? formatTime(nextAppointment.appointment_date) : 'นัดหมาย'}
+                </p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Calendar className="w-6 h-6" />
@@ -261,7 +307,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด */}
+          {/* ✅ 2. ปุ่มสีเขียว - การประเมินล่าสุด (แก้ไขแล้ว - นับจำนวนจริง) */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -269,8 +315,12 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">การประเมินล่าสุด</p>
-                <p className="text-2xl font-bold">{hasScreening ? 'มีการประเมิน' : 'ยังไม่ประเมิน'}</p>
-                <p className="text-xs opacity-75 mt-1">{hasScreening ? '1 ครั้ง' : '0 ครั้ง'}</p>
+                <p className="text-2xl font-bold">
+                  {screeningCount > 0 ? 'มีการประเมิน' : 'ยังไม่ประเมิน'}
+                </p>
+                <p className="text-xs opacity-75 mt-1">
+                  {screeningCount > 0 ? `${screeningCount} ครั้ง` : '0 ครั้ง'}
+                </p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <FileText className="w-6 h-6" />
@@ -278,7 +328,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด */}
+          {/* ✅ 3. ปุ่มสีม่วง - ติดตามล่าสุด (แก้ไขแล้ว - นับจำนวนจริง) */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -286,8 +336,12 @@ export default function PatientDetailPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm opacity-90 mb-1">ติดตามล่าสุด</p>
-                <p className="text-2xl font-bold">{hasFollowup ? `${followupCount} ครั้ง` : 'ยังไม่ติดตาม'}</p>
-                <p className="text-xs opacity-75 mt-1">{hasFollowup ? 'มีข้อมูล' : 'ไม่มีข้อมูล'}</p>
+                <p className="text-2xl font-bold">
+                  {followupCount > 0 ? `${followupCount} ครั้ง` : 'ยังไม่ติดตาม'}
+                </p>
+                <p className="text-xs opacity-75 mt-1">
+                  {followupCount > 0 ? 'มีข้อมูล' : 'ไม่มีข้อมูล'}
+                </p>
               </div>
               <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
                 <Activity className="w-6 h-6" />
@@ -295,7 +349,7 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า */}
+          {/* ✅ 4. ปุ่มสีส้ม - ความคืบหน้า (ไม่ต้องแก้ไข) */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/goals`)}
             className="bg-gradient-to-br from-orange-500 to-red-500 text-white rounded-xl shadow-lg p-6 cursor-pointer hover:shadow-xl transition-all hover:scale-105"
@@ -313,11 +367,7 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* 
-        ========================================
-        ✅ ACTION BUTTONS - ปุ่มเพิ่มเติม
-        ========================================
-        */}
+        {/* ACTION BUTTONS */}
         <div className="flex flex-wrap gap-2 mb-6">
           <button
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
@@ -352,11 +402,7 @@ export default function PatientDetailPage() {
           </button>
         </div>
 
-        {/* 
-        ========================================
-        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
-        ========================================
-        */}
+        {/* Patient Info Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           
           {/* ข้อมูลส่วนตัว */}
@@ -531,11 +577,7 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* 
-        ========================================
-        ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน (1 คน)
-        ========================================
-        */}
+        {/* Emergency Contact */}
         <div className="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
             <Heart className="w-6 h-6 text-red-500" />
