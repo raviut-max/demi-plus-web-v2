@@ -1,16 +1,22 @@
 // app/admin/staff/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มคอลัมน์ "โรงพยาบาล" ในตาราง
-//    2. จัดกลุ่มโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
-//    3. บันทึก hospital_id ลงใน users table
+//    1. เพิ่มฟิลด์วันเกิดในฟอร์มเพิ่มเจ้าหน้าที่
+//    2. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
+//    3. แสดงรหัสผ่านหลังจากสร้างสำเร็จ
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
-import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+// ✅ เดือนภาษาไทย
+const THAI_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+];
 
 // ✅ Interface สำหรับโรงพยาบาล
 interface Hospital {
@@ -28,7 +34,7 @@ interface Hospital {
 
 export default function StaffManagementPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState(null);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -36,7 +42,7 @@ export default function StaffManagementPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
-  const [selectedStaff, setSelectedStaff] = useState<any>(null);
+  const [selectedStaff, setSelectedStaff] = useState(null);
 
   useEffect(() => {
     const userData = checkSession();
@@ -44,7 +50,6 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
-
     if (userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
       router.push('/admin/login');
@@ -96,7 +101,6 @@ export default function StaffManagementPage() {
     if (!confirm(`คุณต้องการปิดการใช้งาน "${staffName}" หรือไม่?`)) {
       return;
     }
-
     try {
       const result = await deactivateStaff(staffId);
       if (result.success) {
@@ -115,7 +119,6 @@ export default function StaffManagementPage() {
     if (!confirm(`คุณต้องการกู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) {
       return;
     }
-
     try {
       const result = await restoreStaff(staffId);
       if (result.success) {
@@ -135,7 +138,6 @@ export default function StaffManagementPage() {
     if (!confirm(`⚠️ คำเตือน: คุณกำลังลบ "${staffName}" อย่างถาวร\n\nการกระทำนี้ไม่สามารถย้อนกลับได้\n\nคุณแน่ใจหรือไม่?`)) {
       return;
     }
-
     if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนได้\n\nพิมพ์ "YES" เพื่อยืนยัน')) {
       return;
     }
@@ -170,7 +172,6 @@ export default function StaffManagementPage() {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
     
-    // สร้าง Map ของแม่ข่าย → ลูกข่าย
     const hospitalGroups = new Map<string, Hospital[]>();
     
     subHospitals.forEach(sub => {
@@ -307,7 +308,7 @@ export default function StaffManagementPage() {
                 <tr>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th> {/* ✅ เพิ่มคอลัมน์ */}
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
@@ -351,7 +352,6 @@ export default function StaffManagementPage() {
                            staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
                         </span>
                       </td>
-                      {/* ✅ แสดงชื่อโรงพยาบาล */}
                       <td className="px-6 py-4">
                         <span className="text-sm text-gray-600">
                           {staff.hospitals?.name || '-'}
@@ -539,22 +539,24 @@ export default function StaffManagementPage() {
 }
 
 // Add Staff Modal Component
-function AddStaffModal({ 
-  hospitals, 
+function AddStaffModal({
+  hospitals,
   getGroupedHospitals,
-  onClose, 
-  onSuccess, 
-  userId 
-}: { 
-  hospitals: Hospital[]; 
+  onClose,
+  onSuccess,
+  userId
+}: {
+  hospitals: Hospital[];
   getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
-  onClose: () => void; 
-  onSuccess: () => void; 
-  userId: string 
+  onClose: () => void;
+  onSuccess: () => void;
+  userId: string
 }) {
   const [formData, setFormData] = useState({
     id_card: '',
-    password: '',
+    birth_day: '',
+    birth_month: '',
+    birth_year: '',
     full_name_th: '',
     role: 'doctor' as 'doctor' | 'helper',
     specialization_th: '',
@@ -563,20 +565,47 @@ function AddStaffModal({
     hospital_id: '',
   });
   const [loading, setLoading] = useState(false);
+  const [createdPassword, setCreatedPassword] = useState('');
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // ✅ ฟังก์ชันสร้างรหัสผ่านจากวันเกิด
+  const generatePassword = () => {
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+      return '';
+    }
+    return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
+      // ✅ ตรวจสอบว่ากรอกวันเกิดครบหรือไม่
+      if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+        alert('กรุณากรอกวันเกิดให้ครบถ้วน');
+        setLoading(false);
+        return;
+      }
+
+      // ✅ สร้างรหัสผ่านจากวันเกิด
+      const password = generatePassword();
+
       const result = await addStaff({
         ...formData,
+        password: password, // ✅ ส่งรหัสผ่านที่สร้างจากวันเกิด
         created_by: userId,
       });
 
       if (result.success) {
-        alert('เพิ่มเจ้าหน้าที่สำเร็จ!');
-        onSuccess();
+        // ✅ แสดงรหัสผ่านที่สร้าง
+        setCreatedPassword(password);
+        setShowSuccess(true);
+        
+        // ✅ รอ 3 วินาทีแล้วปิด modal
+        setTimeout(() => {
+          onSuccess();
+        }, 3000);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -589,6 +618,33 @@ function AddStaffModal({
   };
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
+
+  // ✅ แสดงหน้าสำเร็จ
+  if (showSuccess) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 text-center">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <UserCheck className="w-8 h-8 text-green-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            ✅ เพิ่มเจ้าหน้าที่สำเร็จ!
+          </h2>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <p className="text-sm text-gray-600 mb-2">🔐 รหัสผ่านสำหรับเข้าสู่ระบบ:</p>
+            <p className="text-2xl font-bold text-blue-600 font-mono">{createdPassword}</p>
+            <p className="text-xs text-gray-500 mt-2">
+              💡 รหัสผ่านคือ วัน-เดือน-ปีเกิด (พ.ศ.)
+            </p>
+          </div>
+          <p className="text-sm text-gray-600">
+            กรุณาแจ้งรหัสผ่านให้เจ้าหน้าที่ทราบ<br/>
+            กำลังกลับหน้ารายการใน 3 วินาที...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -608,21 +664,70 @@ function AddStaffModal({
                 value={formData.id_card}
                 onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
                 required
+                maxLength={13}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                รหัสผ่าน *
+                รหัสผ่าน (อัตโนมัติ)
               </label>
               <input
-                type="password"
-                value={formData.password}
-                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                type="text"
+                value={generatePassword() || 'ระบุวันเกิดเพื่อสร้างรหัสผ่าน'}
+                readOnly
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed"
               />
+              <p className="text-xs text-gray-500 mt-1">
+                💡 รหัสผ่าน = วัน-เดือน-ปีเกิด (dd-mm-yyyy)
+              </p>
             </div>
+          </div>
+
+          {/* ✅ วันเกิด (3 ช่อง) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              วันเกิด *
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={formData.birth_day}
+                onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">วัน</option>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <option key={day} value={day}>{day}</option>
+                ))}
+              </select>
+              <select
+                value={formData.birth_month}
+                onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">เดือน</option>
+                {THAI_MONTHS.map((month, index) => (
+                  <option key={index + 1} value={index + 1}>{month}</option>
+                ))}
+              </select>
+              <select
+                value={formData.birth_year}
+                onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">ปี พ.ศ.</option>
+                {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              💡 รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (เช่น 25-12-2530)
+            </p>
           </div>
 
           <div>
@@ -686,7 +791,7 @@ function AddStaffModal({
                   {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
                   {hospitalGroups.get(hospital.id)?.map((sub) => (
                     <option key={sub.id} value={sub.id}>
-                      └─ {sub.name} ({sub.code})
+                      {'   '}└─ {sub.name} ({sub.code})
                     </option>
                   ))}
                 </optgroup>
@@ -745,18 +850,18 @@ function AddStaffModal({
 }
 
 // Edit Staff Modal Component
-function EditStaffModal({ 
-  staff, 
-  hospitals, 
+function EditStaffModal({
+  staff,
+  hospitals,
   getGroupedHospitals,
-  onClose, 
-  onSuccess 
-}: { 
-  staff: any; 
-  hospitals: Hospital[]; 
+  onClose,
+  onSuccess
+}: {
+  staff: any;
+  hospitals: Hospital[];
   getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
-  onClose: () => void; 
-  onSuccess: () => void 
+  onClose: () => void;
+  onSuccess: () => void
 }) {
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
@@ -853,7 +958,7 @@ function EditStaffModal({
                   {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
                   {hospitalGroups.get(hospital.id)?.map((sub) => (
                     <option key={sub.id} value={sub.id}>
-                      └─ {sub.name} ({sub.code})
+                      {'   '}└─ {sub.name} ({sub.code})
                     </option>
                   ))}
                 </optgroup>
