@@ -1,15 +1,15 @@
 // app/admin/staff/page.tsx
-// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 27 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มฟิลด์วันเกิดในฟอร์มเพิ่มเจ้าหน้าที่
-//    2. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
-//    3. แสดงรหัสผ่านหลังจากสร้างสำเร็จ
+//    1. เพิ่มฟิลด์ วัน/เดือน/ปี เกิด ใน EditStaffModal
+//    2. เพิ่มระบบรีเซ็ตรหัสผ่านให้ตรงกับวันเกิดใหม่ (Checkbox)
+//    3. อัปเดตทั้งตาราง doctors และ users
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
-import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 // ✅ เดือนภาษาไทย
@@ -171,9 +171,9 @@ export default function StaffManagementPage() {
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
-    
+    // สร้าง Map ของแม่ข่าย → ลูกข่าย
     const hospitalGroups = new Map<string, Hospital[]>();
-    
+
     subHospitals.forEach(sub => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -634,7 +634,7 @@ function AddStaffModal({
             <p className="text-sm text-gray-600 mb-2">🔐 รหัสผ่านสำหรับเข้าสู่ระบบ:</p>
             <p className="text-2xl font-bold text-blue-600 font-mono">{createdPassword}</p>
             <p className="text-xs text-gray-500 mt-2">
-              💡 รหัสผ่านคือ วัน-เดือน-ปีเกิด (พ.ศ.)
+              💡 รหัสผ่านคือ วัน-เดือน-ปีเกิด (dd-mm-yyyy)
             </p>
           </div>
           <p className="text-sm text-gray-600">
@@ -849,7 +849,7 @@ function AddStaffModal({
   );
 }
 
-// Edit Staff Modal Component
+// ✅ Edit Staff Modal Component (แก้ไขแล้ว - เพิ่มวันเกิด)
 function EditStaffModal({
   staff,
   hospitals,
@@ -863,37 +863,75 @@ function EditStaffModal({
   onClose: () => void;
   onSuccess: () => void
 }) {
+  // ✅ แยกวันเกิดจาก staff.birth_date (YYYY-MM-DD)
+  const parseBirthDate = (dateString: string | null) => {
+    if (!dateString) return { day: '', month: '', year: '' };
+    const date = new Date(dateString);
+    return {
+      day: date.getDate().toString(),
+      month: (date.getMonth() + 1).toString(),
+      year: (date.getFullYear() + 543).toString() // แปลงเป็น พ.ศ.
+    };
+  };
+
+  const initialBirthDate = parseBirthDate(staff.birth_date);
+
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
     phone: staff.doctors?.phone || '',
     email: staff.doctors?.email || '',
     hospital_id: staff.hospital_id || '',
+    birth_day: initialBirthDate.day,
+    birth_month: initialBirthDate.month,
+    birth_year: initialBirthDate.year,
   });
+
   const [loading, setLoading] = useState(false);
+  const [resetPassword, setResetPassword] = useState(false); // ✅ Checkbox รีเซตรหัสผ่าน
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      if (formData.hospital_id) {
-        const { error: userError } = await supabase
-          .from('users')
-          .update({ hospital_id: formData.hospital_id })
-          .eq('id', staff.id);
-
-        if (userError) {
-          console.error('Error updating user hospital:', userError);
-        }
+      // ✅ 1. อัปเดตข้อมูลในตาราง doctors
+      const result = await updateStaff(staff.id, formData);
+      if (!result.success) {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+        setLoading(false);
+        return;
       }
 
-      const result = await updateStaff(staff.id, formData);
-      if (result.success) {
-        alert('แก้ไขข้อมูลสำเร็จ!');
-        onSuccess();
+      // ✅ 2. อัปเดตวันเกิดและรหัสผ่านในตาราง users
+      const birthDateISO = `${parseInt(formData.birth_year) - 543}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
+      const newPassword = `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
+
+      const updateData: any = {
+        birth_date: birthDateISO,
+        updated_at: new Date().toISOString(),
+      };
+
+      // ✅ ถ้าติ๊ก Checkbox → รีเซตรหัสผ่านให้ตรงกับวันเกิดใหม่
+      if (resetPassword) {
+        updateData.password_hash = newPassword;
+      }
+
+      const { error: userError } = await supabase
+        .from('users')
+        .update(updateData)
+        .eq('id', staff.id);
+
+      if (userError) {
+        console.error('Error updating user:', userError);
+        alert('เกิดข้อผิดพลาดในการอัปเดตข้อมูลผู้ใช้');
       } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
+        let message = 'แก้ไขข้อมูลสำเร็จ!';
+        if (resetPassword) {
+          message += `\n\n🔐 รีเซ็ตรหัสผ่านใหม่แล้ว: ${newPassword}`;
+        }
+        alert(message);
+        onSuccess();
       }
     } catch (error) {
       console.error('Error updating staff:', error);
@@ -913,6 +951,64 @@ function EditStaffModal({
         </div>
         
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* ✅ วันเกิด (3 ช่อง) - เหมือนตอนเพิ่ม */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              วันเกิด *
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={formData.birth_day}
+                onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">วัน</option>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <option key={day} value={day}>{day}</option>
+                ))}
+              </select>
+              <select
+                value={formData.birth_month}
+                onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">เดือน</option>
+                {THAI_MONTHS.map((month, index) => (
+                  <option key={index + 1} value={index + 1}>{month}</option>
+                ))}
+              </select>
+              <select
+                value={formData.birth_year}
+                onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">ปี พ.ศ.</option>
+                {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* ✅ Checkbox รีเซตรหัสผ่าน */}
+          <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <input
+              type="checkbox"
+              id="resetPassword"
+              checked={resetPassword}
+              onChange={(e) => setResetPassword(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="resetPassword" className="text-sm text-gray-700 flex items-center gap-2">
+              <Key className="w-4 h-4" />
+              รีเซ็ตรหัสผ่านให้ตรงกับวันเกิดใหม่ ({formData.birth_day.padStart(2, '0')}-{formData.birth_month.padStart(2, '0')}-{formData.birth_year})
+            </label>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               ชื่อ-นามสกุล
