@@ -696,6 +696,7 @@ export async function getDashboardStats() {
 }
 
 // ✅ แก้ไขฟังก์ชัน addStaff
+// ✅ แก้ไขฟังก์ชัน addStaff
 export async function addStaff(data: {
   id_card: string;
   password: string;
@@ -704,19 +705,21 @@ export async function addStaff(data: {
   specialization_th?: string;
   phone?: string;
   email?: string;
-  hospital_id?: string;  // ✅ เพิ่ม field นี้
+  hospital_id?: string;
+  birth_date?: string;  // ✅ เพิ่ม field นี้
   created_by: string;
 }) {
   try {
-    const { data: user, error: userError } = await supabase
+    const {  user, error: userError } = await supabase
       .from('users')
       .insert({
         id_card: data.id_card,
-        password_hash: data.password,
+        password_hash: data.password,  // ✅ เก็บรหัสผ่าน (plain text)
         role: data.role,
         is_active: true,
         created_by: data.created_by,
-        hospital_id: data.hospital_id || null,  // ✅ บันทึก hospital_id
+        hospital_id: data.hospital_id || null,
+        birth_date: data.birth_date || null,  // ✅ บันทึกวันเกิด
       })
       .select()
       .single();
@@ -758,36 +761,67 @@ export async function updateStaff(userId: string, data: {
   specialization_th?: string;
   phone?: string;
   email?: string;
-  hospital_id?: string;  // ✅ เพิ่ม field นี้
+  hospital_id?: string;
+  birth_date?: string;  // ✅ เพิ่ม field นี้
+  password_hash?: string;  // ✅ เพิ่ม field นี้ (สำหรับ reset password)
   is_active?: boolean;
 }) {
   try {
-    // ✅ อัปเดต hospital_id ในตาราง users
+    // ✅ 1. อัปเดตข้อมูลในตาราง users (hospital_id, birth_date, password_hash)
+    const updateUserData: any = {};
+    
     if (data.hospital_id !== undefined) {
+      updateUserData.hospital_id = data.hospital_id;
+    }
+    
+    if (data.birth_date !== undefined) {
+      updateUserData.birth_date = data.birth_date;
+    }
+    
+    if (data.password_hash !== undefined) {
+      updateUserData.password_hash = data.password_hash;
+    }
+
+    // ✅ อัปเดตตาราง users ถ้ามีข้อมูลที่จะอัปเดต
+    if (Object.keys(updateUserData).length > 0) {
+      updateUserData.updated_at = new Date().toISOString();
+      
       const { error: userError } = await supabase
         .from('users')
-        .update({ hospital_id: data.hospital_id })
+        .update(updateUserData)
         .eq('id', userId);
 
       if (userError) {
-        console.error('Error updating user hospital:', userError);
+        console.error('Error updating user:', userError);
+        return { success: false, error: userError.message };
       }
     }
 
-    // ✅ อัปเดตข้อมูลในตาราง doctors
-    const { error } = await supabase
+    // ✅ 2. อัปเดตข้อมูลในตาราง doctors
+    const updateDoctorData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.full_name_th !== undefined) {
+      updateDoctorData.full_name_th = data.full_name_th;
+    }
+
+    if (data.specialization_th !== undefined) {
+      updateDoctorData.specialization_th = data.specialization_th;
+    }
+
+    if (data.is_active !== undefined) {
+      updateDoctorData.is_active = data.is_active;
+    }
+
+    const { error: doctorError } = await supabase
       .from('doctors')
-      .update({
-        full_name_th: data.full_name_th,
-        specialization_th: data.specialization_th,
-        is_active: data.is_active,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updateDoctorData)
       .eq('user_id', userId);
 
-    if (error) {
-      console.error('Error updating staff:', error);
-      return { success: false, error: error.message };
+    if (doctorError) {
+      console.error('Error updating doctor profile:', doctorError);
+      return { success: false, error: doctorError.message };
     }
 
     return { success: true };
@@ -797,7 +831,7 @@ export async function updateStaff(userId: string, data: {
   }
 }
 
-// ✅ แก้ไขฟังก์ชัน getStaffList ให้ดึงข้อมูลโรงพยาบาลมาด้วย
+// ✅ แก้ไขฟังก์ชัน getStaffList ให้ดึงข้อมูล birth_date มาด้วย
 export async function getStaffList(role?: string) {
   try {
     let query = supabase
@@ -820,27 +854,19 @@ export async function getStaffList(role?: string) {
       .in('role', ['admin', 'doctor', 'helper'])
       .eq('is_active', true)
       .order('created_at', { ascending: false });
-    
+
     if (role) {
       query = query.eq('role', role);
     }
 
-    const { data, error } = await query;
+    const {  data, error } = await query;
 
     if (error) {
       console.error('Error fetching staff list:', error);
       return [];
     }
 
-    // ✅ เพิ่ม hospital_name จาก hospitals table
-    const staffWithData = data?.map(staff => ({
-      ...staff,
-      hospital_name: staff.hospitals?.name || '-',
-      hospital_code: staff.hospitals?.code || '-',
-    })) || [];
-
-    console.log('📊 Staff List Data:', staffWithData.length);
-    return staffWithData;
+    return data || [];
   } catch (err) {
     console.error('Get staff list error:', err);
     return [];
