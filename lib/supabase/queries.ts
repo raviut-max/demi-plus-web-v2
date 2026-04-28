@@ -2586,3 +2586,122 @@ export async function getHospitalsWithHierarchy() {
   }
 }
 
+// =====================================================
+// 🏥 ฟังก์ชันจัดการสิทธิ์การเข้าถึงผู้ป่วยตามโรงพยาบาล
+// =====================================================
+
+/**
+ * ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
+ * - Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
+ * - แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+ * - ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
+ */
+export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
+  try {
+    console.log('🔍 Getting accessible hospitals for user:', userId);
+    
+    // ✅ 1. ดึงข้อมูลผู้ใช้ (role + hospital_id)
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('role, hospital_id')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !userData) {
+      console.error('Error fetching user data:', userError);
+      return [];
+    }
+
+    // ✅ 2. ถ้าเป็น Admin → เข้าถึงทั้งหมด (return empty = ไม่กรอง)
+    if (userData.role === 'admin') {
+      console.log('👑 Admin user - can access all hospitals');
+      return []; // Empty array = ไม่มีการกรอง
+    }
+
+    // ✅ 3. ถ้าไม่มี hospital_id → ไม่สามารถเข้าถึงอะไรได้
+    if (!userData.hospital_id) {
+      console.log('⚠️ User has no hospital assigned');
+      return [];
+    }
+
+    // ✅ 4. ดึงข้อมูลโรงพยาบาลของผู้ใช้
+    const { data: hospitalData, error: hospitalError } = await supabase
+      .from('hospitals')
+      .select('id, type, parent_id')
+      .eq('id', userData.hospital_id)
+      .single();
+
+    if (hospitalError || !hospitalData) {
+      console.error('Error fetching hospital data:', hospitalError);
+      return [];
+    }
+
+    console.log('🏥 User hospital:', hospitalData.id, 'Type:', hospitalData.type);
+
+    // ✅ 5. ตรวจสอบประเภทโรงพยาบาล
+    if (hospitalData.type === 'main') {
+      // ✅ แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+      const accessibleIds: string[] = [hospitalData.id];
+      
+      // ดึงลูกข่ายทั้งหมดที่อยู่ใต้แม่ข่ายนี้
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalData.id)
+        .eq('is_active', true);
+
+      if (subHospitals && subHospitals.length > 0) {
+        subHospitals.forEach(sub => accessibleIds.push(sub.id));
+      }
+
+      console.log('🏥 Main hospital - accessible:', accessibleIds.length, 'hospitals');
+      return accessibleIds;
+
+    } else if (hospitalData.type === 'sub') {
+      // ✅ ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
+      console.log('🏥 Sub hospital - accessible: 1 hospital (own)');
+      return [hospitalData.id];
+    }
+
+    return [];
+  } catch (err) {
+    console.error('Error in getAccessibleHospitalIds:', err);
+    return [];
+  }
+}
+
+/**
+ * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
+ */
+export async function getUserHospitalInfo(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        hospital_id,
+        hospitals (
+          id,
+          name,
+          code,
+          type,
+          parent_id,
+          parent_hospital:hospitals!parent_id (
+            id,
+            name,
+            code
+          )
+        )
+      `)
+      .eq('id', userId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data.hospitals;
+  } catch (err) {
+    console.error('Error fetching user hospital info:', err);
+    return null;
+  }
+}
