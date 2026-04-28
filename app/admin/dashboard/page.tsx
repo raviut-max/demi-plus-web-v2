@@ -1,6 +1,5 @@
 // app/admin/dashboard/page.tsx
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getDashboardStats } from '@/lib/supabase/queries';
@@ -32,12 +31,13 @@ interface MenuItem {
   color: string;
   href: string;
   badge?: number;
+  allowedRoles?: string[]; // ✅ เพิ่ม field นี้
 }
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
-  const [stats, setStats] = useState({
+  const [user, setUser] = useState<any>(null);
+  const [stats, setStats] = useState<DashboardStats>({
     totalPatients: 0,
     todayRecords: 0,
     todayAppointments: 0,
@@ -78,7 +78,7 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - ลบ กิจกรรม, ความรู้, Mentor ออก (เหลือ 7 เมนู)
+  // ✅ เมนูจัดการระบบ - แสดงตามสิทธิ์
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -86,13 +86,15 @@ export default function AdminDashboard() {
       icon: <Users className="w-6 h-6" />,
       color: 'from-blue-500 to-cyan-500',
       href: '/admin/patients',
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'แบบประเมิน',
       description: 'ทำแบบประเมิน PAM และ PROMs',
-      icon: <FileText className="w-6 h-6" />,
+      icon: <ClipboardCheck className="w-6 h-6" />,
       color: 'from-purple-500 to-pink-500',
       href: '/admin/screening',
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'เป้าหมาย',
@@ -100,6 +102,7 @@ export default function AdminDashboard() {
       icon: <Target className="w-6 h-6" />,
       color: 'from-green-500 to-emerald-500',
       href: '/admin/goals',
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'นัดหมาย',
@@ -107,6 +110,7 @@ export default function AdminDashboard() {
       icon: <Calendar className="w-6 h-6" />,
       color: 'from-orange-500 to-red-500',
       href: '/admin/appointments',
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'จัดการเจ้าหน้าที่',
@@ -114,6 +118,7 @@ export default function AdminDashboard() {
       icon: <UserCheck className="w-6 h-6" />,
       color: 'from-indigo-500 to-purple-500',
       href: '/admin/staff',
+      allowedRoles: ['admin'], // ✅ เฉพาะ Admin
     },
     {
       title: 'รายงาน',
@@ -121,6 +126,7 @@ export default function AdminDashboard() {
       icon: <BarChart3 className="w-6 h-6" />,
       color: 'from-red-500 to-pink-500',
       href: '/admin/reports',
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'ตั้งค่า',
@@ -128,8 +134,14 @@ export default function AdminDashboard() {
       icon: <Settings className="w-6 h-6" />,
       color: 'from-gray-500 to-slate-500',
       href: '/admin/settings',
+      allowedRoles: ['admin'], // ✅ เฉพาะ Admin เท่านั้น
     },
   ];
+
+  // ✅ Filter เมนูตามสิทธิ์ของผู้ใช้
+  const visibleMenuItems = menuItems.filter(item => 
+    item.allowedRoles?.includes(user?.role || '')
+  );
 
   if (loading) {
     return (
@@ -140,19 +152,16 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-cyan-50 to-purple-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-lg border-b border-gray-200">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              {/* ✅ แก้ไขชื่อเป็น "DeMi+ หน้าหลัก" */}
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
                 DeMi+ หน้าหลัก
               </h1>
-              <p className="text-gray-600">
-                ระบบจัดการสำหรับเจ้าหน้าที่
-              </p>
+              <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
             </div>
             
             <div className="flex items-center gap-4">
@@ -253,13 +262,15 @@ export default function AdminDashboard() {
               <FileText className="w-4 h-4" />
               ทำแบบประเมิน
             </button>
-            <button
-              onClick={() => router.push('/admin/staff/new')}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
-            >
-              <UserCheck className="w-4 h-4" />
-              เพิ่มเจ้าหน้าที่
-            </button>
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => router.push('/admin/staff/new')}
+                className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
+              >
+                <UserCheck className="w-4 h-4" />
+                เพิ่มเจ้าหน้าที่
+              </button>
+            )}
             <button
               onClick={() => router.push('/admin/goals')}
               className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
@@ -270,9 +281,9 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Menu Grid */}
+        {/* Menu Grid - แสดงเมนูตามสิทธิ์ */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {menuItems.map((item, index) => (
+          {visibleMenuItems.map((item, index) => (
             <button
               key={index}
               onClick={() => router.push(item.href)}
