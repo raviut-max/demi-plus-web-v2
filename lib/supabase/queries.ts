@@ -124,8 +124,17 @@ export async function getProfile(userId: string) {
 // =====================================================
 // ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin)
 // =====================================================
-export async function getPatientList(search?: string, pamLevel?: string) {
+export async function getPatientList(search?: string, pamLevel?: string, userId?: string) {
   try {
+    // ✅ 1. ตรวจสอบสิทธิ์การเข้าถึงโรงพยาบาล
+    let accessibleHospitalIds: string[] = [];
+    
+    if (userId) {
+      accessibleHospitalIds = await getAccessibleHospitalIds(userId);
+      console.log('🏥 Accessible hospitals for user:', userId, accessibleHospitalIds);
+    }
+
+    // ✅ 2. สร้าง query
     let query = supabase
       .from('profiles')
       .select(`
@@ -135,22 +144,29 @@ export async function getPatientList(search?: string, pamLevel?: string) {
           role, 
           is_active, 
           created_at 
-        ),
-        hospitals (
-          id,
-          name,
-          code
+        ), 
+        hospitals ( 
+          id, 
+          name, 
+          code 
         )
       `)
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
+    // ✅ 3. กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้าไม่ใช่ admin)
+    if (accessibleHospitalIds.length > 0) {
+      query = query.in('hospital_id', accessibleHospitalIds);
+    }
+
+    // ✅ 4. ค้นหา
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
+    // ✅ 5. กรองตาม PAM Level
     if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }

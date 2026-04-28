@@ -1,15 +1,17 @@
 // app/admin/patients/page.tsx
-// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 28 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เปลี่ยนจาก subdistrict_health_center → hospital_id
-//    2. แสดงชื่อโรงพยาบาลแทน รพสต
-//    3. ค้นหาด้วยชื่อโรงพยาบาลได้
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    4. Admin เห็นทั้งหมด, บุคลากรเห็นเฉพาะโรงพยาบาลที่เข้าถึงได้
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, deletePatient, restorePatient, getDeletedPatients, permanentlyDeletePatient } from '@/lib/supabase/queries';
-import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital } from 'lucide-react';
+import { checkSession, logout, getPatientList, deletePatient, restorePatient, getDeletedPatients, permanentlyDeletePatient, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital, Building2, UserCheck } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 // ✅ Interface ที่แก้ไขแล้ว - ใช้ hospital_id แทน subdistrict_health_center
 interface Patient {
@@ -26,8 +28,8 @@ interface Patient {
   updated_at?: string;
   is_active: boolean;
   status?: string;
-  hospital_id?: string;  // ✅ เปลี่ยนเป็น hospital_id
-  hospitals?: {          // ✅ เพิ่ม hospitals relation
+  hospital_id?: string;
+  hospitals?: {
     id: string;
     name: string;
     code: string;
@@ -40,15 +42,30 @@ interface Patient {
   };
 }
 
+interface UserHospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+}
+
 export default function PatientListPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [deletedPatients, setDeletedPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pamLevelFilter, setPamLevelFilter] = useState('all');
   const [showDeletedModal, setShowDeletedModal] = useState(false);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -64,13 +81,36 @@ export default function PatientListPage() {
     }
 
     setUser(userData);
-    loadPatients();
+    loadUserHospital(userData.id);
+    loadAccessibleHospitals(userData.id);
     setLoading(false);
   }, [router]);
 
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
+
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
+  const loadAccessibleHospitals = async (userId: string) => {
+    try {
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
+      console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
+    } catch (error) {
+      console.error('Error loading accessible hospitals:', error);
+    }
+  };
+
   const loadPatients = async () => {
     try {
-      const data = await getPatientList();
+      // ✅ ส่ง userId เพื่อกรองผู้ป่วยตามสิทธิ์
+      const data = await getPatientList(undefined, undefined, user?.id);
       console.log('📊 Loaded patients:', data.length);
       console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
       setPatients(data);
@@ -78,6 +118,12 @@ export default function PatientListPage() {
       console.error('Error loading patients:', error);
     }
   };
+
+  useEffect(() => {
+    if (user && accessibleHospitalIds.length >= 0) { // ✅ โหลดหลังจากได้สิทธิ์แล้ว
+      loadPatients();
+    }
+  }, [user, accessibleHospitalIds]);
 
   const loadDeletedPatients = async () => {
     try {
@@ -97,7 +143,6 @@ export default function PatientListPage() {
     if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?\n\nการลบจะเป็นการปิดการใช้งานเท่านั้น ข้อมูลจะยังคงอยู่ในระบบ`)) {
       return;
     }
-
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
@@ -116,7 +161,6 @@ export default function PatientListPage() {
     if (!confirm(`คุณต้องการกู้คืนผู้ป่วย "${patientName}" กลับมาใช้งานหรือไม่?`)) {
       return;
     }
-
     try {
       const result = await restorePatient(patientId);
       if (result.success) {
@@ -136,7 +180,6 @@ export default function PatientListPage() {
     if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร\n\nการกระทำนี้ไม่สามารถย้อนกลับได้ และข้อมูลทั้งหมดจะถูกลบออกจากระบบ\n\nคุณแน่ใจหรือไม่?`)) {
       return;
     }
-
     if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้\n\nพิมพ์ "YES" เพื่อยืนยันการลบถาวร')) {
       return;
     }
@@ -166,14 +209,13 @@ export default function PatientListPage() {
     const fullName = patient.first_name && patient.last_name
       ? `${patient.first_name} ${patient.last_name}`
       : patient.full_name || '';
-    
     const hospitalName = patient.hospitals?.name || '';
 
     const matchesSearch =
       fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       patient.hospital_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       patient.users?.id_card?.includes(searchTerm) ||
-      hospitalName.toLowerCase().includes(searchTerm.toLowerCase()); // ✅ ค้นหาด้วยชื่อโรงพยาบาล
+      hospitalName.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesPamLevel = pamLevelFilter === 'all' || patient.pam_level === pamLevelFilter;
 
@@ -220,41 +262,99 @@ export default function PatientListPage() {
             onClick={() => router.push('/admin/dashboard')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
-            ← กลับ Dashboard
+            <ArrowLeft className="w-4 h-4" />
+            กลับ Dashboard
           </button>
-          
-          <div className="flex items-center justify-between">
+
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
                 👥 จัดการผู้ป่วย
               </h1>
-              <p className="text-gray-600">ดูและจัดการข้อมูลผู้ป่วยทั้งหมด</p>
+              <p className="text-gray-600">ดูและจัดการข้อมูลผู้ป่วย</p>
             </div>
             
-            <div className="flex gap-2">
-              <button
-                onClick={handleOpenDeletedModal}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
-              >
-                <Archive className="w-4 h-4" />
-                ผู้ป่วยที่ถูกลบ ({deletedPatients.length})
-              </button>
-              
-              <button
-                onClick={() => router.push('/admin/patients/new')}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-              >
-                <Plus className="w-4 h-4" />
-                ลงทะเบียนผู้ป่วยใหม่
-              </button>
-              
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
-              >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
-              </button>
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">
+                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                {userHospital ? (
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">
+                        {userHospital.name}
+                      </span>
+                    </div>
+                    
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                          🏥 แม่ข่าย
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                          🏥 ลูกข่าย
+                        </span>
+                      )}
+                      
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-2">
+                    ไม่สังกัดโรงพยาบาล
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleOpenDeletedModal}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+                >
+                  <Archive className="w-4 h-4" />
+                  ผู้ป่วยที่ถูกลบ ({deletedPatients.length})
+                </button>
+                
+                <button
+                  onClick={() => router.push('/admin/patients/new')}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  ลงทะเบียนผู้ป่วยใหม่
+                </button>
+                
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
+                  ออกจากระบบ
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -369,7 +469,7 @@ export default function PatientListPage() {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">HN</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th> {/* ✅ เปลี่ยนจาก รพสต */}
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Step</th>
@@ -383,6 +483,11 @@ export default function PatientListPage() {
                     <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
+                      {accessibleHospitalIds.length > 0 && (
+                        <p className="text-sm text-gray-400 mt-2">
+                          🔒 คุณมีสิทธิ์เข้าถึงเฉพาะโรงพยาบาลที่สังกัด
+                        </p>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -410,7 +515,6 @@ export default function PatientListPage() {
                           {patient.users?.id_card || '-'}
                         </span>
                       </td>
-                      {/* ✅ แสดงชื่อโรงพยาบาล */}
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <Hospital className="w-4 h-4 text-gray-400" />
@@ -471,6 +575,11 @@ export default function PatientListPage() {
         {/* Footer */}
         <div className="mt-6 text-center text-sm text-gray-500">
           <p>แสดง {filteredPatients.length} จาก {patients.length} ผู้ป่วย</p>
+          {accessibleHospitalIds.length > 0 && (
+            <p className="text-xs text-gray-400 mt-1">
+              🔒 จำกัดการแสดงผลตามโรงพยาบาลที่สังกัด ({accessibleHospitalIds.length} โรงพยาบาล)
+            </p>
+          )}
         </div>
       </div>
 
