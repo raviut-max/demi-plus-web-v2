@@ -820,7 +820,7 @@ function AddStaffModal({
   );
 }
 
-// ✅ Edit Staff Modal Component (แก้ไขแล้ว - ลบ updated_at)
+// ✅ Edit Staff Modal Component (แก้ไขแล้ว - ลบ updated_at ทั้งหมด)
 function EditStaffModal({
   staff,
   hospitals,
@@ -898,6 +898,7 @@ function EditStaffModal({
 
       if (formData.hospital_id !== staff.hospital_id) {
         updateData.hospital_id = formData.hospital_id;
+        // ✅ ไม่ต้องเพิ่ม updated_at
       }
 
       // ✅ 3. ถ้าติ๊ก Checkbox → รีเซ็ตรหัสผ่านให้ตรงกับวันเกิดใหม่
