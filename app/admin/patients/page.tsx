@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, deletePatient, restorePatient, getDeletedPatients, permanentlyDeletePatient, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
-import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital, Building2, UserCheck } from 'lucide-react';
+import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital, Building2, UserCheck, ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 // ✅ Interface ที่แก้ไขแล้ว - ใช้ hospital_id แทน subdistrict_health_center
@@ -287,7 +287,7 @@ export default function PatientListPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
