@@ -893,7 +893,7 @@ function EditStaffModal({
       // ✅ 2. อัปเดต hospital_id และ birth_date ในตาราง users (ถ้ามีการเปลี่ยน)
       const updateData: any = {
         birth_date: birthDate,
-        updated_at: new Date().toISOString(),
+        // ✅ ไม่ต้องมี updated_at (ตาราง users ไม่มีคอลัมน์นี้)
       };
 
       if (formData.hospital_id !== staff.hospital_id) {
@@ -960,8 +960,7 @@ function EditStaffModal({
           {/* ✅ วันเกิด (3 ช่อง) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              <Calendar className="w-4 h-4 inline mr-1" />
-              วันเกิด
+              🎂 วันเกิด
             </label>
             <div className="grid grid-cols-3 gap-2">
               <select
