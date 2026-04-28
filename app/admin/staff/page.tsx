@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getStaffList, addStaff, updateStaff, deactivateStaff, permanentlyDeleteStaff, restoreStaff, getDeactivatedStaff, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
-import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX, Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key, Save } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 // ✅ เดือนภาษาไทย
@@ -35,7 +35,7 @@ interface Hospital {
 
 export default function StaffManagementPage() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -43,7 +43,7 @@ export default function StaffManagementPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
-  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [selectedStaff, setSelectedStaff] = useState<any>(null);
 
   useEffect(() => {
     const userData = checkSession();
@@ -596,8 +596,8 @@ function AddStaffModal({
 
       const result = await addStaff({
         ...formData,
-        password: password,  // ✅ ใช้รหัสผ่านที่สร้างจากวันเกิด
-        birth_date: birthDate,  // ✅ เพิ่ม birth_date
+        password: password, // ✅ ใช้รหัสผ่านที่สร้างจากวันเกิด
+        birth_date: birthDate, // ✅ เพิ่ม birth_date
         created_by: userId,
       });
 
@@ -701,7 +701,102 @@ function AddStaffModal({
             </p>
           </div>
 
-          {/* ... ฟิลด์อื่นๆ เหมือนเดิม ... */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              ชื่อ-นามสกุล *
+            </label>
+            <input
+              type="text"
+              value={formData.full_name_th}
+              onChange={(e) => setFormData({ ...formData, full_name_th: e.target.value })}
+              required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                บทบาท *
+              </label>
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'doctor' | 'helper' })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="doctor">แพทย์</option>
+                <option value="helper">เจ้าหน้าที่</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ความเชี่ยวชาญ
+              </label>
+              <input
+                type="text"
+                value={formData.specialization_th}
+                onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              โรงพยาบาลสังกัด
+            </label>
+            <select
+              value={formData.hospital_id}
+              onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
+            >
+              <option value="">-- เลือกโรงพยาบาล --</option>
+              
+              {/* ✅ แม่ข่าย */}
+              {mainHospitals.map((hospital) => (
+                <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
+                  <option value={hospital.id}>
+                    └ {hospital.name} ({hospital.code}) - แม่ข่าย
+                  </option>
+                  {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
+                  {hospitalGroups.get(hospital.id)?.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {'   '}└─ {sub.name} ({sub.code})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              💡 โรงพยาบาล: {hospitals.length} แห่ง
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                เบอร์โทรศัพท์
+              </label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                อีเมล
+              </label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
 
           <div className="flex gap-4 pt-4">
             <button
@@ -739,7 +834,7 @@ function EditStaffModal({
   onClose: () => void;
   onSuccess: () => void
 }) {
-  // ✅ แยกวันเกิดจาก staff.birth_date (YYYY-MM-DD) → แปลงเป็น พ.ศ.
+  // ✅ แยกวันเกิดจาก staff.birth_date (YYYY-MM-DD)
   const parseBirthDate = (dateString: string | null) => {
     if (!dateString) return { day: '', month: '', year: '' };
     const date = new Date(dateString);
@@ -766,7 +861,7 @@ function EditStaffModal({
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false); // ✅ Checkbox รีเซ็ตรหัสผ่าน
 
-  // ✅ ฟังก์ชันสร้างรหัสผ่านจากวันเกิด (dd-mm-yyyy)
+  // ✅ ฟังก์ชันสร้างรหัสผ่านจากวันเกิด
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       return '';
@@ -779,13 +874,6 @@ function EditStaffModal({
     setLoading(true);
 
     try {
-      // ✅ ตรวจสอบว่ากรอกวันเกิดครบหรือไม่
-      if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-        alert('กรุณากรอกวันเกิดให้ครบถ้วน');
-        setLoading(false);
-        return;
-      }
-
       // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
@@ -830,7 +918,7 @@ function EditStaffModal({
       // ✅ แจ้งผลลัพธ์
       let message = 'แก้ไขข้อมูลสำเร็จ!';
       if (resetPassword) {
-        message += `\n\n🔐 รีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}\n(วัน-เดือน-ปีเกิด)`;
+        message += `\n\n🔐 รีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}`;
       }
       
       alert(message);
@@ -872,7 +960,8 @@ function EditStaffModal({
           {/* ✅ วันเกิด (3 ช่อง) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              🎂 วันเกิด
+              <Calendar className="w-4 h-4 inline mr-1" />
+              วันเกิด
             </label>
             <div className="grid grid-cols-3 gap-2">
               <select
@@ -906,9 +995,6 @@ function EditStaffModal({
                 ))}
               </select>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              💡 รหัสผ่านปัจจุบัน: {staff.birth_date ? generatePassword() : 'ไม่ระบุ'}
-            </p>
           </div>
 
           {/* ✅ Checkbox รีเซ็ตรหัสผ่าน */}
@@ -931,7 +1017,6 @@ function EditStaffModal({
             </label>
           </div>
 
-          {/* ✅ ความเชี่ยวชาญ */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               ความเชี่ยวชาญ
@@ -977,7 +1062,6 @@ function EditStaffModal({
             </p>
           </div>
 
-          {/* ✅ เบอร์โทรศัพท์ และ อีเมล */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1005,7 +1089,6 @@ function EditStaffModal({
             </div>
           </div>
 
-          {/* ✅ ปุ่มบันทึกและยกเลิก */}
           <div className="flex gap-4 pt-4 border-t border-gray-200">
             <button
               type="submit"
