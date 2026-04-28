@@ -1,8 +1,16 @@
 // app/admin/dashboard/page.tsx
+// ✅ แก้ไขล่าสุด: 28 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. Badge แสดงประเภทโรงพยาบาล (ไม่แสดงโค้ด)
+//    4. เมนูแสดงตามสิทธิ์ (Admin เห็นทั้งหมด, บุคลากรเห็นเฉพาะเมนูที่อนุญาต)
+
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getDashboardStats } from '@/lib/supabase/queries';
+import { supabase } from '@/lib/supabase/client';
 import {
   Users,
   FileText,
@@ -14,7 +22,9 @@ import {
   Target,
   ClipboardCheck,
   BarChart3,
-  Settings
+  Settings,
+  Hospital,
+  Building2
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -31,12 +41,24 @@ interface MenuItem {
   color: string;
   href: string;
   badge?: number;
-  allowedRoles?: string[]; // ✅ เพิ่ม field นี้
+  allowedRoles?: string[];
+}
+
+interface UserHospital {
+  id: string;
+  name: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+  };
 }
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [stats, setStats] = useState<DashboardStats>({
     totalPatients: 0,
     todayRecords: 0,
@@ -59,8 +81,44 @@ export default function AdminDashboard() {
     }
 
     setUser(userData);
+    loadUserHospital(userData.id);
     loadDashboardStats();
   }, [router]);
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      console.log('🏥 Loading user hospital for:', userId);
+      
+      const { data, error } = await supabase
+        .from('users')
+        .select(`
+          hospital_id,
+          hospitals (
+            id,
+            name,
+            type,
+            parent_id,
+            parent_hospital:hospitals!parent_id (
+              id,
+              name
+            )
+          )
+        `)
+        .eq('id', userId)
+        .single();
+
+      if (error || !data) {
+        console.error('Error loading user hospital:', error);
+        return;
+      }
+
+      console.log('✅ User hospital data:', data);
+      setUserHospital(data.hospitals);
+    } catch (err) {
+      console.error('Error in loadUserHospital:', err);
+    }
+  };
 
   const loadDashboardStats = async () => {
     try {
@@ -139,7 +197,7 @@ export default function AdminDashboard() {
   ];
 
   // ✅ Filter เมนูตามสิทธิ์ของผู้ใช้
-  const visibleMenuItems = menuItems.filter(item => 
+  const visibleMenuItems = menuItems.filter(item =>
     item.allowedRoles?.includes(user?.role || '')
   );
 
@@ -153,84 +211,84 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-{/* Header */}
-<div className="bg-white shadow-sm border-b border-gray-200">
-  <div className="max-w-7xl mx-auto px-4 py-6">
-    <div className="flex items-center justify-between flex-wrap gap-4">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">
-          DeMi+ หน้าหลัก
-        </h1>
-        <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
-      </div>
-      
-      <div className="flex items-center gap-4">
-        {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
-        <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-              <UserCheck className="w-5 h-5 text-blue-600" />
-            </div>
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <p className="font-semibold text-gray-800">
-                {user?.full_name_th || 'ผู้ดูแลระบบ'}
-              </p>
-              <p className="text-xs text-gray-500">
-                {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                 user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
-              </p>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                DeMi+ หน้าหลัก
+              </h1>
+              <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
             </div>
-          </div>
-          
-          {/* ✅ แสดงข้อมูลโรงพยาบาล */}
-          {userHospital ? (
-            <div className="border-t border-blue-200 pt-2 mt-2">
-              <div className="flex items-center gap-1 mb-1">
-                <Hospital className="w-3 h-3 text-blue-600" />
-                <span className="text-xs text-gray-600 font-medium">
-                  {userHospital.name}  {/* ✅ แสดงแค่ชื่อ ไม่ต้องมี code */}
-                </span>
+            
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">
+                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                {userHospital ? (
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">
+                        {userHospital.name}  {/* ✅ แสดงแค่ชื่อ ไม่ต้องมี code */}
+                      </span>
+                    </div>
+                    
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                          🏥 แม่ข่าย
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                          🏥 ลูกข่าย
+                        </span>
+                      )}
+                      
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-2">
+                    ไม่สังกัดโรงพยาบาล
+                  </p>
+                )}
               </div>
               
-              {/* ✅ Badge ประเภทโรงพยาบาล */}
-              <div className="flex items-center gap-2">
-                {userHospital.type === 'main' ? (
-                  <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                    🏥 แม่ข่าย
-                  </span>
-                ) : (
-                  <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
-                    🏥 ลูกข่าย
-                  </span>
-                )}
-                
-                {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
-                {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
-                    <Building2 className="w-3 h-3" />
-                    <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
-                  </div>
-                )}
-              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
             </div>
-          ) : (
-            <p className="text-xs text-gray-400 mt-2">
-              ไม่สังกัดโรงพยาบาล
-            </p>
-          )}
+          </div>
         </div>
-        
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
-        >
-          <LogOut className="w-4 h-4" />
-          ออกจากระบบ
-        </button>
       </div>
-    </div>
-  </div>
-</div>
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
@@ -310,11 +368,11 @@ export default function AdminDashboard() {
             </button>
             {user?.role === 'admin' && (
               <button
-                onClick={() => router.push('/admin/staff/new')}
+                onClick={() => router.push('/admin/staff')}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
               >
                 <UserCheck className="w-4 h-4" />
-                เพิ่มเจ้าหน้าที่
+                จัดการเจ้าหน้าที่
               </button>
             )}
             <button
