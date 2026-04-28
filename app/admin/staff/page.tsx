@@ -1,9 +1,9 @@
 // app/admin/staff/page.tsx
 // ✅ แก้ไขล่าสุด: 28 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มฟิลด์วันเกิด (วัน/เดือน/ปี พ.ศ.)
-//    2. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
-//    3. แสดงตัวอย่างรหัสผ่านแบบ real-time
+//    1. ลบ updated_at ออก (ตาราง users ไม่มีคอลัมน์นี้)
+//    2. เพิ่มฟิลด์วันเกิด (วัน/เดือน/ปี พ.ศ.)
+//    3. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
 //    4. เพิ่ม Checkbox สำหรับรีเซ็ตรหัสผ่านในหน้าแก้ไข
 
 'use client';
@@ -496,7 +496,7 @@ export default function StaffManagementPage() {
                             <p>ID Card: {staff.id_card}</p>
                             <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
                             <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
-                            <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at).toLocaleString('th-TH')}</p>
+                            <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at || staff.created_at).toLocaleString('th-TH')}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 ml-4">
@@ -820,7 +820,7 @@ function AddStaffModal({
   );
 }
 
-// Edit Staff Modal Component
+// ✅ Edit Staff Modal Component (แก้ไขแล้ว - ลบ updated_at)
 function EditStaffModal({
   staff,
   hospitals,
@@ -893,7 +893,7 @@ function EditStaffModal({
       // ✅ 2. อัปเดต hospital_id และ birth_date ในตาราง users (ถ้ามีการเปลี่ยน)
       const updateData: any = {
         birth_date: birthDate,
-        // ✅ ไม่ต้องมี updated_at (ตาราง users ไม่มีคอลัมน์นี้)
+        // ✅ ลบ updated_at ออก (ตาราง users ไม่มีคอลัมน์นี้)
       };
 
       if (formData.hospital_id !== staff.hospital_id) {
@@ -960,7 +960,8 @@ function EditStaffModal({
           {/* ✅ วันเกิด (3 ช่อง) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              🎂 วันเกิด
+              <Calendar className="w-4 h-4 inline mr-1" />
+              วันเกิด
             </label>
             <div className="grid grid-cols-3 gap-2">
               <select
@@ -1032,7 +1033,7 @@ function EditStaffModal({
           {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              🏥 โรงพยาบาลสังกัด
+              โรงพยาบาลสังกัด
             </label>
             <select
               value={formData.hospital_id}
