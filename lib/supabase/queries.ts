@@ -1012,15 +1012,19 @@ export async function deletePatient(patientId: string) {
 // =====================================================
 // ฟังก์ชันลบผู้ป่วยถาวร (Permanent Delete)
 // =====================================================
+// ✅ แก้ไขฟังก์ชัน permanentlyDeletePatient ใน lib/supabase/queries.ts
 export async function permanentlyDeletePatient(patientId: string) {
   try {
     console.log('🗑️ Permanently deleting patient:', patientId);
-
+    
+    // ========================================
+    // ✅ 1. ลบ screening_responses ก่อน (foreign key)
+    // ========================================
     const screenings = await supabase
       .from('screenings')
       .select('id')
       .eq('user_id', patientId);
-
+    
     if (screenings.data && screenings.data.length > 0) {
       await supabase
         .from('screening_responses')
@@ -1030,31 +1034,68 @@ export async function permanentlyDeletePatient(patientId: string) {
           screenings.data.map((s: any) => s.id)
         );
     }
-
+    
+    // ========================================
+    // ✅ 2. ลบ appointment_followups (เพิ่มใหม่)
+    // ========================================
+    await supabase
+      .from('appointment_followups')
+      .delete()
+      .eq('user_id', patientId);
+    
+    // ========================================
+    // ✅ 3. ลบ goals (เพิ่มใหม่)
+    // ========================================
+    await supabase
+      .from('goals')
+      .delete()
+      .eq('user_id', patientId);
+    
+    // ========================================
+    // ✅ 4. ลบ records (เพิ่มใหม่)
+    // ========================================
+    await supabase
+      .from('records')
+      .delete()
+      .eq('user_id', patientId);
+    
+    // ========================================
+    // ✅ 5. ลบ screenings
+    // ========================================
     await supabase.from('screenings').delete().eq('user_id', patientId);
+    
+    // ========================================
+    // ✅ 6. ลบ appointments
+    // ========================================
     await supabase.from('appointments').delete().eq('user_id', patientId);
-
+    
+    // ========================================
+    // ✅ 7. ลบ profiles
+    // ========================================
     const { error: profileError } = await supabase
       .from('profiles')
       .delete()
       .eq('id', patientId);
-
+    
     if (profileError) {
       console.error('Error deleting profile:', profileError);
       return { success: false, error: profileError.message };
     }
-
+    
+    // ========================================
+    // ✅ 8. ลบ users (สุดท้าย)
+    // ========================================
     const { error: userError } = await supabase
       .from('users')
       .delete()
       .eq('id', patientId);
-
+    
     if (userError) {
       console.error('Error deleting user:', userError);
       return { success: false, error: userError.message };
     }
-
-    console.log('✅ Patient permanently deleted');
+    
+    console.log('✅ Patient permanently deleted with all related data');
     return { success: true };
   } catch (err) {
     console.error('Permanent delete patient error:', err);
