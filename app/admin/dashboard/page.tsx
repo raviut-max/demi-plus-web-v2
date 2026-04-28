@@ -94,6 +94,7 @@ export default function AdminDashboard() {
       
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ User hospital:', hospitalInfo);
     } catch (error) {
       console.error('Error loading user hospital:', error);
     }
@@ -105,8 +106,9 @@ export default function AdminDashboard() {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 Hospital IDs:', ids);
       
-      // ✅ โหลดสถิติหลังจากได้สิทธิ์แล้ว
+      // ✅ โหลดสถิติหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไปด้วย)
       loadDashboardStats(ids);
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
@@ -115,7 +117,9 @@ export default function AdminDashboard() {
 
   const loadDashboardStats = async (hospitalIds?: string[]) => {
     try {
+      console.log('📊 Loading dashboard stats with hospitalIds:', hospitalIds);
       const data = await getDashboardStats(hospitalIds);
+      console.log('📊 Dashboard stats:', data);
       setStats(data);
     } catch (error) {
       console.error('Error loading dashboard stats:', error);
@@ -228,7 +232,7 @@ export default function AdminDashboard() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>

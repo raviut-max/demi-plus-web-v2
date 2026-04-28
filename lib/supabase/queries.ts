@@ -669,30 +669,98 @@ export async function createAppointment(data: {
 // =====================================================
 // ฟังก์ชันดึงสถิติ Dashboard (Admin)
 // =====================================================
-export async function getDashboardStats() {
+// ✅ ใน lib/supabase/queries.ts
+export async function getDashboardStats(hospitalIds?: string[]) {
   try {
-    const { count: totalPatients } = await supabase
+    // ✅ 1. นับผู้ป่วยทั้งหมด (กรองตามโรงพยาบาลถ้ามี)
+    let patientsQuery = supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('is_active', true);
-
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      patientsQuery = patientsQuery.in('hospital_id', hospitalIds);
+    }
+    
+    const { count: totalPatients } = await patientsQuery;
+    
+    // ✅ 2. นับบันทึกวันนี้ (ต้อง join กับ profiles เพื่อกรองโรงพยาบาล)
     const today = new Date().toISOString().split('T')[0];
-
-    const { count: todayRecords } = await supabase
+    
+    let recordsQuery = supabase
       .from('records')
       .select('*', { count: 'exact', head: true })
       .eq('record_date', today);
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      // ✅ ต้องดึง user_id จาก profiles ที่อยู่ในโรงพยาบาลที่เข้าถึงได้
+      const { data: patientIds } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('hospital_id', hospitalIds)
+        .eq('is_active', true);
+      
+      if (patientIds && patientIds.length > 0) {
+        recordsQuery = recordsQuery.in(
+          'user_id',
+          patientIds.map(p => p.id)
+        );
+      } else {
+        return {
+          totalPatients: 0,
+          todayRecords: 0,
+          todayAppointments: 0,
+          pendingAssessments: 0,
+        };
+      }
+    }
+    
+    const { count: todayRecords } = await recordsQuery;
 
-    const { count: todayAppointments } = await supabase
+    // ✅ 3. นับนัดหมายวันนี้ (ต้อง join กับ profiles เพื่อกรองโรงพยาบาล)
+    let appointmentsQuery = supabase
       .from('appointments')
       .select('*', { count: 'exact', head: true })
       .gte('appointment_date', today)
       .lte('appointment_date', today + 'T23:59:59');
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      // ✅ ต้องดึง user_id จาก profiles ที่อยู่ในโรงพยาบาลที่เข้าถึงได้
+      const { data: patientIds } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('hospital_id', hospitalIds)
+        .eq('is_active', true);
+      
+      if (patientIds && patientIds.length > 0) {
+        appointmentsQuery = appointmentsQuery.in(
+          'user_id',
+          patientIds.map(p => p.id)
+        );
+      } else {
+        return {
+          totalPatients: 0,
+          todayRecords: 0,
+          todayAppointments: 0,
+          pendingAssessments: 0,
+        };
+      }
+    }
+    
+    const { count: todayAppointments } = await appointmentsQuery;
 
-    const { count: pendingAssessments } = await supabase
+    // ✅ 4. นับรอประเมิน (กรองตามโรงพยาบาล)
+    let pendingQuery = supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
-      .eq('pam_level', 'L1');
+      .eq('pam_level', 'L1')
+      .eq('is_active', true);
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
+    }
+    
+    const { count: pendingAssessments } = await pendingQuery;
 
     return {
       totalPatients: totalPatients || 0,
