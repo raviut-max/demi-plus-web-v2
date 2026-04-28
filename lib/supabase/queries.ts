@@ -755,7 +755,7 @@ export async function addStaff(data: {
   }
 }
 
-// ✅ แก้ไขฟังก์ชัน updateStaff
+// ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
   specialization_th?: string;
@@ -767,12 +767,8 @@ export async function updateStaff(userId: string, data: {
   is_active?: boolean;
 }) {
   try {
-    // ✅ 1. อัปเดตข้อมูลในตาราง users (hospital_id, birth_date, password_hash)
+    // ✅ 1. อัปเดตข้อมูลในตาราง users (birth_date, password_hash, hospital_id)
     const updateUserData: any = {};
-    
-    if (data.hospital_id !== undefined) {
-      updateUserData.hospital_id = data.hospital_id;
-    }
     
     if (data.birth_date !== undefined) {
       updateUserData.birth_date = data.birth_date;
@@ -780,6 +776,10 @@ export async function updateStaff(userId: string, data: {
     
     if (data.password_hash !== undefined) {
       updateUserData.password_hash = data.password_hash;
+    }
+    
+    if (data.hospital_id !== undefined) {
+      updateUserData.hospital_id = data.hospital_id;
     }
 
     // ✅ อัปเดตตาราง users ถ้ามีข้อมูลที่จะอัปเดต
@@ -814,14 +814,14 @@ export async function updateStaff(userId: string, data: {
       updateDoctorData.is_active = data.is_active;
     }
 
-    const { error: doctorError } = await supabase
+    const { error } = await supabase
       .from('doctors')
       .update(updateDoctorData)
       .eq('user_id', userId);
 
-    if (doctorError) {
-      console.error('Error updating doctor profile:', doctorError);
-      return { success: false, error: doctorError.message };
+    if (error) {
+      console.error('Error updating staff:', error);
+      return { success: false, error: error.message };
     }
 
     return { success: true };

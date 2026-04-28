@@ -786,7 +786,7 @@ function EditStaffModal({
         return;
       }
 
-      // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD) สำหรับบันทึกในฐานข้อมูล
+      // ✅ รวมวันเกิดเป็น ค.ศ. (YYYY-MM-DD)
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
@@ -802,7 +802,7 @@ function EditStaffModal({
         return;
       }
 
-      // ✅ 2. อัปเดตข้อมูลในตาราง users (birth_date, hospital_id, password_hash)
+      // ✅ 2. อัปเดต hospital_id และ birth_date ในตาราง users (ถ้ามีการเปลี่ยน)
       const updateData: any = {
         birth_date: birthDate,
         updated_at: new Date().toISOString(),
@@ -827,7 +827,7 @@ function EditStaffModal({
         console.error('Error updating user:', userError);
       }
 
-      // ✅ แสดงผลลัพธ์
+      // ✅ แจ้งผลลัพธ์
       let message = 'แก้ไขข้อมูลสำเร็จ!';
       if (resetPassword) {
         message += `\n\n🔐 รีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}\n(วัน-เดือน-ปีเกิด)`;
