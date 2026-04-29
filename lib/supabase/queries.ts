@@ -779,9 +779,7 @@ export async function getDashboardStats(hospitalIds?: string[]) {
   }
 }
 
-// =====================================================
-// ✅ ฟังก์ชันเพิ่มเจ้าหน้าที่ (แก้ไขแล้ว - รองรับ birth_date)
-// =====================================================
+// ✅ แก้ไขฟังก์ชัน addStaff (แก้ไข doctorData is not defined)
 export async function addStaff(data: {
   id_card: string;
   password: string;
@@ -791,14 +789,14 @@ export async function addStaff(data: {
   phone?: string;
   email?: string;
   hospital_id?: string;
-  birth_date?: string;  // ✅ เพิ่ม field นี้
+  birth_date?: string;
   created_by: string;
 }) {
   try {
     console.log('🔍 [addStaff] Starting staff creation...');
     console.log('📋 [addStaff] Input data:', {
       ...data,
-      password: '***' // ไม่แสดงรหัสผ่านใน log
+      password: '***'
     });
 
     // ✅ 1. สร้าง user ในตาราง users
@@ -807,14 +805,14 @@ export async function addStaff(data: {
       .from('users')
       .insert({
         id_card: data.id_card,
-        password_hash: data.password,  // ✅ เก็บรหัสผ่าน (plain text สำหรับตอนนี้)
+        password_hash: data.password,
         role: data.role,
         is_active: true,
         created_by: data.created_by,
-        hospital_id: data.hospital_id || null,  // ✅ บันทึก hospital_id
-        birth_date: data.birth_date || null,  // ✅ บันทึก birth_date
+        hospital_id: data.hospital_id || null,
+        birth_date: data.birth_date || null,
       })
-      .select()  // ✅ เลือกข้อมูลกลับมาเพื่อดูว่าสร้างสำเร็จ
+      .select()
       .single();
 
     if (userError) {
@@ -832,6 +830,8 @@ export async function addStaff(data: {
     console.log('✅ [addStaff] User ID:', user.id);
 
     // ✅ 2. สร้างข้อมูลในตาราง doctors (สำหรับ doctor/helper)
+    let doctorData = null;  // ✅ ประกาศตัวแปร doctorData
+    
     if (data.role === 'doctor' || data.role === 'helper') {
       console.log('💾 [addStaff] Step 2: Creating doctor record...');
       console.log('📋 [addStaff] Doctor data to insert:', {
@@ -845,11 +845,11 @@ export async function addStaff(data: {
         is_verified: false,
       });
 
-      const { data: doctorData, error: doctorError } = await supabase
+      const { data: doctorDataResult, error: doctorError } = await supabase
         .from('doctors')
         .insert({
-          user_id: user.id,  // ✅ ใช้ user.id ที่ได้จากขั้นตอนที่ 1
-          full_name: data.full_name_th,  // ✅ ใช้ full_name_th (ไม่ใช่ id_card)
+          user_id: user.id,
+          full_name: data.full_name_th,
           full_name_th: data.full_name_th,
           specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
           phone: data.phone || null,
@@ -857,8 +857,8 @@ export async function addStaff(data: {
           is_active: true,
           is_verified: false,
         })
-        .select()  // ✅ เลือกข้อมูลกลับมา
-        .single();
+        .select()  // ✅ เพิ่ม select()
+        .single();  // ✅ เพิ่ม single()
 
       if (doctorError) {
         console.error('❌ [addStaff] Error creating doctor record:', doctorError);
@@ -876,6 +876,7 @@ export async function addStaff(data: {
         return { success: false, error: doctorError.message };
       }
 
+      doctorData = doctorDataResult;  // ✅ กำหนดค่าให้ doctorData
       console.log('✅ [addStaff] Doctor record created successfully:', doctorData);
     }
 
@@ -883,7 +884,7 @@ export async function addStaff(data: {
     return { 
       success: true, 
       user,
-      doctor: data.role === 'doctor' || data.role === 'helper' ? doctorData : null
+      doctor: doctorData  // ✅ ส่ง doctorData กลับไป (อาจเป็น null ถ้าเป็น admin)
     };
   } catch (err: any) {
     console.error('❌ [addStaff] Unexpected error:', err);
@@ -891,6 +892,7 @@ export async function addStaff(data: {
     return { success: false, error: err.message };
   }
 }
+
 // ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
