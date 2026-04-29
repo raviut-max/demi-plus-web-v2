@@ -779,7 +779,6 @@ export async function getDashboardStats(hospitalIds?: string[]) {
   }
 }
 
-// ✅ แก้ไขฟังก์ชัน addStaff (แก้ไข doctorData is not defined)
 export async function addStaff(data: {
   id_card: string;
   password: string;
@@ -830,8 +829,6 @@ export async function addStaff(data: {
     console.log('✅ [addStaff] User ID:', user.id);
 
     // ✅ 2. สร้างข้อมูลในตาราง doctors (สำหรับ doctor/helper)
-    let doctorData = null;  // ✅ ประกาศตัวแปร doctorData
-    
     if (data.role === 'doctor' || data.role === 'helper') {
       console.log('💾 [addStaff] Step 2: Creating doctor record...');
       console.log('📋 [addStaff] Doctor data to insert:', {
@@ -845,7 +842,7 @@ export async function addStaff(data: {
         is_verified: false,
       });
 
-      const { data: doctorDataResult, error: doctorError } = await supabase
+      const { data: doctorData, error: doctorError } = await supabase
         .from('doctors')
         .insert({
           user_id: user.id,
@@ -857,8 +854,8 @@ export async function addStaff(data: {
           is_active: true,
           is_verified: false,
         })
-        .select()  // ✅ เพิ่ม select()
-        .single();  // ✅ เพิ่ม single()
+        .select()
+        .single();
 
       if (doctorError) {
         console.error('❌ [addStaff] Error creating doctor record:', doctorError);
@@ -876,7 +873,6 @@ export async function addStaff(data: {
         return { success: false, error: doctorError.message };
       }
 
-      doctorData = doctorDataResult;  // ✅ กำหนดค่าให้ doctorData
       console.log('✅ [addStaff] Doctor record created successfully:', doctorData);
     }
 
@@ -884,7 +880,7 @@ export async function addStaff(data: {
     return { 
       success: true, 
       user,
-      doctor: doctorData  // ✅ ส่ง doctorData กลับไป (อาจเป็น null ถ้าเป็น admin)
+      doctor: data.role === 'doctor' || data.role === 'helper' ? doctorData : null
     };
   } catch (err: any) {
     console.error('❌ [addStaff] Unexpected error:', err);
@@ -892,7 +888,6 @@ export async function addStaff(data: {
     return { success: false, error: err.message };
   }
 }
-
 // ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
