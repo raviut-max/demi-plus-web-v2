@@ -1,24 +1,21 @@
 // app/admin/settings/page.tsx
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
-import { 
-  ArrowLeft, 
-  Lock, 
-  Building2, 
-  Home, 
-  Shield, 
+import {
+  ArrowLeft,
+  Lock,
+  Building2,
   BookOpen,
-  Hospital,
+  Shield,
   Users,
   Settings
 } from 'lucide-react';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
@@ -36,7 +33,6 @@ export default function SettingsPage() {
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
     // ✅ ตรวจสอบรหัสผ่าน (hardcode: 12345678)
     if (password === '12345678') {
       setIsAuthenticated(true);
@@ -145,7 +141,7 @@ export default function SettingsPage() {
               >
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-14 h-14 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-all">
-                    <Hospital className="w-7 h-7 text-blue-600" />
+                    <Building2 className="w-7 h-7 text-blue-600" />
                   </div>
                   <div>
                     <h3 className="text-xl font-bold text-gray-800">
@@ -158,29 +154,6 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-gray-600 text-sm">
                   เพิ่ม/แก้ไข/ลบ ข้อมูลโรงพยาบาลและกำหนดความสัมพันธ์แม่ข่าย-ลูกข่าย
-                </p>
-              </button>
-
-              {/* 🏘️ ปุ่มจัดการหมู่บ้าน */}
-              <button
-                onClick={() => router.push('/admin/villages')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-green-100 rounded-lg flex items-center justify-center group-hover:bg-green-200 transition-all">
-                    <Home className="w-7 h-7 text-green-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      จัดการหมู่บ้าน
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      หมู่บ้านและตำบล
-                    </p>
-                  </div>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  เพิ่ม/แก้ไข/ลบ ข้อมูลหมู่บ้านและกำหนดโรงพยาบาลที่ดูแล
                 </p>
               </button>
 
