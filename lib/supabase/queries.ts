@@ -888,6 +888,8 @@ export async function addStaff(data: {
     return { success: false, error: err.message };
   }
 }
+
+
 // ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
