@@ -1,41 +1,50 @@
 // app/admin/screening/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 29 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. ใช้ window.location.search แทน useSearchParams (แก้ปัญหา Suspense boundary)
-//    2. Auto-select ผู้ป่วยจาก URL parameter patient_id
-//    3. แสดงฟอร์มทันทีเมื่อเลือกผู้ป่วย
-//    4. ปุ่มกลับใช้ router.back() เพื่อกลับไปหน้าเดิม
-//    5. แสดงข้อมูลผู้ป่วยที่เลือกแบบชัดเจน
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
 
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening, createDefaultGoals } from '@/lib/supabase/queries';
-import { FileText, Save, ArrowLeft, LogOut, AlertCircle, User } from 'lucide-react';
+import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening, createDefaultGoals, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { FileText, Save, ArrowLeft, LogOut, AlertCircle, User, Hospital, Building2, UserCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+interface UserHospital {
+  id: string;
+  name: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+  };
+}
 
 export default function ScreeningPage() {
   const router = useRouter();
-  
   // ✅ ใช้ state + useEffect แทน useSearchParams (แก้ปัญหา Suspense boundary)
   const [patientIdFromUrl, setPatientIdFromUrl] = useState<string | null>(null);
-  
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState('');
   const [patientData, setPatientData] = useState<any>(null);
-  
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+
   // PAM Questions & Answers
   const [pamQuestions, setPamQuestions] = useState<any[]>([]);
   const [pamAnswers, setPamAnswers] = useState<Record<string, number>>({});
-  
+
   // PROMs Questions & Answers
   const [promsQuestions, setPromsQuestions] = useState<any[]>([]);
   const [promsAnswers, setPromsAnswers] = useState<Record<string, number>>({});
-  
+
   // Confidence
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidencePlan, setConfidencePlan] = useState('');
@@ -46,7 +55,7 @@ export default function ScreeningPage() {
       const urlParams = new URLSearchParams(window.location.search);
       const pid = urlParams.get('patient_id');
       setPatientIdFromUrl(pid);
-      
+
       // ✅ Auto-select patient ถ้ามีใน URL
       if (pid) {
         setSelectedPatient(pid);
@@ -61,15 +70,84 @@ export default function ScreeningPage() {
       router.push('/admin/login');
       return;
     }
+
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+
     setUser(userData);
-    loadPatients();
-    loadQuestions();
+    loadUserHospital(userData.id);
+    loadAccessibleHospitals(userData.id);
   }, [router]);
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
+
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
+  const loadAccessibleHospitals = async (userId: string) => {
+    try {
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
+      console.log('🏥 Accessible hospitals for screening:', ids.length, 'hospitals');
+      
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
+      loadPatients(ids);
+      loadQuestions();
+    } catch (error) {
+      console.error('Error loading accessible hospitals:', error);
+    }
+  };
+
+  // ✅ แก้ไขฟังก์ชัน loadPatients ให้กรองตามโรงพยาบาล
+  const loadPatients = async (hospitalIds?: string[]) => {
+    try {
+      let query = supabase
+        .from('profiles')
+        .select(`
+          *,
+          hospitals (
+            id,
+            name,
+            type
+          )
+        `)
+        .eq('is_active', true)
+        .order('first_name', { ascending: true });
+
+      // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้
+      if (hospitalIds && hospitalIds.length > 0) {
+        query = query.in('hospital_id', hospitalIds);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Error loading patients:', error);
+        return;
+      }
+
+      const patientsWithData = data?.map(patient => ({
+        ...patient,
+        full_name: patient.first_name && patient.last_name
+          ? `${patient.first_name} ${patient.last_name}`
+          : '',
+      })) || [];
+
+      console.log('📊 Loaded patients:', patientsWithData.length);
+      setPatients(patientsWithData);
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    }
+  };
 
   // ✅ useEffect แยก - โหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
   useEffect(() => {
@@ -77,15 +155,6 @@ export default function ScreeningPage() {
       loadPatientData(selectedPatient);
     }
   }, [selectedPatient, patients]);
-
-  const loadPatients = async () => {
-    try {
-      const data = await getPatientList();
-      setPatients(data);
-    } catch (error) {
-      console.error('Error loading patients:', error);
-    }
-  };
 
   const loadPatientData = async (patientId: string) => {
     try {
@@ -269,6 +338,7 @@ export default function ScreeningPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
+
     if (Object.keys(pamAnswers).length === 0) {
       alert('กรุณาตอบคำถาม PAM ให้ครบ');
       return;
@@ -312,8 +382,8 @@ export default function ScreeningPage() {
         user_id: selectedPatient,
         screening_type: 'full',
         pam_total_score: patientLevel.pamTotal,
-        pam_level_result: patientLevel.level === 'L1' ? 'Deny' : 
-                          patientLevel.level === 'L2' ? 'General' : 
+        pam_level_result: patientLevel.level === 'L1' ? 'Deny' :
+                          patientLevel.level === 'L2' ? 'General' :
                           patientLevel.level === 'L3' ? 'Intensive' : 'Champion',
         proms_q1_score: promsQ1Score,
         proms_q2_score: promsQ2Score,
@@ -335,7 +405,7 @@ export default function ScreeningPage() {
           user?.id
         );
 
-        // ✅ แสดงข้อความสำเร็จพร้อมปุ่มไปหน้า Goals
+        // ✅ แสดงข้อความความสำเร็จพร้อมปุ่มไปหน้า Goals
         let goalsMessage = '';
         if (goalsResult.success && goalsResult.count > 0) {
           goalsMessage = `\n\n🎯 สร้างเป้าหมายเริ่มต้นสำเร็จ: ${goalsResult.count} กิจกรรม`;
@@ -394,7 +464,6 @@ export default function ScreeningPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
             onClick={() => router.back()}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
@@ -402,29 +471,85 @@ export default function ScreeningPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
-          <div className="flex items-center justify-between">
+
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-800 mb-1">
                 📝 แบบประเมินผู้ป่วย
               </h1>
               <p className="text-gray-600">แบบประเมิน PAM และ PROMs</p>
             </div>
-            
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
-            >
-              <LogOut className="w-4 h-4" />
-              ออกจากระบบ
-            </button>
+
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">
+                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                {userHospital ? (
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">
+                        {userHospital.name}
+                      </span>
+                    </div>
+
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                          🏥 แม่ข่าย
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                          🏥 ลูกข่าย
+                        </span>
+                      )}
+
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-2">
+                    ไม่สังกัดโรงพยาบาล
+                  </p>
+                )}
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="max-w-5xl mx-auto px-4 py-8">
-        
         {/* ✅ แสดงข้อมูลผู้ป่วยที่เลือก (ถ้ามี) */}
         {patientData && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
@@ -437,6 +562,13 @@ export default function ScreeningPage() {
                 <p className="text-sm text-blue-700">
                   HN: {patientData.hospital_number} | PAM Level: {patientData.pam_level || 'L1'}
                 </p>
+                {/* ✅ แสดงโรงพยาบาลของผู้ป่วย */}
+                {patientData.hospitals && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    🏥 สังกัด: {patientData.hospitals.name}
+                    {patientData.hospitals.type === 'main' ? ' (แม่ข่าย)' : ' (ลูกข่าย)'}
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -458,9 +590,15 @@ export default function ScreeningPage() {
               {patients.map((patient) => (
                 <option key={patient.id} value={patient.id}>
                   {patient.hospital_number} - {patient.full_name} (PAM: {patient.pam_level})
+                  {patient.hospitals?.name ? ` - ${patient.hospitals.name}` : ''}
                 </option>
               ))}
             </select>
+            {accessibleHospitalIds.length > 0 && (
+              <p className="text-xs text-gray-500 mt-2">
+                🔒 แสดงผู้ป่วยจาก {accessibleHospitalIds.length} โรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
+              </p>
+            )}
           </div>
         )}
 
@@ -473,14 +611,14 @@ export default function ScreeningPage() {
               <p className="text-sm text-gray-600 mb-6">
                 ไม้บรรทัดวัดใจ - กรุณาเลือกระดับที่ตรงกับคุณมากที่สุด (5 ข้อ × 4 คะแนน = 20 คะแนน)
               </p>
-              
+
               <div className="space-y-8">
                 {pamQuestions.map((q, index) => (
                   <div key={q.id} className="border-b border-gray-200 pb-6 last:border-0">
                     <p className="font-medium text-gray-800 mb-4">
                       {index + 1}. {q.question_text}
                     </p>
-                    
+
                     {/* ไม้บรรทัดวัดใจ */}
                     <div className="bg-gradient-to-r from-red-50 via-yellow-50 to-green-50 p-4 rounded-lg">
                       <div className="grid grid-cols-4 gap-2 mb-2">
@@ -491,7 +629,7 @@ export default function ScreeningPage() {
                               key={score}
                               onClick={() => handlePamAnswer(q.id, score)}
                               className={`px-3 py-3 rounded-lg border-2 transition-all text-sm ${
-                                pamAnswers[q.id] === score  
+                                pamAnswers[q.id] === score
                                   ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
                                   : 'border-gray-300 hover:border-gray-400 bg-white'
                               }`}
@@ -502,7 +640,7 @@ export default function ScreeningPage() {
                           );
                         })}
                       </div>
-                      
+
                       {/* ไม้บรรทัด */}
                       <div className="relative mt-3">
                         <div className="h-2 bg-gradient-to-r from-red-400 via-yellow-400 to-green-400 rounded-full"></div>
@@ -519,7 +657,7 @@ export default function ScreeningPage() {
               {patientLevel.pamTotal > 0 && (
                 <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <p className="text-sm font-medium text-blue-800">
-                    คะแนน PAM: {patientLevel.pamTotal} / {patientLevel.pamMax} 
+                    คะแนน PAM: {patientLevel.pamTotal} / {patientLevel.pamMax}
                     (เฉลี่ย {patientLevel.pamAvg.toFixed(2)} / 4)
                   </p>
                 </div>
@@ -532,14 +670,14 @@ export default function ScreeningPage() {
               <p className="text-sm text-gray-600 mb-6">
                 กรุณาเลือกคำตอบที่ตรงกับสุขภาพของคุณ (4 ข้อ × 6 คะแนน = 24 คะแนน)
               </p>
-              
+
               <div className="space-y-8">
                 {promsQuestions.map((q, index) => (
                   <div key={q.id} className="border-b border-gray-200 pb-6 last:border-0">
                     <p className="font-medium text-gray-800 mb-4">
                       {index + 1}. {q.question_text}
                     </p>
-                    
+
                     {/* 6 ระดับ */}
                     <div className="grid grid-cols-6 gap-2">
                       {[1, 2, 3, 4, 5, 6].map((score) => {
@@ -549,7 +687,7 @@ export default function ScreeningPage() {
                             key={score}
                             onClick={() => handlePromsAnswer(q.id, score)}
                             className={`px-2 py-3 rounded-lg border-2 transition-all text-xs ${
-                              promsAnswers[q.id] === score  
+                              promsAnswers[q.id] === score
                                 ? 'border-purple-500 bg-purple-50 text-purple-700 font-semibold'
                                 : 'border-gray-300 hover:border-gray-400 bg-white'
                             }`}
@@ -591,7 +729,7 @@ export default function ScreeningPage() {
                 'bg-green-50 border-green-500'
               }`}>
                 <h3 className="text-2xl font-bold mb-4">📊 สรุปผลการประเมิน</h3>
-                
+
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">คะแนน PAM</p>
@@ -610,7 +748,7 @@ export default function ScreeningPage() {
                     <p className="text-sm opacity-75">คะแนนรวม</p>
                     <div className="flex items-center gap-2">
                       <div className="flex-1 bg-white bg-opacity-50 rounded-full h-4">
-                        <div 
+                        <div
                           className="bg-blue-500 h-4 rounded-full transition-all"
                           style={{ width: `${patientLevel.percentage}%` }}
                         ></div>
@@ -644,7 +782,7 @@ export default function ScreeningPage() {
               <p className="text-sm text-gray-600 mb-6">
                 คุณมีความพร้อมในการทำเป้าหมายแค่ไหน (0-10)
               </p>
-              
+
               <div className="mb-6">
                 <div className="bg-gradient-to-r from-red-50 via-yellow-50 to-green-50 p-6 rounded-lg">
                   {/* ไม้บรรทัด */}
@@ -670,7 +808,7 @@ export default function ScreeningPage() {
                       <span>มากที่สุด</span>
                     </div>
                   </div>
-                  
+
                   <div className="text-center">
                     <p className="text-3xl font-bold text-blue-600">{confidenceScore}</p>
                     <p className="text-sm text-gray-600">คะแนนความมั่นใจ</p>
