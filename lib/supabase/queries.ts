@@ -779,6 +779,9 @@ export async function getDashboardStats(hospitalIds?: string[]) {
   }
 }
 
+// =====================================================
+// ✅ ฟังก์ชันเพิ่มเจ้าหน้าที่ (แก้ไขแล้ว - รองรับ birth_date)
+// =====================================================
 export async function addStaff(data: {
   id_card: string;
   password: string;
@@ -795,7 +798,7 @@ export async function addStaff(data: {
     console.log('🔍 [addStaff] Starting staff creation...');
     console.log('📋 [addStaff] Input data:', {
       ...data,
-      password: '***'
+      password: '***' // ไม่แสดงรหัสผ่านใน log
     });
 
     // ✅ 1. สร้าง user ในตาราง users
@@ -829,6 +832,8 @@ export async function addStaff(data: {
     console.log('✅ [addStaff] User ID:', user.id);
 
     // ✅ 2. สร้างข้อมูลในตาราง doctors (สำหรับ doctor/helper)
+    let doctorData = null; // ✅ ประกาศตัวแปร doctorData ก่อน if block
+    
     if (data.role === 'doctor' || data.role === 'helper') {
       console.log('💾 [addStaff] Step 2: Creating doctor record...');
       console.log('📋 [addStaff] Doctor data to insert:', {
@@ -842,7 +847,7 @@ export async function addStaff(data: {
         is_verified: false,
       });
 
-      const { data: doctorData, error: doctorError } = await supabase
+      const { data: doctorDataResult, error: doctorError } = await supabase
         .from('doctors')
         .insert({
           user_id: user.id,
@@ -873,6 +878,7 @@ export async function addStaff(data: {
         return { success: false, error: doctorError.message };
       }
 
+      doctorData = doctorDataResult; // ✅ กำหนดค่าให้ doctorData
       console.log('✅ [addStaff] Doctor record created successfully:', doctorData);
     }
 
@@ -880,7 +886,7 @@ export async function addStaff(data: {
     return { 
       success: true, 
       user,
-      doctor: data.role === 'doctor' || data.role === 'helper' ? doctorData : null
+      doctor: doctorData // ✅ ส่ง doctorData กลับไป (อาจเป็น null ถ้าเป็น admin)
     };
   } catch (err: any) {
     console.error('❌ [addStaff] Unexpected error:', err);
@@ -888,7 +894,6 @@ export async function addStaff(data: {
     return { success: false, error: err.message };
   }
 }
-
 
 // ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
 export async function updateStaff(userId: string, data: {
