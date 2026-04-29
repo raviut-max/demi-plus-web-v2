@@ -779,8 +779,9 @@ export async function getDashboardStats(hospitalIds?: string[]) {
   }
 }
 
-// ✅ แก้ไขฟังก์ชัน addStaff
-// ✅ แก้ไขฟังก์ชัน addStaff (เพิ่ม debug แบบละเอียด)
+// =====================================================
+// ✅ ฟังก์ชันเพิ่มเจ้าหน้าที่ (แก้ไขแล้ว - รองรับ birth_date)
+// =====================================================
 export async function addStaff(data: {
   id_card: string;
   password: string;
@@ -797,7 +798,7 @@ export async function addStaff(data: {
     console.log('🔍 [addStaff] Starting staff creation...');
     console.log('📋 [addStaff] Input data:', {
       ...data,
-      password: '***' // ไม่แสดงรหัสผ่าน
+      password: '***' // ไม่แสดงรหัสผ่านใน log
     });
 
     // ✅ 1. สร้าง user ในตาราง users
@@ -806,7 +807,7 @@ export async function addStaff(data: {
       .from('users')
       .insert({
         id_card: data.id_card,
-        password_hash: data.password,
+        password_hash: data.password,  // ✅ เก็บรหัสผ่าน (plain text สำหรับตอนนี้)
         role: data.role,
         is_active: true,
         hospital_id: data.hospital_id || null,
@@ -835,7 +836,7 @@ export async function addStaff(data: {
       console.log('💾 [addStaff] Step 2: Creating doctor record...');
       console.log('📋 [addStaff] Doctor data to insert:', {
         user_id: user.id,
-        full_name: data.full_name_th,  // ✅ ใช้ full_name_th แทน id_card
+        full_name: data.full_name_th,
         full_name_th: data.full_name_th,
         specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
         phone: data.phone || null,
@@ -879,7 +880,11 @@ export async function addStaff(data: {
     }
 
     console.log('✅ [addStaff] Staff creation completed successfully!');
-    return { success: true, user, doctor: data.role === 'doctor' || data.role === 'helper' ? doctorData : null };
+    return { 
+      success: true, 
+      user,
+      doctor: data.role === 'doctor' || data.role === 'helper' ? doctorData : null
+    };
   } catch (err: any) {
     console.error('❌ [addStaff] Unexpected error:', err);
     console.error('❌ [addStaff] Error stack:', err.stack);
