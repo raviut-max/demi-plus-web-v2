@@ -779,9 +779,6 @@ export async function getDashboardStats(hospitalIds?: string[]) {
   }
 }
 
-// =====================================================
-// ✅ ฟังก์ชันเพิ่มเจ้าหน้าที่ (แก้ไขแล้ว - รองรับ birth_date)
-// =====================================================
 export async function addStaff(data: {
   id_card: string;
   password: string;
@@ -796,13 +793,8 @@ export async function addStaff(data: {
 }) {
   try {
     console.log('🔍 [addStaff] Starting staff creation...');
-    console.log('📋 [addStaff] Input data:', {
-      ...data,
-      password: '***' // ไม่แสดงรหัสผ่านใน log
-    });
-
+    
     // ✅ 1. สร้าง user ในตาราง users
-    console.log('💾 [addStaff] Step 1: Creating user in users table...');
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert({
@@ -819,34 +811,17 @@ export async function addStaff(data: {
 
     if (userError) {
       console.error('❌ [addStaff] Error creating user:', userError);
-      console.error('❌ [addStaff] Error details:', {
-        message: userError.message,
-        details: userError.details,
-        hint: userError.hint,
-        code: userError.code
-      });
       return { success: false, error: userError.message };
     }
 
-    console.log('✅ [addStaff] User created successfully:', user);
-    console.log('✅ [addStaff] User ID:', user.id);
+    console.log('✅ [addStaff] User created:', user.id);
 
-    // ✅ 2. สร้างข้อมูลในตาราง doctors (สำหรับ doctor/helper)
-    let doctorData = null; // ✅ ประกาศตัวแปร doctorData ก่อน if block
+    // ✅ 2. ประกาศ doctorData ก่อน if block (สำคัญมาก!)
+    let doctorData: any = null;
     
     if (data.role === 'doctor' || data.role === 'helper') {
-      console.log('💾 [addStaff] Step 2: Creating doctor record...');
-      console.log('📋 [addStaff] Doctor data to insert:', {
-        user_id: user.id,
-        full_name: data.full_name_th,
-        full_name_th: data.full_name_th,
-        specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
-        phone: data.phone || null,
-        email: data.email || null,
-        is_active: true,
-        is_verified: false,
-      });
-
+      console.log('💾 [addStaff] Creating doctor record...');
+      
       const { data: doctorDataResult, error: doctorError } = await supabase
         .from('doctors')
         .insert({
@@ -863,34 +838,27 @@ export async function addStaff(data: {
         .single();
 
       if (doctorError) {
-        console.error('❌ [addStaff] Error creating doctor record:', doctorError);
-        console.error('❌ [addStaff] Error details:', {
-          message: doctorError.message,
-          details: doctorError.details,
-          hint: doctorError.hint,
-          code: doctorError.code
-        });
-        
-        // ✅ ลบ user ที่สร้างไว้ (rollback)
-        console.log('🗑️ [addStaff] Rolling back - deleting user...');
+        console.error('❌ [addStaff] Error creating doctor:', doctorError);
+        // Rollback user
         await supabase.from('users').delete().eq('id', user.id);
-        
         return { success: false, error: doctorError.message };
       }
 
-      doctorData = doctorDataResult; // ✅ กำหนดค่าให้ doctorData
-      console.log('✅ [addStaff] Doctor record created successfully:', doctorData);
+      doctorData = doctorDataResult; // ✅ กำหนดค่าให้ตัวแปรที่ประกาศไว้
+      console.log('✅ [addStaff] Doctor created:', doctorData.id);
     }
 
-    console.log('✅ [addStaff] Staff creation completed successfully!');
+    console.log('✅ [addStaff] Staff creation completed!');
+    
+    // ✅ 3. ส่ง doctorData กลับ (ตอนนี้เข้าถึงได้แล้ว)
     return { 
       success: true, 
       user,
-      doctor: doctorData // ✅ ส่ง doctorData กลับไป (อาจเป็น null ถ้าเป็น admin)
+      doctor: doctorData  // ✅ OK - doctorData ถูกประกาศข้างบนแล้ว
     };
+    
   } catch (err: any) {
     console.error('❌ [addStaff] Unexpected error:', err);
-    console.error('❌ [addStaff] Error stack:', err.stack);
     return { success: false, error: err.message };
   }
 }
