@@ -810,9 +810,9 @@ export async function addStaff(data: {
         password_hash: data.password,  // ✅ เก็บรหัสผ่าน (plain text สำหรับตอนนี้)
         role: data.role,
         is_active: true,
-        hospital_id: data.hospital_id || null,
-        birth_date: data.birth_date || null,  // ✅ บันทึก birth_date
         created_by: data.created_by,
+        hospital_id: data.hospital_id || null,  // ✅ บันทึก hospital_id
+        birth_date: data.birth_date || null,  // ✅ บันทึก birth_date
       })
       .select()  // ✅ เลือกข้อมูลกลับมาเพื่อดูว่าสร้างสำเร็จ
       .single();
@@ -891,7 +891,6 @@ export async function addStaff(data: {
     return { success: false, error: err.message };
   }
 }
-
 // ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
