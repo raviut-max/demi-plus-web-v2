@@ -124,7 +124,7 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {/* ✅ เพิ่มลิงก์ไปหน้าลงทะเบียนบุคลากร */}
+          {/* ✅ ลิงก์ไปหน้าลงทะเบียนบุคลากร */}
           <div className="mt-6 pt-6 border-t border-gray-200">
             <button
               onClick={() => router.push('/admin/staff/register')}
@@ -136,17 +136,6 @@ export default function AdminLoginPage() {
             <p className="text-xs text-gray-500 text-center mt-2">
               สำหรับผู้ดูแลระบบที่ต้องการเพิ่มบุคลากรเข้าสู่ระบบ
             </p>
-          </div>
-
-          {/* Test Accounts */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 text-center mb-3">บัญชีทดสอบ</p>
-            <div className="space-y-2 text-xs">
-              <div className="bg-gray-50 rounded-lg p-2">
-                <span className="text-gray-600">Admin: </span>
-                <code className="text-blue-600">1111111111111 / admin123</code>
-              </div>
-            </div>
           </div>
         </div>
       </div>
