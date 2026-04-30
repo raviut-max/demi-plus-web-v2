@@ -1,10 +1,9 @@
 // app/admin/login/page.tsx
-// ✅ แก้ไข: ลบส่วนบัญชีทดสอบออก
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { login, logout } from '@/lib/supabase/queries';
-import { LogIn, AlertCircle, Loader2 } from 'lucide-react';
+import { LogIn, AlertCircle, Loader2, UserPlus } from 'lucide-react';
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -125,7 +124,30 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {/* ✅ ลบส่วน Test Accounts ออกแล้ว */}
+          {/* ✅ เพิ่มลิงก์ไปหน้าลงทะเบียนบุคลากร */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <button
+              onClick={() => router.push('/admin/staff/register')}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all font-semibold"
+            >
+              <UserPlus className="w-5 h-5" />
+              ลงทะเบียนบุคลากรใหม่
+            </button>
+            <p className="text-xs text-gray-500 text-center mt-2">
+              สำหรับผู้ดูแลระบบที่ต้องการเพิ่มบุคลากรเข้าสู่ระบบ
+            </p>
+          </div>
+
+          {/* Test Accounts */}
+          <div className="mt-6 pt-6 border-t border-gray-200">
+            <p className="text-xs text-gray-500 text-center mb-3">บัญชีทดสอบ</p>
+            <div className="space-y-2 text-xs">
+              <div className="bg-gray-50 rounded-lg p-2">
+                <span className="text-gray-600">Admin: </span>
+                <code className="text-blue-600">1111111111111 / admin123</code>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
