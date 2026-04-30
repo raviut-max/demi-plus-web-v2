@@ -1,5 +1,6 @@
+// app/admin/login/page.tsx
+// ✅ แก้ไข: ลบส่วนบัญชีทดสอบออก
 'use client';
-
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { login, logout } from '@/lib/supabase/queries';
@@ -124,17 +125,7 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {/* Test Accounts */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-gray-500 text-center mb-3">บัญชีทดสอบ</p>
-            <div className="space-y-2 text-xs">
-              <div className="bg-gray-50 rounded-lg p-2">
-                <span className="text-gray-600">Admin:</span> <code className="text-blue-600">1111111111111 / admin123</code>
-              </div>
-
-              
-            </div>
-          </div>
+          {/* ✅ ลบส่วน Test Accounts ออกแล้ว */}
         </div>
       </div>
     </div>
