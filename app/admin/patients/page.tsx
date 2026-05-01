@@ -1,10 +1,12 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขตัวแปร showDeletedModal (ลบช่องว่าง)
-//    2. แก้ไขการโหลดข้อมูลผู้ป่วย
-//    3. แก้ไข Syntax errors ทั้งหมด
-//    4. ปรับปรุงการกรองตามสิทธิ์โรงพยาบาล
+//    1. แก้ไขการโหลดผู้ป่วยให้ใช้ accessibleHospitalIds แทน user?.id
+//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    5. กรองโรงพยาบาลและโค้ชตามสิทธิ์
+//    6. Admin เห็นทั้งหมด
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -135,7 +137,7 @@ export default function PatientListPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pamLevelFilter, setPamLevelFilter] = useState('all');
-  const [showDeletedModal, setShowDeletedModal] = useState(false); // ✅ แก้ไขแล้ว
+  const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
@@ -197,8 +199,8 @@ export default function PatientListPage() {
       // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
       loadCoaches(ids);
       
-      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
-      loadPatients();
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไม่ใช่ userId)
+      loadPatients(ids);
       
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
@@ -219,18 +221,20 @@ export default function PatientListPage() {
       }
       
       setCoaches(filteredCoaches);
-      console.log('👨‍️ Filtered coaches:', filteredCoaches.length);
+      console.log('👨‍⚕️ Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('Error loading coaches:', error);
     }
   };
 
-  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ไม่ต้องส่ง userId)
-  const loadPatients = async () => {
+  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ส่ง hospitalIds แทน userId)
+  const loadPatients = async (hospitalIds?: string[]) => {
     try {
       console.log('📡 Loading patients...');
-      // ✅ ส่ง hospitalIds แทน userId
-      const data = await getPatientList(undefined, undefined, accessibleHospitalIds);
+      console.log('🏥 Hospital IDs for filtering:', hospitalIds);
+      
+      // ✅ ส่ง hospitalIds เพื่อกรองผู้ป่วยตามโรงพยาบาลที่เข้าถึงได้
+      const data = await getPatientList(undefined, undefined, hospitalIds);
       console.log('📊 Loaded patients:', data.length);
       console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
       setPatients(data);
@@ -261,7 +265,7 @@ export default function PatientListPage() {
       const result = await deletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยสำเร็จ!');
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -280,7 +284,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('กู้คืนผู้ป่วยสำเร็จ!');
         loadDeletedPatients();
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -302,7 +306,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('ลบผู้ป่วยถาวรสำเร็จ!');
         loadDeletedPatients();
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -597,6 +601,11 @@ export default function PatientListPage() {
               <div>
                 <p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p>
                 <p className="text-2xl font-bold text-gray-800">{patients.length}</p>
+                {accessibleHospitalIds.length > 0 && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    🔒 จาก {accessibleHospitalIds.length} รพ.
+                  </p>
+                )}
               </div>
             </div>
           </div>
