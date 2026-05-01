@@ -1,18 +1,76 @@
-// app/admin/patients/new/page.tsx
+// app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. กรองโรงพยาบาลและโค้ชตามสิทธิ์การเข้าถึง
-//    4. เพิ่ม Debug เพื่อติดตามปัญหา
-//    5. แสดงข้อมูลว่าผู้ป่วยจะสังกัดโรงพยาบาลไหน
+//    1. แก้ไขปัญหา LogOut is not defined
+//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    5. กรองโรงพยาบาลและโค้ชตามสิทธิ์
+//    6. Admin เห็นทั้งหมด
 
 'use client';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, registerPatient, getHospitalsWithHierarchy, getAccessibleHospitalIds, getUserHospitalInfo, getCoaches } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, User, Hospital, Building2, UserCheck, Lock, Stethoscope, Calendar, Phone, Mail, Info } from 'lucide-react';
+import { 
+  checkSession, 
+  logout, 
+  getPatientList, 
+  deletePatient, 
+  restorePatient, 
+  getDeletedPatients, 
+  permanentlyDeletePatient, 
+  getAccessibleHospitalIds, 
+  getUserHospitalInfo, 
+  getHospitalsWithHierarchy, 
+  getCoaches 
+} from '@/lib/supabase/queries';
+import { 
+  Users, 
+  Search, 
+  Filter, 
+  Plus, 
+  Eye, 
+  Edit, 
+  Trash2, 
+  LogOut,  // ✅ ต้องมีตัวนี้!
+  Archive, 
+  RotateCcw, 
+  Hospital, 
+  Building2, 
+  UserCheck, 
+  ArrowLeft, 
+  Stethoscope 
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+// ✅ Interface ที่แก้ไขแล้ว
+interface Patient {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  full_name?: string;
+  hospital_number: string;
+  pam_level: string;
+  zone?: string;
+  current_step?: string;
+  phone?: string;
+  created_at: string;
+  updated_at?: string;
+  is_active: boolean;
+  status?: string;
+  hospital_id?: string;
+  hospitals?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+  users?: {
+    id_card: string;
+    role: string;
+    is_active: boolean;
+    created_at: string;
+  };
+}
 
 interface UserHospital {
   id: string;
@@ -33,6 +91,11 @@ interface Hospital {
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
 }
 
 interface Coach {
@@ -48,38 +111,21 @@ interface Coach {
   };
 }
 
-// ✅ เดือนภาษาไทย
-const THAI_MONTHS = [
-  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
-];
-
-export default function NewPatientPage() {
+export default function PatientListPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [deletedPatients, setDeletedPatients] = useState<Patient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pamLevelFilter, setPamLevelFilter] = useState('all');
+  const [showDeletedModal, setShowDeletedModal] = useState(false);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
-  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  const [formData, setFormData] = useState({
-    id_card: '',
-    password: '',
-    first_name: '',
-    last_name: '',
-    hospital_number: '',
-    birth_date: '',
-    gender: 'male',
-    phone: '',
-    email: '',
-    hospital_id: '',
-    coach_id: '',
-    current_weight: '',
-    height: '',
-    waist_circumference: '',
-  });
+  const [selectedHospital, setSelectedHospital] = useState<string>('');
+  const [selectedCoach, setSelectedCoach] = useState<string>('');
 
   useEffect(() => {
     const userData = checkSession();
@@ -87,87 +133,81 @@ export default function NewPatientPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
 
-    console.log('✅ [NewPatientPage] User session:', userData);
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
+    setLoading(false);
   }, [router]);
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('❌ [loadUserHospital] Error:', error);
+      console.error('Error loading user hospital:', error);
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
 
-      // ✅ โหลดรายชื่อโรงพยาบาลทั้งหมด
       const allHospitals = await getHospitalsWithHierarchy();
-      console.log('🏥 [loadAccessibleHospitals] All hospitals:', allHospitals.length);
-
-      // ✅ กรองโรงพยาบาลตามสิทธิ์
       let filteredHospitals = allHospitals;
       if (ids.length > 0 && user?.role !== 'admin') {
         filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
-        console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
       }
-
+      
       setHospitals(filteredHospitals);
-
-      // ✅ ตั้งค่า hospital_id เริ่มต้นเป็นโรงพยาบาลของผู้ใช้
-      if (filteredHospitals.length > 0 && !formData.hospital_id) {
-        const defaultHospital = filteredHospitals.find(h => h.id === userHospital?.id) || filteredHospitals[0];
-        setFormData(prev => ({ ...prev, hospital_id: defaultHospital.id }));
-        console.log('✅ [loadAccessibleHospitals] Default hospital set to:', defaultHospital.name);
-      }
-
-      // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
       loadCoaches(ids);
-
     } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      console.error('Error loading accessible hospitals:', error);
     }
   };
 
-  // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoaches();
-      console.log('👨‍⚕️ [loadCoaches] All coaches:', allCoaches.length);
-
-      // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
       let filteredCoaches = allCoaches;
       if (hospitalIds.length > 0 && user?.role !== 'admin') {
-        filteredCoaches = allCoaches.filter(coach =>
+        filteredCoaches = allCoaches.filter(coach => 
           coach.hospital_id && hospitalIds.includes(coach.hospital_id)
         );
-        console.log('👨‍⚕️ [loadCoaches] Filtered coaches:', filteredCoaches.length);
       }
-
       setCoaches(filteredCoaches);
     } catch (error) {
-      console.error('❌ [loadCoaches] Error:', error);
+      console.error('Error loading coaches:', error);
+    }
+  };
+
+  const loadPatients = async () => {
+    try {
+      const data = await getPatientList(undefined, undefined, user?.id);
+      setPatients(data);
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (user && accessibleHospitalIds.length >= 0) {
+      loadPatients();
+    }
+  }, [user, accessibleHospitalIds]);
+
+  const loadDeletedPatients = async () => {
+    try {
+      const data = await getDeletedPatients();
+      setDeletedPatients(data);
+    } catch (error) {
+      console.error('Error loading deleted patients:', error);
     }
   };
 
@@ -176,43 +216,125 @@ export default function NewPatientPage() {
     router.push('/admin/login');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmitting(true);
-
+  const handleDeletePatient = async (patientId: string, patientName: string) => {
+    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?`)) {
+      return;
+    }
     try {
-      // ✅ ตรวจสอบว่าเลือกโรงพยาบาลแล้ว
-      if (!formData.hospital_id) {
-        alert('กรุณาเลือกโรงพยาบาลสังกัด');
-        setSubmitting(false);
-        return;
-      }
-
-      // ✅ สร้างรหัสผ่านจาก ID Card (6 หลักท้าย)
-      const password = formData.id_card.slice(-6);
-
-      const result = await registerPatient({
-        ...formData,
-        password: password,
-        current_weight: formData.current_weight ? parseFloat(formData.current_weight) : undefined,
-        height: formData.height ? parseFloat(formData.height) : undefined,
-        waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
-        created_by: user.id,
-      });
-
+      const result = await deletePatient(patientId);
       if (result.success) {
-        alert(`✅ ลงทะเบียนผู้ป่วยสำเร็จ!\n\n🔐 รหัสผ่าน: ${password}\n(6 หลักท้ายของ ID Card)`);
-        router.push('/admin/patients');
+        alert('ลบผู้ป่วยสำเร็จ!');
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handleSubmit] Error:', error);
-      alert('เกิดข้อผิดพลาดในการลงทะเบียน');
-    } finally {
-      setSubmitting(false);
+      console.error('Error deleting patient:', error);
+      alert('เกิดข้อผิดพลาดในการลบผู้ป่วย');
     }
   };
+
+  const handleRestorePatient = async (patientId: string, patientName: string) => {
+    if (!confirm(`คุณต้องการกู้คืนผู้ป่วย "${patientName}" กลับมาใช้งานหรือไม่?`)) {
+      return;
+    }
+    try {
+      const result = await restorePatient(patientId);
+      if (result.success) {
+        alert('กู้คืนผู้ป่วยสำเร็จ!');
+        loadDeletedPatients();
+        loadPatients();
+      } else {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error restoring patient:', error);
+      alert('เกิดข้อผิดพลาดในการกู้คืนผู้ป่วย');
+    }
+  };
+
+  const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
+    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร`)) {
+      return;
+    }
+    if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้')) {
+      return;
+    }
+    try {
+      const result = await permanentlyDeletePatient(patientId);
+      if (result.success) {
+        alert('ลบผู้ป่วยถาวรสำเร็จ!');
+        loadDeletedPatients();
+        loadPatients();
+      } else {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error permanently deleting patient:', error);
+      alert('เกิดข้อผิดพลาดในการลบผู้ป่วยถาวร');
+    }
+  };
+
+  const handleOpenDeletedModal = () => {
+    setShowDeletedModal(true);
+    loadDeletedPatients();
+  };
+
+  const filteredPatients = patients.filter(patient => {
+    const fullName = patient.first_name && patient.last_name
+      ? `${patient.first_name} ${patient.last_name}`
+      : patient.full_name || '';
+    const hospitalName = patient.hospitals?.name || '';
+
+    const matchesSearch =
+      fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      patient.hospital_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      patient.users?.id_card?.includes(searchTerm) ||
+      hospitalName.toLowerCase().includes(searchTerm.toLowerCase());
+
+    const matchesPamLevel = pamLevelFilter === 'all' || patient.pam_level === pamLevelFilter;
+    
+    if (selectedHospital && patient.hospital_id !== selectedHospital) {
+      return false;
+    }
+    
+    if (selectedCoach && patient.coach_id !== selectedCoach) {
+      return false;
+    }
+
+    return matchesSearch && matchesPamLevel;
+  });
+
+  const getPamLevelColor = (level: string) => {
+    switch (level) {
+      case 'L1': return 'bg-red-100 text-red-700';
+      case 'L2': return 'bg-yellow-100 text-yellow-700';
+      case 'L3': return 'bg-blue-100 text-blue-700';
+      case 'L4': return 'bg-green-100 text-green-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
+  };
+
+  const getZoneColor = (zone: string) => {
+    if (zone?.includes('Green')) return 'text-green-600';
+    if (zone?.includes('Red')) return 'text-red-600';
+    return 'text-gray-600';
+  };
+
+  const getPatientName = (patient: Patient) => {
+    if (patient.first_name && patient.last_name) {
+      return `${patient.first_name} ${patient.last_name}`;
+    }
+    return patient.full_name || 'ไม่ระบุชื่อ';
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -220,21 +342,21 @@ export default function NewPatientPage() {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
-            onClick={() => router.back()}
+            onClick={() => router.push('/admin/dashboard')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ
+            กลับ Dashboard
           </button>
 
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                📝 ลงทะเบียนผู้ป่วยใหม่
+                👥 จัดการผู้ป่วย
               </h1>
-              <p className="text-gray-600">กรอกข้อมูลผู้ป่วยเพื่อสร้างบัญชีและโปรไฟล์</p>
+              <p className="text-gray-600">ดูและจัดการข้อมูลผู้ป่วย</p>
             </div>
-
+            
             <div className="flex items-center gap-4">
               {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
@@ -252,8 +374,7 @@ export default function NewPatientPage() {
                     </p>
                   </div>
                 </div>
-
-                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
@@ -262,8 +383,7 @@ export default function NewPatientPage() {
                         {userHospital.name}
                       </span>
                     </div>
-
-                    {/* ✅ Badge ประเภทโรงพยาบาล */}
+                    
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -274,8 +394,7 @@ export default function NewPatientPage() {
                           🏥 ลูกข่าย
                         </span>
                       )}
-
-                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
+                      
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -291,93 +410,82 @@ export default function NewPatientPage() {
                 )}
               </div>
 
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              <div className="flex gap-2">
+                <button
+                  onClick={handleOpenDeletedModal}
+                  className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+                >
+                  <Archive className="w-4 h-4" />
+                  ผู้ป่วยที่ถูกลบ ({deletedPatients.length})
+                </button>
+                
+                <button
+                  onClick={() => router.push('/admin/patients/new')}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  ลงทะเบียนผู้ป่วยใหม่
+                </button>
+                
+                {/* ✅ ปุ่มออกจากระบบที่ใช้ LogOut icon */}
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+                >
+                  <LogOut className="w-4 h-4" />
+                  ออกจากระบบ
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Search & Filter */}
+        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
+          <div className="flex flex-col md:flex-row gap-4 mb-4">
+            <div className="flex-1">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="ค้นหาด้วย ชื่อ, HN, ID Card, หรือ โรงพยาบาล..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+            <div className="md:w-48">
+              <select
+                value={pamLevelFilter}
+                onChange={(e) => setPamLevelFilter(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
-              </button>
+                <option value="all">ทุก PAM Level</option>
+                <option value="L1">L1 - Deny</option>
+                <option value="L2">L2 - General</option>
+                <option value="L3">L3 - Intensive</option>
+                <option value="L4">L4 - Champion</option>
+              </select>
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Info Banner */}
-      <div className="max-w-4xl mx-auto px-4 py-4">
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
-          <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-blue-800">
-            <p className="font-semibold mb-1">📋 ข้อมูลการลงทะเบียน</p>
-            <ul className="space-y-1">
-              <li>• ผู้ป่วยจะสังกัดโรงพยาบาล: <strong>{userHospital?.name || 'ไม่ได้กำหนด'}</strong></li>
-              <li>• สามารถเลือกโค้ชจากโรงพยาบาลที่เข้าถึงได้ ({coaches.length} คน)</li>
-              <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจาก 6 หลักท้ายของ ID Card</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      {/* Form */}
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
-
-          {/* ✅ ส่วนที่ 1: ข้อมูลบัญชีผู้ใช้ */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
-              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                <span className="text-blue-600 font-bold">1</span>
-              </div>
-              <h2 className="text-xl font-bold text-gray-800">ข้อมูลบัญชีผู้ใช้</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  เลขบัตรประชาชน *
-                </label>
-                <input
-                  type="text"
-                  value={formData.id_card}
-                  onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
-                  required
-                  maxLength={13}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="กรอกเลขบัตรประชาชน 13 หลัก"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  💡 รหัสผ่าน = 6 หลักท้ายของ ID Card
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  รหัสผ่าน (อัตโนมัติ)
-                </label>
-                <input
-                  type="text"
-                  value={formData.id_card.length >= 6 ? formData.id_card.slice(-6) : '••••••'}
-                  readOnly
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-mono"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  🔐 ระบบสร้างอัตโนมัติ
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+          
+          {/* Filter เพิ่มเติม: โรงพยาบาลและโค้ช */}
+          <div className="flex flex-col md:flex-row gap-4 pt-4 border-t border-gray-200">
+            <div className="md:w-64">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 <Hospital className="w-4 h-4 inline mr-1" />
-                โรงพยาบาลสังกัด *
+                โรงพยาบาล
               </label>
               <select
-                value={formData.hospital_id}
-                onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                value={selectedHospital}
+                onChange={(e) => setSelectedHospital(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">-- เลือกโรงพยาบาล --</option>
+                <option value="">ทั้งหมด</option>
                 {hospitals.map((hospital) => (
                   <option key={hospital.id} value={hospital.id}>
                     {hospital.name} ({hospital.code})
@@ -385,235 +493,331 @@ export default function NewPatientPage() {
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
-              </p>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+            
+            <div className="md:w-64">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
                 <Stethoscope className="w-4 h-4 inline mr-1" />
-                โค้ช/แพทย์ผู้ดูแล
+                โค้ช/แพทย์
               </label>
               <select
-                value={formData.coach_id}
-                onChange={(e) => setFormData({ ...formData, coach_id: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                value={selectedCoach}
+                onChange={(e) => setSelectedCoach(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">-- ไม่กำหนด --</option>
+                <option value="">ทั้งหมด</option>
                 {coaches.map((coach) => (
                   <option key={coach.id} value={coach.id}>
                     {coach.full_name_th}
-                    {coach.specialization_th ? ` - ${coach.specialization_th}` : ''}
-                    {coach.hospitals?.name ? ` (${coach.hospitals.name})` : ''}
+                    {coach.hospitals?.name ? ` - ${coach.hospitals.name}` : ''}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-gray-500 mt-1">
-                👨‍⚕️ แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้ ({coaches.length} คน)
+            </div>
+            
+            {(selectedHospital || selectedCoach) && (
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    setSelectedHospital('');
+                    setSelectedCoach('');
+                  }}
+                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+                >
+                  ล้างตัวกรอง
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+          <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Users className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p>
+                <p className="text-2xl font-bold text-gray-800">{patients.length}</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <span className="text-red-600 font-bold text-sm">L1</span>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">L1 (Deny)</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {patients.filter(p => p.pam_level === 'L1').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
+                <span className="text-yellow-600 font-bold text-sm">L2</span>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">L2 (General)</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {patients.filter(p => p.pam_level === 'L2').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <span className="text-blue-600 font-bold text-sm">L3</span>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">L3 (Intensive)</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {patients.filter(p => p.pam_level === 'L3').length}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <span className="text-green-600 font-bold text-sm">L4</span>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">L4 (Champion)</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {patients.filter(p => p.pam_level === 'L4').length}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Patients Table */}
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">HN</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Step</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">วันที่ลงทะเบียน</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredPatients.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                      <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>ไม่พบข้อมูลผู้ป่วย</p>
+                      {accessibleHospitalIds.length > 0 && (
+                        <p className="text-sm text-gray-400 mt-2">
+                          🔒 คุณมีสิทธิ์เข้าถึงเฉพาะโรงพยาบาลที่สังกัด
+                        </p>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPatients.map((patient) => (
+                    <tr key={patient.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm font-medium text-gray-800">
+                          {patient.hospital_number}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                            <Users className="w-4 h-4 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium text-gray-800">
+                              {getPatientName(patient)}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-gray-600">
+                          {patient.users?.id_card || '-'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <Hospital className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-600">
+                            {patient.hospitals?.name || '-'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPamLevelColor(patient.pam_level)}`}>
+                          {patient.pam_level}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`text-sm font-medium ${getZoneColor(patient.zone || '')}`}>
+                          {patient.zone || 'Green Zone'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm text-gray-600">{patient.current_step}</span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-600">
+                        {new Date(patient.created_at).toLocaleDateString('th-TH')}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => router.push(`/admin/patients/${patient.id}`)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="ดูรายละเอียด"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => router.push(`/admin/patients/${patient.id}/edit`)}
+                            className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                            title="แก้ไข"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDeletePatient(patient.id, getPatientName(patient))}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="ลบ"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-6 text-center text-sm text-gray-500">
+          <p>แสดง {filteredPatients.length} จาก {patients.length} ผู้ป่วย</p>
+          {accessibleHospitalIds.length > 0 && (
+            <p className="text-xs text-gray-400 mt-1">
+              🔒 จำกัดการแสดงผลตามโรงพยาบาลที่สังกัด ({accessibleHospitalIds.length} โรงพยาบาล)
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Modal แสดงผู้ป่วยที่ถูกลบ */}
+      {showDeletedModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                  <Archive className="w-6 h-6 text-gray-600" />
+                  ผู้ป่วยที่ถูกลบ ({deletedPatients.length})
+                </h2>
+                <button
+                  onClick={() => setShowDeletedModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                คลิก "กู้คืน" เพื่อนำผู้ป่วยกลับมาใช้งาน หรือ "ลบถาวร" เพื่อลบข้อมูลออกจากระบบอย่างถาวร
               </p>
             </div>
-          </div>
 
-          {/* ✅ ส่วนที่ 2: ข้อมูลส่วนตัว */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
-              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                <span className="text-green-600 font-bold">2</span>
-              </div>
-              <h2 className="text-xl font-bold text-gray-800">ข้อมูลส่วนตัว</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  ชื่อ *
-                </label>
-                <input
-                  type="text"
-                  value={formData.first_name}
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="ชื่อ"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  นามสกุล *
-                </label>
-                <input
-                  type="text"
-                  value={formData.last_name}
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="นามสกุล"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  HN (Hospital Number) *
-                </label>
-                <input
-                  type="text"
-                  value={formData.hospital_number}
-                  onChange={(e) => setFormData({ ...formData, hospital_number: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="HN-001"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <Calendar className="w-4 h-4 inline mr-1" />
-                  วันเกิด *
-                </label>
-                <input
-                  type="date"
-                  value={formData.birth_date}
-                  onChange={(e) => setFormData({ ...formData, birth_date: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  เพศ *
-                </label>
-                <select
-                  value={formData.gender}
-                  onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="male">ชาย</option>
-                  <option value="female">หญิง</option>
-                  <option value="other">อื่นๆ</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <Phone className="w-4 h-4 inline mr-1" />
-                  เบอร์โทรศัพท์
-                </label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="0812345678"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Mail className="w-4 h-4 inline mr-1" />
-                อีเมล
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="email@example.com"
-              />
-            </div>
-          </div>
-
-          {/* ✅ ส่วนที่ 3: ข้อมูลสุขภาพ */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
-              <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                <span className="text-purple-600 font-bold">3</span>
-              </div>
-              <h2 className="text-xl font-bold text-gray-800">ข้อมูลสุขภาพ</h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  น้ำหนัก (kg)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.current_weight}
-                  onChange={(e) => setFormData({ ...formData, current_weight: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="75.5"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  ส่วนสูง (cm)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.height}
-                  onChange={(e) => setFormData({ ...formData, height: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="170"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  รอบเอว (cm)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.waist_circumference}
-                  onChange={(e) => setFormData({ ...formData, waist_circumference: e.target.value })}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="92"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Buttons */}
-          <div className="flex gap-4 pt-6 border-t border-gray-200">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex-1 bg-blue-500 text-white font-bold py-4 rounded-xl hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {submitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  กำลังลงทะเบียน...
-                </>
+            <div className="p-6">
+              {deletedPatients.length === 0 ? (
+                <div className="text-center py-12">
+                  <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500">ไม่มีผู้ป่วยที่ถูกลบ</p>
+                </div>
               ) : (
-                <>
-                  <Save className="w-5 h-5" />
-                  ลงทะเบียนผู้ป่วย
-                </>
+                <div className="space-y-4">
+                  {deletedPatients.map((patient) => (
+                    <div key={patient.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="font-semibold text-gray-800">
+                              {getPatientName(patient)}
+                            </h3>
+                            <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-mono">
+                              {patient.hospital_number}
+                            </span>
+                            {patient.pam_level && (
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getPamLevelColor(patient.pam_level)}`}>
+                                {patient.pam_level}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-sm text-gray-600 space-y-1">
+                            <p>ID Card: {patient.users?.id_card || '-'}</p>
+                            <p>โรงพยาบาล: {patient.hospitals?.name || '-'}</p>
+                            <p>Zone: {patient.zone || '-'}</p>
+                            <p>ถูกลบเมื่อ: {new Date(patient.updated_at || patient.created_at).toLocaleString('th-TH')}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 ml-4">
+                          <button
+                            onClick={() => router.push(`/admin/patients/${patient.id}`)}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="ดูรายละเอียด"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleRestorePatient(patient.id, getPatientName(patient))}
+                            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+                            title="กู้คืนผู้ป่วย"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            กู้คืน
+                          </button>
+                          <button
+                            onClick={() => handlePermanentlyDeletePatient(patient.id, getPatientName(patient))}
+                            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
+                            title="ลบถาวร"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            ลบถาวร
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
-            </button>
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="flex-1 bg-gray-500 text-white font-bold py-4 rounded-xl hover:bg-gray-600 transition-all"
-            >
-              ยกเลิก
-            </button>
+            </div>
+
+            <div className="p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => setShowDeletedModal(false)}
+                className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+              >
+                ปิด
+              </button>
+            </div>
           </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
