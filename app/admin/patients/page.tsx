@@ -1,19 +1,46 @@
 // app/admin/patients/page.tsx
-// ✅ แก้ไขล่าสุด: 28 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    4. Admin เห็นทั้งหมด, บุคลากรเห็นเฉพาะโรงพยาบาลที่เข้าถึงได้
+//    4. ✅ เพิ่ม Validation ตรวจสอบ userId ก่อนเรียก API
+//    5. ✅ เพิ่ม Error Handling สำหรับ UUID invalid
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, deletePatient, restorePatient, getDeletedPatients, permanentlyDeletePatient, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
-import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital, Building2, UserCheck, ArrowLeft } from 'lucide-react';
+import { 
+  checkSession, 
+  logout, 
+  getPatientList, 
+  deletePatient, 
+  restorePatient, 
+  getDeletedPatients, 
+  permanentlyDeletePatient, 
+  getAccessibleHospitalIds, 
+  getUserHospitalInfo 
+} from '@/lib/supabase/queries';
+import { 
+  Users, 
+  Search, 
+  Filter, 
+  Plus, 
+  Eye, 
+  Edit, 
+  Trash2, 
+  LogOut, 
+  Archive, 
+  RotateCcw, 
+  Hospital, 
+  Building2, 
+  UserCheck, 
+  ArrowLeft,
+  Lock
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ✅ Interface ที่แก้ไขแล้ว - ใช้ hospital_id แทน subdistrict_health_center
+// ✅ Interface สำหรับผู้ป่วย
 interface Patient {
   id: string;
   first_name?: string;
@@ -42,6 +69,7 @@ interface Patient {
   };
 }
 
+// ✅ Interface สำหรับโรงพยาบาลของผู้ใช้
 interface UserHospital {
   id: string;
   name: string;
@@ -68,19 +96,37 @@ export default function PatientListPage() {
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
   useEffect(() => {
+    console.log('🔍 [PatientList] Component mounted');
+    
     const userData = checkSession();
+    
+    // ✅ ตรวจสอบว่ามี session หรือไม่
     if (!userData) {
+      console.warn('⚠️ [PatientList] No session found - Redirecting to login');
       router.push('/admin/login');
       return;
     }
 
+    // ✅ ตรวจสอบสิทธิ์
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+      console.error('❌ [PatientList] User not authorized:', userData.role);
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
 
+    console.log('✅ [PatientList] User session:', userData);
     setUser(userData);
+    
+    // ✅ ตรวจสอบว่า userId เป็น UUID ที่ถูกต้องหรือไม่
+    if (!userData.id || userData.id === '0' || userData.id.length < 36) {
+      console.error('❌ [PatientList] Invalid user ID:', userData.id);
+      alert('Session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
+      logout();
+      router.push('/admin/login');
+      return;
+    }
+    
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
     setLoading(false);
@@ -89,41 +135,75 @@ export default function PatientListPage() {
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
+      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
+      
+      // ✅ ตรวจสอบ userId อีกครั้งก่อนเรียก API
+      if (!userId || userId === '0' || userId.length < 36) {
+        console.error('❌ [loadAccessibleHospitals] Invalid userId:', userId);
+        return;
+      }
+      
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
+      loadPatients(ids);
     } catch (error) {
-      console.error('Error loading accessible hospitals:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
   };
 
-  const loadPatients = async () => {
+  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ตรวจสอบ hospitalIds)
+  const loadPatients = async (hospitalIds?: string[]) => {
     try {
-      // ✅ ส่ง userId เพื่อกรองผู้ป่วยตามสิทธิ์
-      const data = await getPatientList(undefined, undefined, user?.id);
-      console.log('📊 Loaded patients:', data.length);
-      console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
-      setPatients(data);
+      console.log('📡 [loadPatients] Loading patients...');
+      console.log('🏥 [loadPatients] Hospital IDs for filtering:', hospitalIds);
+      
+      // ✅ ตรวจสอบ hospitalIds ก่อนเรียก API
+      if (hospitalIds && hospitalIds.length > 0) {
+        // ✅ ตรวจสอบว่าทุก ID เป็น UUID ที่ถูกต้อง
+        const validIds = hospitalIds.filter(id => id && id.length === 36);
+        console.log('✅ [loadPatients] Valid hospital IDs:', validIds.length);
+        
+        if (validIds.length !== hospitalIds.length) {
+          console.warn('⚠️ [loadPatients] Some hospital IDs are invalid:', hospitalIds, '→', validIds);
+        }
+        
+        // ✅ ใช้ validIds แทน hospitalIds
+        const data = await getPatientList(undefined, undefined, validIds);
+        console.log('📊 [loadPatients] Loaded patients:', data.length);
+        
+        if (data.length > 0) {
+          console.log('📊 [loadPatients] Sample patient:', data[0]);
+        }
+        
+        setPatients(data);
+      } else {
+        // ✅ Admin หรือไม่มี hospital_ids → โหลดทั้งหมด
+        console.log('👑 [loadPatients] Admin user or no hospital filter - loading all patients');
+        const data = await getPatientList();
+        console.log('📊 [loadPatients] Loaded patients:', data.length);
+        setPatients(data);
+      }
     } catch (error) {
-      console.error('Error loading patients:', error);
+      console.error('❌ [loadPatients] Error:', error);
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ป่วย');
     }
   };
-
-  useEffect(() => {
-    if (user && accessibleHospitalIds.length >= 0) { // ✅ โหลดหลังจากได้สิทธิ์แล้ว
-      loadPatients();
-    }
-  }, [user, accessibleHospitalIds]);
 
   const loadDeletedPatients = async () => {
     try {
@@ -140,14 +220,14 @@ export default function PatientListPage() {
   };
 
   const handleDeletePatient = async (patientId: string, patientName: string) => {
-    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?\n\nการลบจะเป็นการปิดการใช้งานเท่านั้น ข้อมูลจะยังคงอยู่ในระบบ`)) {
+    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?`)) {
       return;
     }
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยสำเร็จ!');
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -166,7 +246,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('กู้คืนผู้ป่วยสำเร็จ!');
         loadDeletedPatients();
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -177,19 +257,15 @@ export default function PatientListPage() {
   };
 
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
-    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร\n\nการกระทำนี้ไม่สามารถย้อนกลับได้ และข้อมูลทั้งหมดจะถูกลบออกจากระบบ\n\nคุณแน่ใจหรือไม่?`)) {
+    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร`)) {
       return;
     }
-    if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้\n\nพิมพ์ "YES" เพื่อยืนยันการลบถาวร')) {
-      return;
-    }
-
     try {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยถาวรสำเร็จ!');
         loadDeletedPatients();
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -204,7 +280,6 @@ export default function PatientListPage() {
     loadDeletedPatients();
   };
 
-  // ✅ แก้ไขฟังก์ชันกรองให้ค้นหาจาก hospital name ด้วย
   const filteredPatients = patients.filter(patient => {
     const fullName = patient.first_name && patient.last_name
       ? `${patient.first_name} ${patient.last_name}`
@@ -287,7 +362,7 @@ export default function PatientListPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -478,16 +553,22 @@ export default function PatientListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredPatients.length === 0 ? (
+                {patients.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
                       {accessibleHospitalIds.length > 0 && (
                         <p className="text-sm text-gray-400 mt-2">
-                          🔒 คุณมีสิทธิ์เข้าถึงเฉพาะโรงพยาบาลที่สังกัด
+                          🔒 คุณมีสิทธิ์เข้าถึงเฉพาะโรงพยาบาลที่สังกัด ({accessibleHospitalIds.length} โรงพยาบาล)
                         </p>
                       )}
+                      <button
+                        onClick={() => router.push('/admin/patients/new')}
+                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                      >
+                        ลงทะเบียนผู้ป่วยคนแรก
+                      </button>
                     </td>
                   </tr>
                 ) : (
