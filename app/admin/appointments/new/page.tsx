@@ -5,12 +5,13 @@
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
 //    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
+//    5. ✅ เพิ่ม Debug เพื่อตรวจสอบการกรองผู้ป่วย
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getStaffList, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Calendar, Clock, User, Stethoscope, Hospital, Building2, UserCheck } from 'lucide-react';
+import { ArrowLeft, LogOut, Save, Calendar, Clock, User, Stethoscope, Hospital, Building2, UserCheck, Lock } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -73,6 +74,7 @@ export default function NewAppointmentPage() {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ User hospital:', hospitalInfo);
     } catch (error) {
       console.error('Error loading user hospital:', error);
     }
@@ -81,9 +83,11 @@ export default function NewAppointmentPage() {
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
+      console.log('🔍 Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 Accessible hospitals for appointments:', ids.length, 'hospitals');
+      console.log('🏥 Hospital IDs:', ids);
       
       // ✅ โหลดข้อมูลหลังจากได้สิทธิ์แล้ว
       loadData(ids);
@@ -98,8 +102,19 @@ export default function NewAppointmentPage() {
       console.log('🏥 Hospital IDs for filtering:', hospitalIds);
 
       // ✅ 1. ดึงข้อมูลผู้ป่วย (กรองตามโรงพยาบาลถ้ามี)
+      console.log('🔍 Calling getPatientList with hospitalIds:', hospitalIds);
       const patientsData = await getPatientList(undefined, undefined, hospitalIds);
       console.log('📋 Total patients (filtered):', patientsData.length);
+      console.log('📋 Sample patient:', patientsData[0]);
+      
+      // ✅ Debug: ตรวจสอบว่าผู้ป่วยแต่ละคนอยู่โรงพยาบาลไหน
+      if (patientsData.length > 0) {
+        console.log(' Checking patient hospitals:');
+        patientsData.slice(0, 5).forEach((patient, index) => {
+          console.log(`  ${index + 1}. ${patient.full_name} - Hospital ID: ${patient.hospital_id}`, patient.hospitals);
+        });
+      }
+      
       setPatients(patientsData);
 
       // ✅ 2. ดึงข้อมูลแพทย์/เจ้าหน้าที่ (กรองตามโรงพยาบาลถ้ามี)
@@ -111,6 +126,7 @@ export default function NewAppointmentPage() {
         filteredStaff = allStaff.filter(staff => 
           staff.hospital_id && hospitalIds.includes(staff.hospital_id)
         );
+        console.log('👨‍⚕️ Staff filtered from', allStaff.length, 'to', filteredStaff.length);
       }
       
       // กรองเอาเฉพาะ doctor และ helper
@@ -287,9 +303,15 @@ export default function NewAppointmentPage() {
                 </option>
               ))}
             </select>
-            {accessibleHospitalIds.length > 0 && (
-              <p className="text-xs text-gray-500 mt-1">
-                🔒 แสดงผู้ป่วยจาก {accessibleHospitalIds.length} โรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
+            {accessibleHospitalIds.length > 0 ? (
+              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                แสดงผู้ป่วยจาก {accessibleHospitalIds.length} โรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                แสดงผู้ป่วยทั้งหมด (Admin)
               </p>
             )}
           </div>
