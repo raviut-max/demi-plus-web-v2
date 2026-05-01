@@ -1,9 +1,11 @@
 // app/admin/patients/[id]/appointments/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลบุคลากรและโรงพยาบาล (แม่ข่าย/ลูกข่าย) แบบ compact
-//    2. กรองแพทย์ตามโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่าย-ลูกข่าย)
-//    3. แสดงชื่อโรงพยาบาลของแต่ละแพทย์ใน dropdown
+//    1. แก้ไขการโหลดแพทย์ - ดึง hospital_id จาก users table
+//    2. เพิ่ม debug logging แบบละเอียด
+//    3. แสดงชื่อโรงพยาบาลของแต่ละแพทย์
+//    4. กรองแพทย์ตามโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่าย-ลูกข่าย)
+
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -86,35 +88,39 @@ export default function PatientAppointmentsPage() {
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ User hospital:', hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
   const loadData = async () => {
     try {
-      console.log('📥 Loading patient detail for ID:', patientId);
+      console.log('📥 [loadData] Loading patient detail for ID:', patientId);
       
       // ✅ 1. โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
-      console.log('✅ Patient detail loaded:', patientData);
+      console.log('✅ [loadData] Patient detail loaded:', patientData);
       setPatient(patientData);
 
       // ✅ 2. โหลดโรงพยาบาลที่ผู้ป่วยสังกัด (เพื่อกรองแพทย์)
       if (patientData?.hospital_id) {
+        console.log('🏥 [loadData] Patient hospital_id:', patientData.hospital_id);
         await loadAccessibleHospitalsForPatient(patientData.hospital_id);
       } else {
+        console.warn('⚠️ [loadData] Patient has no hospital_id');
         await loadDoctors([]);
       }
 
       // ✅ 3. โหลดนัดหมาย
-      console.log('📥 Loading appointments for patient:', patientId);
+      console.log('📥 [loadData] Loading appointments for patient:', patientId);
       const appointmentsData = await getAppointments(patientId);
-      console.log('✅ Appointments loaded:', appointmentsData);
+      console.log('✅ [loadData] Appointments loaded:', appointmentsData);
       
+      // ✅ เรียงลำดับ: ล่าสุดไว้บนสุด
       const sortedAppointments = appointmentsData.sort((a, b) => {
         return new Date(b.appointment_date).getTime() - new Date(a.appointment_date).getTime();
       });
@@ -124,7 +130,7 @@ export default function PatientAppointmentsPage() {
       await loadFollowupStatus(sortedAppointments);
 
     } catch (error) {
-      console.error('❌ Error loading data:', error);
+      console.error('❌ [loadData] Error:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -134,66 +140,89 @@ export default function PatientAppointmentsPage() {
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้สำหรับผู้ป่วย (แม่ข่าย-ลูกข่าย)
   const loadAccessibleHospitalsForPatient = async (patientHospitalId: string) => {
     try {
-      console.log('🏥 Loading accessible hospitals for patient hospital:', patientHospitalId);
+      console.log('🏥 [loadAccessibleHospitalsForPatient] Patient hospital:', patientHospitalId);
       
-      const { data: patientHospital } = await supabase
+      // ✅ ดึงข้อมูลโรงพยาบาลของผู้ป่วย
+      const { data: patientHospital, error: hospError } = await supabase
         .from('hospitals')
         .select('id, type, parent_id')
         .eq('id', patientHospitalId)
         .single();
 
-      if (!patientHospital) {
-        console.log('⚠️ Patient hospital not found');
+      if (hospError) {
+        console.error('❌ [loadAccessibleHospitalsForPatient] Error fetching patient hospital:', hospError);
         await loadDoctors([]);
         return;
       }
+
+      if (!patientHospital) {
+        console.log('⚠️ [loadAccessibleHospitalsForPatient] Patient hospital not found');
+        await loadDoctors([]);
+        return;
+      }
+
+      console.log('📊 [loadAccessibleHospitalsForPatient] Patient hospital type:', patientHospital.type);
 
       let hospitalIds: string[] = [patientHospitalId];
 
       // ✅ ถ้าผู้ป่วยอยู่แม่ข่าย → รวมลูกข่ายทั้งหมด
       if (patientHospital.type === 'main') {
-        const { data: subHospitals } = await supabase
+        console.log('🏥 [loadAccessibleHospitalsForPatient] Patient is in MAIN hospital');
+        const { data: subHospitals, error: subError } = await supabase
           .from('hospitals')
           .select('id')
           .eq('parent_id', patientHospitalId)
           .eq('is_active', true);
         
-        if (subHospitals && subHospitals.length > 0) {
+        if (subError) {
+          console.error('❌ [loadAccessibleHospitalsForPatient] Error fetching sub hospitals:', subError);
+        } else if (subHospitals && subHospitals.length > 0) {
           hospitalIds = [...hospitalIds, ...subHospitals.map(h => h.id)];
+          console.log('✅ [loadAccessibleHospitalsForPatient] Found', subHospitals.length, 'sub hospitals');
         }
-        console.log('🏥 Main hospital - accessible hospitals:', hospitalIds);
       }
       // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ
       else if (patientHospital.type === 'sub' && patientHospital.parent_id) {
+        console.log('🏥 [loadAccessibleHospitalsForPatient] Patient is in SUB hospital');
+        console.log('🏥 [loadAccessibleHospitalsForPatient] Parent hospital:', patientHospital.parent_id);
+        
+        // เพิ่มแม่ข่าย
         hospitalIds.push(patientHospital.parent_id);
         
-        const { data: siblingHospitals } = await supabase
+        // เพิ่มลูกข่ายอื่นๆ ของแม่ข่ายนี้
+        const { data: siblingHospitals, error: sibError } = await supabase
           .from('hospitals')
           .select('id')
           .eq('parent_id', patientHospital.parent_id)
           .eq('is_active', true);
         
-        if (siblingHospitals && siblingHospitals.length > 0) {
+        if (sibError) {
+          console.error('❌ [loadAccessibleHospitalsForPatient] Error fetching sibling hospitals:', sibError);
+        } else if (siblingHospitals && siblingHospitals.length > 0) {
           hospitalIds = [...hospitalIds, ...siblingHospitals.map(h => h.id)];
+          console.log('✅ [loadAccessibleHospitalsForPatient] Found', siblingHospitals.length, 'sibling hospitals');
         }
-        console.log('🏥 Sub hospital - accessible hospitals:', hospitalIds);
       }
 
+      console.log('🎯 [loadAccessibleHospitalsForPatient] Final hospital IDs:', hospitalIds);
       setAccessibleHospitalIds(hospitalIds);
       await loadDoctors(hospitalIds);
 
     } catch (error) {
-      console.error('Error loading accessible hospitals:', error);
+      console.error('❌ [loadAccessibleHospitalsForPatient] Exception:', error);
       await loadDoctors([]);
     }
   };
 
-  // ✅ โหลดแพทย์ (กรองตามโรงพยาบาล)
+  // ✅ โหลดแพทย์ (แก้ไขแล้ว - ดึง hospital_id จาก users table)
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ Loading doctors for hospitals:', hospitalIds);
+      console.log('👨‍️ [loadDoctors] Starting...');
+      console.log('🏥 [loadDoctors] Hospital IDs to filter:', hospitalIds);
+      console.log('👤 [loadDoctors] Current user role:', user?.role);
       
-      let query = supabase
+      // ✅ 1. ดึงข้อมูลแพทย์ทั้งหมด (ไม่ join กับ hospitals)
+      let doctorsQuery = supabase
         .from('doctors')
         .select(`
           id, 
@@ -204,48 +233,108 @@ export default function PatientAppointmentsPage() {
         `)
         .eq('is_active', true);
 
+      console.log('🔍 [loadDoctors] Doctors query built');
+
+      // ✅ 2. ถ้ามี hospitalIds ให้กรอง
       if (hospitalIds && hospitalIds.length > 0) {
-        query = query.in('hospital_id', hospitalIds);
+        console.log('🔍 [loadDoctors] Filtering by hospital_ids:', hospitalIds);
+        
+        // ✅ ดึง user_id จาก users table ที่มี hospital_id ในรายการ
+        const { data: usersData, error: usersError } = await supabase
+          .from('users')
+          .select('id')
+          .in('hospital_id', hospitalIds)
+          .eq('is_active', true);
+
+        if (usersError) {
+          console.error('❌ [loadDoctors] Error fetching users:', usersError);
+        } else {
+          console.log('✅ [loadDoctors] Found', usersData?.length || 0, 'active users in hospitals');
+          
+          if (usersData && usersData.length > 0) {
+            const userIds = usersData.map(u => u.id);
+            console.log('👥 [loadDoctors] User IDs:', userIds);
+            
+            doctorsQuery = doctorsQuery.in('user_id', userIds);
+          } else {
+            console.warn('⚠️ [loadDoctors] No active users found in these hospitals');
+            setDoctors([]);
+            return;
+          }
+        }
       }
 
-      const { data: doctorsData, error: doctorsError } = await query;
+      // ✅ 3. Execute query
+      const { data: doctorsData, error: doctorsError } = await doctorsQuery;
 
       if (doctorsError) {
-        console.error('❌ Error loading doctors:', doctorsError);
+        console.error('❌ [loadDoctors] Error fetching doctors:', doctorsError);
+        console.error('❌ [loadDoctors] Error details:', JSON.stringify(doctorsError, null, 2));
         setDoctors([]);
         return;
       }
 
-      console.log('✅ Doctors loaded:', doctorsData?.length || 0);
+      console.log('✅ [loadDoctors] Found', doctorsData?.length || 0, 'doctors');
       
-      const doctorsWithHospitals = await Promise.all(
-        (doctorsData || []).map(async (doctor) => {
-          const { data: userData } = await supabase
-            .from('users')
-            .select('hospital_id')
-            .eq('id', doctor.user_id)
-            .single();
+      if (!doctorsData || doctorsData.length === 0) {
+        console.warn('⚠️ [loadDoctors] No doctors found');
+        setDoctors([]);
+        return;
+      }
 
-          let hospitalData = null;
-          if (userData?.hospital_id) {
-            const { data: hospData } = await supabase
+      // ✅ 4. โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์แยก
+      console.log('🏥 [loadDoctors] Loading hospital info for each doctor...');
+      const doctorsWithHospitals = await Promise.all(
+        doctorsData.map(async (doctor) => {
+          try {
+            // ✅ ดึง hospital_id จาก users table
+            const { data: userData, error: userError } = await supabase
+              .from('users')
+              .select('hospital_id')
+              .eq('id', doctor.user_id)
+              .single();
+
+            if (userError) {
+              console.warn(`⚠️ [loadDoctors] Error fetching user ${doctor.user_id}:`, userError);
+              return { ...doctor, hospitals: null };
+            }
+
+            if (!userData?.hospital_id) {
+              console.log(`ℹ️ [loadDoctors] Doctor ${doctor.full_name_th} has no hospital_id`);
+              return { ...doctor, hospitals: null };
+            }
+
+            // ✅ ดึงข้อมูลโรงพยาบาล
+            const { data: hospData, error: hospError } = await supabase
               .from('hospitals')
               .select('id, name, code, type')
               .eq('id', userData.hospital_id)
               .single();
-            hospitalData = hospData;
+
+            if (hospError) {
+              console.warn(`⚠️ [loadDoctors] Error fetching hospital ${userData.hospital_id}:`, hospError);
+              return { ...doctor, hospitals: null };
+            }
+
+            console.log(`✅ [loadDoctors] Doctor ${doctor.full_name_th} -> Hospital: ${hospData?.name}`);
+            return {
+              ...doctor,
+              hospitals: hospData
+            };
+          } catch (err) {
+            console.error(`❌ [loadDoctors] Error processing doctor ${doctor.id}:`, err);
+            return { ...doctor, hospitals: null };
           }
-          
-          return {
-            ...doctor,
-            hospitals: hospitalData
-          };
         })
       );
 
+      console.log('✅ [loadDoctors] Final doctors list:', doctorsWithHospitals.length);
+      console.log('📋 [loadDoctors] Sample doctor:', doctorsWithHospitals[0]);
+      
       setDoctors(doctorsWithHospitals);
     } catch (error) {
-      console.error('Error loading doctors:', error);
+      console.error('❌ [loadDoctors] Exception:', error);
+      console.error('❌ [loadDoctors] Stack:', error instanceof Error ? error.stack : 'No stack');
       setDoctors([]);
     }
   };
