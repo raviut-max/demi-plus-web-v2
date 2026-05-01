@@ -3,7 +3,7 @@
 // ✅ การแก้ไข:
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    3. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
 //    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
 //    5. ✅ เพิ่ม Debug เพื่อตรวจสอบการกรองผู้ป่วย
 
@@ -74,42 +74,43 @@ export default function NewAppointmentPage() {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ User hospital:', hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 Getting accessible hospitals for user:', userId);
+      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 Accessible hospitals for appointments:', ids.length, 'hospitals');
-      console.log('🏥 Hospital IDs:', ids);
+      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       
       // ✅ โหลดข้อมูลหลังจากได้สิทธิ์แล้ว
       loadData(ids);
     } catch (error) {
-      console.error('Error loading accessible hospitals:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
   };
 
+  // ✅ โหลดข้อมูลผู้ป่วยและแพทย์ (กรองตามโรงพยาบาล)
   const loadData = async (hospitalIds?: string[]) => {
     try {
-      console.log('📡 Loading patients and appointments...');
-      console.log('🏥 Hospital IDs for filtering:', hospitalIds);
-
+      console.log('📡 [loadData] Loading patients and appointments...');
+      console.log('🏥 [loadData] Hospital IDs for filtering:', hospitalIds);
+      
       // ✅ 1. ดึงข้อมูลผู้ป่วย (กรองตามโรงพยาบาลถ้ามี)
-      console.log('🔍 Calling getPatientList with hospitalIds:', hospitalIds);
+      console.log('🔍 [loadData] Calling getPatientList with hospitalIds:', hospitalIds);
       const patientsData = await getPatientList(undefined, undefined, hospitalIds);
-      console.log('📋 Total patients (filtered):', patientsData.length);
-      console.log('📋 Sample patient:', patientsData[0]);
+      
+      console.log('📋 [loadData] Total patients (filtered):', patientsData.length);
       
       // ✅ Debug: ตรวจสอบว่าผู้ป่วยแต่ละคนอยู่โรงพยาบาลไหน
       if (patientsData.length > 0) {
-        console.log(' Checking patient hospitals:');
+        console.log('🏥 [loadData] Checking patient hospitals:');
         patientsData.slice(0, 5).forEach((patient, index) => {
           console.log(`  ${index + 1}. ${patient.full_name} - Hospital ID: ${patient.hospital_id}`, patient.hospitals);
         });
@@ -126,7 +127,7 @@ export default function NewAppointmentPage() {
         filteredStaff = allStaff.filter(staff => 
           staff.hospital_id && hospitalIds.includes(staff.hospital_id)
         );
-        console.log('👨‍⚕️ Staff filtered from', allStaff.length, 'to', filteredStaff.length);
+        console.log('👨‍⚕️ [loadData] Staff filtered from', allStaff.length, 'to', filteredStaff.length);
       }
       
       // กรองเอาเฉพาะ doctor และ helper
@@ -134,11 +135,11 @@ export default function NewAppointmentPage() {
         staff.role === 'doctor' || staff.role === 'helper'
       );
 
-      console.log('👨‍⚕️ Total staff (filtered):', filteredStaff.length);
+      console.log('👨‍⚕️ [loadData] Total staff (filtered):', filteredStaff.length);
       setStaffList(filteredStaff);
 
     } catch (error) {
-      console.error('❌ Error loading data:', error);
+      console.error('❌ [loadData] Error:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -175,7 +176,7 @@ export default function NewAppointmentPage() {
       alert('✅ สร้างนัดหมายสำเร็จ!');
       router.push('/admin/appointments/view');
     } catch (error) {
-      console.error('Error creating appointment:', error);
+      console.error('❌ [handleSubmit] Error:', error);
       alert('เกิดข้อผิดพลาด: ' + (error as any).message);
     } finally {
       setSaving(false);
@@ -224,7 +225,7 @@ export default function NewAppointmentPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
