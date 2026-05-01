@@ -1,13 +1,13 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. Badge แสดงประเภทโรงพยาบาล
-//    4. แสดงแม่ข่าย (ถ้าเป็นลูกข่าย)
-//    5. ✅ กรองโรงพยาบาลตามสิทธิ์การเข้าถึง
-//    6. ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
-//    7. ✅ แสดงรายละเอียดผู้ป่วยครบถ้วนตามฟอร์มลงทะเบียน
+//    1. ✅ แก้ไขการโหลดผู้ป่วยให้ใช้ accessibleHospitalIds แทน user?.id
+//    2. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    5. ✅ จำนวนผู้ป่วยแสดงเฉพาะ รพ.ที่เข้าถึงได้ (แม่ข่าย/ลูกข่าย)
+//    6. ✅ Modal รายละเอียดผู้ป่วยแสดงข้อมูลครบถ้วนตามฟอร์มลงทะเบียน
+//    7. ✅ เพิ่มส่วนข้อมูลสุขภาพ, ผู้ติดต่อฉุกเฉิน, โค้ช
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -28,7 +28,6 @@ import {
 import {
   Users,
   Search,
-  Filter,
   Plus,
   Eye,
   Edit,
@@ -48,11 +47,13 @@ import {
   Weight,
   Ruler,
   Activity,
-  AlertCircle
+  AlertCircle,
+  Syringe,
+  Heart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ✅ Interface ที่แก้ไขแล้ว
+// ✅ Interface ที่แก้ไขแล้ว - เพิ่มฟิลด์ทั้งหมดจากฟอร์มลงทะเบียน
 interface Patient {
   id: string;
   first_name?: string;
@@ -77,7 +78,7 @@ interface Patient {
   district?: string;
   province?: string;
   postal_code?: string;
-  // ✅ ข้อมูลสุขภาพ
+  // ✅ ข้อมูลสุขภาพ (จากฟอร์มลงทะเบียน)
   current_weight?: number;
   height?: number;
   waist_circumference?: number;
@@ -85,7 +86,7 @@ interface Patient {
   blood_sugar?: number;
   hba1c_level?: number;
   notes?: string;
-  // ✅ ที่อยู่
+  // ✅ ที่อยู่เพิ่มเติม
   house_number?: string;
   address_line1?: string;
   soi?: string;
@@ -96,6 +97,9 @@ interface Patient {
   emergency_contact_name?: string;
   emergency_contact_phone?: string;
   emergency_contact_relationship?: string;
+  // ✅ ข้อมูลอื่นๆ
+  occupation?: string;
+  education_level?: string;
   hospitals?: {
     id: string;
     name: string;
@@ -223,8 +227,8 @@ export default function PatientListPage() {
       // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
       loadCoaches(ids);
       
-      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
-      loadPatients();
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds เพื่อกรอง)
+      loadPatients(ids);
       
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
@@ -245,17 +249,20 @@ export default function PatientListPage() {
       }
       
       setCoaches(filteredCoaches);
-      console.log('👨‍️ Filtered coaches:', filteredCoaches.length);
+      console.log('👨‍⚕️ Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('Error loading coaches:', error);
     }
   };
 
-  // ✅ โหลดผู้ป่วย
-  const loadPatients = async () => {
+  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ส่ง hospitalIds เพื่อกรองตามสิทธิ์)
+  const loadPatients = async (hospitalIds?: string[]) => {
     try {
       console.log('📡 Loading patients...');
-      const data = await getPatientList(undefined, undefined, accessibleHospitalIds);
+      console.log('🏥 Hospital IDs for filtering:', hospitalIds);
+      
+      // ✅ ส่ง hospitalIds เพื่อกรองผู้ป่วยตามโรงพยาบาลที่เข้าถึงได้
+      const data = await getPatientList(undefined, undefined, hospitalIds);
       console.log('📊 Loaded patients:', data.length);
       console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
       setPatients(data);
@@ -286,7 +293,7 @@ export default function PatientListPage() {
       const result = await deletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยสำเร็จ!');
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -305,7 +312,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('กู้คืนผู้ป่วยสำเร็จ!');
         loadDeletedPatients();
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -327,7 +334,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('ลบผู้ป่วยถาวรสำเร็จ!');
         loadDeletedPatients();
-        loadPatients();
+        loadPatients(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -405,6 +412,11 @@ export default function PatientListPage() {
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  const formatNumber = (value: number | undefined | null, unit: string = '') => {
+    if (value === undefined || value === null) return '-';
+    return `${value}${unit ? ' ' + unit : ''}`;
   };
 
   if (loading) {
@@ -612,7 +624,7 @@ export default function PatientListPage() {
           </div>
         </div>
 
-        {/* Summary Cards */}
+        {/* Summary Cards - ✅ แสดงจำนวนผู้ป่วยที่กรองตามโรงพยาบาลแล้ว */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
@@ -807,10 +819,10 @@ export default function PatientListPage() {
         </div>
       </div>
 
-      {/* Modal แสดงรายละเอียดผู้ป่วย - ✅ แก้ไขให้แสดงข้อมูลครบถ้วน */}
+      {/* ✅ Modal แสดงรายละเอียดผู้ป่วย - แก้ไขให้แสดงข้อมูลครบถ้วน */}
       {showPatientDetail && selectedPatient && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
               <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
                 <Users className="w-6 h-6 text-blue-600" />
@@ -825,10 +837,10 @@ export default function PatientListPage() {
             </div>
 
             <div className="p-6 space-y-6">
-              {/* ข้อมูลพื้นฐาน */}
+              {/* 1. ข้อมูลพื้นฐาน */}
               <div className="bg-blue-50 rounded-lg p-4">
                 <h3 className="text-sm font-bold text-blue-800 mb-2">👤 ข้อมูลพื้นฐาน</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
                     <p className="text-sm text-gray-500">HN</p>
                     <p className="font-medium text-gray-800">{selectedPatient.hospital_number}</p>
@@ -866,39 +878,62 @@ export default function PatientListPage() {
                       {selectedPatient.email || '-'}
                     </p>
                   </div>
+                  <div>
+                    <p className="text-sm text-gray-500">อาชีพ</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.occupation || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">การศึกษา</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.education_level || '-'}</p>
+                  </div>
                 </div>
               </div>
 
-              {/* ✅ ข้อมูลสุขภาพ - เพิ่มใหม่ */}
+              {/* 2. ✅ ข้อมูลสุขภาพ - เพิ่มใหม่ครบถ้วน */}
               <div className="bg-purple-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-purple-800 mb-2">💊 ข้อมูลสุขภาพ</h3>
-                <div className="grid grid-cols-3 gap-4">
+                <h3 className="text-sm font-bold text-purple-800 mb-2 flex items-center gap-2">
+                  <Activity className="w-4 h-4" />
+                  💊 ข้อมูลสุขภาพ
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
-                    <p className="text-sm text-gray-500">น้ำหนัก (kg)</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.current_weight || '-'}</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Weight className="w-3 h-3" /> น้ำหนัก
+                    </p>
+                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.current_weight, 'kg')}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">ส่วนสูง (cm)</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.height || '-'}</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Ruler className="w-3 h-3" /> ส่วนสูง
+                    </p>
+                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.height, 'cm')}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">รอบเอว (cm)</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.waist_circumference || '-'}</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Activity className="w-3 h-3" /> รอบเอว
+                    </p>
+                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.waist_circumference, 'cm')}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">ประเภทเบาหวาน</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Syringe className="w-3 h-3" /> ประเภทเบาหวาน
+                    </p>
                     <p className="font-medium text-gray-800">{selectedPatient.diabetes_type || '-'}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">ค่าน้ำตาลในเลือด (mg/dL)</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.blood_sugar || '-'}</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Activity className="w-3 h-3" /> น้ำตาลในเลือด
+                    </p>
+                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.blood_sugar, 'mg/dL')}</p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-500">ค่า HbA1c</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.hba1c_level || '-'}</p>
+                    <p className="text-sm text-gray-500 flex items-center gap-1">
+                      <Heart className="w-3 h-3" /> ค่า HbA1c
+                    </p>
+                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.hba1c_level, '%')}</p>
                   </div>
                   {selectedPatient.notes && (
-                    <div className="col-span-3">
+                    <div className="col-span-2 md:col-span-3">
                       <p className="text-sm text-gray-500">หมายเหตุ</p>
                       <p className="font-medium text-gray-800">{selectedPatient.notes}</p>
                     </div>
@@ -906,9 +941,12 @@ export default function PatientListPage() {
                 </div>
               </div>
 
-              {/* โรงพยาบาลและโค้ช */}
+              {/* 3. โรงพยาบาลและโค้ช */}
               <div className="bg-green-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-green-800 mb-2">🏥 โรงพยาบาลและโค้ช</h3>
+                <h3 className="text-sm font-bold text-green-800 mb-2 flex items-center gap-2">
+                  <Hospital className="w-4 h-4" />
+                  🏥 โรงพยาบาลและโค้ช
+                </h3>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-500">โรงพยาบาล</p>
@@ -926,11 +964,14 @@ export default function PatientListPage() {
                 </div>
               </div>
 
-              {/* ✅ ที่อยู่ - ปรับปรุงให้ครบถ้วน */}
+              {/* 4. ✅ ที่อยู่ - เพิ่มข้อมูลครบถ้วน */}
               <div className="bg-pink-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-pink-800 mb-2">📍 ที่อยู่</h3>
+                <h3 className="text-sm font-bold text-pink-800 mb-2 flex items-center gap-2">
+                  <MapPin className="w-4 h-4" />
+                  📍 ที่อยู่
+                </h3>
                 <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <div>
                       <p className="text-sm text-gray-500">เลขที่</p>
                       <p className="font-medium text-gray-800">{selectedPatient.house_number || '-'}</p>
@@ -950,6 +991,10 @@ export default function PatientListPage() {
                     <div>
                       <p className="text-sm text-gray-500">ถนน</p>
                       <p className="font-medium text-gray-800">{selectedPatient.road || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">รหัสไปรษณีย์</p>
+                      <p className="font-medium text-gray-800">{selectedPatient.postal_code || '-'}</p>
                     </div>
                   </div>
                   {selectedPatient.address_line1 && (
@@ -973,14 +1018,17 @@ export default function PatientListPage() {
                 </div>
               </div>
 
-              {/* ✅ ผู้ติดต่อฉุกเฉิน - เพิ่มใหม่ */}
-              {selectedPatient.emergency_contact_name && (
+              {/* 5. ✅ ผู้ติดต่อฉุกเฉิน - เพิ่มใหม่ */}
+              {(selectedPatient.emergency_contact_name || selectedPatient.emergency_contact_phone) && (
                 <div className="bg-orange-50 rounded-lg p-4">
-                  <h3 className="text-sm font-bold text-orange-800 mb-2">🚨 ผู้ติดต่อฉุกเฉิน</h3>
+                  <h3 className="text-sm font-bold text-orange-800 mb-2 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    🚨 ผู้ติดต่อฉุกเฉิน
+                  </h3>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
                       <p className="text-sm text-gray-500">ชื่อผู้ติดต่อ</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.emergency_contact_name}</p>
+                      <p className="font-medium text-gray-800">{selectedPatient.emergency_contact_name || '-'}</p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500">เบอร์โทรศัพท์</p>
@@ -997,7 +1045,7 @@ export default function PatientListPage() {
                 </div>
               )}
 
-              {/* ระดับผู้ป่วย */}
+              {/* 6. ระดับผู้ป่วย */}
               <div className="bg-yellow-50 rounded-lg p-4">
                 <h3 className="text-sm font-bold text-yellow-800 mb-2">📊 ระดับผู้ป่วย</h3>
                 <div className="grid grid-cols-3 gap-4">
@@ -1020,13 +1068,25 @@ export default function PatientListPage() {
                 </div>
               </div>
 
-              {/* วันที่ลงทะเบียน */}
+              {/* 7. วันที่ลงทะเบียน */}
               <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-gray-800 mb-2">📅 วันที่ลงทะเบียน</h3>
-                <p className="font-medium text-gray-800 flex items-center gap-1">
-                  <Calendar className="w-4 h-4" />
-                  {formatDate(selectedPatient.created_at)}
-                </p>
+                <h3 className="text-sm font-bold text-gray-800 mb-2">📅 ข้อมูลการลงทะเบียน</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">วันที่ลงทะเบียน</p>
+                    <p className="font-medium text-gray-800 flex items-center gap-1">
+                      <Calendar className="w-4 h-4" />
+                      {formatDate(selectedPatient.created_at)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">อัปเดตล่าสุด</p>
+                    <p className="font-medium text-gray-800 flex items-center gap-1">
+                      <Calendar className="w-4 h-4" />
+                      {formatDate(selectedPatient.updated_at || selectedPatient.created_at)}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 
