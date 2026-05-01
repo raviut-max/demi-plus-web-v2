@@ -1,16 +1,16 @@
 // app/admin/patients/[id]/appointments/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลบุคลากรและโรงพยาบาล (แม่ข่าย/ลูกข่าย) ด้านบน
-//    2. ลบปุ่ม "สร้างนัดหมายแรก" ออก ใช้ปุ่มด้านบนอย่างเดียว
-//    3. กรองแพทย์ตามโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่าย-ลูกข่าย)
-//    4. แสดงชื่อโรงพยาบาลของแต่ละแพทย์ใน dropdown
+//    1. แสดงข้อมูลบุคลากรและโรงพยาบาลแบบ compact (ประหยัดพื้นที่)
+//    2. แก้ไขการโหลดแพทย์ให้แสดงทั้งแม่ข่ายและลูกข่าย
+//    3. แสดงชื่อโรงพยาบาลของแต่ละแพทย์ใน dropdown
+//    4. แก้ไข error เรื่อง foreign key relationship
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches, getUserHospitalInfo, getAccessibleHospitalIds } from '@/lib/supabase/queries';
-import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText, Hospital, Building2, UserCheck } from 'lucide-react';
+import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText, Hospital, Building2, UserCheck, Stethoscope } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -26,6 +26,21 @@ interface UserHospital {
   };
 }
 
+interface Doctor {
+  id: string;
+  user_id: string;
+  full_name_th: string;
+  specialization_th?: string;
+  is_active: boolean;
+  hospital_id?: string;
+  hospitals?: {
+    id: string;
+    name: string;
+    code: string;
+    type: string;
+  };
+}
+
 export default function PatientAppointmentsPage() {
   const router = useRouter();
   const params = useParams();
@@ -36,7 +51,7 @@ export default function PatientAppointmentsPage() {
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
-  const [doctors, setDoctors] = useState<any[]>([]);
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
@@ -93,6 +108,9 @@ export default function PatientAppointmentsPage() {
       // ✅ 2. โหลดโรงพยาบาลที่ผู้ป่วยสังกัด (เพื่อกรองแพทย์)
       if (patientData?.hospital_id) {
         await loadAccessibleHospitalsForPatient(patientData.hospital_id);
+      } else {
+        // ถ้าไม่มี hospital_id ให้โหลดแพทย์ทั้งหมด
+        await loadDoctors([]);
       }
 
       // ✅ 3. โหลดนัดหมาย
@@ -177,11 +195,12 @@ export default function PatientAppointmentsPage() {
     }
   };
 
-  // ✅ โหลดแพทย์ (กรองตามโรงพยาบาล)
+  // ✅ โหลดแพทย์ (กรองตามโรงพยาบาล) - แก้ไขแล้ว
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
       console.log('👨‍⚕️ Loading doctors for hospitals:', hospitalIds);
       
+      // ✅ ใช้ query ที่ไม่ join กับ hospitals table โดยตรง
       let query = supabase
         .from('doctors')
         .select(`
@@ -190,12 +209,7 @@ export default function PatientAppointmentsPage() {
           full_name_th, 
           specialization_th,
           is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type
-          )
+          hospital_id
         `)
         .eq('is_active', true);
 
@@ -204,16 +218,36 @@ export default function PatientAppointmentsPage() {
         query = query.in('hospital_id', hospitalIds);
       }
 
-      const { data, error } = await query;
+      const { data: doctorsData, error: doctorsError } = await query;
 
-      if (error) {
-        console.error('❌ Error loading doctors:', error);
+      if (doctorsError) {
+        console.error('❌ Error loading doctors:', doctorsError);
         setDoctors([]);
         return;
       }
 
-      console.log('✅ Doctors loaded:', data?.length || 0);
-      setDoctors(data || []);
+      console.log('✅ Doctors loaded:', doctorsData?.length || 0);
+      
+      // ✅ โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์แยก
+      const doctorsWithHospitals = await Promise.all(
+        (doctorsData || []).map(async (doctor) => {
+          if (doctor.hospital_id) {
+            const { data: hospitalData } = await supabase
+              .from('hospitals')
+              .select('id, name, code, type')
+              .eq('id', doctor.hospital_id)
+              .single();
+            
+            return {
+              ...doctor,
+              hospitals: hospitalData
+            };
+          }
+          return doctor;
+        })
+      );
+
+      setDoctors(doctorsWithHospitals);
     } catch (error) {
       console.error('Error loading doctors:', error);
       setDoctors([]);
@@ -427,7 +461,7 @@ export default function PatientAppointmentsPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button 
+          <button
             onClick={() => router.push(`/admin/patients/${patientId}`)} 
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
@@ -452,48 +486,48 @@ export default function PatientAppointmentsPage() {
             </button>
           </div>
 
-          {/* ✅ แสดงข้อมูลบุคลากรและโรงพยาบาล */}
+          {/* ✅ แสดงข้อมูลบุคลากรและโรงพยาบาลแบบ compact */}
           {userHospital && (
-            <div className="mt-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <UserCheck className="w-5 h-5 text-blue-600" />
+            <div className="mt-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3">
+              <div className="flex items-center gap-3 flex-wrap text-sm">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-4 h-4 text-blue-600" />
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-800">
+                    <p className="font-medium text-gray-800 text-xs">
                       {user?.full_name_th || 'ผู้ดูแลระบบ'}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                      {user?.role === 'admin' ? '👑 Admin' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
 
-                <div className="h-8 w-px bg-blue-300"></div>
+                <div className="h-6 w-px bg-blue-300"></div>
 
-                <div className="flex items-center gap-2">
-                  <Hospital className="w-4 h-4 text-blue-600" />
-                  <span className="text-sm font-medium text-gray-700">
+                <div className="flex items-center gap-1.5">
+                  <Hospital className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="text-xs font-medium text-gray-700">
                     {userHospital.name}
                   </span>
                   {userHospital.type === 'main' ? (
-                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                      🏥 แม่ข่าย
+                    <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                      แม่ข่าย
                     </span>
                   ) : (
-                    <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
-                      🏥 ลูกข่าย
+                    <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                      ลูกข่าย
                     </span>
                   )}
                 </div>
 
                 {userHospital.type === 'sub' && userHospital.parent_hospital && (
                   <>
-                    <div className="h-8 w-px bg-blue-300"></div>
-                    <div className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4 text-gray-500" />
+                    <div className="h-6 w-px bg-blue-300"></div>
+                    <div className="flex items-center gap-1">
+                      <Building2 className="w-3 h-3 text-gray-500" />
                       <span className="text-xs text-gray-600">
                         แม่ข่าย: {userHospital.parent_hospital.name}
                       </span>
