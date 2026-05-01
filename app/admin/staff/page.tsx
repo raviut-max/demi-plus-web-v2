@@ -1,13 +1,13 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 30 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ ฟีเจอร์หลัก:
 //    1. จัดการเจ้าหน้าที่ (เพิ่ม/แก้ไข/ลบ/กู้คืน)
-//    2. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
-//    3. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
-//    4. แสดงข้อมูลโรงพยาบาลในตาราง
-//    5. มีระบบ Soft Delete และ Permanent Delete
-//    6. ✅ เพิ่มระบบรออนุมัติ (Pending Approval)
+//    2. ระบบรออนุมัติ (Pending Approval)
+//    3. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
+//    4. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
+//    5. แสดงข้อมูลโรงพยาบาลในตาราง
+//    6. มีระบบ Soft Delete และ Permanent Delete
 // =====================================================
 
 'use client';
@@ -771,7 +771,7 @@ export default function StaffManagementPage() {
                         <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                         <p>ไม่มีคำขอรออนุมัติ</p>
                         <p className="text-sm text-gray-400 mt-2">
-                          บุคลากรสามารถลงทะเบียนได้ที่ /admin/register
+                          บุคลากรสามารถลงทะเบียนได้ที่ /admin/staff/register
                         </p>
                       </td>
                     </tr>
@@ -1316,7 +1316,7 @@ function EditStaffModal({
     return {
       day: date.getDate().toString(),
       month: (date.getMonth() + 1).toString(),
-      year: (date.getFullYear() + 543).toString()
+      year: (date.getFullYear() + 543).toString() // Convert AD to BE
     };
   };
 
@@ -1355,10 +1355,13 @@ function EditStaffModal({
     setLoading(true);
     
     try {
+      // ✅ Convert birth date to AD
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
       console.log('📅 [EditStaffModal] Birth date (AD):', birthDate);
 
+      // ✅ Update doctors table
+      console.log('💾 [EditStaffModal] Updating doctors table...');
       const result = await updateStaff(staff.id, {
         ...formData,
         birth_date: birthDate,
@@ -1371,6 +1374,7 @@ function EditStaffModal({
         return;
       }
 
+      // ✅ Update users table (hospital_id and birth_date)
       const updateData: any = {
         birth_date: birthDate,
       };
@@ -1380,12 +1384,14 @@ function EditStaffModal({
         console.log('🏥 [EditStaffModal] Hospital changed:', staff.hospital_id, '→', formData.hospital_id);
       }
 
+      // ✅ Reset password if checkbox is checked
       if (resetPassword) {
         const newPassword = generatePassword();
         updateData.password_hash = newPassword;
         console.log('🔐 [EditStaffModal] Password reset:', newPassword);
       }
 
+      // ✅ Execute update
       const { error: userError } = await supabase
         .from('users')
         .update(updateData)
@@ -1395,6 +1401,7 @@ function EditStaffModal({
         console.error('❌ [EditStaffModal] User update error:', userError);
       }
 
+      // ✅ Show success message
       let message = 'แก้ไขข้อมูลสำเร็จ!';
       if (resetPassword) {
         message += `\n\n🔐 รีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}`;
