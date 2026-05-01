@@ -1,11 +1,11 @@
 // app/admin/appointments/new/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
-//    5. ✅ เพิ่ม Debug เพื่อตรวจสอบการกรองผู้ป่วย
+//    1. ✅ ใช้ doctors.id แทน users.id สำหรับ doctor_id
+//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    5. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -42,7 +42,7 @@ export default function NewAppointmentPage() {
 
   const [formData, setFormData] = useState({
     user_id: '',
-    doctor_id: '',
+    doctor_id: '',  // ✅ ต้องเป็น doctors.id
     appointment_type: 'followup',
     appointment_date: tomorrow.toISOString().slice(0, 16),
     duration_minutes: '30',
@@ -121,6 +121,8 @@ export default function NewAppointmentPage() {
       // ✅ 2. ดึงข้อมูลแพทย์/เจ้าหน้าที่ (กรองตามโรงพยาบาลถ้ามี)
       const allStaff = await getStaffList();
       
+      console.log('👨‍⚕️ [loadData] Total staff before filter:', allStaff.length);
+      
       // กรอง staff ตาม hospital IDs (ถ้าไม่ใช่ admin)
       let filteredStaff = allStaff;
       if (hospitalIds && hospitalIds.length > 0 && user?.role !== 'admin') {
@@ -136,6 +138,8 @@ export default function NewAppointmentPage() {
       );
 
       console.log('👨‍⚕️ [loadData] Total staff (filtered):', filteredStaff.length);
+      console.log('👨‍⚕️ [loadData] Sample staff:', filteredStaff[0]);
+      
       setStaffList(filteredStaff);
 
     } catch (error) {
@@ -153,6 +157,16 @@ export default function NewAppointmentPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // ✅ ตรวจสอบว่าเลือกแพทย์แล้ว
+    if (!formData.doctor_id) {
+      alert('กรุณาเลือกแพทย์/เจ้าหน้าที่');
+      return;
+    }
+    
+    console.log('💾 [handleSubmit] Submitting appointment...');
+    console.log('📝 [handleSubmit] FormData:', formData);
+    
     setSaving(true);
 
     try {
@@ -160,7 +174,7 @@ export default function NewAppointmentPage() {
         .from('appointments')
         .insert({
           user_id: formData.user_id,
-          doctor_id: formData.doctor_id,
+          doctor_id: formData.doctor_id,  // ✅ ต้องเป็น doctors.id
           appointment_type: formData.appointment_type,
           appointment_date: new Date(formData.appointment_date).toISOString(),
           duration_minutes: parseInt(formData.duration_minutes),
@@ -171,8 +185,12 @@ export default function NewAppointmentPage() {
           created_by: user?.id,
         });
 
-      if (error) throw error;
+      if (error) {
+        console.error('❌ [handleSubmit] Error:', error);
+        throw error;
+      }
 
+      console.log('✅ [handleSubmit] Appointment created successfully!');
       alert('✅ สร้างนัดหมายสำเร็จ!');
       router.push('/admin/appointments/view');
     } catch (error) {
@@ -225,7 +243,7 @@ export default function NewAppointmentPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -325,25 +343,40 @@ export default function NewAppointmentPage() {
             </label>
             <select
               value={formData.doctor_id}
-              onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
+              onChange={(e) => {
+                console.log('🎯 [Dropdown] Selected doctor_id:', e.target.value);
+                setFormData({ ...formData, doctor_id: e.target.value });
+              }}
               required
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               <option value="">-- เลือกแพทย์/เจ้าหน้าที่ --</option>
               {staffList.map((staff: any) => {
+                // ✅ ใช้ doctors.id แทน users.id
+                const doctorId = staff.doctors?.id;
                 const staffName = staff.doctors?.full_name_th || staff.full_name_th || '-';
                 const staffRole = staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่';
                 const specialization = staff.doctors?.specialization_th || '';
                 const hospitalName = staff.hospitals?.name || '';
                 
+                console.log('👨‍️ [Dropdown] Staff:', {
+                  users_id: staff.id,
+                  doctors_id: doctorId,
+                  name: staffName,
+                  role: staffRole
+                });
+                
                 return (
-                  <option key={staff.id} value={staff.id}>
+                  <option key={doctorId} value={doctorId}>
                     {staffName} ({staffRole}{specialization ? ` - ${specialization}` : ''})
                     {hospitalName ? ` - ${hospitalName}` : ''}
                   </option>
                 );
               })}
             </select>
+            <p className="text-xs text-gray-500 mt-1">
+              💡 แสดงแพทย์/เจ้าหน้าที่จากโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
+            </p>
           </div>
 
           {/* ประเภทนัดหมาย */}
