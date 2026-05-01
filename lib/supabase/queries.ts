@@ -124,17 +124,11 @@ export async function getProfile(userId: string) {
 // =====================================================
 // ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin)
 // =====================================================
-export async function getPatientList(search?: string, pamLevel?: string, userId?: string) {
+export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
   try {
-    // ✅ 1. ตรวจสอบสิทธิ์การเข้าถึงโรงพยาบาล
-    let accessibleHospitalIds: string[] = [];
+    console.log('🔍 [getPatientList] Called with hospitalIds:', hospitalIds);
     
-    if (userId) {
-      accessibleHospitalIds = await getAccessibleHospitalIds(userId);
-      console.log('🏥 Accessible hospitals for user:', userId, accessibleHospitalIds);
-    }
-
-    // ✅ 2. สร้าง query
+    // ✅ 1. สร้าง query
     let query = supabase
       .from('profiles')
       .select(`
@@ -154,19 +148,26 @@ export async function getPatientList(search?: string, pamLevel?: string, userId?
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    // ✅ 3. กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้าไม่ใช่ admin)
-    if (accessibleHospitalIds.length > 0) {
-      query = query.in('hospital_id', accessibleHospitalIds);
+    // ✅ 2. กรองตามโรงพยาบาล (ถ้ามี hospitalIds)
+    if (hospitalIds && hospitalIds.length > 0) {
+      console.log('🏥 [getPatientList] Filtering by hospitalIds:', hospitalIds);
+      query = query.in('hospital_id', hospitalIds);
+    } else if (hospitalIds && hospitalIds.length === 0) {
+      // ✅ Admin → แสดงทั้งหมด (ไม่ต้องกรอง)
+      console.log('👑 [getPatientList] Admin user - showing all patients');
+    } else {
+      // ✅ ไม่มีการส่ง hospitalIds → แสดงทั้งหมด
+      console.log('⚠️ [getPatientList] No hospitalIds provided - showing all patients');
     }
 
-    // ✅ 4. ค้นหา
+    // ✅ 3. ค้นหา
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
-    // ✅ 5. กรองตาม PAM Level
+    // ✅ 4. กรองตาม PAM Level
     if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }
@@ -174,7 +175,7 @@ export async function getPatientList(search?: string, pamLevel?: string, userId?
     const { data, error } = await query;
 
     if (error) {
-      console.error('Error fetching patient list:', error);
+      console.error('❌ [getPatientList] Error:', error);
       return [];
     }
 
@@ -185,10 +186,10 @@ export async function getPatientList(search?: string, pamLevel?: string, userId?
         : '',
     })) || [];
 
-    console.log('📊 Patient List Data:', patientsWithData.length);
+    console.log('📊 [getPatientList] Total patients (filtered):', patientsWithData.length);
     return patientsWithData;
   } catch (err) {
-    console.error('Get patient list error:', err);
+    console.error('❌ [getPatientList] Exception:', err);
     return [];
   }
 }
