@@ -1,45 +1,51 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขปัญหา LogOut is not defined
-//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    4. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    5. กรองโรงพยาบาลและโค้ชตามสิทธิ์
-//    6. Admin เห็นทั้งหมด
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. Badge แสดงประเภทโรงพยาบาล
+//    4. แสดงแม่ข่าย (ถ้าเป็นลูกข่าย)
+//    5. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    6. กรองโรงพยาบาลและโค้ชตามสิทธิ์
+//    7. Admin เห็นทั้งหมด
+//    8. ✅ เพิ่มรายละเอียดผู้ป่วยครบถ้วน
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  getPatientList, 
-  deletePatient, 
-  restorePatient, 
-  getDeletedPatients, 
-  permanentlyDeletePatient, 
-  getAccessibleHospitalIds, 
-  getUserHospitalInfo, 
-  getHospitalsWithHierarchy, 
-  getCoaches 
+import {
+  checkSession,
+  logout,
+  getPatientList,
+  deletePatient,
+  restorePatient,
+  getDeletedPatients,
+  permanentlyDeletePatient,
+  getAccessibleHospitalIds,
+  getUserHospitalInfo,
+  getHospitalsWithHierarchy,
+  getCoaches
 } from '@/lib/supabase/queries';
-import { 
-  Users, 
-  Search, 
-  Filter, 
-  Plus, 
-  Eye, 
-  Edit, 
-  Trash2, 
-  LogOut,  // ✅ ต้องมีตัวนี้!
-  Archive, 
-  RotateCcw, 
-  Hospital, 
-  Building2, 
-  UserCheck, 
-  ArrowLeft, 
-  Stethoscope 
+import {
+  Users,
+  Search,
+  Filter,
+  Plus,
+  Eye,
+  Edit,
+  Trash2,
+  LogOut,
+  Archive,
+  RotateCcw,
+  Hospital,
+  Building2,
+  UserCheck,
+  ArrowLeft,
+  Stethoscope,
+  Phone,
+  Mail,
+  Calendar,
+  MapPin
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -54,15 +60,28 @@ interface Patient {
   zone?: string;
   current_step?: string;
   phone?: string;
+  email?: string;
   created_at: string;
   updated_at?: string;
   is_active: boolean;
   status?: string;
   hospital_id?: string;
+  coach_id?: string;
+  birth_date?: string;
+  gender?: string;
+  address?: string;
+  subdistrict?: string;
+  district?: string;
+  province?: string;
+  postal_code?: string;
   hospitals?: {
     id: string;
     name: string;
     code: string;
+    type?: string;
+  };
+  coaches?: {
+    full_name_th: string;
   };
   users?: {
     id_card: string;
@@ -126,6 +145,8 @@ export default function PatientListPage() {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [selectedHospital, setSelectedHospital] = useState<string>('');
   const [selectedCoach, setSelectedCoach] = useState<string>('');
+  const [showPatientDetail, setShowPatientDetail] = useState(false);
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
 
   useEffect(() => {
     const userData = checkSession();
@@ -145,43 +166,59 @@ export default function PatientListPage() {
     setLoading(false);
   }, [router]);
 
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ User hospital:', hospitalInfo);
     } catch (error) {
       console.error('Error loading user hospital:', error);
     }
   };
 
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
+      console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
 
+      // ✅ โหลดรายชื่อโรงพยาบาลทั้งหมด (สำหรับ dropdown)
       const allHospitals = await getHospitalsWithHierarchy();
+      
+      // ✅ กรองโรงพยาบาลตามสิทธิ์
       let filteredHospitals = allHospitals;
       if (ids.length > 0 && user?.role !== 'admin') {
         filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
       }
       
       setHospitals(filteredHospitals);
+      console.log('🏥 Filtered hospitals:', filteredHospitals.length);
+      
+      // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
       loadCoaches(ids);
+      
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
     }
   };
 
+  // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
       const allCoaches = await getCoaches();
+      
+      // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
       let filteredCoaches = allCoaches;
       if (hospitalIds.length > 0 && user?.role !== 'admin') {
         filteredCoaches = allCoaches.filter(coach => 
           coach.hospital_id && hospitalIds.includes(coach.hospital_id)
         );
       }
+      
       setCoaches(filteredCoaches);
+      console.log('👨‍⚕️ Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('Error loading coaches:', error);
     }
@@ -189,7 +226,10 @@ export default function PatientListPage() {
 
   const loadPatients = async () => {
     try {
+      // ✅ ส่ง userId เพื่อกรองผู้ป่วยตามสิทธิ์
       const data = await getPatientList(undefined, undefined, user?.id);
+      console.log('📊 Loaded patients:', data.length);
+      console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
       setPatients(data);
     } catch (error) {
       console.error('Error loading patients:', error);
@@ -197,7 +237,7 @@ export default function PatientListPage() {
   };
 
   useEffect(() => {
-    if (user && accessibleHospitalIds.length >= 0) {
+    if (user && accessibleHospitalIds.length >= 0) { // ✅ โหลดหลังจากได้สิทธิ์แล้ว
       loadPatients();
     }
   }, [user, accessibleHospitalIds]);
@@ -217,7 +257,7 @@ export default function PatientListPage() {
   };
 
   const handleDeletePatient = async (patientId: string, patientName: string) => {
-    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?`)) {
+    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?\n\nการลบจะเป็นการปิดการใช้งานเท่านั้น ข้อมูลจะยังคงอยู่ในระบบ`)) {
       return;
     }
     try {
@@ -254,10 +294,10 @@ export default function PatientListPage() {
   };
 
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
-    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร`)) {
+    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร\n\nการกระทำนี้ไม่สามารถย้อนกลับได้ และข้อมูลทั้งหมดจะถูกลบออกจากระบบ\n\nคุณแน่ใจหรือไม่?`)) {
       return;
     }
-    if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้')) {
+    if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้\n\nพิมพ์ "YES" เพื่อยืนยันการลบถาวร')) {
       return;
     }
     try {
@@ -280,6 +320,12 @@ export default function PatientListPage() {
     loadDeletedPatients();
   };
 
+  const handleViewPatientDetail = (patient: Patient) => {
+    setSelectedPatient(patient);
+    setShowPatientDetail(true);
+  };
+
+  // ✅ แก้ไขฟังก์ชันกรองให้ค้นหาจาก hospital name ด้วย
   const filteredPatients = patients.filter(patient => {
     const fullName = patient.first_name && patient.last_name
       ? `${patient.first_name} ${patient.last_name}`
@@ -293,11 +339,13 @@ export default function PatientListPage() {
       hospitalName.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesPamLevel = pamLevelFilter === 'all' || patient.pam_level === pamLevelFilter;
-    
+
+    // ✅ กรองตามโรงพยาบาลที่เลือก
     if (selectedHospital && patient.hospital_id !== selectedHospital) {
       return false;
     }
-    
+
+    // ✅ กรองตามโค้ชที่เลือก (ถ้ามี)
     if (selectedCoach && patient.coach_id !== selectedCoach) {
       return false;
     }
@@ -326,6 +374,15 @@ export default function PatientListPage() {
       return `${patient.first_name} ${patient.last_name}`;
     }
     return patient.full_name || 'ไม่ระบุชื่อ';
+  };
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return '-';
+    return new Date(dateString).toLocaleDateString('th-TH', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
   };
 
   if (loading) {
@@ -370,11 +427,12 @@ export default function PatientListPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
                 
+                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
@@ -384,6 +442,7 @@ export default function PatientListPage() {
                       </span>
                     </div>
                     
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -395,6 +454,7 @@ export default function PatientListPage() {
                         </span>
                       )}
                       
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -427,7 +487,6 @@ export default function PatientListPage() {
                   ลงทะเบียนผู้ป่วยใหม่
                 </button>
                 
-                {/* ✅ ปุ่มออกจากระบบที่ใช้ LogOut icon */}
                 <button
                   onClick={handleLogout}
                   className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -473,7 +532,7 @@ export default function PatientListPage() {
             </div>
           </div>
           
-          {/* Filter เพิ่มเติม: โรงพยาบาลและโค้ช */}
+          {/* ✅ Filter เพิ่มเติม: โรงพยาบาลและโค้ช */}
           <div className="flex flex-col md:flex-row gap-4 pt-4 border-t border-gray-200">
             <div className="md:w-64">
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -675,12 +734,12 @@ export default function PatientListPage() {
                         <span className="text-sm text-gray-600">{patient.current_step}</span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-600">
-                        {new Date(patient.created_at).toLocaleDateString('th-TH')}
+                        {formatDate(patient.created_at)}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => router.push(`/admin/patients/${patient.id}`)}
+                            onClick={() => handleViewPatientDetail(patient)}
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                             title="ดูรายละเอียด"
                           >
@@ -720,6 +779,163 @@ export default function PatientListPage() {
           )}
         </div>
       </div>
+
+      {/* Modal แสดงรายละเอียดผู้ป่วย */}
+      {showPatientDetail && selectedPatient && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <Users className="w-6 h-6 text-blue-600" />
+                รายละเอียดผู้ป่วย
+              </h2>
+              <button
+                onClick={() => setShowPatientDetail(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* ข้อมูลพื้นฐาน */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-blue-800 mb-2">👤 ข้อมูลพื้นฐาน</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">HN</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.hospital_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">ชื่อ-นามสกุล</p>
+                    <p className="font-medium text-gray-800">{getPatientName(selectedPatient)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">ID Card</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.users?.id_card || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">วันเกิด</p>
+                    <p className="font-medium text-gray-800">{formatDate(selectedPatient.birth_date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">เพศ</p>
+                    <p className="font-medium text-gray-800">
+                      {selectedPatient.gender === 'male' ? 'ชาย' : 
+                       selectedPatient.gender === 'female' ? 'หญิง' : '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">เบอร์โทรศัพท์</p>
+                    <p className="font-medium text-gray-800 flex items-center gap-1">
+                      <Phone className="w-3 h-3" />
+                      {selectedPatient.phone || '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">อีเมล</p>
+                    <p className="font-medium text-gray-800 flex items-center gap-1">
+                      <Mail className="w-3 h-3" />
+                      {selectedPatient.email || '-'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* โรงพยาบาลและโค้ช */}
+              <div className="bg-green-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-green-800 mb-2">🏥 โรงพยาบาลและโค้ช</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">โรงพยาบาล</p>
+                    <p className="font-medium text-gray-800 flex items-center gap-1">
+                      <Hospital className="w-4 h-4" />
+                      {selectedPatient.hospitals?.name || '-'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">โค้ช/แพทย์ผู้ดูแล</p>
+                    <p className="font-medium text-gray-800">
+                      {selectedPatient.coaches?.full_name_th || '-'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* ที่อยู่ */}
+              <div className="bg-purple-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-purple-800 mb-2">📍 ที่อยู่</h3>
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-500">ที่อยู่</p>
+                  <p className="font-medium text-gray-800 flex items-start gap-1">
+                    <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <span>
+                      {selectedPatient.address && (
+                        <>{selectedPatient.address}<br /></>
+                      )}
+                      {selectedPatient.subdistrict && `${selectedPatient.subdistrict} `}
+                      {selectedPatient.district && `${selectedPatient.district} `}
+                      {selectedPatient.province && `${selectedPatient.province} `}
+                      {selectedPatient.postal_code && `${selectedPatient.postal_code}`}
+                    </span>
+                  </p>
+                </div>
+              </div>
+
+              {/* ระดับผู้ป่วย */}
+              <div className="bg-orange-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-orange-800 mb-2">📊 ระดับผู้ป่วย</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">PAM Level</p>
+                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getPamLevelColor(selectedPatient.pam_level)}`}>
+                      {selectedPatient.pam_level}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Zone</p>
+                    <p className={`font-medium ${getZoneColor(selectedPatient.zone || '')}`}>
+                      {selectedPatient.zone || 'Green Zone'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Step</p>
+                    <p className="font-medium text-gray-800">{selectedPatient.current_step}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* วันที่ลงทะเบียน */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <h3 className="text-sm font-bold text-gray-800 mb-2">📅 วันที่ลงทะเบียน</h3>
+                <p className="font-medium text-gray-800 flex items-center gap-1">
+                  <Calendar className="w-4 h-4" />
+                  {formatDate(selectedPatient.created_at)}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowPatientDetail(false);
+                  router.push(`/admin/patients/${selectedPatient.id}/edit`);
+                }}
+                className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all font-bold flex items-center gap-2"
+              >
+                <Edit className="w-4 h-4" />
+                แก้ไข
+              </button>
+              <button
+                onClick={() => setShowPatientDetail(false)}
+                className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all font-bold"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal แสดงผู้ป่วยที่ถูกลบ */}
       {showDeletedModal && (
@@ -772,12 +988,12 @@ export default function PatientListPage() {
                             <p>ID Card: {patient.users?.id_card || '-'}</p>
                             <p>โรงพยาบาล: {patient.hospitals?.name || '-'}</p>
                             <p>Zone: {patient.zone || '-'}</p>
-                            <p>ถูกลบเมื่อ: {new Date(patient.updated_at || patient.created_at).toLocaleString('th-TH')}</p>
+                            <p>ถูกลบเมื่อ: {formatDate(patient.updated_at || patient.created_at)}</p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 ml-4">
                           <button
-                            onClick={() => router.push(`/admin/patients/${patient.id}`)}
+                            onClick={() => handleViewPatientDetail(patient)}
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                             title="ดูรายละเอียด"
                           >
