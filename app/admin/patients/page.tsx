@@ -4,43 +4,17 @@
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    4. ✅ เพิ่ม Validation ตรวจสอบ userId ก่อนเรียก API
-//    5. ✅ เพิ่ม Error Handling สำหรับ UUID invalid
+//    4. กรองโรงพยาบาลและโค้ชตามสิทธิ์ (แม่ข่ายเห็นทั้งหมด, ลูกข่ายเห็นเฉพาะของตัวเอง)
+//    5. Admin เห็นทั้งหมด
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  getPatientList, 
-  deletePatient, 
-  restorePatient, 
-  getDeletedPatients, 
-  permanentlyDeletePatient, 
-  getAccessibleHospitalIds, 
-  getUserHospitalInfo 
-} from '@/lib/supabase/queries';
-import { 
-  Users, 
-  Search, 
-  Filter, 
-  Plus, 
-  Eye, 
-  Edit, 
-  Trash2, 
-  LogOut, 
-  Archive, 
-  RotateCcw, 
-  Hospital, 
-  Building2, 
-  UserCheck, 
-  ArrowLeft,
-  Lock
-} from 'lucide-react';
+import { checkSession, logout, getPatientList, deletePatient, restorePatient, getDeletedPatients, permanentlyDeletePatient, getAccessibleHospitalIds, getUserHospitalInfo, getHospitalsWithHierarchy, getCoaches } from '@/lib/supabase/queries';
+import { Users, Search, Filter, Plus, Eye, Edit, Trash2, LogOut, Archive, RotateCcw, Hospital, Building2, UserCheck, ArrowLeft, Stethoscope } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ✅ Interface สำหรับผู้ป่วย
+// ✅ Interface ที่แก้ไขแล้ว - ใช้ hospital_id แทน subdistrict_health_center
 interface Patient {
   id: string;
   first_name?: string;
@@ -69,7 +43,6 @@ interface Patient {
   };
 }
 
-// ✅ Interface สำหรับโรงพยาบาลของผู้ใช้
 interface UserHospital {
   id: string;
   name: string;
@@ -80,6 +53,32 @@ interface UserHospital {
     id: string;
     name: string;
     code: string;
+  };
+}
+
+interface Hospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+}
+
+interface Coach {
+  id: string;
+  user_id: string;
+  full_name_th: string;
+  specialization_th?: string;
+  is_active: boolean;
+  hospital_id?: string;
+  hospitals?: {
+    name: string;
+    type: string;
   };
 }
 
@@ -94,39 +93,24 @@ export default function PatientListPage() {
   const [pamLevelFilter, setPamLevelFilter] = useState('all');
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [selectedHospital, setSelectedHospital] = useState<string>('');
+  const [selectedCoach, setSelectedCoach] = useState<string>('');
 
   useEffect(() => {
-    console.log('🔍 [PatientList] Component mounted');
-    
     const userData = checkSession();
-    
-    // ✅ ตรวจสอบว่ามี session หรือไม่
     if (!userData) {
-      console.warn('⚠️ [PatientList] No session found - Redirecting to login');
       router.push('/admin/login');
       return;
     }
-
-    // ✅ ตรวจสอบสิทธิ์
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-      console.error('❌ [PatientList] User not authorized:', userData.role);
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
 
-    console.log('✅ [PatientList] User session:', userData);
     setUser(userData);
-    
-    // ✅ ตรวจสอบว่า userId เป็น UUID ที่ถูกต้องหรือไม่
-    if (!userData.id || userData.id === '0' || userData.id.length < 36) {
-      console.error('❌ [PatientList] Invalid user ID:', userData.id);
-      alert('Session ไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่');
-      logout();
-      router.push('/admin/login');
-      return;
-    }
-    
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
     setLoading(false);
@@ -135,75 +119,78 @@ export default function PatientListPage() {
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
+      console.log('✅ User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('❌ [loadUserHospital] Error:', error);
+      console.error('Error loading user hospital:', error);
     }
   };
 
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
-      
-      // ✅ ตรวจสอบ userId อีกครั้งก่อนเรียก API
-      if (!userId || userId === '0' || userId.length < 36) {
-        console.error('❌ [loadAccessibleHospitals] Invalid userId:', userId);
-        return;
-      }
-      
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
       
-      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
-      loadPatients(ids);
+      // ✅ โหลดรายชื่อโรงพยาบาลทั้งหมด (สำหรับ dropdown)
+      const allHospitals = await getHospitalsWithHierarchy();
+      
+      // ✅ กรองโรงพยาบาลตามสิทธิ์
+      let filteredHospitals = allHospitals;
+      if (ids.length > 0 && user?.role !== 'admin') {
+        filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
+      }
+      
+      setHospitals(filteredHospitals);
+      console.log('🏥 Filtered hospitals:', filteredHospitals.length);
+      
+      // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
+      loadCoaches(ids);
+      
     } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      console.error('Error loading accessible hospitals:', error);
     }
   };
 
-  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ตรวจสอบ hospitalIds)
-  const loadPatients = async (hospitalIds?: string[]) => {
+  // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
+  const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('📡 [loadPatients] Loading patients...');
-      console.log('🏥 [loadPatients] Hospital IDs for filtering:', hospitalIds);
+      const allCoaches = await getCoaches();
       
-      // ✅ ตรวจสอบ hospitalIds ก่อนเรียก API
-      if (hospitalIds && hospitalIds.length > 0) {
-        // ✅ ตรวจสอบว่าทุก ID เป็น UUID ที่ถูกต้อง
-        const validIds = hospitalIds.filter(id => id && id.length === 36);
-        console.log('✅ [loadPatients] Valid hospital IDs:', validIds.length);
-        
-        if (validIds.length !== hospitalIds.length) {
-          console.warn('⚠️ [loadPatients] Some hospital IDs are invalid:', hospitalIds, '→', validIds);
-        }
-        
-        // ✅ ใช้ validIds แทน hospitalIds
-        const data = await getPatientList(undefined, undefined, validIds);
-        console.log('📊 [loadPatients] Loaded patients:', data.length);
-        
-        if (data.length > 0) {
-          console.log('📊 [loadPatients] Sample patient:', data[0]);
-        }
-        
-        setPatients(data);
-      } else {
-        // ✅ Admin หรือไม่มี hospital_ids → โหลดทั้งหมด
-        console.log('👑 [loadPatients] Admin user or no hospital filter - loading all patients');
-        const data = await getPatientList();
-        console.log('📊 [loadPatients] Loaded patients:', data.length);
-        setPatients(data);
+      // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
+      let filteredCoaches = allCoaches;
+      if (hospitalIds.length > 0 && user?.role !== 'admin') {
+        filteredCoaches = allCoaches.filter(coach => 
+          coach.hospital_id && hospitalIds.includes(coach.hospital_id)
+        );
       }
+      
+      setCoaches(filteredCoaches);
+      console.log('👨‍⚕️ Filtered coaches:', filteredCoaches.length);
     } catch (error) {
-      console.error('❌ [loadPatients] Error:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ป่วย');
+      console.error('Error loading coaches:', error);
     }
   };
+
+  const loadPatients = async () => {
+    try {
+      // ✅ ส่ง userId เพื่อกรองผู้ป่วยตามสิทธิ์
+      const data = await getPatientList(undefined, undefined, user?.id);
+      console.log('📊 Loaded patients:', data.length);
+      console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
+      setPatients(data);
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (user && accessibleHospitalIds.length >= 0) { // ✅ โหลดหลังจากได้สิทธิ์แล้ว
+      loadPatients();
+    }
+  }, [user, accessibleHospitalIds]);
 
   const loadDeletedPatients = async () => {
     try {
@@ -220,14 +207,14 @@ export default function PatientListPage() {
   };
 
   const handleDeletePatient = async (patientId: string, patientName: string) => {
-    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?`)) {
+    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?\n\nการลบจะเป็นการปิดการใช้งานเท่านั้น ข้อมูลจะยังคงอยู่ในระบบ`)) {
       return;
     }
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
         alert('ลบผู้ป่วยสำเร็จ!');
-        loadPatients(accessibleHospitalIds);
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -246,7 +233,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('กู้คืนผู้ป่วยสำเร็จ!');
         loadDeletedPatients();
-        loadPatients(accessibleHospitalIds);
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -257,7 +244,10 @@ export default function PatientListPage() {
   };
 
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
-    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร`)) {
+    if (!confirm(`⚠️ คำเตือน: คุณกำลังจะลบผู้ป่วย "${patientName}" อย่างถาวร\n\nการกระทำนี้ไม่สามารถย้อนกลับได้ และข้อมูลทั้งหมดจะถูกลบออกจากระบบ\n\nคุณแน่ใจหรือไม่?`)) {
+      return;
+    }
+    if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนข้อมูลกลับมาได้\n\nพิมพ์ "YES" เพื่อยืนยันการลบถาวร')) {
       return;
     }
     try {
@@ -265,7 +255,7 @@ export default function PatientListPage() {
       if (result.success) {
         alert('ลบผู้ป่วยถาวรสำเร็จ!');
         loadDeletedPatients();
-        loadPatients(accessibleHospitalIds);
+        loadPatients();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -280,6 +270,7 @@ export default function PatientListPage() {
     loadDeletedPatients();
   };
 
+  // ✅ แก้ไขฟังก์ชันกรองให้ค้นหาจาก hospital name ด้วย
   const filteredPatients = patients.filter(patient => {
     const fullName = patient.first_name && patient.last_name
       ? `${patient.first_name} ${patient.last_name}`
@@ -293,6 +284,16 @@ export default function PatientListPage() {
       hospitalName.toLowerCase().includes(searchTerm.toLowerCase());
 
     const matchesPamLevel = pamLevelFilter === 'all' || patient.pam_level === pamLevelFilter;
+    
+    // ✅ กรองตามโรงพยาบาลที่เลือก
+    if (selectedHospital && patient.hospital_id !== selectedHospital) {
+      return false;
+    }
+    
+    // ✅ กรองตามโค้ชที่เลือก (ถ้ามี)
+    if (selectedCoach && patient.coach_id !== selectedCoach) {
+      return false;
+    }
 
     return matchesSearch && matchesPamLevel;
   });
@@ -362,7 +363,7 @@ export default function PatientListPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -439,7 +440,7 @@ export default function PatientListPage() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Search & Filter */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-          <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex flex-col md:flex-row gap-4 mb-4">
             <div className="flex-1">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -465,6 +466,63 @@ export default function PatientListPage() {
                 <option value="L4">L4 - Champion</option>
               </select>
             </div>
+          </div>
+          
+          {/* ✅ Filter เพิ่มเติม: โรงพยาบาลและโค้ช */}
+          <div className="flex flex-col md:flex-row gap-4 pt-4 border-t border-gray-200">
+            <div className="md:w-64">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                <Hospital className="w-4 h-4 inline mr-1" />
+                โรงพยาบาล
+              </label>
+              <select
+                value={selectedHospital}
+                onChange={(e) => setSelectedHospital(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">ทั้งหมด</option>
+                {hospitals.map((hospital) => (
+                  <option key={hospital.id} value={hospital.id}>
+                    {hospital.name} ({hospital.code})
+                    {hospital.type === 'main' ? ' - แม่ข่าย' : ' - ลูกข่าย'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div className="md:w-64">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                <Stethoscope className="w-4 h-4 inline mr-1" />
+                โค้ช/แพทย์
+              </label>
+              <select
+                value={selectedCoach}
+                onChange={(e) => setSelectedCoach(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">ทั้งหมด</option>
+                {coaches.map((coach) => (
+                  <option key={coach.id} value={coach.id}>
+                    {coach.full_name_th}
+                    {coach.hospitals?.name ? ` - ${coach.hospitals.name}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {(selectedHospital || selectedCoach) && (
+              <div className="flex items-end">
+                <button
+                  onClick={() => {
+                    setSelectedHospital('');
+                    setSelectedCoach('');
+                  }}
+                  className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+                >
+                  ล้างตัวกรอง
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -553,22 +611,16 @@ export default function PatientListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {patients.length === 0 ? (
+                {filteredPatients.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
                       {accessibleHospitalIds.length > 0 && (
                         <p className="text-sm text-gray-400 mt-2">
-                          🔒 คุณมีสิทธิ์เข้าถึงเฉพาะโรงพยาบาลที่สังกัด ({accessibleHospitalIds.length} โรงพยาบาล)
+                          🔒 คุณมีสิทธิ์เข้าถึงเฉพาะโรงพยาบาลที่สังกัด
                         </p>
                       )}
-                      <button
-                        onClick={() => router.push('/admin/patients/new')}
-                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                      >
-                        ลงทะเบียนผู้ป่วยคนแรก
-                      </button>
                     </td>
                   </tr>
                 ) : (
