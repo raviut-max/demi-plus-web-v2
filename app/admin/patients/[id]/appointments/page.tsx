@@ -1,14 +1,13 @@
 // app/admin/patients/[id]/appointments/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขการโหลดแพทย์ - ไม่ต้องใช้ hospital_id
-//    2. ปรับ UI ให้กระชับ (compact)
-//    3. แสดงรายชื่อแพทย์ครบทุกคน (ไม่กรอง)
-
+//    1. แสดงข้อมูลบุคลากรและโรงพยาบาล (แม่ข่าย/ลูกข่าย) แบบ compact
+//    2. กรองแพทย์ตามโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่าย-ลูกข่าย)
+//    3. แสดงชื่อโรงพยาบาลของแต่ละแพทย์ใน dropdown
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches } from '@/lib/supabase/queries';
+import { checkSession, getPatientDetail, getAppointments, createAppointment, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText, Hospital, Building2, UserCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -108,7 +107,6 @@ export default function PatientAppointmentsPage() {
       if (patientData?.hospital_id) {
         await loadAccessibleHospitalsForPatient(patientData.hospital_id);
       } else {
-        // ถ้าไม่มี hospital_id ให้โหลดแพทย์ทั้งหมด
         await loadDoctors([]);
       }
 
@@ -117,7 +115,6 @@ export default function PatientAppointmentsPage() {
       const appointmentsData = await getAppointments(patientId);
       console.log('✅ Appointments loaded:', appointmentsData);
       
-      // ✅ เรียงลำดับ: ล่าสุดไว้บนสุด
       const sortedAppointments = appointmentsData.sort((a, b) => {
         return new Date(b.appointment_date).getTime() - new Date(a.appointment_date).getTime();
       });
@@ -139,7 +136,6 @@ export default function PatientAppointmentsPage() {
     try {
       console.log('🏥 Loading accessible hospitals for patient hospital:', patientHospitalId);
       
-      // ✅ ดึงข้อมูลโรงพยาบาลของผู้ป่วย
       const { data: patientHospital } = await supabase
         .from('hospitals')
         .select('id, type, parent_id')
@@ -148,7 +144,7 @@ export default function PatientAppointmentsPage() {
 
       if (!patientHospital) {
         console.log('⚠️ Patient hospital not found');
-        await loadDoctors([]); // โหลดแพทย์ทั้งหมดถ้าไม่พบ
+        await loadDoctors([]);
         return;
       }
 
@@ -169,10 +165,8 @@ export default function PatientAppointmentsPage() {
       }
       // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ
       else if (patientHospital.type === 'sub' && patientHospital.parent_id) {
-        // เพิ่มแม่ข่าย
         hospitalIds.push(patientHospital.parent_id);
         
-        // เพิ่มลูกข่ายอื่นๆ ของแม่ข่ายนี้
         const { data: siblingHospitals } = await supabase
           .from('hospitals')
           .select('id')
@@ -194,13 +188,12 @@ export default function PatientAppointmentsPage() {
     }
   };
 
-  // ✅ โหลดแพทย์ (แก้ไขแล้ว - ไม่ต้องใช้ hospital_id)
+  // ✅ โหลดแพทย์ (กรองตามโรงพยาบาล)
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ Loading doctors...');
+      console.log('👨‍⚕️ Loading doctors for hospitals:', hospitalIds);
       
-      // ✅ ดึงข้อมูลแพทย์ทั้งหมด (ไม่กรอง)
-      const { data: doctorsData, error: doctorsError } = await supabase
+      let query = supabase
         .from('doctors')
         .select(`
           id, 
@@ -211,6 +204,12 @@ export default function PatientAppointmentsPage() {
         `)
         .eq('is_active', true);
 
+      if (hospitalIds && hospitalIds.length > 0) {
+        query = query.in('hospital_id', hospitalIds);
+      }
+
+      const { data: doctorsData, error: doctorsError } = await query;
+
       if (doctorsError) {
         console.error('❌ Error loading doctors:', doctorsError);
         setDoctors([]);
@@ -219,10 +218,8 @@ export default function PatientAppointmentsPage() {
 
       console.log('✅ Doctors loaded:', doctorsData?.length || 0);
       
-      // ✅ โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์แยก (ถ้ามี)
       const doctorsWithHospitals = await Promise.all(
         (doctorsData || []).map(async (doctor) => {
-          // ✅ พยายามดึง hospital_id จาก users table แทน
           const { data: userData } = await supabase
             .from('users')
             .select('hospital_id')
@@ -499,7 +496,7 @@ export default function PatientAppointmentsPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 Admin' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
