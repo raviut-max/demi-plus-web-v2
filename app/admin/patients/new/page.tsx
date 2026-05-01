@@ -1,16 +1,37 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. Badge แสดงประเภทโรงพยาบาล
-//    4. แสดงแม่ข่าย (ถ้าเป็นลูกข่าย)
-//    5. กรองโรงพยาบาลตามสิทธิ์การเข้าถึง
+//    1. แก้ไขปัญหา LogOut is not defined
+//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. กรองโรงพยาบาลตามสิทธิ์การเข้าถึง
+//    5. Admin เห็นทั้งหมด, บุคลากรเห็นเฉพาะโรงพยาบาลที่เข้าถึงได้
+
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, registerPatient, getHospitalsWithHierarchy, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, User, Hospital, Building2, UserCheck, Lock, Calendar, Phone, Mail, Info } from 'lucide-react';
+import { 
+  checkSession, 
+  logout, 
+  registerPatient, 
+  getHospitalsWithHierarchy, 
+  getAccessibleHospitalIds, 
+  getUserHospitalInfo 
+} from '@/lib/supabase/queries';
+import { 
+  ArrowLeft, 
+  LogOut, 
+  Save, 
+  User, 
+  Hospital, 
+  Building2, 
+  UserCheck, 
+  Lock, 
+  Calendar, 
+  Phone, 
+  Mail, 
+  Info 
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -85,7 +106,6 @@ export default function NewPatientPage() {
     loadAccessibleHospitals(userData.id);
   }, [router]);
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       console.log('🏥 [loadUserHospital] Loading for user:', userId);
@@ -97,7 +117,6 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
@@ -106,11 +125,9 @@ export default function NewPatientPage() {
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
 
-      // ✅ โหลดรายชื่อโรงพยาบาลทั้งหมด
       const allHospitals = await getHospitalsWithHierarchy();
       console.log('🏥 [loadAccessibleHospitals] All hospitals:', allHospitals.length);
 
-      // ✅ กรองโรงพยาบาลตามสิทธิ์
       let filteredHospitals = allHospitals;
       if (ids.length > 0 && user?.role !== 'admin') {
         filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
@@ -119,7 +136,6 @@ export default function NewPatientPage() {
 
       setHospitals(filteredHospitals);
 
-      // ✅ ตั้งค่า hospital_id เริ่มต้นเป็นโรงพยาบาลของผู้ใช้
       if (filteredHospitals.length > 0 && !formData.hospital_id) {
         const defaultHospital = filteredHospitals.find(h => h.id === userHospital?.id) || filteredHospitals[0];
         setFormData(prev => ({ ...prev, hospital_id: defaultHospital.id }));
@@ -141,14 +157,12 @@ export default function NewPatientPage() {
     setSubmitting(true);
 
     try {
-      // ✅ ตรวจสอบว่าเลือกโรงพยาบาลแล้ว
       if (!formData.hospital_id) {
         alert('กรุณาเลือกโรงพยาบาลสังกัด');
         setSubmitting(false);
         return;
       }
 
-      // ✅ สร้างรหัสผ่านจาก ID Card (6 หลักท้าย)
       const password = formData.id_card.slice(-6);
 
       const result = await registerPatient({
@@ -208,12 +222,11 @@ export default function NewPatientPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
 
-                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
@@ -223,7 +236,6 @@ export default function NewPatientPage() {
                       </span>
                     </div>
 
-                    {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -235,7 +247,6 @@ export default function NewPatientPage() {
                         </span>
                       )}
 
-                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -251,6 +262,7 @@ export default function NewPatientPage() {
                 )}
               </div>
 
+              {/* ✅ ปุ่มออกจากระบบที่ใช้ LogOut icon */}
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -282,7 +294,7 @@ export default function NewPatientPage() {
       <div className="max-w-4xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-lg p-6 space-y-6">
 
-          {/* ✅ ส่วนที่ 1: ข้อมูลบัญชีผู้ใช้ */}
+          {/* ส่วนที่ 1: ข้อมูลบัญชีผู้ใช้ */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
               <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
@@ -351,7 +363,7 @@ export default function NewPatientPage() {
             </div>
           </div>
 
-          {/* ✅ ส่วนที่ 2: ข้อมูลส่วนตัว */}
+          {/* ส่วนที่ 2: ข้อมูลส่วนตัว */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
               <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
@@ -467,7 +479,7 @@ export default function NewPatientPage() {
             </div>
           </div>
 
-          {/* ✅ ส่วนที่ 3: ข้อมูลสุขภาพ */}
+          {/* ส่วนที่ 3: ข้อมูลสุขภาพ */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-gray-200">
               <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
