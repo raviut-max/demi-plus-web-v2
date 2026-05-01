@@ -1,13 +1,13 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไขการโหลดผู้ป่วยให้ใช้ accessibleHospitalIds แทน user?.id
-//    2. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    3. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    4. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    5. ✅ จำนวนผู้ป่วยแสดงเฉพาะ รพ.ที่เข้าถึงได้ (แม่ข่าย/ลูกข่าย)
-//    6. ✅ Modal รายละเอียดผู้ป่วยแสดงข้อมูลครบถ้วนตามฟอร์มลงทะเบียน
-//    7. ✅ เพิ่มส่วนข้อมูลสุขภาพ, ผู้ติดต่อฉุกเฉิน, โค้ช
+//    1. แก้ไขการโหลดผู้ป่วยให้ใช้ accessibleHospitalIds แทน user?.id
+//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    5. กรองโรงพยาบาลและโค้ชตามสิทธิ์
+//    6. Admin เห็นทั้งหมด
+//    7. ✅ กดปุ่มดูรายละเอียด (ลูกตา) → redirect ไปหน้า /admin/patients/[id]
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -28,6 +28,7 @@ import {
 import {
   Users,
   Search,
+  Filter,
   Plus,
   Eye,
   Edit,
@@ -43,17 +44,11 @@ import {
   Phone,
   Mail,
   Calendar,
-  MapPin,
-  Weight,
-  Ruler,
-  Activity,
-  AlertCircle,
-  Syringe,
-  Heart
+  MapPin
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ✅ Interface ที่แก้ไขแล้ว - เพิ่มฟิลด์ทั้งหมดจากฟอร์มลงทะเบียน
+// ✅ Interface ที่แก้ไขแล้ว
 interface Patient {
   id: string;
   first_name?: string;
@@ -78,28 +73,6 @@ interface Patient {
   district?: string;
   province?: string;
   postal_code?: string;
-  // ✅ ข้อมูลสุขภาพ (จากฟอร์มลงทะเบียน)
-  current_weight?: number;
-  height?: number;
-  waist_circumference?: number;
-  diabetes_type?: string;
-  blood_sugar?: number;
-  hba1c_level?: number;
-  notes?: string;
-  // ✅ ที่อยู่เพิ่มเติม
-  house_number?: string;
-  address_line1?: string;
-  soi?: string;
-  road?: string;
-  village_no?: string;
-  village_name?: string;
-  // ✅ ผู้ติดต่อฉุกเฉิน
-  emergency_contact_name?: string;
-  emergency_contact_phone?: string;
-  emergency_contact_relationship?: string;
-  // ✅ ข้อมูลอื่นๆ
-  occupation?: string;
-  education_level?: string;
   hospitals?: {
     id: string;
     name: string;
@@ -171,8 +144,6 @@ export default function PatientListPage() {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [selectedHospital, setSelectedHospital] = useState<string>('');
   const [selectedCoach, setSelectedCoach] = useState<string>('');
-  const [showPatientDetail, setShowPatientDetail] = useState(false);
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
 
   useEffect(() => {
     const userData = checkSession();
@@ -227,7 +198,7 @@ export default function PatientListPage() {
       // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
       loadCoaches(ids);
       
-      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds เพื่อกรอง)
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไม่ใช่ userId)
       loadPatients(ids);
       
     } catch (error) {
@@ -255,7 +226,7 @@ export default function PatientListPage() {
     }
   };
 
-  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ส่ง hospitalIds เพื่อกรองตามสิทธิ์)
+  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ส่ง hospitalIds แทน userId)
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       console.log('📡 Loading patients...');
@@ -349,11 +320,6 @@ export default function PatientListPage() {
     loadDeletedPatients();
   };
 
-  const handleViewPatientDetail = (patient: Patient) => {
-    setSelectedPatient(patient);
-    setShowPatientDetail(true);
-  };
-
   // ✅ แก้ไขฟังก์ชันกรองให้ค้นหาจาก hospital name ด้วย
   const filteredPatients = patients.filter(patient => {
     const fullName = patient.first_name && patient.last_name
@@ -412,11 +378,6 @@ export default function PatientListPage() {
       month: 'long',
       day: 'numeric'
     });
-  };
-
-  const formatNumber = (value: number | undefined | null, unit: string = '') => {
-    if (value === undefined || value === null) return '-';
-    return `${value}${unit ? ' ' + unit : ''}`;
   };
 
   if (loading) {
@@ -624,7 +585,7 @@ export default function PatientListPage() {
           </div>
         </div>
 
-        {/* Summary Cards - ✅ แสดงจำนวนผู้ป่วยที่กรองตามโรงพยาบาลแล้ว */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
@@ -777,8 +738,9 @@ export default function PatientListPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
+                          {/* ✅ แก้ไข: คลิกแล้ว redirect ไปหน้ารายละเอียด */}
                           <button
-                            onClick={() => handleViewPatientDetail(patient)}
+                            onClick={() => router.push(`/admin/patients/${patient.id}`)}
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                             title="ดูรายละเอียด"
                           >
@@ -818,299 +780,6 @@ export default function PatientListPage() {
           )}
         </div>
       </div>
-
-      {/* ✅ Modal แสดงรายละเอียดผู้ป่วย - แก้ไขให้แสดงข้อมูลครบถ้วน */}
-      {showPatientDetail && selectedPatient && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
-              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                <Users className="w-6 h-6 text-blue-600" />
-                รายละเอียดผู้ป่วย
-              </h2>
-              <button
-                onClick={() => setShowPatientDetail(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="p-6 space-y-6">
-              {/* 1. ข้อมูลพื้นฐาน */}
-              <div className="bg-blue-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-blue-800 mb-2">👤 ข้อมูลพื้นฐาน</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">HN</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.hospital_number}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">ชื่อ-นามสกุล</p>
-                    <p className="font-medium text-gray-800">{getPatientName(selectedPatient)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">ID Card</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.users?.id_card || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">วันเกิด</p>
-                    <p className="font-medium text-gray-800">{formatDate(selectedPatient.birth_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">เพศ</p>
-                    <p className="font-medium text-gray-800">
-                      {selectedPatient.gender === 'male' ? 'ชาย' : 
-                       selectedPatient.gender === 'female' ? 'หญิง' : '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">เบอร์โทรศัพท์</p>
-                    <p className="font-medium text-gray-800 flex items-center gap-1">
-                      <Phone className="w-3 h-3" />
-                      {selectedPatient.phone || '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">อีเมล</p>
-                    <p className="font-medium text-gray-800 flex items-center gap-1">
-                      <Mail className="w-3 h-3" />
-                      {selectedPatient.email || '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">อาชีพ</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.occupation || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">การศึกษา</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.education_level || '-'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. ✅ ข้อมูลสุขภาพ - เพิ่มใหม่ครบถ้วน */}
-              <div className="bg-purple-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-purple-800 mb-2 flex items-center gap-2">
-                  <Activity className="w-4 h-4" />
-                  💊 ข้อมูลสุขภาพ
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                      <Weight className="w-3 h-3" /> น้ำหนัก
-                    </p>
-                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.current_weight, 'kg')}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                      <Ruler className="w-3 h-3" /> ส่วนสูง
-                    </p>
-                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.height, 'cm')}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                      <Activity className="w-3 h-3" /> รอบเอว
-                    </p>
-                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.waist_circumference, 'cm')}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                      <Syringe className="w-3 h-3" /> ประเภทเบาหวาน
-                    </p>
-                    <p className="font-medium text-gray-800">{selectedPatient.diabetes_type || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                      <Activity className="w-3 h-3" /> น้ำตาลในเลือด
-                    </p>
-                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.blood_sugar, 'mg/dL')}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                      <Heart className="w-3 h-3" /> ค่า HbA1c
-                    </p>
-                    <p className="font-medium text-gray-800">{formatNumber(selectedPatient.hba1c_level, '%')}</p>
-                  </div>
-                  {selectedPatient.notes && (
-                    <div className="col-span-2 md:col-span-3">
-                      <p className="text-sm text-gray-500">หมายเหตุ</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.notes}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 3. โรงพยาบาลและโค้ช */}
-              <div className="bg-green-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-green-800 mb-2 flex items-center gap-2">
-                  <Hospital className="w-4 h-4" />
-                  🏥 โรงพยาบาลและโค้ช
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">โรงพยาบาล</p>
-                    <p className="font-medium text-gray-800 flex items-center gap-1">
-                      <Hospital className="w-4 h-4" />
-                      {selectedPatient.hospitals?.name || '-'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">โค้ช/แพทย์ผู้ดูแล</p>
-                    <p className="font-medium text-gray-800">
-                      {selectedPatient.coaches?.full_name_th || '-'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 4. ✅ ที่อยู่ - เพิ่มข้อมูลครบถ้วน */}
-              <div className="bg-pink-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-pink-800 mb-2 flex items-center gap-2">
-                  <MapPin className="w-4 h-4" />
-                  📍 ที่อยู่
-                </h3>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">เลขที่</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.house_number || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">หมู่ที่/ชุมชน</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.village_no || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">หมู่บ้าน</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.village_name || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">ซอย</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.soi || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">ถนน</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.road || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">รหัสไปรษณีย์</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.postal_code || '-'}</p>
-                    </div>
-                  </div>
-                  {selectedPatient.address_line1 && (
-                    <div>
-                      <p className="text-sm text-gray-500">ที่อยู่เพิ่มเติม</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.address_line1}</p>
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-sm text-gray-500">ที่อยู่เต็ม</p>
-                    <p className="font-medium text-gray-800 flex items-start gap-1">
-                      <MapPin className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                      <span>
-                        {selectedPatient.subdistrict && `${selectedPatient.subdistrict} `}
-                        {selectedPatient.district && `${selectedPatient.district} `}
-                        {selectedPatient.province && `${selectedPatient.province} `}
-                        {selectedPatient.postal_code && `${selectedPatient.postal_code}`}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 5. ✅ ผู้ติดต่อฉุกเฉิน - เพิ่มใหม่ */}
-              {(selectedPatient.emergency_contact_name || selectedPatient.emergency_contact_phone) && (
-                <div className="bg-orange-50 rounded-lg p-4">
-                  <h3 className="text-sm font-bold text-orange-800 mb-2 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" />
-                    🚨 ผู้ติดต่อฉุกเฉิน
-                  </h3>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">ชื่อผู้ติดต่อ</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.emergency_contact_name || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">เบอร์โทรศัพท์</p>
-                      <p className="font-medium text-gray-800 flex items-center gap-1">
-                        <Phone className="w-3 h-3" />
-                        {selectedPatient.emergency_contact_phone || '-'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">ความสัมพันธ์</p>
-                      <p className="font-medium text-gray-800">{selectedPatient.emergency_contact_relationship || '-'}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 6. ระดับผู้ป่วย */}
-              <div className="bg-yellow-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-yellow-800 mb-2">📊 ระดับผู้ป่วย</h3>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">PAM Level</p>
-                    <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${getPamLevelColor(selectedPatient.pam_level)}`}>
-                      {selectedPatient.pam_level}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Zone</p>
-                    <p className={`font-medium ${getZoneColor(selectedPatient.zone || '')}`}>
-                      {selectedPatient.zone || 'Green Zone'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">Step</p>
-                    <p className="font-medium text-gray-800">{selectedPatient.current_step}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* 7. วันที่ลงทะเบียน */}
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="text-sm font-bold text-gray-800 mb-2">📅 ข้อมูลการลงทะเบียน</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-gray-500">วันที่ลงทะเบียน</p>
-                    <p className="font-medium text-gray-800 flex items-center gap-1">
-                      <Calendar className="w-4 h-4" />
-                      {formatDate(selectedPatient.created_at)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-gray-500">อัปเดตล่าสุด</p>
-                    <p className="font-medium text-gray-800 flex items-center gap-1">
-                      <Calendar className="w-4 h-4" />
-                      {formatDate(selectedPatient.updated_at || selectedPatient.created_at)}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setShowPatientDetail(false);
-                  router.push(`/admin/patients/${selectedPatient.id}/edit`);
-                }}
-                className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all font-bold flex items-center gap-2"
-              >
-                <Edit className="w-4 h-4" />
-                แก้ไข
-              </button>
-              <button
-                onClick={() => setShowPatientDetail(false)}
-                className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all font-bold"
-              >
-                ปิด
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal แสดงผู้ป่วยที่ถูกลบ */}
       {showDeletedModal && (
@@ -1168,7 +837,7 @@ export default function PatientListPage() {
                         </div>
                         <div className="flex items-center gap-2 ml-4">
                           <button
-                            onClick={() => handleViewPatientDetail(patient)}
+                            onClick={() => router.push(`/admin/patients/${patient.id}`)}
                             className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                             title="ดูรายละเอียด"
                           >
