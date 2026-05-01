@@ -1,16 +1,15 @@
 // app/admin/patients/[id]/appointments/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลบุคลากรและโรงพยาบาลแบบ compact (ประหยัดพื้นที่)
-//    2. แก้ไขการโหลดแพทย์ให้แสดงทั้งแม่ข่ายและลูกข่าย
-//    3. แสดงชื่อโรงพยาบาลของแต่ละแพทย์ใน dropdown
-//    4. แก้ไข error เรื่อง foreign key relationship
+//    1. แก้ไขการโหลดแพทย์ - ไม่ต้องใช้ hospital_id
+//    2. ปรับ UI ให้กระชับ (compact)
+//    3. แสดงรายชื่อแพทย์ครบทุกคน (ไม่กรอง)
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches, getUserHospitalInfo, getAccessibleHospitalIds } from '@/lib/supabase/queries';
-import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText, Hospital, Building2, UserCheck, Stethoscope } from 'lucide-react';
+import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches } from '@/lib/supabase/queries';
+import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText, Hospital, Building2, UserCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -195,30 +194,22 @@ export default function PatientAppointmentsPage() {
     }
   };
 
-  // ✅ โหลดแพทย์ (กรองตามโรงพยาบาล) - แก้ไขแล้ว
+  // ✅ โหลดแพทย์ (แก้ไขแล้ว - ไม่ต้องใช้ hospital_id)
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ Loading doctors for hospitals:', hospitalIds);
+      console.log('👨‍⚕️ Loading doctors...');
       
-      // ✅ ใช้ query ที่ไม่ join กับ hospitals table โดยตรง
-      let query = supabase
+      // ✅ ดึงข้อมูลแพทย์ทั้งหมด (ไม่กรอง)
+      const { data: doctorsData, error: doctorsError } = await supabase
         .from('doctors')
         .select(`
           id, 
           user_id, 
           full_name_th, 
           specialization_th,
-          is_active,
-          hospital_id
+          is_active
         `)
         .eq('is_active', true);
-
-      // ✅ กรองตามโรงพยาบาลถ้ามี
-      if (hospitalIds && hospitalIds.length > 0) {
-        query = query.in('hospital_id', hospitalIds);
-      }
-
-      const { data: doctorsData, error: doctorsError } = await query;
 
       if (doctorsError) {
         console.error('❌ Error loading doctors:', doctorsError);
@@ -228,22 +219,30 @@ export default function PatientAppointmentsPage() {
 
       console.log('✅ Doctors loaded:', doctorsData?.length || 0);
       
-      // ✅ โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์แยก
+      // ✅ โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์แยก (ถ้ามี)
       const doctorsWithHospitals = await Promise.all(
         (doctorsData || []).map(async (doctor) => {
-          if (doctor.hospital_id) {
-            const { data: hospitalData } = await supabase
+          // ✅ พยายามดึง hospital_id จาก users table แทน
+          const { data: userData } = await supabase
+            .from('users')
+            .select('hospital_id')
+            .eq('id', doctor.user_id)
+            .single();
+
+          let hospitalData = null;
+          if (userData?.hospital_id) {
+            const { data: hospData } = await supabase
               .from('hospitals')
               .select('id, name, code, type')
-              .eq('id', doctor.hospital_id)
+              .eq('id', userData.hospital_id)
               .single();
-            
-            return {
-              ...doctor,
-              hospitals: hospitalData
-            };
+            hospitalData = hospData;
           }
-          return doctor;
+          
+          return {
+            ...doctor,
+            hospitals: hospitalData
+          };
         })
       );
 
@@ -462,7 +461,7 @@ export default function PatientAppointmentsPage() {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}`)} 
+            onClick={() => router.push(`/admin/patients/${patientId}`)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -486,7 +485,7 @@ export default function PatientAppointmentsPage() {
             </button>
           </div>
 
-          {/* ✅ แสดงข้อมูลบุคลากรและโรงพยาบาลแบบ compact */}
+          {/* ✅ แสดงข้อมูลบุคลากรและโรงพยาบาล (Compact) */}
           {userHospital && (
             <div className="mt-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3">
               <div className="flex items-center gap-3 flex-wrap text-sm">
