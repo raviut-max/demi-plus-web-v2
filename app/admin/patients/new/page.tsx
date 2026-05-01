@@ -5,12 +5,14 @@
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. Badge แสดงประเภทโรงพยาบาล
 //    4. แสดงแม่ข่าย (ถ้าเป็นลูกข่าย)
-//    5. แก้ไข handleHospitalChange ให้ update formData อย่างถูกต้อง
-//    6. แก้ไขช่องว่างในโค้ดทั้งหมด
+//    5. ✅ กรองโรงพยาบาลตามสิทธิ์การเข้าถึง
+//    6. ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
+//    7. แก้ไขช่องว่างในโค้ดทั้งหมด
+
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, registerPatient, getCoaches, getHospitalsWithHierarchy, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { checkSession, logout, registerPatient, getCoaches, getHospitalsWithHierarchy, getUserHospitalInfo, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import { UserPlus, AlertCircle, Loader2, ArrowLeft, UserCheck, Hospital, Building2, LogOut } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 import { supabase } from '@/lib/supabase/client';
@@ -67,6 +69,7 @@ export default function NewPatientPage() {
   const [loading, setLoading] = useState(false);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
@@ -125,8 +128,8 @@ export default function NewPatientPage() {
     }
     setUser(userData);
     loadUserHospital(userData.id);
+    loadAccessibleHospitals(userData.id);
     loadCoaches();
-    loadHospitals();
   }, [router]);
 
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
@@ -140,28 +143,50 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ โหลดรายการโรงพยาบาล (แบบมีลำดับชั้น)
-  const loadHospitals = async () => {
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
+  const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🏥 Loading hospitals with hierarchy...');
-      const data = await getHospitalsWithHierarchy();
-      console.log('✅ Hospitals loaded:', data.length);
-      setHospitals(data);
+      console.log('🔍 Getting accessible hospitals for user:', userId);
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
+      console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
+      
+      // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
+      const allHospitals = await getHospitalsWithHierarchy();
+      
+      // ✅ กรองโรงพยาบาลตามสิทธิ์
+      let filteredHospitals = allHospitals;
+      if (ids.length > 0 && user?.role !== 'admin') {
+        filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
+      }
+      
+      setHospitals(filteredHospitals);
+      console.log('🏥 Filtered hospitals:', filteredHospitals.length);
     } catch (error) {
       console.error('Error loading hospitals:', error);
     }
   };
 
+  // ✅ โหลดโค้ช (กรองตามโรงพยาบาลที่เข้าถึงได้)
   const loadCoaches = async () => {
     try {
-      const data = await getCoaches();
-      setCoaches(data);
+      const allCoaches = await getCoaches();
+      
+      // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
+      let filteredCoaches = allCoaches;
+      if (accessibleHospitalIds.length > 0 && user?.role !== 'admin') {
+        filteredCoaches = allCoaches.filter(coach => 
+          coach.hospital_id && accessibleHospitalIds.includes(coach.hospital_id)
+        );
+      }
+      
+      setCoaches(filteredCoaches);
+      console.log('👨‍️ Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('Error loading coaches:', error);
     }
   };
 
-  // ✅ แก้ไข handleHospitalChange ให้ update formData อย่างถูกต้อง
   const handleHospitalChange = (hospitalId: string) => {
     setFormData({ ...formData, hospital_id: hospitalId, village_id: '' });
     
@@ -475,6 +500,7 @@ export default function NewPatientPage() {
               <li>• ผู้ป่วยจะสังกัดโรงพยาบาล: <strong>{userHospital?.name || 'ไม่ได้กำหนด'}</strong></li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
               <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน</li>
             </ul>
           </div>
         </div>
@@ -813,7 +839,7 @@ export default function NewPatientPage() {
             ที่อยู่และโรงพยาบาลสังกัด
           </h2>
         
-          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical (กรองตามสิทธิ์) */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               🏥 โรงพยาบาลสังกัด <span className="text-red-500">*</span>
@@ -848,6 +874,11 @@ export default function NewPatientPage() {
             {hospitals.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
                 ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
+              </p>
+            )}
+            {accessibleHospitalIds.length > 0 && (
+              <p className="text-xs text-blue-600 mt-1">
+                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
               </p>
             )}
           </div>
@@ -1023,7 +1054,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช */}
+        {/* 6. กำหนดโค้ช (กรองตามโรงพยาบาล) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1043,9 +1074,13 @@ export default function NewPatientPage() {
               {coaches.map((coach) => (
                 <option key={coach.id} value={coach.user_id}>
                   {coach.full_name_th} {coach.specialization_th ? `(${coach.specialization_th})` : ''}
+                  {coach.hospitals?.name ? ` - ${coach.hospitals.name}` : ''}
                 </option>
               ))}
             </select>
+            <p className="text-xs text-gray-500 mt-1">
+              🔒 แสดงโค้ชจากโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({coaches.length} คน)
+            </p>
           </div>
         </div>
 
