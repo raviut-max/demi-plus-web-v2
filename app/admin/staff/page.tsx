@@ -180,32 +180,84 @@ export default function StaffManagementPage() {
   };
 
   // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ
-  const loadPendingStaff = async () => {
-    try {
-      console.log('⏳ [loadPendingStaff] Fetching pending staff...');
-      const { data, error } = await supabase
-        .from('pending_staff')
-        .select(`
-          *,
-          hospitals (
-            name,
-            code
-          )
-        `)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
+// ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (Debug เต็มรูปแบบ)
+const loadPendingStaff = async () => {
+  try {
+    console.log('⏳ [loadPendingStaff] Fetching pending staff...');
+    
+    // ✅ 1. ทดสอบ Query แบบง่ายก่อน
+    console.log('🔍 [loadPendingStaff] Step 1: Testing simple query...');
+    const {  simpleData, error: simpleError } = await supabase
+      .from('pending_staff')
+      .select('*')
+      .eq('status', 'pending');
 
-      if (error) {
-        console.error('❌ [loadPendingStaff] Error:', error);
-        return;
+    if (simpleError) {
+      console.error('❌ [loadPendingStaff] Simple query error:', simpleError);
+      console.error('❌ [loadPendingStaff] Error details:', {
+        message: simpleError.message,
+        details: simpleError.details,
+        hint: simpleError.hint,
+        code: simpleError.code
+      });
+    } else {
+      console.log(`✅ [loadPendingStaff] Simple query - Found ${simpleData?.length || 0} pending staff`);
+      if (simpleData && simpleData.length > 0) {
+        console.log('📋 [loadPendingStaff] Sample pending staff:', simpleData[0]);
       }
-
-      console.log(`✅ [loadPendingStaff] Loaded ${data?.length || 0} pending staff`);
-      setPendingStaff(data || []);
-    } catch (error) {
-      console.error('❌ [loadPendingStaff] Exception:', error);
     }
-  };
+
+    // ✅ 2. ทดสอบ Query แบบเต็ม (join hospitals)
+    console.log('🔍 [loadPendingStaff] Step 2: Testing full query with join...');
+    const {  data, error } = await supabase
+      .from('pending_staff')
+      .select(`
+        *,
+        hospitals (
+          name,
+          code
+        )
+      `)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ [loadPendingStaff] Full query error:', error);
+      console.error('❌ [loadPendingStaff] Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      return;
+    }
+
+    console.log(`✅ [loadPendingStaff] Full query - Found ${data?.length || 0} pending staff`);
+    
+    if (data && data.length > 0) {
+      console.log('📋 [loadPendingStaff] Pending staff details:', data.map(p => ({
+        id: p.id,
+        full_name: p.full_name_th,
+        status: p.status,
+        hospital_id: p.hospital_id,
+        hospital_data: p.hospitals
+      })));
+    } else {
+      console.warn('⚠️ [loadPendingStaff] No pending staff found');
+      console.log('💡 [loadPendingStaff] Possible reasons:');
+      console.log('  1. No pending staff in database');
+      console.log('  2. All pending staff have been approved/rejected');
+      console.log('  3. RLS policy blocking access');
+      console.log('  4. Join with hospitals failed');
+    }
+
+    setPendingStaff(data || []);
+  } catch (error) {
+    console.error('❌ [loadPendingStaff] Exception:', error);
+    console.error('❌ [loadPendingStaff] Stack:', (error as Error).stack);
+  }
+};
+
 
   // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน
   const loadDeactivatedStaff = async () => {
