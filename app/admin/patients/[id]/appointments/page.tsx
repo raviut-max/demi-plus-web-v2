@@ -1,27 +1,48 @@
 // app/admin/patients/[id]/appointments/page.tsx
-'use client';
+// ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. แสดงข้อมูลบุคลากรและโรงพยาบาล (แม่ข่าย/ลูกข่าย) ด้านบน
+//    2. ลบปุ่ม "สร้างนัดหมายแรก" ออก ใช้ปุ่มด้านบนอย่างเดียว
+//    3. กรองแพทย์ตามโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่าย-ลูกข่าย)
+//    4. แสดงชื่อโรงพยาบาลของแต่ละแพทย์ใน dropdown
 
+'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches } from '@/lib/supabase/queries';
-import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText } from 'lucide-react';
+import { checkSession, getPatientDetail, getAppointments, createAppointment, getCoaches, getUserHospitalInfo, getAccessibleHospitalIds } from '@/lib/supabase/queries';
+import { ArrowLeft, Calendar, Plus, Clock, User, MapPin, CheckCircle, XCircle, AlertCircle, Edit, Trash2, FileText, Hospital, Building2, UserCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+interface UserHospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+}
 
 export default function PatientAppointmentsPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-
-  const [user, setUser] = useState(null);
+  
+  const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState(null);
+  const [patient, setPatient] = useState<any>(null);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [doctors, setDoctors] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [appointmentsWithFollowup, setAppointmentsWithFollowup] = useState<Set<string>>(new Set());
-
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  
   const [formData, setFormData] = useState({
     doctor_id: '',
     appointment_type: 'followup',
@@ -43,41 +64,159 @@ export default function PatientAppointmentsPage() {
       router.push('/admin/login');
       return;
     }
-
+    
     setUser(userData);
+    loadUserHospital(userData.id);
     loadData();
   }, [router]);
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+      console.log('✅ User hospital:', hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
       console.log('📥 Loading patient detail for ID:', patientId);
+      
+      // ✅ 1. โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       console.log('✅ Patient detail loaded:', patientData);
       setPatient(patientData);
 
+      // ✅ 2. โหลดโรงพยาบาลที่ผู้ป่วยสังกัด (เพื่อกรองแพทย์)
+      if (patientData?.hospital_id) {
+        await loadAccessibleHospitalsForPatient(patientData.hospital_id);
+      }
+
+      // ✅ 3. โหลดนัดหมาย
       console.log('📥 Loading appointments for patient:', patientId);
       const appointmentsData = await getAppointments(patientId);
       console.log('✅ Appointments loaded:', appointmentsData);
-      console.log('📊 Appointments count:', appointmentsData?.length || 0);
-
-      // ✅ 1. เรียงลำดับนัดหมาย: ล่าสุดไว้บนสุด (Descending)
+      
+      // ✅ เรียงลำดับ: ล่าสุดไว้บนสุด
       const sortedAppointments = appointmentsData.sort((a, b) => {
         return new Date(b.appointment_date).getTime() - new Date(a.appointment_date).getTime();
       });
       setAppointments(sortedAppointments);
 
-      // ✅ 2. โหลดข้อมูลว่า appointment ไหนมี followup แล้ว
+      // ✅ 4. โหลดสถานะ followup
       await loadFollowupStatus(sortedAppointments);
 
-      console.log('📥 Loading doctors list...');
-      const doctorsData = await getCoaches();
-      console.log('✅ Doctors loaded:', doctorsData?.length || 0);
-      setDoctors(doctorsData);
     } catch (error) {
-      console.error('❌ Error loading ', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้สำหรับผู้ป่วย (แม่ข่าย-ลูกข่าย)
+  const loadAccessibleHospitalsForPatient = async (patientHospitalId: string) => {
+    try {
+      console.log('🏥 Loading accessible hospitals for patient hospital:', patientHospitalId);
+      
+      // ✅ ดึงข้อมูลโรงพยาบาลของผู้ป่วย
+      const { data: patientHospital } = await supabase
+        .from('hospitals')
+        .select('id, type, parent_id')
+        .eq('id', patientHospitalId)
+        .single();
+
+      if (!patientHospital) {
+        console.log('⚠️ Patient hospital not found');
+        await loadDoctors([]); // โหลดแพทย์ทั้งหมดถ้าไม่พบ
+        return;
+      }
+
+      let hospitalIds: string[] = [patientHospitalId];
+
+      // ✅ ถ้าผู้ป่วยอยู่แม่ข่าย → รวมลูกข่ายทั้งหมด
+      if (patientHospital.type === 'main') {
+        const { data: subHospitals } = await supabase
+          .from('hospitals')
+          .select('id')
+          .eq('parent_id', patientHospitalId)
+          .eq('is_active', true);
+        
+        if (subHospitals && subHospitals.length > 0) {
+          hospitalIds = [...hospitalIds, ...subHospitals.map(h => h.id)];
+        }
+        console.log('🏥 Main hospital - accessible hospitals:', hospitalIds);
+      }
+      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ
+      else if (patientHospital.type === 'sub' && patientHospital.parent_id) {
+        // เพิ่มแม่ข่าย
+        hospitalIds.push(patientHospital.parent_id);
+        
+        // เพิ่มลูกข่ายอื่นๆ ของแม่ข่ายนี้
+        const { data: siblingHospitals } = await supabase
+          .from('hospitals')
+          .select('id')
+          .eq('parent_id', patientHospital.parent_id)
+          .eq('is_active', true);
+        
+        if (siblingHospitals && siblingHospitals.length > 0) {
+          hospitalIds = [...hospitalIds, ...siblingHospitals.map(h => h.id)];
+        }
+        console.log('🏥 Sub hospital - accessible hospitals:', hospitalIds);
+      }
+
+      setAccessibleHospitalIds(hospitalIds);
+      await loadDoctors(hospitalIds);
+
+    } catch (error) {
+      console.error('Error loading accessible hospitals:', error);
+      await loadDoctors([]);
+    }
+  };
+
+  // ✅ โหลดแพทย์ (กรองตามโรงพยาบาล)
+  const loadDoctors = async (hospitalIds: string[]) => {
+    try {
+      console.log('👨‍⚕️ Loading doctors for hospitals:', hospitalIds);
+      
+      let query = supabase
+        .from('doctors')
+        .select(`
+          id, 
+          user_id, 
+          full_name_th, 
+          specialization_th,
+          is_active,
+          hospitals (
+            id,
+            name,
+            code,
+            type
+          )
+        `)
+        .eq('is_active', true);
+
+      // ✅ กรองตามโรงพยาบาลถ้ามี
+      if (hospitalIds && hospitalIds.length > 0) {
+        query = query.in('hospital_id', hospitalIds);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('❌ Error loading doctors:', error);
+        setDoctors([]);
+        return;
+      }
+
+      console.log('✅ Doctors loaded:', data?.length || 0);
+      setDoctors(data || []);
+    } catch (error) {
+      console.error('Error loading doctors:', error);
+      setDoctors([]);
     }
   };
 
@@ -115,12 +254,13 @@ export default function PatientAppointmentsPage() {
 
     const selectedDoctor = doctors.find(d => d.id === formData.doctor_id);
     if (!selectedDoctor) {
-      alert('ไม่พบข้อมูลแพทย์ที่เลือกในตาราง doctors\nกรุณาเลือกแพทย์ใหม่');
+      alert('ไม่พบข้อมูลแพทย์ที่เลือก');
       return;
     }
 
     try {
       const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
+      
       const result = await createAppointment({
         user_id: patientId,
         doctor_id: formData.doctor_id,
@@ -148,8 +288,10 @@ export default function PatientAppointmentsPage() {
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
+    
     try {
       const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
+      
       const { error } = await supabase
         .from('appointments')
         .update({
@@ -164,6 +306,7 @@ export default function PatientAppointmentsPage() {
         .eq('id', selectedAppointment.id);
 
       if (error) throw error;
+      
       alert('✅ อัปเดตนัดหมายสำเร็จ!');
       setShowEditModal(false);
       loadData();
@@ -176,9 +319,18 @@ export default function PatientAppointmentsPage() {
 
   const handleCancelAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการยกเลิกนัดหมายนี้หรือไม่?')) return;
+    
     try {
-      const { error } = await supabase.from('appointments').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('id', appointmentId);
+      const { error } = await supabase
+        .from('appointments')
+        .update({ 
+          status: 'cancelled', 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', appointmentId);
+
       if (error) throw error;
+      
       alert('✅ ยกเลิกนัดหมายสำเร็จ!');
       loadData();
     } catch (error) {
@@ -189,9 +341,18 @@ export default function PatientAppointmentsPage() {
 
   const handleCompleteAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการทำเครื่องหมายว่านัดหมายนี้เสร็จสิ้นแล้วหรือไม่?')) return;
+    
     try {
-      const { error } = await supabase.from('appointments').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', appointmentId);
+      const { error } = await supabase
+        .from('appointments')
+        .update({ 
+          status: 'completed', 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', appointmentId);
+
       if (error) throw error;
+      
       alert('✅ บันทึกว่าเสร็จสิ้นแล้ว!');
       loadData();
     } catch (error) {
@@ -205,6 +366,7 @@ export default function PatientAppointmentsPage() {
     const dateTime = new Date(appointment.appointment_date);
     const date = dateTime.toISOString().split('T')[0];
     const time = dateTime.toTimeString().split(' ')[0].substring(0, 5);
+    
     setFormData({
       doctor_id: appointment.doctor_id || '',
       appointment_type: appointment.appointment_type || 'followup',
@@ -214,11 +376,20 @@ export default function PatientAppointmentsPage() {
       location_detail: appointment.location_detail || '',
       notes: appointment.notes || '',
     });
+    
     setShowEditModal(true);
   };
 
   const resetForm = () => {
-    setFormData({ doctor_id: '', appointment_type: 'followup', appointment_date: '', appointment_time: '', location_type: 'clinic', location_detail: '', notes: '' });
+    setFormData({
+      doctor_id: '',
+      appointment_type: 'followup',
+      appointment_date: '',
+      appointment_time: '',
+      location_type: 'clinic',
+      location_detail: '',
+      notes: '',
+    });
     setSelectedAppointment(null);
   };
 
@@ -244,7 +415,11 @@ export default function PatientAppointmentsPage() {
   };
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div></div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
   }
 
   return (
@@ -252,20 +427,82 @@ export default function PatientAppointmentsPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button onClick={() => router.push(`/admin/patients/${patientId}`)} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
+          <button 
+            onClick={() => router.push(`/admin/patients/${patientId}`)} 
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
+          >
             <ArrowLeft className="w-4 h-4" />
             กลับหน้าผู้ป่วย
           </button>
+          
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">ประวัตินัดหมาย</h1>
-              <p className="text-gray-600">ผู้ป่วย: {patient?.first_name} {patient?.last_name} | HN: {patient?.hospital_number}</p>
+              <p className="text-gray-600">
+                ผู้ป่วย: {patient?.first_name} {patient?.last_name} | HN: {patient?.hospital_number}
+              </p>
             </div>
-            <button onClick={() => { resetForm(); setShowCreateModal(true); }} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all">
+            
+            <button 
+              onClick={() => { resetForm(); setShowCreateModal(true); }} 
+              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+            >
               <Plus className="w-4 h-4" />
               สร้างนัดหมายใหม่
             </button>
           </div>
+
+          {/* ✅ แสดงข้อมูลบุคลากรและโรงพยาบาล */}
+          {userHospital && (
+            <div className="mt-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">
+                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="h-8 w-px bg-blue-300"></div>
+
+                <div className="flex items-center gap-2">
+                  <Hospital className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-medium text-gray-700">
+                    {userHospital.name}
+                  </span>
+                  {userHospital.type === 'main' ? (
+                    <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                      🏥 แม่ข่าย
+                    </span>
+                  ) : (
+                    <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                      🏥 ลูกข่าย
+                    </span>
+                  )}
+                </div>
+
+                {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                  <>
+                    <div className="h-8 w-px bg-blue-300"></div>
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-gray-500" />
+                      <span className="text-xs text-gray-600">
+                        แม่ข่าย: {userHospital.parent_hospital.name}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -275,32 +512,65 @@ export default function PatientAppointmentsPage() {
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><Calendar className="w-5 h-5 text-blue-600" /></div>
-              <div><p className="text-sm text-gray-500">นัดหมายทั้งหมด</p><p className="text-2xl font-bold text-gray-800">{appointments.length}</p></div>
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Calendar className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">นัดหมายทั้งหมด</p>
+                <p className="text-2xl font-bold text-gray-800">{appointments.length}</p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><Clock className="w-5 h-5 text-blue-600" /></div>
-              <div><p className="text-sm text-gray-500">รอนัดหมาย</p><p className="text-2xl font-bold text-gray-800">{appointments.filter(a => a.status === 'scheduled').length}</p></div>
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Clock className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">รอนัดหมาย</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {appointments.filter(a => a.status === 'scheduled').length}
+                </p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-600" /></div>
-              <div><p className="text-sm text-gray-500">เสร็จสิ้น</p><p className="text-2xl font-bold text-gray-800">{appointments.filter(a => a.status === 'completed').length}</p></div>
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">เสร็จสิ้น</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {appointments.filter(a => a.status === 'completed').length}
+                </p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center"><XCircle className="w-5 h-5 text-red-600" /></div>
-              <div><p className="text-sm text-gray-500">ยกเลิก</p><p className="text-2xl font-bold text-gray-800">{appointments.filter(a => a.status === 'cancelled').length}</p></div>
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <XCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">ยกเลิก</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {appointments.filter(a => a.status === 'cancelled').length}
+                </p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center"><AlertCircle className="w-5 h-5 text-orange-600" /></div>
-              <div><p className="text-sm text-gray-500">ไม่มาตามนัด</p><p className="text-2xl font-bold text-gray-800">{appointments.filter(a => a.status === 'no_show').length}</p></div>
+              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-orange-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">ไม่มาตามนัด</p>
+                <p className="text-2xl font-bold text-gray-800">
+                  {appointments.filter(a => a.status === 'no_show').length}
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -308,8 +578,12 @@ export default function PatientAppointmentsPage() {
         {/* Appointments List */}
         <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
           <div className="p-6 border-b border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><Calendar className="w-6 h-6 text-blue-600" /> รายการนัดหมายทั้งหมด</h2>
+            <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+              <Calendar className="w-6 h-6 text-blue-600" />
+              รายการนัดหมายทั้งหมด
+            </h2>
           </div>
+          
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
@@ -329,7 +603,12 @@ export default function PatientAppointmentsPage() {
                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       <Calendar className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ยังไม่มีนัดหมาย</p>
-                      <button onClick={() => { resetForm(); setShowCreateModal(true); }} className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">สร้างนัดหมายแรก</button>
+                      <button 
+                        onClick={() => { resetForm(); setShowCreateModal(true); }} 
+                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                      >
+                        สร้างนัดหมายแรก
+                      </button>
                     </td>
                   </tr>
                 ) : (
@@ -344,8 +623,19 @@ export default function PatientAppointmentsPage() {
                           <div className="flex items-center gap-2">
                             <Calendar className="w-4 h-4 text-gray-400" />
                             <div>
-                              <p className="font-medium text-gray-800">{new Date(appointment.appointment_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
-                              <p className="text-sm text-gray-500">{new Date(appointment.appointment_date).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</p>
+                              <p className="font-medium text-gray-800">
+                                {new Date(appointment.appointment_date).toLocaleDateString('th-TH', { 
+                                  year: 'numeric', 
+                                  month: 'long', 
+                                  day: 'numeric' 
+                                })}
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                {new Date(appointment.appointment_date).toLocaleTimeString('th-TH', { 
+                                  hour: '2-digit', 
+                                  minute: '2-digit' 
+                                })}
+                              </p>
                             </div>
                           </div>
                         </td>
@@ -353,29 +643,39 @@ export default function PatientAppointmentsPage() {
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
                             <User className="w-4 h-4 text-gray-400" />
-                            <span className="text-gray-700">{appointment.doctors?.full_name_th || '-'}</span>
+                            <span className="text-gray-700">
+                              {appointment.doctors?.full_name_th || '-'}
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
                             <MapPin className="w-4 h-4 text-gray-400" />
-                            <span className="text-gray-700">{appointment.location_type === 'clinic' ? 'คลินิก' : appointment.location_type === 'online' ? 'ออนไลน์' : appointment.location_type === 'home' ? 'บ้าน' : appointment.location_detail || '-'}</span>
+                            <span className="text-gray-700">
+                              {appointment.location_type === 'clinic' ? 'คลินิก' : 
+                               appointment.location_type === 'online' ? 'ออนไลน์' : 
+                               appointment.location_type === 'home' ? 'บ้าน' : 
+                               appointment.location_detail || '-'}
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex flex-col gap-1">
                             <span>{getStatusBadge(appointment.status)}</span>
                             {needsFollowup && (
-                              <span className="text-xs text-purple-600 font-medium">⏳ รอบันทึกติดตาม</span>
+                              <span className="text-xs text-purple-600 font-medium">
+                                ⏳ รอบันทึกติดตาม
+                              </span>
                             )}
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="max-w-xs truncate text-gray-600 text-sm">{appointment.notes || '-'}</div>
+                          <div className="max-w-xs truncate text-gray-600 text-sm">
+                            {appointment.notes || '-'}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2 flex-wrap">
-                            {/* ✅ แสดงเฉพาะปุ่ม "บันทึกติดตาม" (สีม่วง) เมื่อเสร็จสิ้นแล้วแต่ยังไม่มี followup */}
                             {needsFollowup && (
                               <button
                                 onClick={() => router.push(`/admin/appointments/followup/${appointment.id}`)}
@@ -387,26 +687,36 @@ export default function PatientAppointmentsPage() {
                               </button>
                             )}
 
-                            {/* แสดงปุ่มจัดการปกติ เฉพาะเมื่อไม่เสร็จสิ้น */}
                             {!isCompleted && (
                               <>
                                 {appointment.status === 'scheduled' && (
                                   <>
-                                    <button onClick={() => handleCompleteAppointment(appointment.id)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="ทำเครื่องหมายว่าเสร็จสิ้น">
+                                    <button 
+                                      onClick={() => handleCompleteAppointment(appointment.id)} 
+                                      className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors" 
+                                      title="ทำเครื่องหมายว่าเสร็จสิ้น"
+                                    >
                                       <CheckCircle className="w-4 h-4" />
                                     </button>
-                                    <button onClick={() => handleCancelAppointment(appointment.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="ยกเลิกนัดหมาย">
+                                    <button 
+                                      onClick={() => handleCancelAppointment(appointment.id)} 
+                                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" 
+                                      title="ยกเลิกนัดหมาย"
+                                    >
                                       <XCircle className="w-4 h-4" />
                                     </button>
                                   </>
                                 )}
-                                <button onClick={() => openEditModal(appointment)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="แก้ไข">
+                                <button 
+                                  onClick={() => openEditModal(appointment)} 
+                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" 
+                                  title="แก้ไข"
+                                >
                                   <Edit className="w-4 h-4" />
                                 </button>
                               </>
                             )}
 
-                            {/* แสดงข้อความถ้าเสร็จสิ้นแล้วและมี followup แล้ว */}
                             {isCompleted && hasFollowup && (
                               <span className="text-gray-400 text-sm flex items-center gap-1">
                                 <CheckCircle className="w-4 h-4" /> เสร็จสมบูรณ์
@@ -429,33 +739,62 @@ export default function PatientAppointmentsPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Plus className="w-6 h-6 text-blue-600" /> สร้างนัดหมายใหม่</h2>
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <Plus className="w-6 h-6 text-blue-600" />
+                สร้างนัดหมายใหม่
+              </h2>
             </div>
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">แพทย์ผู้ทำการรักษา *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  แพทย์ผู้ทำการรักษา *
+                </label>
                 <p className="text-xs text-gray-500 mb-2">พบแพทย์: {doctors.length} คน</p>
-                {doctors.length === 0 && <p className="text-xs text-red-500 mb-2">⚠️ ไม่พบข้อมูลแพทย์! กรุณาตรวจสอบ RLS Policy</p>}
-                <select value={formData.doctor_id} onChange={(e) => setFormData({...formData, doctor_id: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                {doctors.length === 0 && (
+                  <p className="text-xs text-red-500 mb-2">⚠️ ไม่พบข้อมูลแพทย์!</p>
+                )}
+                <select 
+                  value={formData.doctor_id} 
+                  onChange={(e) => setFormData({...formData, doctor_id: e.target.value})} 
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
                   <option value="">-- เลือกแพทย์ --</option>
                   {doctors.map((doctor) => (
-                    <option key={doctor.id} value={doctor.id}>{doctor.full_name_th} ({doctor.specialization_th})</option>
+                    <option key={doctor.id} value={doctor.id}>
+                      {doctor.full_name_th} 
+                      {doctor.specialization_th ? ` (${doctor.specialization_th})` : ''}
+                      {doctor.hospitals?.name ? ` - ${doctor.hospitals.name}` : ''}
+                    </option>
                   ))}
                 </select>
+                {accessibleHospitalIds.length > 0 && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    🔒 แสดงแพทย์จาก {accessibleHospitalIds.length} โรงพยาบาล (แม่ข่าย-ลูกข่าย)
+                  </p>
+                )}
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">ประเภทนัดหมาย *</label>
-                  <select value={formData.appointment_type} onChange={(e) => setFormData({...formData, appointment_type: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <select 
+                    value={formData.appointment_type} 
+                    onChange={(e) => setFormData({...formData, appointment_type: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
                     <option value="followup">🔄 ติดตามผล</option>
-                    <option value="consultation">👨‍️ ปรึกษาแพทย์</option>
+                    <option value="consultation">👨‍⚕️ ปรึกษาแพทย์</option>
                     <option value="screening">📋 คัดกรอง</option>
                     <option value="education">📚 ให้ความรู้</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">สถานที่ *</label>
-                  <select value={formData.location_type} onChange={(e) => setFormData({...formData, location_type: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <select 
+                    value={formData.location_type} 
+                    onChange={(e) => setFormData({...formData, location_type: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
                     <option value="clinic">🏥 คลินิก</option>
                     <option value="online">💻 ออนไลน์</option>
                     <option value="home">🏠 บ้าน</option>
@@ -463,28 +802,63 @@ export default function PatientAppointmentsPage() {
                   </select>
                 </div>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">วันที่ *</label>
-                  <input type="date" value={formData.appointment_date} onChange={(e) => setFormData({...formData, appointment_date: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input 
+                    type="date" 
+                    value={formData.appointment_date} 
+                    onChange={(e) => setFormData({...formData, appointment_date: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">เวลา *</label>
-                  <input type="time" value={formData.appointment_time} onChange={(e) => setFormData({...formData, appointment_time: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input 
+                    type="time" 
+                    value={formData.appointment_time} 
+                    onChange={(e) => setFormData({...formData, appointment_time: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">รายละเอียดสถานที่</label>
-                <input type="text" value={formData.location_detail} onChange={(e) => setFormData({...formData, location_detail: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="เช่น ห้องตรวจที่ 1, Zoom Meeting, etc." />
+                <input 
+                  type="text" 
+                  value={formData.location_detail} 
+                  onChange={(e) => setFormData({...formData, location_detail: e.target.value})} 
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                  placeholder="เช่น ห้องตรวจที่ 1, Zoom Meeting, etc."
+                />
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">หมายเหตุ</label>
-                <textarea value={formData.notes} onChange={(e) => setFormData({...formData, notes: e.target.value})} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="หมายเหตุเพิ่มเติม..." />
+                <textarea 
+                  value={formData.notes} 
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})} 
+                  rows={3} 
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                  placeholder="หมายเหตุเพิ่มเติม..."
+                />
               </div>
             </div>
             <div className="p-6 border-t border-gray-200 flex gap-4">
-              <button onClick={handleCreateAppointment} className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all">สร้างนัดหมาย</button>
-              <button onClick={() => { setShowCreateModal(false); resetForm(); }} className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all">ยกเลิก</button>
+              <button 
+                onClick={handleCreateAppointment} 
+                className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all"
+              >
+                สร้างนัดหมาย
+              </button>
+              <button 
+                onClick={() => { setShowCreateModal(false); resetForm(); }} 
+                className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all"
+              >
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>
@@ -495,22 +869,38 @@ export default function PatientAppointmentsPage() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2"><Edit className="w-6 h-6 text-blue-600" /> แก้ไขนัดหมาย</h2>
+              <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <Edit className="w-6 h-6 text-blue-600" />
+                แก้ไขนัดหมาย
+              </h2>
             </div>
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">แพทย์ผู้ทำการรักษา *</label>
-                <select value={formData.doctor_id} onChange={(e) => setFormData({...formData, doctor_id: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                <select 
+                  value={formData.doctor_id} 
+                  onChange={(e) => setFormData({...formData, doctor_id: e.target.value})} 
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
                   <option value="">-- เลือกแพทย์ --</option>
                   {doctors.map((doctor) => (
-                    <option key={doctor.id} value={doctor.id}>{doctor.full_name_th} ({doctor.specialization_th})</option>
+                    <option key={doctor.id} value={doctor.id}>
+                      {doctor.full_name_th} 
+                      {doctor.specialization_th ? ` (${doctor.specialization_th})` : ''}
+                      {doctor.hospitals?.name ? ` - ${doctor.hospitals.name}` : ''}
+                    </option>
                   ))}
                 </select>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">ประเภทนัดหมาย *</label>
-                  <select value={formData.appointment_type} onChange={(e) => setFormData({...formData, appointment_type: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <select 
+                    value={formData.appointment_type} 
+                    onChange={(e) => setFormData({...formData, appointment_type: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
                     <option value="followup">🔄 ติดตามผล</option>
                     <option value="consultation">👨‍⚕️ ปรึกษาแพทย์</option>
                     <option value="screening">📋 คัดกรอง</option>
@@ -519,7 +909,11 @@ export default function PatientAppointmentsPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">สถานที่ *</label>
-                  <select value={formData.location_type} onChange={(e) => setFormData({...formData, location_type: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <select 
+                    value={formData.location_type} 
+                    onChange={(e) => setFormData({...formData, location_type: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
                     <option value="clinic">🏥 คลินิก</option>
                     <option value="online">💻 ออนไลน์</option>
                     <option value="home">🏠 บ้าน</option>
@@ -527,28 +921,63 @@ export default function PatientAppointmentsPage() {
                   </select>
                 </div>
               </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">วันที่ *</label>
-                  <input type="date" value={formData.appointment_date} onChange={(e) => setFormData({...formData, appointment_date: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input 
+                    type="date" 
+                    value={formData.appointment_date} 
+                    onChange={(e) => setFormData({...formData, appointment_date: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">เวลา *</label>
-                  <input type="time" value={formData.appointment_time} onChange={(e) => setFormData({...formData, appointment_time: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input 
+                    type="time" 
+                    value={formData.appointment_time} 
+                    onChange={(e) => setFormData({...formData, appointment_time: e.target.value})} 
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">รายละเอียดสถานที่</label>
-                <input type="text" value={formData.location_detail} onChange={(e) => setFormData({...formData, location_detail: e.target.value})} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="เช่น ห้องตรวจที่ 1, Zoom Meeting, etc." />
+                <input 
+                  type="text" 
+                  value={formData.location_detail} 
+                  onChange={(e) => setFormData({...formData, location_detail: e.target.value})} 
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                  placeholder="เช่น ห้องตรวจที่ 1, Zoom Meeting, etc."
+                />
               </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">หมายเหตุ</label>
-                <textarea value={formData.notes} onChange={(e) => setFormData({...formData, notes: e.target.value})} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="หมายเหตุเพิ่มเติม..." />
+                <textarea 
+                  value={formData.notes} 
+                  onChange={(e) => setFormData({...formData, notes: e.target.value})} 
+                  rows={3} 
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" 
+                  placeholder="หมายเหตุเพิ่มเติม..."
+                />
               </div>
             </div>
             <div className="p-6 border-t border-gray-200 flex gap-4">
-              <button onClick={handleUpdateAppointment} className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all">บันทึกการแก้ไข</button>
-              <button onClick={() => { setShowEditModal(false); resetForm(); }} className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all">ยกเลิก</button>
+              <button 
+                onClick={handleUpdateAppointment} 
+                className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all"
+              >
+                บันทึกการแก้ไข
+              </button>
+              <button 
+                onClick={() => { setShowEditModal(false); resetForm(); }} 
+                className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all"
+              >
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>
