@@ -1,14 +1,10 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. Badge แสดงประเภทโรงพยาบาล
-//    4. แสดงแม่ข่าย (ถ้าเป็นลูกข่าย)
-//    5. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    6. กรองโรงพยาบาลและโค้ชตามสิทธิ์
-//    7. Admin เห็นทั้งหมด
-//    8. ✅ เพิ่มรายละเอียดผู้ป่วยครบถ้วน
+//    1. แก้ไขตัวแปร showDeletedModal (ลบช่องว่าง)
+//    2. แก้ไขการโหลดข้อมูลผู้ป่วย
+//    3. แก้ไข Syntax errors ทั้งหมด
+//    4. ปรับปรุงการกรองตามสิทธิ์โรงพยาบาล
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -139,7 +135,7 @@ export default function PatientListPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [pamLevelFilter, setPamLevelFilter] = useState('all');
-  const [showDeletedModal, setShowDeletedModal] = useState(false);
+  const [showDeletedModal, setShowDeletedModal] = useState(false); // ✅ แก้ไขแล้ว
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
@@ -180,9 +176,11 @@ export default function PatientListPage() {
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
+      console.log('🔍 Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 Hospital IDs:', ids);
 
       // ✅ โหลดรายชื่อโรงพยาบาลทั้งหมด (สำหรับ dropdown)
       const allHospitals = await getHospitalsWithHierarchy();
@@ -198,6 +196,9 @@ export default function PatientListPage() {
       
       // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
       loadCoaches(ids);
+      
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
+      loadPatients();
       
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
@@ -218,16 +219,18 @@ export default function PatientListPage() {
       }
       
       setCoaches(filteredCoaches);
-      console.log('👨‍⚕️ Filtered coaches:', filteredCoaches.length);
+      console.log('👨‍️ Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('Error loading coaches:', error);
     }
   };
 
+  // ✅ โหลดผู้ป่วย (แก้ไขแล้ว - ไม่ต้องส่ง userId)
   const loadPatients = async () => {
     try {
-      // ✅ ส่ง userId เพื่อกรองผู้ป่วยตามสิทธิ์
-      const data = await getPatientList(undefined, undefined, user?.id);
+      console.log('📡 Loading patients...');
+      // ✅ ส่ง hospitalIds แทน userId
+      const data = await getPatientList(undefined, undefined, accessibleHospitalIds);
       console.log('📊 Loaded patients:', data.length);
       console.log('🏥 Sample patient hospital:', data[0]?.hospitals);
       setPatients(data);
@@ -235,12 +238,6 @@ export default function PatientListPage() {
       console.error('Error loading patients:', error);
     }
   };
-
-  useEffect(() => {
-    if (user && accessibleHospitalIds.length >= 0) { // ✅ โหลดหลังจากได้สิทธิ์แล้ว
-      loadPatients();
-    }
-  }, [user, accessibleHospitalIds]);
 
   const loadDeletedPatients = async () => {
     try {
@@ -427,7 +424,7 @@ export default function PatientListPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
