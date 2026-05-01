@@ -1,47 +1,46 @@
 // app/admin/appointments/new/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569 (22:15)
+// ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. เปลี่ยนจาก useSearchParams() → ใช้ searchParams props
-//    2. เพิ่ม TypeScript interface สำหรับ props
-//    3. แก้ไขการ redirect กลับไปตาม returnUrl ที่ถูกต้อง
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
 
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, getStaffList } from '@/lib/supabase/queries';
-import { ArrowLeft, LogOut, Save, Calendar, Clock, User, Stethoscope } from 'lucide-react';
+import { checkSession, logout, getPatientList, getStaffList, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { ArrowLeft, LogOut, Save, Calendar, Clock, User, Stethoscope, Hospital, Building2, UserCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// ✅ Interface สำหรับ props ของหน้านี้
-interface NewAppointmentPageProps {
-  searchParams?: { [key: string]: string | string[] | undefined };
+interface UserHospital {
+  id: string;
+  name: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+  };
 }
 
-export default function NewAppointmentPage({ searchParams }: NewAppointmentPageProps) {
+export default function NewAppointmentPage() {
   const router = useRouter();
-  
-  // ✅ ดึง returnUrl และ patient_id จาก searchParams props (ไม่ใช่ hook)
-  const returnUrl = searchParams?.returnUrl as string || '';
-  const patientIdFromQuery = searchParams?.patient_id as string || '';
-  
-  console.log('🔍 [DEBUG] New Appointment Page');
-  console.log('🔗 returnUrl:', returnUrl);
-  console.log('👤 patient_id from query:', patientIdFromQuery);
-
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+
   // ตั้งค่าเริ่มต้นเป็นวันพรุ่งนี้ 08:00
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   tomorrow.setHours(8, 0, 0, 0);
 
   const [formData, setFormData] = useState({
-    user_id: patientIdFromQuery || '', // ✅ ถ้ามี patient_id จาก query ให้ตั้งเป็นค่าเริ่มต้น
+    user_id: '',
     doctor_id: '',
     appointment_type: 'followup',
     appointment_date: tomorrow.toISOString().slice(0, 16),
@@ -65,25 +64,65 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
     }
 
     setUser(userData);
-    loadData();
+    loadUserHospital(userData.id);
+    loadAccessibleHospitals(userData.id);
   }, [router]);
 
-  const loadData = async () => {
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
     try {
-      const [patientsData, allStaff] = await Promise.all([
-        getPatientList(),
-        getStaffList()
-      ]);
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
 
-      // ✅ กรองเอาเฉพาะ doctor และ helper (ไม่เอา admin)
-      const filteredStaff = allStaff.filter(staff => 
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
+  const loadAccessibleHospitals = async (userId: string) => {
+    try {
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
+      console.log('🏥 Accessible hospitals for appointments:', ids.length, 'hospitals');
+      
+      // ✅ โหลดข้อมูลหลังจากได้สิทธิ์แล้ว
+      loadData(ids);
+    } catch (error) {
+      console.error('Error loading accessible hospitals:', error);
+    }
+  };
+
+  const loadData = async (hospitalIds?: string[]) => {
+    try {
+      console.log('📡 Loading patients and appointments...');
+      console.log('🏥 Hospital IDs for filtering:', hospitalIds);
+
+      // ✅ 1. ดึงข้อมูลผู้ป่วย (กรองตามโรงพยาบาลถ้ามี)
+      const patientsData = await getPatientList(undefined, undefined, hospitalIds);
+      console.log('📋 Total patients (filtered):', patientsData.length);
+      setPatients(patientsData);
+
+      // ✅ 2. ดึงข้อมูลแพทย์/เจ้าหน้าที่ (กรองตามโรงพยาบาลถ้ามี)
+      const allStaff = await getStaffList();
+      
+      // กรอง staff ตาม hospital IDs (ถ้าไม่ใช่ admin)
+      let filteredStaff = allStaff;
+      if (hospitalIds && hospitalIds.length > 0 && user?.role !== 'admin') {
+        filteredStaff = allStaff.filter(staff => 
+          staff.hospital_id && hospitalIds.includes(staff.hospital_id)
+        );
+      }
+      
+      // กรองเอาเฉพาะ doctor และ helper
+      filteredStaff = filteredStaff.filter(staff => 
         staff.role === 'doctor' || staff.role === 'helper'
       );
 
-      setPatients(patientsData);
+      console.log('👨‍⚕️ Total staff (filtered):', filteredStaff.length);
       setStaffList(filteredStaff);
+
     } catch (error) {
-      console.error('Error loading ', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -98,10 +137,6 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
-    
-    console.log('💾 [DEBUG] Submitting appointment...');
-    console.log('📝 FormData:', formData);
-    console.log('🔗 returnUrl:', returnUrl);
 
     try {
       const { error } = await supabase
@@ -121,17 +156,8 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
 
       if (error) throw error;
 
-      console.log('✅ Appointment created successfully!');
-      alert('สร้างนัดหมายสำเร็จ!');
-      
-      // ✅ กลับไปตามที่มา
-      if (returnUrl) {
-        console.log('🔙 Redirecting to returnUrl:', returnUrl);
-        router.push(decodeURIComponent(returnUrl));
-      } else {
-        console.log('🔙 Redirecting to appointments view');
-        router.push('/admin/appointments/view');
-      }
+      alert('✅ สร้างนัดหมายสำเร็จ!');
+      router.push('/admin/appointments/view');
     } catch (error) {
       console.error('Error creating appointment:', error);
       alert('เกิดข้อผิดพลาด: ' + (error as any).message);
@@ -160,22 +186,79 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
-          <div className="flex items-center justify-between">
+
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                สร้างนัดหมายใหม่
+                📅 สร้างนัดหมายใหม่
               </h1>
               <p className="text-gray-600">กำหนดนัดหมายผู้ป่วย</p>
             </div>
-            
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-            >
-              <LogOut className="w-4 h-4" />
-              ออกจากระบบ
-            </button>
+
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">
+                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                {userHospital ? (
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">
+                        {userHospital.name}
+                      </span>
+                    </div>
+
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                          🏥 แม่ข่าย
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                          🏥 ลูกข่าย
+                        </span>
+                      )}
+
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-2">
+                    ไม่สังกัดโรงพยาบาล
+                  </p>
+                )}
+              </div>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -194,15 +277,21 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
               value={formData.user_id}
               onChange={(e) => setFormData({ ...formData, user_id: e.target.value })}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               <option value="">-- เลือกผู้ป่วย --</option>
               {patients.map((patient) => (
                 <option key={patient.id} value={patient.id}>
                   {patient.full_name} ({patient.hospital_number})
+                  {patient.hospitals?.name ? ` - ${patient.hospitals.name}` : ''}
                 </option>
               ))}
             </select>
+            {accessibleHospitalIds.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                🔒 แสดงผู้ป่วยจาก {accessibleHospitalIds.length} โรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
+              </p>
+            )}
           </div>
 
           {/* แพทย์/เจ้าหน้าที่ */}
@@ -215,18 +304,19 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
               value={formData.doctor_id}
               onChange={(e) => setFormData({ ...formData, doctor_id: e.target.value })}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               <option value="">-- เลือกแพทย์/เจ้าหน้าที่ --</option>
               {staffList.map((staff: any) => {
-                const staffId = staff.id;
                 const staffName = staff.doctors?.full_name_th || staff.full_name_th || '-';
                 const staffRole = staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่';
                 const specialization = staff.doctors?.specialization_th || '';
+                const hospitalName = staff.hospitals?.name || '';
                 
                 return (
-                  <option key={staffId} value={staffId}>
+                  <option key={staff.id} value={staff.id}>
                     {staffName} ({staffRole}{specialization ? ` - ${specialization}` : ''})
+                    {hospitalName ? ` - ${hospitalName}` : ''}
                   </option>
                 );
               })}
@@ -242,7 +332,7 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
               value={formData.appointment_type}
               onChange={(e) => setFormData({ ...formData, appointment_type: e.target.value })}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg"
             >
               <option value="followup">ติดตามผล</option>
               <option value="consultation">ปรึกษา</option>
@@ -263,7 +353,7 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
               value={formData.appointment_date}
               onChange={(e) => setFormData({ ...formData, appointment_date: e.target.value })}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg"
             />
           </div>
 
@@ -277,7 +367,7 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
               <select
                 value={formData.duration_minutes}
                 onChange={(e) => setFormData({ ...formData, duration_minutes: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg"
               >
                 <option value="15">15 นาที</option>
                 <option value="30">30 นาที</option>
@@ -286,11 +376,13 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">สถานที่</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                สถานที่
+              </label>
               <select
                 value={formData.location_type}
                 onChange={(e) => setFormData({ ...formData, location_type: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg"
               >
                 <option value="clinic">คลินิก</option>
                 <option value="online">ออนไลน์</option>
@@ -302,12 +394,14 @@ export default function NewAppointmentPage({ searchParams }: NewAppointmentPageP
 
           {/* หมายเหตุ */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">หมายเหตุ</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              หมายเหตุ
+            </label>
             <textarea
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
               rows={3}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg"
               placeholder="หมายเหตุเพิ่มเติม"
             />
           </div>
