@@ -1,10 +1,9 @@
 // app/admin/patients/[id]/appointments/page.tsx
-// ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขการโหลดแพทย์ - ดึง hospital_id จาก users table
-//    2. เพิ่ม debug logging แบบละเอียด
-//    3. แสดงชื่อโรงพยาบาลของแต่ละแพทย์
-//    4. กรองแพทย์ตามโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่าย-ลูกข่าย)
+//    1. แก้ไขปัญหา Timezone (+7 ชั่วโมง)
+//    2. แปลงเวลาให้ถูกต้องก่อนบันทึก
+//    3. แสดงเวลาให้ถูกต้องตาม timezone ประเทศไทย
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -181,7 +180,7 @@ export default function PatientAppointmentsPage() {
           console.log('✅ [loadAccessibleHospitalsForPatient] Found', subHospitals.length, 'sub hospitals');
         }
       }
-      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ
+      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ 
       else if (patientHospital.type === 'sub' && patientHospital.parent_id) {
         console.log('🏥 [loadAccessibleHospitalsForPatient] Patient is in SUB hospital');
         console.log('🏥 [loadAccessibleHospitalsForPatient] Parent hospital:', patientHospital.parent_id);
@@ -217,7 +216,7 @@ export default function PatientAppointmentsPage() {
   // ✅ โหลดแพทย์ (แก้ไขแล้ว - ดึง hospital_id จาก users table)
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍️ [loadDoctors] Starting...');
+      console.log('👨‍⚕️ [loadDoctors] Starting...');
       console.log('🏥 [loadDoctors] Hospital IDs to filter:', hospitalIds);
       console.log('👤 [loadDoctors] Current user role:', user?.role);
       
@@ -250,7 +249,7 @@ export default function PatientAppointmentsPage() {
           console.error('❌ [loadDoctors] Error fetching users:', usersError);
         } else {
           console.log('✅ [loadDoctors] Found', usersData?.length || 0, 'active users in hospitals');
-          
+           
           if (usersData && usersData.length > 0) {
             const userIds = usersData.map(u => u.id);
             console.log('👥 [loadDoctors] User IDs:', userIds);
@@ -361,6 +360,7 @@ export default function PatientAppointmentsPage() {
     }
   };
 
+  // ✅ แก้ไขปัญหา Timezone - แปลงเวลาให้ถูกต้อง
   const handleCreateAppointment = async () => {
     if (!formData.doctor_id) {
       alert('กรุณาเลือกแพทย์');
@@ -378,7 +378,19 @@ export default function PatientAppointmentsPage() {
     }
 
     try {
-      const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
+      // ✅ แก้ไขปัญหา Timezone: สร้าง DateTime object ที่ถูกต้อง
+      // ตัวอย่าง: 2026-05-22 + 11:00 = 2026-05-22T11:00:00
+      const dateTimeString = `${formData.appointment_date}T${formData.appointment_time}:00`;
+      
+      // ✅ สร้าง Date object จาก local time (ประเทศไทย UTC+7)
+      const appointmentDate = new Date(dateTimeString);
+      
+      // ✅ แปลงเป็น ISO string เพื่อเก็บใน database (UTC)
+      const appointmentDateTime = appointmentDate.toISOString();
+      
+      console.log('🕐 [handleCreateAppointment] Original input:', dateTimeString);
+      console.log('🕐 [handleCreateAppointment] Date object:', appointmentDate);
+      console.log('🕐 [handleCreateAppointment] ISO string (UTC):', appointmentDateTime);
       
       const result = await createAppointment({
         user_id: patientId,
@@ -409,7 +421,10 @@ export default function PatientAppointmentsPage() {
     if (!selectedAppointment) return;
     
     try {
-      const appointmentDateTime = `${formData.appointment_date}T${formData.appointment_time}:00`;
+      // ✅ แก้ไขปัญหา Timezone เช่นเดียวกัน
+      const dateTimeString = `${formData.appointment_date}T${formData.appointment_time}:00`;
+      const appointmentDate = new Date(dateTimeString);
+      const appointmentDateTime = appointmentDate.toISOString();
       
       const { error } = await supabase
         .from('appointments')
@@ -585,7 +600,7 @@ export default function PatientAppointmentsPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 Admin' :
-                       user?.role === 'doctor' ? '👨‍️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
