@@ -1,10 +1,32 @@
-'use client';
+// app/admin/hospitals/[id]/edit/page.tsx
+// ✅ แก้ไขล่าสุด: 4 พฤษภาคม 2569
+// ✅ ฟีเจอร์:
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. Badge แสดงประเภทโรงพยาบาล
+//    4. โหลดข้อมูลโรงพยาบาลเดิมมาแสดง
+//    5. อัปเดตข้อมูลโรงพยาบาล
+//    6. UI สอดคล้องกับหน้าเพิ่มโรงพยาบาลใหม่
 
+'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession } from '@/lib/supabase/queries';
-import { ArrowLeft, Building2, Save, X } from 'lucide-react';
+import { checkSession, logout, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { ArrowLeft, Building2, Save, Hospital, UserCheck, LogOut } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+interface UserHospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+}
 
 interface Hospital {
   id: string;
@@ -12,18 +34,8 @@ interface Hospital {
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  address?: string;
-  phone?: string;
-  province?: string;
-  district?: string;
-  subdistrict?: string;
-  postal_code?: string;
+  address: string | null;
   is_active: boolean;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
 }
 
 export default function EditHospitalPage() {
@@ -32,36 +44,50 @@ export default function EditHospitalPage() {
   const hospitalId = params.id as string;
 
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mainHospitals, setMainHospitals] = useState<Hospital[]>([]);
   const [error, setError] = useState('');
-  
+  const [success, setSuccess] = useState('');
+
   const [formData, setFormData] = useState({
     name: '',
     code: '',
     type: 'main' as 'main' | 'sub',
-    parent_id: '' as string | null,
+    parent_id: '',
     address: '',
-    phone: '',
-    province: '',
-    district: '',
-    subdistrict: '',
-    postal_code: '',
     is_active: true,
   });
 
   useEffect(() => {
     const userData = checkSession();
-    if (!userData || userData.role !== 'admin') {
+    if (!userData) {
       router.push('/admin/login');
       return;
     }
+    if (!['admin'].includes(userData.role)) {
+      alert('เฉพาะผู้ดูแลระบบเท่านั้นที่แก้ไขโรงพยาบาลได้');
+      router.push('/admin/hospitals');
+      return;
+    }
     setUser(userData);
+    loadUserHospital(userData.id);
     loadMainHospitals();
     loadHospital();
   }, [router, hospitalId]);
 
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
+
+  // ✅ โหลดโรงพยาบาลแม่ข่ายทั้งหมด (สำหรับ dropdown)
   const loadMainHospitals = async () => {
     try {
       const { data, error } = await supabase
@@ -79,6 +105,7 @@ export default function EditHospitalPage() {
     }
   };
 
+  // ✅ โหลดข้อมูลโรงพยาบาลที่จะแก้ไข
   const loadHospital = async () => {
     try {
       const { data, error } = await supabase
@@ -94,45 +121,51 @@ export default function EditHospitalPage() {
           name: data.name || '',
           code: data.code || '',
           type: data.type || 'main',
-          parent_id: data.parent_id || null,
+          parent_id: data.parent_id || '',
           address: data.address || '',
-          phone: data.phone || '',
-          province: data.province || '',
-          district: data.district || '',
-          subdistrict: data.subdistrict || '',
-          postal_code: data.postal_code || '',
           is_active: data.is_active ?? true,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading hospital:', error);
       setError('ไม่พบข้อมูลโรงพยาบาล');
+      setTimeout(() => {
+        router.push('/admin/hospitals');
+      }, 2000);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleLogout = () => {
+    logout();
+    router.push('/admin/login');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
+    setSaving(true);
 
-    // Validation
+    // ✅ Validation
     if (!formData.name.trim()) {
       setError('กรุณากรอกชื่อโรงพยาบาล');
+      setSaving(false);
       return;
     }
 
     if (!formData.code.trim()) {
       setError('กรุณากรอกรหัสโรงพยาบาล');
+      setSaving(false);
       return;
     }
 
     if (formData.type === 'sub' && !formData.parent_id) {
       setError('กรุณาเลือกโรงพยาบาลแม่ข่าย');
+      setSaving(false);
       return;
     }
-
-    setSaving(true);
 
     try {
       const updateData: any = {
@@ -141,13 +174,8 @@ export default function EditHospitalPage() {
         type: formData.type,
         parent_id: formData.type === 'sub' ? formData.parent_id : null,
         address: formData.address.trim() || null,
-        phone: formData.phone.trim() || null,
-        province: formData.province.trim() || null,
-        district: formData.district.trim() || null,
-        subdistrict: formData.subdistrict.trim() || null,
-        postal_code: formData.postal_code.trim() || null,
         is_active: formData.is_active,
-        updated_at: new Date().toISOString(),
+        // ✅ updated_at จะถูกอัปเดตโดย trigger อัตโนมัติ
       };
 
       const { error } = await supabase
@@ -164,11 +192,13 @@ export default function EditHospitalPage() {
         return;
       }
 
-      alert('✅ แก้ไขโรงพยาบาลสำเร็จ!');
-      router.push('/admin/hospitals');
+      setSuccess('✅ แก้ไขโรงพยาบาลสำเร็จ!');
+      setTimeout(() => {
+        router.push('/admin/hospitals');
+      }, 1500);
     } catch (error: any) {
       console.error('Error updating hospital:', error);
-      setError('เกิดข้อผิดพลาด: ' + error.message);
+      setError('❌ เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setSaving(false);
     }
@@ -195,28 +225,85 @@ export default function EditHospitalPage() {
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ
+            กลับหน้าจัดการโรงพยาบาล
           </button>
 
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center gap-2">
-              <Building2 className="w-8 h-8" />
-              แก้ไขข้อมูล โรงพยาบาล
-            </h1>
-            <p className="text-gray-600">ปรับปรุงข้อมูลโรงพยาบาลแม่ข่ายหรือลูกข่าย</p>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                🏥 แก้ไขข้อมูลโรงพยาบาล
+              </h1>
+              <p className="text-gray-600">ปรับปรุงข้อมูลโรงพยาบาลแม่ข่ายหรือลูกข่าย</p>
+            </div>
+
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              {userHospital && (
+                <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <UserCheck className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800 text-sm">
+                        {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">
+                        {userHospital.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                          🏥 แม่ข่าย
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                          🏥 ลูกข่าย
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-4 py-8">
+      <form onSubmit={handleSubmit} className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 space-y-6">
           
-          {/* Error Message */}
+          {/* Error/Success Messages */}
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
-              <X className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2">
               <span className="text-red-700 text-sm">{error}</span>
+            </div>
+          )}
+
+          {success && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-2">
+              <span className="text-green-700 text-sm">{success}</span>
             </div>
           )}
 
@@ -264,6 +351,7 @@ export default function EditHospitalPage() {
               value={formData.code}
               onChange={(e) => setFormData({...formData, code: e.target.value.toUpperCase()})}
               required
+              maxLength={50}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 uppercase"
               placeholder="เช่น PHETCHABUN"
             />
@@ -279,7 +367,7 @@ export default function EditHospitalPage() {
                 โรงพยาบาลแม่ข่าย <span className="text-red-500">*</span>
               </label>
               <select
-                value={formData.parent_id || ''}
+                value={formData.parent_id}
                 onChange={(e) => setFormData({...formData, parent_id: e.target.value})}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 required
@@ -293,7 +381,7 @@ export default function EditHospitalPage() {
               </select>
               {mainHospitals.length === 0 && (
                 <p className="text-xs text-orange-500 mt-1">
-                  ⚠️ ยังไม่มีโรงพยาบาลแม่ข่ายในระบบ กรุณาสร้างแม่ข่ายก่อน
+                  ⚠️ ยังไม่มีโรงพยาบาลแม่ข่ายในระบบ
                 </p>
               )}
             </div>
@@ -310,20 +398,6 @@ export default function EditHospitalPage() {
               rows={3}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               placeholder="ที่อยู่โรงพยาบาล (ถ้ามี)"
-            />
-          </div>
-
-          {/* เบอร์โทรศัพท์ */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              เบอร์โทรศัพท์
-            </label>
-            <input
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({...formData, phone: e.target.value})}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              placeholder="056-123456"
             />
           </div>
 
@@ -350,7 +424,7 @@ export default function EditHospitalPage() {
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <Save className="w-5 h-5" />
               {saving ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข'}
