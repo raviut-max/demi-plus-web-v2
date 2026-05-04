@@ -1,13 +1,14 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 4 พฤษภาคม 2569
-// ✅ ฟีเจอร์หลัก:
-//    1. จัดการเจ้าหน้าที่ (เพิ่ม/แก้ไข/ปิดการใช้งาน/กู้คืน/ลบถาวร)
-//    2. ระบบรออนุมัติ (Pending Approval)
-//    3. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
-//    4. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
-//    5. แสดงข้อมูลโรงพยาบาลในตาราง
-//    6. มีระบบ Soft Delete และ Permanent Delete
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. แก้ไขตัวแปร showDeletedModal (ลบช่องว่าง)
+//    2. แก้ไข Syntax errors ทั้งหมด
+//    3. เพิ่มระบบรออนุมัติ (Pending Approval)
+//    4. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
+//    5. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
+//    6. แสดงข้อมูลโรงพยาบาลในตาราง
+//    7. มีระบบ Soft Delete และ Permanent Delete
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -112,7 +113,7 @@ export default function StaffManagementPage() {
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
+  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false); // ✅ แก้ไขแล้ว
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
 
   // =====================================================
@@ -179,10 +180,35 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (Debug เต็มรูปแบบ)
   const loadPendingStaff = async () => {
     try {
       console.log('⏳ [loadPendingStaff] Fetching pending staff...');
+      
+      // ✅ 1. ทดสอบ Query แบบง่ายก่อน
+      console.log('🔍 [loadPendingStaff] Step 1: Testing simple query...');
+      const { data: simpleData, error: simpleError } = await supabase
+        .from('pending_staff')
+        .select('*')
+        .eq('status', 'pending');
+      
+      if (simpleError) {
+        console.error('❌ [loadPendingStaff] Simple query error:', simpleError);
+        console.error('❌ [loadPendingStaff] Error details:', {
+          message: simpleError.message,
+          details: simpleError.details,
+          hint: simpleError.hint,
+          code: simpleError.code
+        });
+      } else {
+        console.log(`✅ [loadPendingStaff] Simple query - Found ${simpleData?.length || 0} pending staff`);
+        if (simpleData && simpleData.length > 0) {
+          console.log('📋 [loadPendingStaff] Sample pending staff:', simpleData[0]);
+        }
+      }
+      
+      // ✅ 2. ทดสอบ Query แบบเต็ม (join hospitals)
+      console.log('🔍 [loadPendingStaff] Step 2: Testing full query with join...');
       const { data, error } = await supabase
         .from('pending_staff')
         .select(`
@@ -196,14 +222,39 @@ export default function StaffManagementPage() {
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('❌ [loadPendingStaff] Error:', error);
+        console.error('❌ [loadPendingStaff] Full query error:', error);
+        console.error('❌ [loadPendingStaff] Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
         return;
       }
       
-      console.log(`✅ [loadPendingStaff] Loaded ${data?.length || 0} pending staff`);
+      console.log(`✅ [loadPendingStaff] Full query - Found ${data?.length || 0} pending staff`);
+      
+      if (data && data.length > 0) {
+        console.log('📋 [loadPendingStaff] Pending staff details:', data.map(p => ({
+          id: p.id,
+          full_name: p.full_name_th,
+          status: p.status,
+          hospital_id: p.hospital_id,
+          hospital_data: p.hospitals
+        })));
+      } else {
+        console.warn('⚠️ [loadPendingStaff] No pending staff found');
+        console.log('💡 [loadPendingStaff] Possible reasons:');
+        console.log('  1. No pending staff in database');
+        console.log('  2. All pending staff have been approved/rejected');
+        console.log('  3. RLS policy blocking access');
+        console.log('  4. Join with hospitals failed');
+      }
+      
       setPendingStaff(data || []);
     } catch (error) {
       console.error('❌ [loadPendingStaff] Exception:', error);
+      console.error('❌ [loadPendingStaff] Stack:', (error as Error).stack);
     }
   };
 
@@ -331,11 +382,10 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ ปิดการใช้งานเจ้าหน้าที่ (Soft Delete)
   const handleDeactivate = async (staffId: string, staffName: string) => {
     console.log(`🔴 [handleDeactivate] Deactivating staff: ${staffId} - ${staffName}`);
     
-    if (!confirm(`คุณต้องการปิดการใช้งาน "${staffName}" หรือไม่?\n\nเจ้าหน้าที่นี้จะไม่สามารถเข้าสู่ระบบได้\n\nสามารถกู้คืนได้ที่แท็บ "ที่ปิดการใช้งาน"`)) {
+    if (!confirm(`คุณต้องการปิดการใช้งาน "${staffName}" หรือไม่?\n\nเจ้าหน้าที่นี้จะไม่สามารถเข้าสู่ระบบได้`)) {
       console.log('⚠️ [handleDeactivate] User cancelled deactivation');
       return;
     }
@@ -345,9 +395,8 @@ export default function StaffManagementPage() {
       
       if (result.success) {
         console.log('✅ [handleDeactivate] Successfully deactivated');
-        alert('✅ ปิดการใช้งานเจ้าหน้าที่สำเร็จ!\n\nสามารถกู้คืนได้ที่แท็บ "ที่ปิดการใช้งาน"');
+        alert('ปิดการใช้งานเจ้าหน้าที่สำเร็จ!');
         loadStaffList();
-        loadDeactivatedStaff();
       } else {
         console.error('❌ [handleDeactivate] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
@@ -358,7 +407,6 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ กู้คืนเจ้าหน้าที่
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
     console.log(`♻️ [handleRestoreStaff] Restoring staff: ${staffId} - ${staffName}`);
     
@@ -372,7 +420,7 @@ export default function StaffManagementPage() {
       
       if (result.success) {
         console.log('✅ [handleRestoreStaff] Successfully restored');
-        alert('✅ กู้คืนเจ้าหน้าที่สำเร็จ!');
+        alert('กู้คืนเจ้าหน้าที่สำเร็จ!');
         loadDeactivatedStaff();
         loadStaffList();
       } else {
@@ -385,7 +433,6 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ ลบเจ้าหน้าที่ถาวร (Permanent Delete)
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
     console.log(`☠️ [handlePermanentlyDeleteStaff] Permanent delete: ${staffId} - ${staffName}`);
     
@@ -404,7 +451,7 @@ export default function StaffManagementPage() {
       
       if (result.success) {
         console.log('✅ [handlePermanentlyDeleteStaff] Successfully permanently deleted');
-        alert('✅ ลบเจ้าหน้าที่ถาวรสำเร็จ!');
+        alert('ลบเจ้าหน้าที่ถาวรสำเร็จ!');
         loadDeactivatedStaff();
         loadStaffList();
       } else {
@@ -427,7 +474,7 @@ export default function StaffManagementPage() {
     console.log('🗑️ [handleOpenDeactivatedModal] Opening deactivated modal');
     setActiveTab('deactivated');
     loadDeactivatedStaff();
-    setShowDeactivatedModal(true);
+    setShowDeactivatedModal(true); // ✅ เปิด modal
   };
 
   // =====================================================
@@ -533,7 +580,7 @@ export default function StaffManagementPage() {
               </button>
             </div>
           </div>
-
+          
           {/* Tabs */}
           <div className="flex gap-2 mt-4 border-b border-gray-200">
             <button
