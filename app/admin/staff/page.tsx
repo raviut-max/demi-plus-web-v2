@@ -2,13 +2,12 @@
 // =====================================================
 // ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขตัวแปร showDeletedModal (ลบช่องว่าง)
-//    2. แก้ไข Syntax errors ทั้งหมด
-//    3. เพิ่มระบบรออนุมัติ (Pending Approval)
+//    1. แก้ไขจำนวนปิดการใช้งานไม่อัปเดต
+//    2. ✅ ลบแท็บ "ที่ปิดการใช้งาน" ออกแล้ว
+//    3. ระบบรออนุมัติ (Pending Approval)
 //    4. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
 //    5. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
 //    6. แสดงข้อมูลโรงพยาบาลในตาราง
-//    7. มีระบบ Soft Delete และ Permanent Delete
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -37,7 +36,6 @@ import {
   Shield,
   Stethoscope,
   Heart,
-  Archive,
   RotateCcw,
   Calendar,
   Key,
@@ -104,16 +102,14 @@ export default function StaffManagementPage() {
   // ✅ States สำหรับข้อมูลหลัก
   const [user, setUser] = useState<any>(null);
   const [staffList, setStaffList] = useState<any[]>([]);
-  const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
   const [pendingStaff, setPendingStaff] = useState<PendingStaff[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
   
   // ✅ States สำหรับ Modal และ Tabs
-  const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
+  const [activeTab, setActiveTab] = useState<'active' | 'pending'>('active');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false); // ✅ แก้ไขแล้ว
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
 
   // =====================================================
@@ -180,35 +176,11 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (Debug เต็มรูปแบบ)
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ
   const loadPendingStaff = async () => {
     try {
       console.log('⏳ [loadPendingStaff] Fetching pending staff...');
       
-      // ✅ 1. ทดสอบ Query แบบง่ายก่อน
-      console.log('🔍 [loadPendingStaff] Step 1: Testing simple query...');
-      const { data: simpleData, error: simpleError } = await supabase
-        .from('pending_staff')
-        .select('*')
-        .eq('status', 'pending');
-      
-      if (simpleError) {
-        console.error('❌ [loadPendingStaff] Simple query error:', simpleError);
-        console.error('❌ [loadPendingStaff] Error details:', {
-          message: simpleError.message,
-          details: simpleError.details,
-          hint: simpleError.hint,
-          code: simpleError.code
-        });
-      } else {
-        console.log(`✅ [loadPendingStaff] Simple query - Found ${simpleData?.length || 0} pending staff`);
-        if (simpleData && simpleData.length > 0) {
-          console.log('📋 [loadPendingStaff] Sample pending staff:', simpleData[0]);
-        }
-      }
-      
-      // ✅ 2. ทดสอบ Query แบบเต็ม (join hospitals)
-      console.log('🔍 [loadPendingStaff] Step 2: Testing full query with join...');
       const { data, error } = await supabase
         .from('pending_staff')
         .select(`
@@ -222,51 +194,14 @@ export default function StaffManagementPage() {
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('❌ [loadPendingStaff] Full query error:', error);
-        console.error('❌ [loadPendingStaff] Error details:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        });
+        console.error('❌ [loadPendingStaff] Error:', error);
         return;
       }
       
-      console.log(`✅ [loadPendingStaff] Full query - Found ${data?.length || 0} pending staff`);
-      
-      if (data && data.length > 0) {
-        console.log('📋 [loadPendingStaff] Pending staff details:', data.map(p => ({
-          id: p.id,
-          full_name: p.full_name_th,
-          status: p.status,
-          hospital_id: p.hospital_id,
-          hospital_data: p.hospitals
-        })));
-      } else {
-        console.warn('⚠️ [loadPendingStaff] No pending staff found');
-        console.log('💡 [loadPendingStaff] Possible reasons:');
-        console.log('  1. No pending staff in database');
-        console.log('  2. All pending staff have been approved/rejected');
-        console.log('  3. RLS policy blocking access');
-        console.log('  4. Join with hospitals failed');
-      }
-      
+      console.log(`✅ [loadPendingStaff] Loaded ${data?.length || 0} pending staff`);
       setPendingStaff(data || []);
     } catch (error) {
       console.error('❌ [loadPendingStaff] Exception:', error);
-      console.error('❌ [loadPendingStaff] Stack:', (error as Error).stack);
-    }
-  };
-
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน
-  const loadDeactivatedStaff = async () => {
-    try {
-      console.log('🗑️ [loadDeactivatedStaff] Fetching deactivated staff...');
-      const data = await getDeactivatedStaff();
-      console.log(`✅ [loadDeactivatedStaff] Loaded ${data.length} deactivated staff`);
-      setDeactivatedStaff(data);
-    } catch (error) {
-      console.error('❌ [loadDeactivatedStaff] Error:', error);
     }
   };
 
@@ -396,7 +331,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         console.log('✅ [handleDeactivate] Successfully deactivated');
         alert('ปิดการใช้งานเจ้าหน้าที่สำเร็จ!');
-        loadStaffList();
+        loadStaffList(); // ✅ โหลดใหม่เพื่ออัปเดตจำนวน
       } else {
         console.error('❌ [handleDeactivate] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
@@ -421,8 +356,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         console.log('✅ [handleRestoreStaff] Successfully restored');
         alert('กู้คืนเจ้าหน้าที่สำเร็จ!');
-        loadDeactivatedStaff();
-        loadStaffList();
+        loadStaffList(); // ✅ โหลดใหม่เพื่ออัปเดตจำนวน
       } else {
         console.error('❌ [handleRestoreStaff] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
@@ -452,8 +386,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         console.log('✅ [handlePermanentlyDeleteStaff] Successfully permanently deleted');
         alert('ลบเจ้าหน้าที่ถาวรสำเร็จ!');
-        loadDeactivatedStaff();
-        loadStaffList();
+        loadStaffList(); // ✅ โหลดใหม่เพื่ออัปเดตจำนวน
       } else {
         console.error('❌ [handlePermanentlyDeleteStaff] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
@@ -468,13 +401,6 @@ export default function StaffManagementPage() {
     console.log('✏️ [handleEdit] Opening edit modal for:', staff);
     setSelectedStaff(staff);
     setShowEditModal(true);
-  };
-
-  const handleOpenDeactivatedModal = () => {
-    console.log('🗑️ [handleOpenDeactivatedModal] Opening deactivated modal');
-    setActiveTab('deactivated');
-    loadDeactivatedStaff();
-    setShowDeactivatedModal(true); // ✅ เปิด modal
   };
 
   // =====================================================
@@ -556,14 +482,6 @@ export default function StaffManagementPage() {
               </button>
               
               <button
-                onClick={handleOpenDeactivatedModal}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
-              >
-                <Archive className="w-4 h-4" />
-                ที่ปิดการใช้งาน ({deactivatedStaff.length})
-              </button>
-              
-              <button
                 onClick={() => setShowAddModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
               >
@@ -580,7 +498,7 @@ export default function StaffManagementPage() {
               </button>
             </div>
           </div>
-          
+
           {/* Tabs */}
           <div className="flex gap-2 mt-4 border-b border-gray-200">
             <button
@@ -604,17 +522,6 @@ export default function StaffManagementPage() {
             >
               <Clock className="w-4 h-4 inline mr-2" />
               รออนุมัติ ({pendingStaff.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('deactivated')}
-              className={`px-4 py-2 font-semibold transition-colors ${
-                activeTab === 'deactivated'
-                  ? 'text-gray-600 border-b-2 border-gray-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Archive className="w-4 h-4 inline mr-2" />
-              ปิดการใช้งาน ({deactivatedStaff.length})
             </button>
           </div>
         </div>
@@ -791,6 +698,24 @@ export default function StaffManagementPage() {
                                 </button>
                               </>
                             )}
+                            {!staff.is_active && (
+                              <>
+                                <button
+                                  onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                                  className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                                  title="กู้คืน"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                  title="ลบถาวร"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -903,8 +828,6 @@ export default function StaffManagementPage() {
             </div>
           </div>
         )}
-
-        {/* Deactivated Staff - แสดงใน Modal */}
       </div>
 
       {/* Modals */}
@@ -942,94 +865,6 @@ export default function StaffManagementPage() {
             loadStaffList();
           }}
         />
-      )}
-
-      {showDeactivatedModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                  <Archive className="w-6 h-6 text-gray-600" />
-                  เจ้าหน้าที่ที่ปิดการใช้งาน ({deactivatedStaff.length})
-                </h2>
-                <button
-                  onClick={() => setShowDeactivatedModal(false)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
-                >
-                  ×
-                </button>
-              </div>
-              <p className="text-sm text-gray-500 mt-1">
-                คลิก "กู้คืน" เพื่อนำกลับมาใช้งาน หรือ "ลบถาวร" เพื่อลบออกจากระบบอย่างถาวร
-              </p>
-            </div>
-
-            <div className="p-6">
-              {deactivatedStaff.length === 0 ? (
-                <div className="text-center py-12">
-                  <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500">ไม่มีเจ้าหน้าที่ที่ปิดการใช้งาน</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {deactivatedStaff.map((staff) => (
-                    <div key={staff.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-gray-800">{staff.doctors?.full_name_th || '-'}</h3>
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                              staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                              staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
-                              'bg-yellow-100 text-yellow-700'
-                            }`}>
-                              {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
-                               staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-600 space-y-1">
-                            <p>ID Card: {staff.id_card}</p>
-                            <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
-                            <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
-                            <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at || staff.created_at).toLocaleString('th-TH')}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 ml-4">
-                          <button
-                            onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
-                            title="กู้คืน"
-                          >
-                            <RotateCcw className="w-4 h-4" />
-                            กู้คืน
-                          </button>
-                          <button
-                            onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
-                            title="ลบถาวร"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            ลบถาวร
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-6 border-t border-gray-200 bg-gray-50">
-              <button
-                onClick={() => setShowDeactivatedModal(false)}
-                className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
-              >
-                ปิด
-              </button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );
