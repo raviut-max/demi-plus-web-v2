@@ -1,15 +1,15 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 1 พฤษภาคม 2569
-// ✅ ฟีเจอร์หลัก:
-//    1. จัดการเจ้าหน้าที่ (เพิ่ม/แก้ไข/ลบ/กู้คืน)
-//    2. ระบบรออนุมัติ (Pending Approval)
-//    3. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
-//    4. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
-//    5. แสดงข้อมูลโรงพยาบาลในตาราง
-//    6. มีระบบ Soft Delete และ Permanent Delete
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. แก้ไขตัวแปร showDeletedModal (ลบช่องว่าง)
+//    2. แก้ไข Syntax errors ทั้งหมด
+//    3. เพิ่มระบบรออนุมัติ (Pending Approval)
+//    4. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
+//    5. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
+//    6. แสดงข้อมูลโรงพยาบาลในตาราง
+//    7. มีระบบ Soft Delete และ Permanent Delete
 // =====================================================
-
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -97,6 +97,7 @@ interface PendingStaff {
 // =====================================================
 // 🎯 MAIN COMPONENT
 // =====================================================
+
 export default function StaffManagementPage() {
   const router = useRouter();
   
@@ -112,15 +113,15 @@ export default function StaffManagementPage() {
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
+  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false); // ✅ แก้ไขแล้ว
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
 
   // =====================================================
   // 🔄 INITIAL DATA LOADING
   // =====================================================
+
   useEffect(() => {
     console.log('🔍 [StaffManagement] Component mounted - Checking session...');
-    
     const userData = checkSession();
     
     if (!userData) {
@@ -138,7 +139,7 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
-
+    
     setUser(userData);
     loadStaffList();
     loadHospitals();
@@ -148,7 +149,7 @@ export default function StaffManagementPage() {
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
+
   // ✅ โหลดรายชื่อโรงพยาบาลแบบ Hierarchical
   const loadHospitals = async () => {
     try {
@@ -179,85 +180,83 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ
-// ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (Debug เต็มรูปแบบ)
-const loadPendingStaff = async () => {
-  try {
-    console.log('⏳ [loadPendingStaff] Fetching pending staff...');
-    
-    // ✅ 1. ทดสอบ Query แบบง่ายก่อน
-    console.log('🔍 [loadPendingStaff] Step 1: Testing simple query...');
-    const {  simpleData, error: simpleError } = await supabase
-      .from('pending_staff')
-      .select('*')
-      .eq('status', 'pending');
-
-    if (simpleError) {
-      console.error('❌ [loadPendingStaff] Simple query error:', simpleError);
-      console.error('❌ [loadPendingStaff] Error details:', {
-        message: simpleError.message,
-        details: simpleError.details,
-        hint: simpleError.hint,
-        code: simpleError.code
-      });
-    } else {
-      console.log(`✅ [loadPendingStaff] Simple query - Found ${simpleData?.length || 0} pending staff`);
-      if (simpleData && simpleData.length > 0) {
-        console.log('📋 [loadPendingStaff] Sample pending staff:', simpleData[0]);
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (Debug เต็มรูปแบบ)
+  const loadPendingStaff = async () => {
+    try {
+      console.log('⏳ [loadPendingStaff] Fetching pending staff...');
+      
+      // ✅ 1. ทดสอบ Query แบบง่ายก่อน
+      console.log('🔍 [loadPendingStaff] Step 1: Testing simple query...');
+      const { data: simpleData, error: simpleError } = await supabase
+        .from('pending_staff')
+        .select('*')
+        .eq('status', 'pending');
+      
+      if (simpleError) {
+        console.error('❌ [loadPendingStaff] Simple query error:', simpleError);
+        console.error('❌ [loadPendingStaff] Error details:', {
+          message: simpleError.message,
+          details: simpleError.details,
+          hint: simpleError.hint,
+          code: simpleError.code
+        });
+      } else {
+        console.log(`✅ [loadPendingStaff] Simple query - Found ${simpleData?.length || 0} pending staff`);
+        if (simpleData && simpleData.length > 0) {
+          console.log('📋 [loadPendingStaff] Sample pending staff:', simpleData[0]);
+        }
       }
+      
+      // ✅ 2. ทดสอบ Query แบบเต็ม (join hospitals)
+      console.log('🔍 [loadPendingStaff] Step 2: Testing full query with join...');
+      const { data, error } = await supabase
+        .from('pending_staff')
+        .select(`
+          *,
+          hospitals (
+            name,
+            code
+          )
+        `)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        console.error('❌ [loadPendingStaff] Full query error:', error);
+        console.error('❌ [loadPendingStaff] Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        return;
+      }
+      
+      console.log(`✅ [loadPendingStaff] Full query - Found ${data?.length || 0} pending staff`);
+      
+      if (data && data.length > 0) {
+        console.log('📋 [loadPendingStaff] Pending staff details:', data.map(p => ({
+          id: p.id,
+          full_name: p.full_name_th,
+          status: p.status,
+          hospital_id: p.hospital_id,
+          hospital_data: p.hospitals
+        })));
+      } else {
+        console.warn('⚠️ [loadPendingStaff] No pending staff found');
+        console.log('💡 [loadPendingStaff] Possible reasons:');
+        console.log('  1. No pending staff in database');
+        console.log('  2. All pending staff have been approved/rejected');
+        console.log('  3. RLS policy blocking access');
+        console.log('  4. Join with hospitals failed');
+      }
+      
+      setPendingStaff(data || []);
+    } catch (error) {
+      console.error('❌ [loadPendingStaff] Exception:', error);
+      console.error('❌ [loadPendingStaff] Stack:', (error as Error).stack);
     }
-
-    // ✅ 2. ทดสอบ Query แบบเต็ม (join hospitals)
-    console.log('🔍 [loadPendingStaff] Step 2: Testing full query with join...');
-    const {  data, error } = await supabase
-      .from('pending_staff')
-      .select(`
-        *,
-        hospitals (
-          name,
-          code
-        )
-      `)
-      .eq('status', 'pending')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ [loadPendingStaff] Full query error:', error);
-      console.error('❌ [loadPendingStaff] Error details:', {
-        message: error.message,
-        details: error.details,
-        hint: error.hint,
-        code: error.code
-      });
-      return;
-    }
-
-    console.log(`✅ [loadPendingStaff] Full query - Found ${data?.length || 0} pending staff`);
-    
-    if (data && data.length > 0) {
-      console.log('📋 [loadPendingStaff] Pending staff details:', data.map(p => ({
-        id: p.id,
-        full_name: p.full_name_th,
-        status: p.status,
-        hospital_id: p.hospital_id,
-        hospital_data: p.hospitals
-      })));
-    } else {
-      console.warn('⚠️ [loadPendingStaff] No pending staff found');
-      console.log('💡 [loadPendingStaff] Possible reasons:');
-      console.log('  1. No pending staff in database');
-      console.log('  2. All pending staff have been approved/rejected');
-      console.log('  3. RLS policy blocking access');
-      console.log('  4. Join with hospitals failed');
-    }
-
-    setPendingStaff(data || []);
-  } catch (error) {
-    console.error('❌ [loadPendingStaff] Exception:', error);
-    console.error('❌ [loadPendingStaff] Stack:', (error as Error).stack);
-  }
-};
-
+  };
 
   // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน
   const loadDeactivatedStaff = async () => {
@@ -274,7 +273,7 @@ const loadPendingStaff = async () => {
   // =====================================================
   // 🎬 ACTION HANDLERS
   // =====================================================
-  
+
   const handleLogout = () => {
     console.log('🚪 [handleLogout] User logging out...');
     logout();
@@ -289,7 +288,7 @@ const loadPendingStaff = async () => {
       console.log('⚠️ [handleApprove] User cancelled approval');
       return;
     }
-
+    
     try {
       // ✅ 1. ดึงข้อมูลจาก pending_staff
       const { data: pendingData, error: fetchError } = await supabase
@@ -297,9 +296,9 @@ const loadPendingStaff = async () => {
         .select('*')
         .eq('id', pendingId)
         .single();
-
+      
       if (fetchError) throw fetchError;
-
+      
       // ✅ 2. สร้าง user ในตาราง users
       const { data: userData, error: userError } = await supabase
         .from('users')
@@ -314,9 +313,9 @@ const loadPendingStaff = async () => {
         })
         .select()
         .single();
-
+      
       if (userError) throw userError;
-
+      
       // ✅ 3. สร้าง doctor record (ถ้าเป็น doctor/helper)
       if (pendingData.role === 'doctor' || pendingData.role === 'helper') {
         await supabase
@@ -332,7 +331,7 @@ const loadPendingStaff = async () => {
             is_verified: false,
           });
       }
-
+      
       // ✅ 4. อัปเดต status เป็น approved
       await supabase
         .from('pending_staff')
@@ -342,7 +341,7 @@ const loadPendingStaff = async () => {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-
+      
       console.log('✅ [handleApprove] Successfully approved');
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\n\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff();
@@ -362,7 +361,7 @@ const loadPendingStaff = async () => {
       console.log('⚠️ [handleReject] No reason provided');
       return;
     }
-
+    
     try {
       await supabase
         .from('pending_staff')
@@ -373,7 +372,7 @@ const loadPendingStaff = async () => {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-
+      
       console.log('✅ [handleReject] Successfully rejected');
       alert(`❌ ปฏิเสธ "${staffName}" แล้ว\n\nเหตุผล: ${reason}`);
       loadPendingStaff();
@@ -441,12 +440,12 @@ const loadPendingStaff = async () => {
       console.log('⚠️ [handlePermanentlyDeleteStaff] User cancelled permanent delete');
       return;
     }
-
+    
     if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนได้\n\nพิมพ์ "YES" เพื่อยืนยัน')) {
       console.log('⚠️ [handlePermanentlyDeleteStaff] User did not confirm');
       return;
     }
-
+    
     try {
       const result = await permanentlyDeleteStaff(staffId);
       
@@ -475,14 +474,15 @@ const loadPendingStaff = async () => {
     console.log('🗑️ [handleOpenDeactivatedModal] Opening deactivated modal');
     setActiveTab('deactivated');
     loadDeactivatedStaff();
+    setShowDeactivatedModal(true); // ✅ เปิด modal
   };
 
   // =====================================================
   // 🏥 HOSPITAL GROUPING FUNCTION
   // =====================================================
+
   const getGroupedHospitals = () => {
     console.log('🏥 [getGroupedHospitals] Grouping hospitals...');
-    
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
     
@@ -498,7 +498,7 @@ const loadPendingStaff = async () => {
         hospitalGroups.get(sub.parent_id)!.push(sub);
       }
     });
-
+    
     console.log('✅ [getGroupedHospitals] Grouped into', hospitalGroups.size, 'groups');
     return { mainHospitals, hospitalGroups };
   };
@@ -506,6 +506,7 @@ const loadPendingStaff = async () => {
   // =====================================================
   // ⏳ LOADING STATE
   // =====================================================
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -520,6 +521,7 @@ const loadPendingStaff = async () => {
   // =====================================================
   // 🎨 RENDER UI
   // =====================================================
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -578,7 +580,7 @@ const loadPendingStaff = async () => {
               </button>
             </div>
           </div>
-
+          
           {/* Tabs */}
           <div className="flex gap-2 mt-4 border-b border-gray-200">
             <button
@@ -823,7 +825,7 @@ const loadPendingStaff = async () => {
                         <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                         <p>ไม่มีคำขอรออนุมัติ</p>
                         <p className="text-sm text-gray-400 mt-2">
-                          บุคลากรสามารถลงทะเบียนได้ที่ /admin/staff/register
+                          บุคลากรสามารถลงทะเบียนได้ที่ /admin/register
                         </p>
                       </td>
                     </tr>
@@ -1036,6 +1038,7 @@ const loadPendingStaff = async () => {
 // =====================================================
 // ➕ ADD STAFF MODAL COMPONENT
 // =====================================================
+
 function AddStaffModal({
   hospitals,
   getGroupedHospitals,
@@ -1049,7 +1052,7 @@ function AddStaffModal({
   onSuccess: () => void;
   userId: string
 }) {
-  console.log(' [AddStaffModal] Component mounted');
+  console.log('📝 [AddStaffModal] Component mounted');
   
   const [formData, setFormData] = useState({
     id_card: '',
@@ -1063,6 +1066,7 @@ function AddStaffModal({
     email: '',
     hospital_id: '',
   });
+  
   const [loading, setLoading] = useState(false);
 
   // ✅ Generate password from birth date (dd-mm-yyyy)
@@ -1079,7 +1083,6 @@ function AddStaffModal({
     e.preventDefault();
     console.log('📝 [AddStaffModal] Form submitted');
     console.log('📋 [AddStaffModal] Form data:', formData);
-    
     setLoading(true);
     
     try {
@@ -1090,16 +1093,16 @@ function AddStaffModal({
         setLoading(false);
         return;
       }
-
+      
       // ✅ Generate password from birth date
       const password = generatePassword();
       console.log('🔐 [AddStaffModal] Password:', password);
-
+      
       // ✅ Convert birth date to Buddhist Era (BE) to AD
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
       console.log('📅 [AddStaffModal] Birth date (AD):', birthDate);
-
+      
       // ✅ Call addStaff API
       console.log('💾 [AddStaffModal] Calling addStaff API...');
       const result = await addStaff({
@@ -1108,7 +1111,7 @@ function AddStaffModal({
         birth_date: birthDate,
         created_by: userId,
       });
-
+      
       if (result.success) {
         console.log('✅ [AddStaffModal] Staff added successfully');
         alert(`เพิ่มเจ้าหน้าที่สำเร็จ!\n\n🔐 รหัสผ่าน: ${password}\n(วัน-เดือน-ปีเกิด)`);
@@ -1133,7 +1136,6 @@ function AddStaffModal({
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* ID Card & Password */}
           <div className="grid grid-cols-2 gap-4">
@@ -1265,7 +1267,6 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
-              
               {mainHospitals.map((hospital) => (
                 <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
                   <option value={hospital.id}>
@@ -1346,6 +1347,7 @@ function AddStaffModal({
 // =====================================================
 // ✏️ EDIT STAFF MODAL COMPONENT
 // =====================================================
+
 function EditStaffModal({
   staff,
   hospitals,
@@ -1371,10 +1373,10 @@ function EditStaffModal({
       year: (date.getFullYear() + 543).toString() // Convert AD to BE
     };
   };
-
+  
   const initialBirthDate = parseBirthDate(staff.birth_date);
   console.log('📅 [EditStaffModal] Initial birth date:', initialBirthDate);
-
+  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
@@ -1385,7 +1387,7 @@ function EditStaffModal({
     birth_month: initialBirthDate.month,
     birth_year: initialBirthDate.year,
   });
-
+  
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false);
 
@@ -1403,7 +1405,6 @@ function EditStaffModal({
     e.preventDefault();
     console.log('📝 [EditStaffModal] Form submitted');
     console.log('📋 [EditStaffModal] Form data:', formData);
-    
     setLoading(true);
     
     try {
@@ -1411,7 +1412,7 @@ function EditStaffModal({
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
       console.log('📅 [EditStaffModal] Birth date (AD):', birthDate);
-
+      
       // ✅ Update doctors table
       console.log('💾 [EditStaffModal] Updating doctors table...');
       const result = await updateStaff(staff.id, {
@@ -1425,34 +1426,34 @@ function EditStaffModal({
         setLoading(false);
         return;
       }
-
+      
       // ✅ Update users table (hospital_id and birth_date)
       const updateData: any = {
         birth_date: birthDate,
       };
-
+      
       if (formData.hospital_id !== staff.hospital_id) {
         updateData.hospital_id = formData.hospital_id;
         console.log('🏥 [EditStaffModal] Hospital changed:', staff.hospital_id, '→', formData.hospital_id);
       }
-
+      
       // ✅ Reset password if checkbox is checked
       if (resetPassword) {
         const newPassword = generatePassword();
         updateData.password_hash = newPassword;
         console.log('🔐 [EditStaffModal] Password reset:', newPassword);
       }
-
+      
       // ✅ Execute update
       const { error: userError } = await supabase
         .from('users')
         .update(updateData)
         .eq('id', staff.id);
-
+      
       if (userError) {
         console.error('❌ [EditStaffModal] User update error:', userError);
       }
-
+      
       // ✅ Show success message
       let message = 'แก้ไขข้อมูลสำเร็จ!';
       if (resetPassword) {
@@ -1480,7 +1481,6 @@ function EditStaffModal({
             {staff.doctors?.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
@@ -1580,7 +1580,6 @@ function EditStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
-              
               {mainHospitals.map((hospital) => (
                 <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
                   <option value={hospital.id}>
