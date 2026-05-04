@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession } from '@/lib/supabase/queries';
-import { ArrowLeft, Building2, Save } from 'lucide-react';
+import { ArrowLeft, Building2, Save, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface Hospital {
@@ -12,8 +12,18 @@ interface Hospital {
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  address: string | null;
+  address?: string;
+  phone?: string;
+  province?: string;
+  district?: string;
+  subdistrict?: string;
+  postal_code?: string;
   is_active: boolean;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
 }
 
 export default function EditHospitalPage() {
@@ -25,6 +35,7 @@ export default function EditHospitalPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mainHospitals, setMainHospitals] = useState<Hospital[]>([]);
+  const [error, setError] = useState('');
   
   const [formData, setFormData] = useState({
     name: '',
@@ -32,6 +43,11 @@ export default function EditHospitalPage() {
     type: 'main' as 'main' | 'sub',
     parent_id: '' as string | null,
     address: '',
+    phone: '',
+    province: '',
+    district: '',
+    subdistrict: '',
+    postal_code: '',
     is_active: true,
   });
 
@@ -78,15 +94,19 @@ export default function EditHospitalPage() {
           name: data.name || '',
           code: data.code || '',
           type: data.type || 'main',
-          parent_id: data.parent_id || '',
+          parent_id: data.parent_id || null,
           address: data.address || '',
+          phone: data.phone || '',
+          province: data.province || '',
+          district: data.district || '',
+          subdistrict: data.subdistrict || '',
+          postal_code: data.postal_code || '',
           is_active: data.is_active ?? true,
         });
       }
     } catch (error) {
       console.error('Error loading hospital:', error);
-      alert('ไม่พบข้อมูลโรงพยาบาล');
-      router.push('/admin/hospitals');
+      setError('ไม่พบข้อมูลโรงพยาบาล');
     } finally {
       setLoading(false);
     }
@@ -94,20 +114,21 @@ export default function EditHospitalPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setError('');
+
     // Validation
     if (!formData.name.trim()) {
-      alert('กรุณากรอกชื่อโรงพยาบาล');
+      setError('กรุณากรอกชื่อโรงพยาบาล');
       return;
     }
-    
+
     if (!formData.code.trim()) {
-      alert('กรุณากรอกรหัสโรงพยาบาล');
+      setError('กรุณากรอกรหัสโรงพยาบาล');
       return;
     }
 
     if (formData.type === 'sub' && !formData.parent_id) {
-      alert('กรุณาเลือกโรงพยาบาลแม่ข่าย');
+      setError('กรุณาเลือกโรงพยาบาลแม่ข่าย');
       return;
     }
 
@@ -120,6 +141,11 @@ export default function EditHospitalPage() {
         type: formData.type,
         parent_id: formData.type === 'sub' ? formData.parent_id : null,
         address: formData.address.trim() || null,
+        phone: formData.phone.trim() || null,
+        province: formData.province.trim() || null,
+        district: formData.district.trim() || null,
+        subdistrict: formData.subdistrict.trim() || null,
+        postal_code: formData.postal_code.trim() || null,
         is_active: formData.is_active,
         updated_at: new Date().toISOString(),
       };
@@ -130,8 +156,8 @@ export default function EditHospitalPage() {
         .eq('id', hospitalId);
 
       if (error) {
-        if (error.code === '23505') { // Unique violation
-          alert('รหัสโรงพยาบาลนี้มีผู้ใช้งานแล้ว กรุณาใช้รหัสอื่น');
+        if (error.code === '23505') { // Unique constraint violation
+          setError('รหัสโรงพยาบาลนี้มีผู้ใช้งานแล้ว กรุณาใช้รหัสอื่น');
         } else {
           throw error;
         }
@@ -142,7 +168,7 @@ export default function EditHospitalPage() {
       router.push('/admin/hospitals');
     } catch (error: any) {
       console.error('Error updating hospital:', error);
-      alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+      setError('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setSaving(false);
     }
@@ -163,7 +189,7 @@ export default function EditHospitalPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-2xl mx-auto px-4 py-6">
+        <div className="max-w-4xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push('/admin/hospitals')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 transition-colors"
@@ -173,9 +199,9 @@ export default function EditHospitalPage() {
           </button>
 
           <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">
-              <Building2 className="w-8 h-8 inline mr-2" />
-              แก้ไขข้อมูลโรงพยาบาล
+            <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center gap-2">
+              <Building2 className="w-8 h-8" />
+              แก้ไขข้อมูล โรงพยาบาล
             </h1>
             <p className="text-gray-600">ปรับปรุงข้อมูลโรงพยาบาลแม่ข่ายหรือลูกข่าย</p>
           </div>
@@ -186,6 +212,14 @@ export default function EditHospitalPage() {
       <form onSubmit={handleSubmit} className="max-w-2xl mx-auto px-4 py-8">
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 space-y-6">
           
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
+              <X className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+              <span className="text-red-700 text-sm">{error}</span>
+            </div>
+          )}
+
           {/* ประเภทโรงพยาบาล */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -252,7 +286,9 @@ export default function EditHospitalPage() {
               >
                 <option value="">-- เลือกแม่ข่าย --</option>
                 {mainHospitals.map(h => (
-                  <option key={h.id} value={h.id}>{h.name} ({h.code})</option>
+                  <option key={h.id} value={h.id}>
+                    {h.name} ({h.code})
+                  </option>
                 ))}
               </select>
               {mainHospitals.length === 0 && (
@@ -274,6 +310,20 @@ export default function EditHospitalPage() {
               rows={3}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               placeholder="ที่อยู่โรงพยาบาล (ถ้ามี)"
+            />
+          </div>
+
+          {/* เบอร์โทรศัพท์ */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              เบอร์โทรศัพท์
+            </label>
+            <input
+              type="tel"
+              value={formData.phone}
+              onChange={(e) => setFormData({...formData, phone: e.target.value})}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="056-123456"
             />
           </div>
 
