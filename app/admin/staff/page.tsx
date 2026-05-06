@@ -2,11 +2,10 @@
 // =====================================================
 // ✅ แก้ไขล่าสุด: 6 พฤษภาคม 2569
 // ✅ การแก้ไขใหม่:
-//    1. ✅ Hospital Admin เห็นเฉพาะ staff ใน รพ.ตัวเองเท่านั้น
-//    2. ✅ Hospital Admin ไม่เห็น Super Admin
-//    3. ✅ Super Admin เห็น staff ทั้งหมด
-//    4. ✅ เพิ่มการตรวจสอบสิทธิ์ในทุก action
-//    5. ✅ แก้ไข syntax errors ทั้งหมด
+//    1. ✅ แก้ไขปัญหา Hospital Admin ไม่เห็น staff
+//    2. ✅ เพิ่มการตรวจสอบว่า user เองมี hospital_id หรือไม่
+//    3. ✅ ปรับ logic การกรองให้ถูกต้อง
+//    4. ✅ เพิ่ม debug logging
 // =====================================================
 
 'use client';
@@ -124,6 +123,7 @@ export default function StaffManagementPage() {
     console.log('👤 [StaffManagement] User:', userData);
     console.log('👑 [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
     console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
+    console.log('🏥 [StaffManagement] User hospital_id:', userData.hospital_id);
 
     setUser(userData);
     loadUserHospital(userData.id);
@@ -175,7 +175,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ (กรองตามสิทธิ์) - ✅ แก้ไขแล้ว
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ (แก้ไขแล้ว - แก้ปัญหาไม่แสดง staff)
   const loadStaffList = async () => {
     try {
       console.log('👥 [loadStaffList] Fetching staff list...');
@@ -184,6 +184,13 @@ export default function StaffManagementPage() {
       
       const allStaff = await getStaffList();
       console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
+      console.log('📊 [loadStaffList] All staff:', allStaff.map(s => ({
+        id: s.id,
+        name: s.doctors?.full_name_th,
+        hospital_id: s.hospital_id,
+        role: s.role,
+        admin_type: s.admin_type
+      })));
       
       // ✅ กรองเจ้าหน้าที่ตามสิทธิ์
       let filteredStaff = allStaff;
@@ -191,27 +198,32 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } else {
-        // ✅ Hospital Admin: เห็นเฉพาะ staff ใน รพ.ตัวเอง + ไม่เห็น Super Admin
+      } else if (accessibleHospitalIds.length > 0) {
+        // ✅ Hospital Admin: เห็นเฉพาะ staff ใน รพ.ตัวเอง
         filteredStaff = allStaff.filter(staff => {
-          // ✅ ซ่อน Super Admin จาก Hospital Admin
-          if (staff.admin_type === 'super' || staff.role === 'super_admin') {
-            console.log('🚫 [loadStaffList] Hiding Super Admin:', staff.id_card);
-            return false;
+          // ✅ 1. ถ้า staff ไม่มี hospital_id → แสดง (เช่น Super Admin)
+          if (!staff.hospital_id) {
+            console.log('✅ [loadStaffList] Showing staff without hospital_id:', staff.id_card);
+            return true;
           }
           
-          // ✅ แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้
-          const isInAccessibleHospital = !staff.hospital_id || 
-            accessibleHospitalIds.includes(staff.hospital_id);
+          // ✅ 2. ถ้า staff มี hospital_id → ตรวจสอบว่าอยู่ใน accessible hospitals หรือไม่
+          const isInAccessibleHospital = accessibleHospitalIds.includes(staff.hospital_id);
           
-          if (!isInAccessibleHospital) {
-            console.log('🚫 [loadStaffList] Hiding staff from other hospital:', staff.id_card);
+          if (isInAccessibleHospital) {
+            console.log('✅ [loadStaffList] Showing staff in accessible hospital:', staff.id_card, staff.hospital_id);
+          } else {
+            console.log('🚫 [loadStaffList] Hiding staff from other hospital:', staff.id_card, staff.hospital_id);
           }
           
           return isInAccessibleHospital;
         });
         
         console.log('📊 [loadStaffList] Filtered staff for Hospital Admin:', filteredStaff.length);
+      } else {
+        // ✅ ไม่มี accessible hospitals → ไม่แสดงอะไรเลย
+        console.log('⚠️ [loadStaffList] No accessible hospitals - showing no staff');
+        filteredStaff = [];
       }
       
       setStaffList(filteredStaff);
@@ -223,11 +235,10 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (กรองตามสิทธิ์) - ✅ แก้ไขแล้ว
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (กรองตามสิทธิ์)
   const loadPendingStaff = async () => {
     try {
       console.log('⏳ [loadPendingStaff] Fetching pending staff...');
-      
       const { data, error } = await supabase
         .from('pending_staff')
         .select(`*, hospitals (name, code)`)
@@ -246,11 +257,23 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadPendingStaff] Super Admin - showing all pending:', filteredPending.length);
-      } else {
+      } else if (accessibleHospitalIds.length > 0) {
         // ✅ Hospital Admin: เห็นเฉพาะ pending จาก รพ.ที่เข้าถึงได้
         filteredPending = filteredPending.filter(pending => {
-          return !pending.hospital_id || 
-            accessibleHospitalIds.includes(pending.hospital_id);
+          if (!pending.hospital_id) {
+            console.log('✅ [loadPendingStaff] Showing pending without hospital_id:', pending.id_card);
+            return true;
+          }
+          
+          const isInAccessibleHospital = accessibleHospitalIds.includes(pending.hospital_id);
+          
+          if (isInAccessibleHospital) {
+            console.log('✅ [loadPendingStaff] Showing pending in accessible hospital:', pending.id_card, pending.hospital_id);
+          } else {
+            console.log('🚫 [loadPendingStaff] Hiding pending from other hospital:', pending.id_card, pending.hospital_id);
+          }
+          
+          return isInAccessibleHospital;
         });
         
         console.log('📊 [loadPendingStaff] Filtered pending for Hospital Admin:', filteredPending.length);
@@ -263,7 +286,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน - ✅ แก้ไขแล้ว
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน
   const loadDeactivatedStaff = async () => {
     try {
       console.log('🗑️ [loadDeactivatedStaff] Fetching deactivated staff...');
@@ -275,7 +298,7 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadDeactivatedStaff] Super Admin - showing all deactivated:', filteredData.length);
-      } else {
+      } else if (accessibleHospitalIds.length > 0) {
         // ✅ Hospital Admin: เห็นเฉพาะ deactivated จาก รพ.ที่เข้าถึงได้
         filteredData = data.filter(staff => 
           !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id)
@@ -300,7 +323,7 @@ export default function StaffManagementPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข - ✅ แก้ไขแล้ว
+  // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข
   const canEditStaff = (staff: any): boolean => {
     // ✅ Super Admin แก้ไขได้ทั้งหมด
     if (isSuperAdmin(user)) {
@@ -326,7 +349,7 @@ export default function StaffManagementPage() {
     return false;
   };
 
-  // ✅ ตรวจสอบสิทธิ์ก่อนลบ - ✅ แก้ไขแล้ว
+  // ✅ ตรวจสอบสิทธิ์ก่อนลบ
   const canDeleteStaff = (staff: any): boolean => {
     return canEditStaff(staff);
   };
@@ -343,7 +366,7 @@ export default function StaffManagementPage() {
       
       if (fetchError) throw fetchError;
 
-      // ✅ ตรวจสอบสิทธิ์การอนุมัติ - ✅ แก้ไขแล้ว
+      // ✅ ตรวจสอบสิทธิ์การอนุมัติ
       if (!isSuperAdmin(user) && pendingData.hospital_id && 
           !accessibleHospitalIds.includes(pendingData.hospital_id)) {
         alert('❌ คุณไม่มีสิทธิ์อนุมัติเจ้าหน้าที่โรงพยาบาลนี้');
@@ -424,10 +447,8 @@ export default function StaffManagementPage() {
   };
 
   const handleDeactivate = async (staffId: string, staffName: string) => {
-    // ✅ หาข้อมูล staff ที่เลือก
     const staff = staffList.find(s => s.id === staffId);
     
-    // ✅ ตรวจสอบสิทธิ์ก่อนลบ - ✅ แก้ไขแล้ว
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
@@ -452,7 +473,6 @@ export default function StaffManagementPage() {
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
     
-    // ✅ ตรวจสอบสิทธิ์ก่อนกู้คืน - ✅ แก้ไขแล้ว
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
@@ -478,7 +498,6 @@ export default function StaffManagementPage() {
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
     
-    // ✅ ตรวจสอบสิทธิ์ก่อนลบถาวร - ✅ แก้ไขแล้ว
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
@@ -503,7 +522,6 @@ export default function StaffManagementPage() {
   };
 
   const handleEdit = (staff: any) => {
-    // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข - ✅ แก้ไขแล้ว
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
       return;
@@ -576,7 +594,7 @@ export default function StaffManagementPage() {
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
               <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ และเจ้าหน้าที่</p>
               
-              {/* ✅ แสดงข้อมูลสิทธิ์ - ✅ แก้ไขแล้ว */}
+              {/* ✅ แสดงข้อมูลสิทธิ์ */}
               <div className="flex items-center gap-2 mt-2">
                 {isSuperAdmin(user) ? (
                   <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1">
@@ -759,7 +777,6 @@ export default function StaffManagementPage() {
                   ) : (
                     staffList.map((staff) => {
                       const canEdit = canEditStaff(staff);
-                      const isAdmin = staff.role === 'admin';
                       const isSuper = staff.admin_type === 'super' || staff.role === 'super_admin';
                       
                       return (
