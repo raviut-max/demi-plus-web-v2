@@ -124,6 +124,7 @@ export async function getProfile(userId: string) {
 // =====================================================
 // ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin)
 // =====================================================
+/*
 export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
   try {
     console.log('🔍 [getPatientList] Called with hospitalIds:', hospitalIds);
@@ -192,7 +193,7 @@ export async function getPatientList(search?: string, pamLevel?: string, hospita
     console.error('❌ [getPatientList] Exception:', err);
     return [];
   }
-}
+}*/
 
 // =====================================================
 // ฟังก์ชันกู้คืนผู้ป่วย (Restore)
@@ -2705,7 +2706,8 @@ export async function getHospitalsWithHierarchy() {
  * - แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
  * - ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
  */
-export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
+/*
+export async function getAccessibleHospitalIds_0(userId: string): Promise<string[]> {
   try {
     console.log('🔍 Getting accessible hospitals for user:', userId);
     
@@ -2778,11 +2780,13 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
     return [];
   }
 }
+*/
 
 /**
  * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
  */
-export async function getUserHospitalInfo(userId: string) {
+/*
+export async function getUserHospitalInfo_0(userId: string) {
   try {
     const { data, error } = await supabase
       .from('users')
@@ -2813,4 +2817,268 @@ export async function getUserHospitalInfo(userId: string) {
     console.error('Error fetching user hospital info:', err);
     return null;
   }
+}
+*/
+
+// =====================================================
+// ✅ เพิ่มใหม่: Helper Functions สำหรับ Super Admin System
+// =====================================================
+
+/**
+ * ตรวจสอบว่าเป็น Super Admin หรือไม่
+ * Super Admin = admin_type = 'super' หรือ role = 'super_admin'
+ */
+export function isSuperAdmin(userData: any): boolean {
+  if (!userData) return false;
+  return userData.admin_type === 'super' || userData.role === 'super_admin';
+}
+
+/**
+ * ตรวจสอบว่าเป็น Hospital Admin หรือไม่
+ * Hospital Admin = admin_type = 'hospital' หรือ role = 'admin' + มี hospital_id
+ */
+export function isHospitalAdmin(userData: any): boolean {
+  if (!userData) return false;
+  return userData.admin_type === 'hospital' || 
+         (userData.role === 'admin' && userData.hospital_id);
+}
+
+/**
+ * ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
+ * - Super Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
+ * - Hospital Admin (แม่ข่าย): เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+ * - Hospital Admin (ลูกข่าย): เข้าถึงเฉพาะตัวเองเท่านั้น
+ */
+export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
+  try {
+    console.log('🔍 [getAccessibleHospitalIds] Getting accessible hospitals for user:', userId);
+    
+    // ✅ 1. ดึงข้อมูลผู้ใช้ (role + admin_type + hospital_id)
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('role, admin_type, hospital_id')
+      .eq('id', userId)
+      .single();
+    
+    if (userError || !userData) {
+      console.error('❌ [getAccessibleHospitalIds] Error fetching user data:', userError);
+      return [];
+    }
+    
+    console.log('📊 [getAccessibleHospitalIds] User data:', {
+      role: userData.role,
+      admin_type: userData.admin_type,
+      hospital_id: userData.hospital_id
+    });
+    
+    // ✅ 2. ถ้าเป็น Super Admin → เข้าถึงทั้งหมด (return empty = ไม่กรอง)
+    if (isSuperAdmin(userData)) {
+      console.log('👑 [getAccessibleHospitalIds] Super Admin - can access all hospitals');
+      return []; // Empty array = ไม่มีการกรอง
+    }
+    
+    // ✅ 3. ถ้าไม่มี hospital_id → ไม่สามารถเข้าถึงอะไรได้
+    if (!userData.hospital_id) {
+      console.log('⚠️ [getAccessibleHospitalIds] User has no hospital assigned');
+      return [];
+    }
+    
+    // ✅ 4. ดึงข้อมูลโรงพยาบาลของผู้ใช้
+    const { data: hospitalData, error: hospitalError } = await supabase
+      .from('hospitals')
+      .select('id, type, parent_id')
+      .eq('id', userData.hospital_id)
+      .single();
+    
+    if (hospitalError || !hospitalData) {
+      console.error('❌ [getAccessibleHospitalIds] Error fetching hospital data:', hospitalError);
+      return [];
+    }
+    
+    console.log('🏥 [getAccessibleHospitalIds] User hospital:', {
+      id: hospitalData.id,
+      type: hospitalData.type,
+      parent_id: hospitalData.parent_id
+    });
+    
+    // ✅ 5. ตรวจสอบประเภทโรงพยาบาล
+    if (hospitalData.type === 'main') {
+      // ✅ แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+      const accessibleIds: string[] = [hospitalData.id];
+      
+      // ดึงลูกข่ายทั้งหมดที่อยู่ใต้แม่ข่ายนี้
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalData.id)
+        .eq('is_active', true);
+      
+      if (subHospitals && subHospitals.length > 0) {
+        subHospitals.forEach(sub => accessibleIds.push(sub.id));
+        console.log('✅ [getAccessibleHospitalIds] Found', subHospitals.length, 'sub hospitals');
+      }
+      
+      console.log('🏥 [getAccessibleHospitalIds] Main hospital - accessible:', accessibleIds.length, 'hospitals');
+      return accessibleIds;
+      
+    } else if (hospitalData.type === 'sub') {
+      // ✅ ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
+      console.log('🏥 [getAccessibleHospitalIds] Sub hospital - accessible: 1 hospital (own)');
+      return [hospitalData.id];
+    }
+    
+    return [];
+    
+  } catch (err) {
+    console.error('❌ [getAccessibleHospitalIds] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
+ */
+export async function getUserHospitalInfo(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        hospital_id,
+        hospitals (
+          id,
+          name,
+          code,
+          type,
+          parent_id,
+          parent_hospital:hospitals!parent_id (
+            id,
+            name,
+            code
+          )
+        )
+      `)
+      .eq('id', userId)
+      .single();
+    
+    if (error || !data) {
+      return null;
+    }
+    
+    return data.hospitals;
+  } catch (err) {
+    console.error('Error fetching user hospital info:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// ✅ อัปเดตฟังก์ชันเดิมให้ใช้ Helper Functions ใหม่
+// =====================================================
+
+// ✅ อัปเดต getPatientList ให้รับ hospitalIds แทน userId
+export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
+  try {
+    console.log('🔍 [getPatientList] Called with hospitalIds:', hospitalIds);
+    
+    // ✅ 1. สร้าง query
+    let query = supabase
+      .from('profiles')
+      .select(`
+        *, 
+        users!profiles_id_fkey ( 
+          id_card, 
+          role, 
+          is_active, 
+          created_at 
+        ), 
+        hospitals ( 
+          id, 
+          name, 
+          code,
+          type
+        )
+      `)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    // ✅ 2. กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้ามี hospitalIds)
+    if (hospitalIds && hospitalIds.length > 0) {
+      console.log('🏥 [getPatientList] Filtering by hospitalIds:', hospitalIds);
+      query = query.in('hospital_id', hospitalIds);
+    } else if (hospitalIds && hospitalIds.length === 0) {
+      // ✅ Super Admin (empty array = ไม่กรอง)
+      console.log('👑 [getPatientList] Super Admin - showing all patients');
+    } else {
+      // ✅ ไม่มีการส่ง hospitalIds มา
+      console.log('⚠️ [getPatientList] No hospitalIds provided');
+    }
+
+    // ✅ 3. ค้นหา
+    if (search) {
+      query = query.or(
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+      );
+    }
+
+    // ✅ 4. กรองตาม PAM Level
+    if (pamLevel) {
+      query = query.eq('pam_level', pamLevel);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ [getPatientList] Error:', error);
+      return [];
+    }
+
+    const patientsWithData = data?.map(patient => ({
+      ...patient,
+      full_name: patient.first_name && patient.last_name 
+        ? `${patient.first_name} ${patient.last_name}` 
+        : '',
+    })) || [];
+
+    console.log('📊 [getPatientList] Total patients (filtered):', patientsWithData.length);
+    return patientsWithData;
+  } catch (err) {
+    console.error('❌ [getPatientList] Exception:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// ✅ ฟังก์ชันเดิมที่เหลือ (คงไว้)
+// =====================================================
+
+// ... (ฟังก์ชันเดิมทั้งหมดคงไว้ เช่น login, logout, checkSession, etc.)
+
+// ✅ เพิ่มฟังก์ชันตรวจสอบสิทธิ์สำหรับแต่ละหน้า
+export function checkAdminPermission(userData: any, requiredType?: 'super' | 'hospital'): boolean {
+  if (!userData) return false;
+  
+  // ✅ ถ้าไม่ระบุ type → ตรวจสอบแค่ว่าเป็น admin หรือไม่
+  if (!requiredType) {
+    return userData.role === 'admin' || userData.admin_type === 'super' || userData.admin_type === 'hospital';
+  }
+  
+  // ✅ ตรวจสอบตาม type ที่ต้องการ
+  if (requiredType === 'super') {
+    return isSuperAdmin(userData);
+  }
+  
+  if (requiredType === 'hospital') {
+    return isHospitalAdmin(userData);
+  }
+  
+  return false;
+}
+
+// ✅ ฟังก์ชันกรองข้อมูลตามสิทธิ์ (ใช้สำหรับทุกหน้า)
+export async function filterDataByHospitalPermission<T>(
+  userId: string,
+  fetchData: (hospitalIds: string[]) => Promise<T[]>
+): Promise<T[]> {
+  const hospitalIds = await getAccessibleHospitalIds(userId);
+  return fetchData(hospitalIds);
 }
