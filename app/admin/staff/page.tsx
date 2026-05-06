@@ -356,7 +356,7 @@ export default function StaffManagementPage() {
 
   const handleApprove = async (pendingId: string, staffName: string) => {
     if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
-
+    
     try {
       const { data: pendingData, error: fetchError } = await supabase
         .from('pending_staff')
@@ -426,7 +426,7 @@ export default function StaffManagementPage() {
   const handleReject = async (pendingId: string, staffName: string) => {
     const reason = prompt('เหตุผลในการปฏิเสธ:', '');
     if (!reason) return;
-
+    
     try {
       await supabase
         .from('pending_staff')
@@ -1139,7 +1139,7 @@ function AddStaffModal({
   
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
-  
+
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
@@ -1338,7 +1338,7 @@ function AddStaffModal({
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
               <option value="doctor">👨‍⚕️ แพทย์</option>
-              <option value="helper">👩‍💼 เจ้าหน้าที่</option>
+              <option value="helper">👩‍ เจ้าหน้าที่</option>
             </select>
             {!isSuper && (
               <p className="text-xs text-blue-600 mt-1">
@@ -1510,6 +1510,7 @@ function EditStaffModal({
   };
 
   const initialBirthDate = parseBirthDate(staff.birth_date);
+  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
