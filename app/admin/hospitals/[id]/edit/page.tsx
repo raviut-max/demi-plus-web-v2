@@ -1,18 +1,19 @@
 // app/admin/hospitals/[id]/edit/page.tsx
 // ✅ แก้ไขล่าสุด: 4 พฤษภาคม 2569
-// ✅ ฟีเจอร์:
+// ✅ การแก้ไข:
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. Badge แสดงประเภทโรงพยาบาล
 //    4. โหลดข้อมูลโรงพยาบาลเดิมมาแสดง
 //    5. อัปเดตข้อมูลโรงพยาบาล
 //    6. UI สอดคล้องกับหน้าเพิ่มโรงพยาบาลใหม่
+//    7. เพิ่มปุ่ม Logout
 
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, logout, getUserHospitalInfo } from '@/lib/supabase/queries';
-import { ArrowLeft, Building2, Save, Hospital, UserCheck, LogOut } from 'lucide-react';
+import { ArrowLeft, Building2, Save, Hospital, UserCheck, LogOut, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -50,7 +51,6 @@ export default function EditHospitalPage() {
   const [mainHospitals, setMainHospitals] = useState<Hospital[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -71,6 +71,7 @@ export default function EditHospitalPage() {
       router.push('/admin/hospitals');
       return;
     }
+
     setUser(userData);
     loadUserHospital(userData.id);
     loadMainHospitals();
@@ -297,12 +298,14 @@ export default function EditHospitalPage() {
           {/* Error/Success Messages */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
               <span className="text-red-700 text-sm">{error}</span>
             </div>
           )}
 
           {success && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
               <span className="text-green-700 text-sm">{success}</span>
             </div>
           )}
