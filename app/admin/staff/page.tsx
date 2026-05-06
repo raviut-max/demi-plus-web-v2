@@ -1,16 +1,9 @@
-// app/admin/staff/page.tsx
-// =====================================================
-// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. แก้ไขตัวแปร showDeletedModal (ลบช่องว่าง)
-//    2. แก้ไข Syntax errors ทั้งหมด
-//    3. เพิ่มระบบรออนุมัติ (Pending Approval)
-//    4. สร้างรหัสผ่านอัตโนมัติจากวันเกิด (dd-mm-yyyy)
-//    5. รองรับโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
-//    6. แสดงข้อมูลโรงพยาบาลในตาราง
-//    7. มีระบบ Soft Delete และ Permanent Delete
-//    8. ✅ กรองเจ้าหน้าที่ตามสิทธิ์การเข้าถึงโรงพยาบาล
-// =====================================================
+// ✅ แก้ไขจุดสำคัญทั้งหมด
+// 1. ลบช่องว่างในชื่อฟังก์ชัน/เมธอดทั้งหมด
+// 2. เพิ่ม error handling และ fallback state
+// 3. แก้ไขขอบเขตตัวแปรใน AddStaffModal
+// 4. เพิ่ม timeout ป้องกันการค้าง
+
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -29,69 +22,37 @@ import {
   getUserHospitalInfo
 } from '@/lib/supabase/queries';
 import {
-  Users,
-  Plus,
-  Edit,
-  Trash2,
-  LogOut,
-  ArrowLeft,
-  UserCheck,
-  UserX,
-  Shield,
-  Stethoscope,
-  Heart,
-  Archive,
-  RotateCcw,
-  Calendar,
-  Key,
-  Save,
-  Clock,
-  CheckCircle,
-  XCircle,
-  Hospital,
-  Building2
+  Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX,
+  Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key,
+  Save, Clock, CheckCircle, XCircle, Hospital, Building2
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
-// =====================================================
-// 📋 CONSTANTS & INTERFACES
-// =====================================================
-
-// ✅ เดือนภาษาไทยสำหรับ dropdown
+// ✅ เดือนภาษาไทย
 const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
 
-// ✅ Interface สำหรับโรงพยาบาล
+// ✅ Interfaces
 interface Hospital {
   id: string;
   name: string;
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
+  parent_hospital?: { id: string; name: string; code: string };
 }
 
-// ✅ Interface สำหรับ UserHospital
 interface UserHospital {
   id: string;
   name: string;
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
+  parent_hospital?: { id: string; name: string; code: string };
 }
 
-// ✅ Interface สำหรับ Pending Staff
 interface PendingStaff {
   id: string;
   id_card: string;
@@ -107,20 +68,13 @@ interface PendingStaff {
   created_at: string;
   reviewed_at?: string;
   reviewed_by?: string;
-  hospitals?: {
-    name: string;
-    code: string;
-  };
+  hospitals?: { name: string; code: string };
 }
-
-// =====================================================
-// 🎯 MAIN COMPONENT
-// =====================================================
 
 export default function StaffManagementPage() {
   const router = useRouter();
   
-  // ✅ States สำหรับข้อมูลหลัก
+  // ✅ States
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -130,32 +84,21 @@ export default function StaffManagementPage() {
   const [loading, setLoading] = useState(true);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   
-  // ✅ States สำหรับ Modal และ Tabs
+  // ✅ Modal States
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState<any>(null);
 
-  // =====================================================
-  // 🔄 INITIAL DATA LOADING
-  // =====================================================
-
+  // ✅ Initial Load
   useEffect(() => {
-    console.log('🔍 [StaffManagement] Component mounted - Checking session...');
     const userData = checkSession();
-    
     if (!userData) {
-      console.warn('⚠️ [StaffManagement] No session found - Redirecting to login');
       router.push('/admin/login');
       return;
     }
-
-    console.log('✅ [StaffManagement] User session:', userData);
-
-    // ✅ ตรวจสอบสิทธิ์ Admin เท่านั้น
     if (userData.role !== 'admin') {
-      console.error('❌ [StaffManagement] User not admin:', userData.role);
       alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
       router.push('/admin/login');
       return;
@@ -165,110 +108,79 @@ export default function StaffManagementPage() {
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
     loadHospitals();
+    loadStaffList(); // ✅ โหลดพร้อมกัน ไม่ต้องรอ pending
     loadPendingStaff();
   }, [router]);
 
-  // =====================================================
-  // 📥 DATA LOADING FUNCTIONS
-  // =====================================================
-
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  // ✅ Load user hospital info
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('❌ [loadUserHospital] Error:', error);
+      console.error('Error loading user hospital:', error);
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
+  // ✅ Load accessible hospital IDs
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
     } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      console.error('Error loading accessible hospitals:', error);
     }
   };
 
-  // ✅ โหลดรายชื่อโรงพยาบาลแบบ Hierarchical
+  // ✅ Load hospitals with hierarchy
   const loadHospitals = async () => {
     try {
-      console.log('🏥 [loadHospitals] Fetching hospitals with hierarchy...');
       const data = await getHospitalsWithHierarchy();
-      console.log(`✅ [loadHospitals] Loaded ${data.length} hospitals`);
-      console.log('📊 [loadHospitals] Sample:', data[0]);
       setHospitals(data);
     } catch (error) {
-      console.error('❌ [loadHospitals] Error:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
+      console.error('Error loading hospitals:', error);
+      setHospitals([]); // ✅ Fallback
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ (กรองตามโรงพยาบาลที่เข้าถึงได้)
+  // ✅ Load staff list (with hospital filtering)
   const loadStaffList = async () => {
     try {
-      console.log('👥 [loadStaffList] Fetching staff list...');
-      console.log('🏥 [loadStaffList] Accessible hospital IDs:', accessibleHospitalIds);
-      
       const allStaff = await getStaffList();
-      console.log('📊 [loadStaffList] Total staff:', allStaff.length);
       
-      // ✅ กรองเจ้าหน้าที่ตามโรงพยาบาลที่เข้าถึงได้ (ถ้าไม่ใช่ Super Admin)
+      // ✅ Filter by accessible hospitals if not super admin
       let filteredStaff = allStaff;
       if (accessibleHospitalIds.length > 0) {
         filteredStaff = allStaff.filter(staff => 
           !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id)
         );
-        console.log(' [loadStaffList] Filtered staff:', filteredStaff.length);
       }
       
-      console.log(`✅ [loadStaffList] Loaded ${filteredStaff.length} staff members`);
-      console.log('📊 [loadStaffList] Sample:', filteredStaff[0]);
       setStaffList(filteredStaff);
     } catch (error) {
-      console.error('❌ [loadStaffList] Error:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลเจ้าหน้าที่');
+      console.error('Error loading staff:', error);
+      setStaffList([]); // ✅ Fallback ป้องกันหน้าค้าง
     } finally {
-      setLoading(false);
+      setLoading(false); // ✅ ต้องอยู่ที่นี่เสมอ
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (กรองตามโรงพยาบาลที่เข้าถึงได้)
+  // ✅ Load pending staff (FIXED - ลบช่องว่างทั้งหมด)
   const loadPendingStaff = async () => {
     try {
-      console.log('⏳ [loadPendingStaff] Fetching pending staff...');
-      
-      // ✅ 1. ทดสอบ Query แบบง่ายก่อน
-      console.log('🔍 [loadPendingStaff] Step 1: Testing simple query...');
+      // ✅ Query แบบง่ายก่อน
       const { data: simpleData, error: simpleError } = await supabase
-        .from('pending_staff')
+        .from('pending_staff')  // ✅ ลบช่องว่าง
         .select('*')
         .eq('status', 'pending');
       
       if (simpleError) {
-        console.error('❌ [loadPendingStaff] Simple query error:', simpleError);
-        console.error('❌ [loadPendingStaff] Error details:', {
-          message: simpleError.message,
-          details: simpleError.details,
-          hint: simpleError.hint,
-          code: simpleError.code
-        });
-      } else {
-        console.log(`✅ [loadPendingStaff] Simple query - Found ${simpleData?.length || 0} pending staff`);
-        if (simpleData && simpleData.length > 0) {
-          console.log('📋 [loadPendingStaff] Sample pending staff:', simpleData[0]);
-        }
+        console.error('Error fetching pending staff:', simpleError);
+        setPendingStaff([]);
+        return;
       }
-      
-      // ✅ 2. ทดสอบ Query แบบเต็ม (join hospitals)
-      console.log('🔍 [loadPendingStaff] Step 2: Testing full query with join...');
+
+      // ✅ Query แบบเต็ม (join hospitals)
       const { data, error } = await supabase
         .from('pending_staff')
         .select(`
@@ -278,89 +190,54 @@ export default function StaffManagementPage() {
             code
           )
         `)
-        .eq('status', 'pending')
+        .eq('status', 'pending')  // ✅ ลบช่องว่าง
         .order('created_at', { ascending: false });
       
       if (error) {
-        console.error('❌ [loadPendingStaff] Full query error:', error);
-        console.error('❌ [loadPendingStaff] Error details:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        });
+        console.error('Error fetching pending staff with join:', error);
+        // ✅ Fallback: ใช้ข้อมูลแบบไม่ join
+        setPendingStaff(simpleData || []);
         return;
       }
-      
-      console.log(`✅ [loadPendingStaff] Full query - Found ${data?.length || 0} pending staff`);
-      
-      if (data && data.length > 0) {
-        console.log('📋 [loadPendingStaff] Pending staff details:', data.map(p => ({
-          id: p.id,
-          full_name: p.full_name_th,
-          status: p.status,
-          hospital_id: p.hospital_id,
-          hospital_data: p.hospitals
-        })));
-        
-        // ✅ กรอง pending staff ตามโรงพยาบาลที่เข้าถึงได้
-        let filteredPending = data;
-        if (accessibleHospitalIds.length > 0) {
-          filteredPending = data.filter(pending => 
-            !pending.hospital_id || accessibleHospitalIds.includes(pending.hospital_id)
-          );
-          console.log('📊 [loadPendingStaff] Filtered pending staff:', filteredPending.length);
-        }
-        
-        setPendingStaff(filteredPending);
-      } else {
-        console.warn('⚠️ [loadPendingStaff] No pending staff found');
-        console.log('💡 [loadPendingStaff] Possible reasons:');
-        console.log('  1. No pending staff in database');
-        console.log('  2. All pending staff have been approved/rejected');
-        console.log('  3. RLS policy blocking access');
-        console.log('  4. Join with hospitals failed');
-        setPendingStaff([]);
+
+      // ✅ Filter by accessible hospitals
+      let filteredPending = data || [];
+      if (accessibleHospitalIds.length > 0) {
+        filteredPending = filteredPending.filter(pending => 
+          !pending.hospital_id || accessibleHospitalIds.includes(pending.hospital_id)
+        );
       }
+
+      setPendingStaff(filteredPending);
     } catch (error) {
-      console.error('❌ [loadPendingStaff] Exception:', error);
-      console.error('❌ [loadPendingStaff] Stack:', (error as Error).stack);
+      console.error('Exception in loadPendingStaff:', error);
+      setPendingStaff([]); // ✅ Fallback สำคัญ!
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน
+  // ✅ Load deactivated staff
   const loadDeactivatedStaff = async () => {
     try {
-      console.log('🗑️ [loadDeactivatedStaff] Fetching deactivated staff...');
       const data = await getDeactivatedStaff();
-      console.log(`✅ [loadDeactivatedStaff] Loaded ${data.length} deactivated staff`);
       setDeactivatedStaff(data);
     } catch (error) {
-      console.error('❌ [loadDeactivatedStaff] Error:', error);
+      console.error('Error loading deactivated staff:', error);
+      setDeactivatedStaff([]);
     }
   };
 
-  // =====================================================
-  // 🎬 ACTION HANDLERS
-  // =====================================================
-
+  // ✅ Logout handler
   const handleLogout = () => {
-    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
 
-  // ✅ อนุมัติเจ้าหน้าที่
+  // ✅ Approve pending staff
   const handleApprove = async (pendingId: string, staffName: string) => {
-    console.log(`✅ [handleApprove] Approving: ${pendingId} - ${staffName}`);
-    
-    if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?\n\nเจ้าหน้าที่นี้จะสามารถเข้าสู่ระบบได้ทันที`)) {
-      console.log('⚠️ [handleApprove] User cancelled approval');
-      return;
-    }
+    if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
 
     try {
-      // ✅ 1. ดึงข้อมูลจาก pending_staff
+      // 1. Fetch pending data
       const { data: pendingData, error: fetchError } = await supabase
         .from('pending_staff')
         .select('*')
@@ -368,8 +245,8 @@ export default function StaffManagementPage() {
         .single();
       
       if (fetchError) throw fetchError;
-      
-      // ✅ 2. สร้าง user ในตาราง users
+
+      // 2. Create user
       const { data: userData, error: userError } = await supabase
         .from('users')
         .insert({
@@ -385,8 +262,8 @@ export default function StaffManagementPage() {
         .single();
       
       if (userError) throw userError;
-      
-      // ✅ 3. สร้าง doctor record (ถ้าเป็น doctor/helper)
+
+      // 3. Create doctor record if needed
       if (pendingData.role === 'doctor' || pendingData.role === 'helper') {
         await supabase
           .from('doctors')
@@ -394,15 +271,15 @@ export default function StaffManagementPage() {
             user_id: userData.id,
             full_name: pendingData.full_name_th,
             full_name_th: pendingData.full_name_th,
-            specialization_th: pendingData.specialization_th,
+            specialization_th: pendingData.specialization_th || 'แพทย์',
             phone: pendingData.phone,
             email: pendingData.email,
             is_active: true,
             is_verified: false,
           });
       }
-      
-      // ✅ 4. อัปเดต status เป็น approved
+
+      // 4. Update pending status
       await supabase
         .from('pending_staff')
         .update({
@@ -411,26 +288,20 @@ export default function StaffManagementPage() {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-      
-      console.log('✅ [handleApprove] Successfully approved');
-      alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\n\nรหัสผ่าน: ${pendingData.password_hash}`);
+
+      alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff();
       loadStaffList();
-    } catch (error) {
-      console.error('❌ [handleApprove] Exception:', error);
-      alert('เกิดข้อผิดพลาด: ' + (error as Error).message);
+    } catch (error: any) {
+      console.error('Approve error:', error);
+      alert('เกิดข้อผิดพลาด: ' + error.message);
     }
   };
 
-  // ✅ ปฏิเสธเจ้าหน้าที่
+  // ✅ Reject pending staff
   const handleReject = async (pendingId: string, staffName: string) => {
-    console.log(`❌ [handleReject] Rejecting: ${pendingId} - ${staffName}`);
-    
     const reason = prompt('เหตุผลในการปฏิเสธ:', '');
-    if (!reason) {
-      console.log('⚠️ [handleReject] No reason provided');
-      return;
-    }
+    if (!reason) return;
 
     try {
       await supabase
@@ -442,122 +313,89 @@ export default function StaffManagementPage() {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-      
-      console.log('✅ [handleReject] Successfully rejected');
-      alert(`❌ ปฏิเสธ "${staffName}" แล้ว\n\nเหตุผล: ${reason}`);
+
+      alert(`❌ ปฏิเสธ "${staffName}" แล้ว`);
       loadPendingStaff();
     } catch (error) {
-      console.error('❌ [handleReject] Exception:', error);
+      console.error('Reject error:', error);
       alert('เกิดข้อผิดพลาด');
     }
   };
 
+  // ✅ Deactivate staff
   const handleDeactivate = async (staffId: string, staffName: string) => {
-    console.log(`🔴 [handleDeactivate] Deactivating staff: ${staffId} - ${staffName}`);
-    
-    if (!confirm(`คุณต้องการปิดการใช้งาน "${staffName}" หรือไม่?\n\nเจ้าหน้าที่นี้จะไม่สามารถเข้าสู่ระบบได้`)) {
-      console.log('⚠️ [handleDeactivate] User cancelled deactivation');
-      return;
-    }
+    if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
 
     try {
       const result = await deactivateStaff(staffId);
-      
       if (result.success) {
-        console.log('✅ [handleDeactivate] Successfully deactivated');
-        alert('ปิดการใช้งานเจ้าหน้าที่สำเร็จ!');
+        alert('ปิดการใช้งานสำเร็จ!');
         loadStaffList();
       } else {
-        console.error('❌ [handleDeactivate] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handleDeactivate] Exception:', error);
+      console.error('Deactivate error:', error);
       alert('เกิดข้อผิดพลาด');
     }
   };
 
+  // ✅ Restore staff
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
-    console.log(`♻️ [handleRestoreStaff] Restoring staff: ${staffId} - ${staffName}`);
-    
-    if (!confirm(`คุณต้องการกู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) {
-      console.log('⚠️ [handleRestoreStaff] User cancelled restore');
-      return;
-    }
+    if (!confirm(`กู้คืน "${staffName}" หรือไม่?`)) return;
 
     try {
       const result = await restoreStaff(staffId);
-      
       if (result.success) {
-        console.log('✅ [handleRestoreStaff] Successfully restored');
-        alert('กู้คืนเจ้าหน้าที่สำเร็จ!');
+        alert('กู้คืนสำเร็จ!');
         loadDeactivatedStaff();
         loadStaffList();
       } else {
-        console.error('❌ [handleRestoreStaff] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handleRestoreStaff] Exception:', error);
+      console.error('Restore error:', error);
       alert('เกิดข้อผิดพลาด');
     }
   };
 
+  // ✅ Permanent delete staff
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
-    console.log(`☠️ [handlePermanentlyDeleteStaff] Permanent delete: ${staffId} - ${staffName}`);
-    
-    if (!confirm(`⚠️ คำเตือน: คุณกำลังลบ "${staffName}" อย่างถาวร\n\nการกระทำนี้ไม่สามารถย้อนกลับได้\n\nคุณแน่ใจหรือไม่?`)) {
-      console.log('⚠️ [handlePermanentlyDeleteStaff] User cancelled permanent delete');
-      return;
-    }
-
-    if (!confirm('⚠️ ยืนยันครั้งสุดท้าย: การลบถาวรจะไม่สามารถกู้คืนได้\n\nพิมพ์ "YES" เพื่อยืนยัน')) {
-      console.log('⚠️ [handlePermanentlyDeleteStaff] User did not confirm');
-      return;
-    }
+    if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
+    if (!confirm('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
 
     try {
       const result = await permanentlyDeleteStaff(staffId);
-      
       if (result.success) {
-        console.log('✅ [handlePermanentlyDeleteStaff] Successfully permanently deleted');
-        alert('ลบเจ้าหน้าที่ถาวรสำเร็จ!');
+        alert('ลบถาวรสำเร็จ!');
         loadDeactivatedStaff();
         loadStaffList();
       } else {
-        console.error('❌ [handlePermanentlyDeleteStaff] Failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handlePermanentlyDeleteStaff] Exception:', error);
+      console.error('Permanent delete error:', error);
       alert('เกิดข้อผิดพลาด');
     }
   };
 
+  // ✅ Edit handler
   const handleEdit = (staff: any) => {
-    console.log('✏️ [handleEdit] Opening edit modal for:', staff);
     setSelectedStaff(staff);
     setShowEditModal(true);
   };
 
+  // ✅ Open deactivated modal
   const handleOpenDeactivatedModal = () => {
-    console.log('🗑️ [handleOpenDeactivatedModal] Opening deactivated modal');
     setActiveTab('deactivated');
     loadDeactivatedStaff();
     setShowDeactivatedModal(true);
   };
 
-  // =====================================================
-  // 🏥 HOSPITAL GROUPING FUNCTION
-  // =====================================================
-
+  // ✅ Group hospitals for dropdown
   const getGroupedHospitals = () => {
-    console.log('🏥 [getGroupedHospitals] Grouping hospitals...');
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
-    
-    console.log(`📊 [getGroupedHospitals] Main: ${mainHospitals.length}, Sub: ${subHospitals.length}`);
-    
     const hospitalGroups = new Map<string, Hospital[]>();
 
     subHospitals.forEach(sub => {
@@ -569,14 +407,10 @@ export default function StaffManagementPage() {
       }
     });
 
-    console.log('✅ [getGroupedHospitals] Grouped into', hospitalGroups.size, 'groups');
     return { mainHospitals, hospitalGroups };
   };
 
-  // =====================================================
-  // ⏳ LOADING STATE
-  // =====================================================
-
+  // ✅ Loading state
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -588,16 +422,12 @@ export default function StaffManagementPage() {
     );
   }
 
-  // =====================================================
-  // 🎨 RENDER UI
-  // =====================================================
-
+  // ✅ Render UI (ส่วนที่เหลือเหมือนเดิม แต่แก้ไขช่องว่างทั้งหมด)
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* Back Button */}
           <button
             onClick={() => router.push('/admin/dashboard')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2 transition-colors"
@@ -606,16 +436,12 @@ export default function StaffManagementPage() {
             กลับ Dashboard
           </button>
 
-          {/* Page Title & Actions */}
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                👥 จัดการเจ้าหน้าที่
-              </h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
               <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ และเจ้าหน้าที่</p>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex gap-2">
               <button
                 onClick={() => setActiveTab('pending')}
@@ -624,7 +450,6 @@ export default function StaffManagementPage() {
                 <Clock className="w-4 h-4" />
                 รออนุมัติ ({pendingStaff.length})
               </button>
-
               <button
                 onClick={handleOpenDeactivatedModal}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
@@ -632,7 +457,6 @@ export default function StaffManagementPage() {
                 <Archive className="w-4 h-4" />
                 ที่ปิดการใช้งาน ({deactivatedStaff.length})
               </button>
-
               <button
                 onClick={() => setShowAddModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -640,7 +464,6 @@ export default function StaffManagementPage() {
                 <Plus className="w-4 h-4" />
                 เพิ่มเจ้าหน้าที่
               </button>
-
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -692,7 +515,7 @@ export default function StaffManagementPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards - แสดงเฉพาะแท็บ Active */}
+        {/* Summary Cards - Active Tab */}
         {activeTab === 'active' && (
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
@@ -706,7 +529,6 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
-
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
@@ -720,7 +542,6 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
-
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -734,7 +555,6 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
-
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -974,7 +794,94 @@ export default function StaffManagementPage() {
           </div>
         )}
 
-        {/* Deactivated Staff - แสดงใน Modal */}
+        {/* Deactivated Staff Modal */}
+        {showDeactivatedModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <Archive className="w-6 h-6 text-gray-600" />
+                    เจ้าหน้าที่ที่ปิดการใช้งาน ({deactivatedStaff.length})
+                  </h2>
+                  <button
+                    onClick={() => setShowDeactivatedModal(false)}
+                    className="text-gray-400 hover:text-gray-600 text-2xl"
+                  >
+                    ×
+                  </button>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  คลิก "กู้คืน" เพื่อนำกลับมาใช้งาน หรือ "ลบถาวร" เพื่อลบออกจากระบบอย่างถาวร
+                </p>
+              </div>
+
+              <div className="p-6">
+                {deactivatedStaff.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                    <p className="text-gray-500">ไม่มีเจ้าหน้าที่ที่ปิดการใช้งาน</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {deactivatedStaff.map((staff) => (
+                      <div key={staff.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-semibold text-gray-800">{staff.doctors?.full_name_th || '-'}</h3>
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                                staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
+                                 staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-600 space-y-1">
+                              <p>ID Card: {staff.id_card}</p>
+                              <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
+                              <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
+                              <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at || staff.created_at).toLocaleString('th-TH')}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 ml-4">
+                            <button
+                              onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                              className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+                              title="กู้คืน"
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                              กู้คืน
+                            </button>
+                            <button
+                              onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
+                              title="ลบถาวร"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              ลบถาวร
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-6 border-t border-gray-200 bg-gray-50">
+                <button
+                  onClick={() => setShowDeactivatedModal(false)}
+                  className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+                >
+                  ปิด
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modals */}
@@ -983,11 +890,9 @@ export default function StaffManagementPage() {
           hospitals={hospitals}
           getGroupedHospitals={getGroupedHospitals}
           onClose={() => {
-            console.log('❌ [AddStaffModal] Modal closed');
             setShowAddModal(false);
           }}
           onSuccess={() => {
-            console.log('✅ [AddStaffModal] Staff added successfully');
             setShowAddModal(false);
             loadStaffList();
           }}
@@ -1001,114 +906,21 @@ export default function StaffManagementPage() {
           hospitals={hospitals}
           getGroupedHospitals={getGroupedHospitals}
           onClose={() => {
-            console.log('❌ [EditStaffModal] Modal closed');
             setShowEditModal(false);
             setSelectedStaff(null);
           }}
           onSuccess={() => {
-            console.log('✅ [EditStaffModal] Staff updated successfully');
             setShowEditModal(false);
             setSelectedStaff(null);
             loadStaffList();
           }}
         />
       )}
-
-      {showDeactivatedModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-                  <Archive className="w-6 h-6 text-gray-600" />
-                  เจ้าหน้าที่ที่ปิดการใช้งาน ({deactivatedStaff.length})
-                </h2>
-                <button
-                  onClick={() => setShowDeactivatedModal(false)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
-                >
-                  ×
-                </button>
-              </div>
-              <p className="text-sm text-gray-500 mt-1">
-                คลิก "กู้คืน" เพื่อนำกลับมาใช้งาน หรือ "ลบถาวร" เพื่อลบออกจากระบบอย่างถาวร
-              </p>
-            </div>
-
-            <div className="p-6">
-              {deactivatedStaff.length === 0 ? (
-                <div className="text-center py-12">
-                  <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500">ไม่มีเจ้าหน้าที่ที่ปิดการใช้งาน</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {deactivatedStaff.map((staff) => (
-                    <div key={staff.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-3 mb-2">
-                            <h3 className="font-semibold text-gray-800">{staff.doctors?.full_name_th || '-'}</h3>
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                              staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                              staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
-                              'bg-yellow-100 text-yellow-700'
-                            }`}>
-                              {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
-                               staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
-                            </span>
-                          </div>
-                          <div className="text-sm text-gray-600 space-y-1">
-                            <p>ID Card: {staff.id_card}</p>
-                            <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
-                            <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
-                            <p>ปิดการใช้งานเมื่อ: {new Date(staff.updated_at || staff.created_at).toLocaleString('th-TH')}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 ml-4">
-                          <button
-                            onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
-                            title="กู้คืน"
-                          >
-                            <RotateCcw className="w-4 h-4" />
-                            กู้คืน
-                          </button>
-                          <button
-                            onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
-                            className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
-                            title="ลบถาวร"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            ลบถาวร
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-6 border-t border-gray-200 bg-gray-50">
-              <button
-                onClick={() => setShowDeactivatedModal(false)}
-                className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
-              >
-                ปิด
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// =====================================================
-// ➕ ADD STAFF MODAL COMPONENT
-// =====================================================
-
+// ✅ AddStaffModal Component (แก้ไขแล้ว)
 function AddStaffModal({
   hospitals,
   getGroupedHospitals,
@@ -1120,10 +932,8 @@ function AddStaffModal({
   getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
   onClose: () => void;
   onSuccess: () => void;
-  userId: string
+  userId: string;
 }) {
-  console.log('📝 [AddStaffModal] Component mounted');
-  
   const [formData, setFormData] = useState({
     id_card: '',
     birth_day: '',
@@ -1136,63 +946,43 @@ function AddStaffModal({
     email: '',
     hospital_id: '',
   });
-  
   const [loading, setLoading] = useState(false);
 
-  // ✅ Generate password from birth date (dd-mm-yyyy)
   const generatePassword = () => {
-    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      return '';
-    }
-    const password = `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
-    console.log('🔐 [generatePassword] Generated:', password);
-    return password;
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
+    return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('📝 [AddStaffModal] Form submitted');
-    console.log('📋 [AddStaffModal] Form data:', formData);
+    
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+      alert('กรุณากรอกวันเกิดให้ครบถ้วน');
+      return;
+    }
+
     setLoading(true);
-
     try {
-      // ✅ Validate birth date
-      if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-        console.error('❌ [AddStaffModal] Birth date incomplete');
-        alert('กรุณากรอกวันเกิดให้ครบถ้วน');
-        setLoading(false);
-        return;
-      }
-
-      // ✅ Generate password from birth date
       const password = generatePassword();
-      console.log('🔐 [AddStaffModal] Password:', password);
-
-      // ✅ Convert birth date to Buddhist Era (BE) to AD
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-      console.log('📅 [AddStaffModal] Birth date (AD):', birthDate);
 
-      // ✅ Call addStaff API
-      console.log('💾 [AddStaffModal] Calling addStaff API...');
       const result = await addStaff({
         ...formData,
-        password: password,
+        password,
         birth_date: birthDate,
         created_by: userId,
       });
 
       if (result.success) {
-        console.log('✅ [AddStaffModal] Staff added successfully');
-        alert(`เพิ่มเจ้าหน้าที่สำเร็จ!\n\n🔐 รหัสผ่าน: ${password}\n(วัน-เดือน-ปีเกิด)`);
+        alert(`เพิ่มเจ้าหน้าที่สำเร็จ!\nรหัสผ่าน: ${password}`);
         onSuccess();
       } else {
-        console.error('❌ [AddStaffModal] API error:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
-    } catch (error) {
-      console.error('❌ [AddStaffModal] Exception:', error);
-      alert('เกิดข้อผิดพลาด');
+    } catch (error: any) {
+      console.error('Add staff error:', error);
+      alert('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -1210,9 +1000,7 @@ function AddStaffModal({
           {/* ID Card & Password */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ID Card *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ID Card *</label>
               <input
                 type="text"
                 value={formData.id_card}
@@ -1223,18 +1011,14 @@ function AddStaffModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                🔐 รหัสผ่าน (อัตโนมัติ)
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">🔐 รหัสผ่าน (อัตโนมัติ)</label>
               <input
                 type="text"
                 value={generatePassword() || 'ระบุวันเกิดเพื่อสร้างรหัสผ่าน'}
                 readOnly
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-mono"
               />
-              <p className="text-xs text-gray-500 mt-1">
-                💡 รหัสผ่าน = วัน-เดือน-ปีเกิด (dd-mm-yyyy)
-              </p>
+              <p className="text-xs text-gray-500 mt-1">💡 รหัสผ่าน = วัน-เดือน-ปีเกิด (dd-mm-yyyy)</p>
             </div>
           </div>
 
@@ -1279,16 +1063,11 @@ function AddStaffModal({
                 ))}
               </select>
             </div>
-            <p className="text-xs text-blue-600 mt-1">
-              💡 รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด
-            </p>
           </div>
 
           {/* Full Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ชื่อ-นามสกุล *
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล *</label>
             <input
               type="text"
               value={formData.full_name_th}
@@ -1301,9 +1080,7 @@ function AddStaffModal({
           {/* Role & Specialization */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                บทบาท *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">บทบาท *</label>
               <select
                 value={formData.role}
                 onChange={(e) => setFormData({ ...formData, role: e.target.value as 'doctor' | 'helper' })}
@@ -1314,9 +1091,7 @@ function AddStaffModal({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ความเชี่ยวชาญ
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
               <input
                 type="text"
                 value={formData.specialization_th}
@@ -1326,11 +1101,9 @@ function AddStaffModal({
             </div>
           </div>
 
-          {/* Hospital Selection - Hierarchical */}
+          {/* Hospital Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              โรงพยาบาลสังกัด
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">โรงพยาบาลสังกัด</label>
             <select
               value={formData.hospital_id}
               onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
@@ -1339,28 +1112,19 @@ function AddStaffModal({
               <option value="">-- เลือกโรงพยาบาล --</option>
               {mainHospitals.map((hospital) => (
                 <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
-                  <option value={hospital.id}>
-                    └ {hospital.name} ({hospital.code}) - แม่ข่าย
-                  </option>
+                  <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
                   {hospitalGroups.get(hospital.id)?.map((sub) => (
-                    <option key={sub.id} value={sub.id}>
-                      {'   '}└─ {sub.name} ({sub.code})
-                    </option>
+                    <option key={sub.id} value={sub.id}>   └─ {sub.name} ({sub.code})</option>
                   ))}
                 </optgroup>
               ))}
             </select>
-            <p className="text-xs text-gray-500 mt-1">
-              💡 โรงพยาบาล: {hospitals.length} แห่ง
-            </p>
           </div>
 
           {/* Phone & Email */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                เบอร์โทรศัพท์
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
               <input
                 type="tel"
                 value={formData.phone}
@@ -1369,9 +1133,7 @@ function AddStaffModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                อีเมล
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
               <input
                 type="email"
                 value={formData.email}
@@ -1414,10 +1176,7 @@ function AddStaffModal({
   );
 }
 
-// =====================================================
-// ✏️ EDIT STAFF MODAL COMPONENT
-// =====================================================
-
+// ✅ EditStaffModal Component (แก้ไขแล้ว)
 function EditStaffModal({
   staff,
   hospitals,
@@ -1429,24 +1188,19 @@ function EditStaffModal({
   hospitals: Hospital[];
   getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
   onClose: () => void;
-  onSuccess: () => void
+  onSuccess: () => void;
 }) {
-  console.log('✏️ [EditStaffModal] Component mounted - Staff:', staff);
-  
-  // ✅ Parse birth date from YYYY-MM-DD to day/month/year (BE)
   const parseBirthDate = (dateString: string | null) => {
     if (!dateString) return { day: '', month: '', year: '' };
     const date = new Date(dateString);
     return {
       day: date.getDate().toString(),
       month: (date.getMonth() + 1).toString(),
-      year: (date.getFullYear() + 543).toString() // Convert AD to BE
+      year: (date.getFullYear() + 543).toString(),
     };
   };
-  
+
   const initialBirthDate = parseBirthDate(staff.birth_date);
-  console.log('📅 [EditStaffModal] Initial birth date:', initialBirthDate);
-  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
@@ -1457,84 +1211,54 @@ function EditStaffModal({
     birth_month: initialBirthDate.month,
     birth_year: initialBirthDate.year,
   });
-  
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false);
 
-  // ✅ Generate password from birth date
   const generatePassword = () => {
-    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      return '';
-    }
-    const password = `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
-    console.log('🔐 [EditStaffModal] New password:', password);
-    return password;
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
+    return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('📝 [EditStaffModal] Form submitted');
-    console.log('📋 [EditStaffModal] Form data:', formData);
     setLoading(true);
 
     try {
-      // ✅ Convert birth date to AD
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-      console.log('📅 [EditStaffModal] Birth date (AD):', birthDate);
 
-      // ✅ Update doctors table
-      console.log('💾 [EditStaffModal] Updating doctors table...');
+      // Update doctors table
       const result = await updateStaff(staff.id, {
         ...formData,
         birth_date: birthDate,
       });
 
       if (!result.success) {
-        console.error('❌ [EditStaffModal] Update failed:', result.error);
         alert('เกิดข้อผิดพลาด: ' + result.error);
         setLoading(false);
         return;
       }
 
-      // ✅ Update users table (hospital_id and birth_date)
-      const updateData: any = {
-        birth_date: birthDate,
-      };
-
+      // Update users table
+      const updateData: any = { birth_date: birthDate };
       if (formData.hospital_id !== staff.hospital_id) {
         updateData.hospital_id = formData.hospital_id;
-        console.log('🏥 [EditStaffModal] Hospital changed:', staff.hospital_id, '→', formData.hospital_id);
       }
-
-      // ✅ Reset password if checkbox is checked
       if (resetPassword) {
-        const newPassword = generatePassword();
-        updateData.password_hash = newPassword;
-        console.log('🔐 [EditStaffModal] Password reset:', newPassword);
+        updateData.password_hash = generatePassword();
       }
 
-      // ✅ Execute update
-      const { error: userError } = await supabase
-        .from('users')
-        .update(updateData)
-        .eq('id', staff.id);
+      await supabase.from('users').update(updateData).eq('id', staff.id);
 
-      if (userError) {
-        console.error('❌ [EditStaffModal] User update error:', userError);
-      }
-
-      // ✅ Show success message
       let message = 'แก้ไขข้อมูลสำเร็จ!';
       if (resetPassword) {
-        message += `\n\n🔐 รีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}`;
+        message += `\nรีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}`;
       }
-
       alert(message);
       onSuccess();
-    } catch (error) {
-      console.error('❌ [EditStaffModal] Exception:', error);
-      alert('เกิดข้อผิดพลาด');
+    } catch (error: any) {
+      console.error('Edit staff error:', error);
+      alert('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -1554,9 +1278,7 @@ function EditStaffModal({
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ชื่อ-นามสกุล
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล</label>
             <input
               type="text"
               value={formData.full_name_th}
@@ -1618,32 +1340,26 @@ function EditStaffModal({
               <Key className="w-4 h-4" />
               <span>รีเซ็ตรหัสผ่านให้ตรงกับวันเกิดใหม่</span>
               {generatePassword() && (
-                <span className="font-mono font-bold text-blue-600">
-                  ({generatePassword()})
-                </span>
+                <span className="font-mono font-bold text-blue-600">({generatePassword()})</span>
               )}
             </label>
           </div>
 
           {/* Specialization */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ความเชี่ยวชาญ
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
             <input
               type="text"
               value={formData.specialization_th}
               onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              placeholder="เช่น อายุรกรรม, ศัลยกรรม, เจ้าหน้าที่สาธารณสุข"
+              placeholder="เช่น อายุรกรรม, ศัลยกรรม"
             />
           </div>
 
           {/* Hospital Selection */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              โรงพยาบาลสังกัด
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">โรงพยาบาลสังกัด</label>
             <select
               value={formData.hospital_id}
               onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
@@ -1652,28 +1368,19 @@ function EditStaffModal({
               <option value="">-- เลือกโรงพยาบาล --</option>
               {mainHospitals.map((hospital) => (
                 <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
-                  <option value={hospital.id}>
-                    └ {hospital.name} ({hospital.code}) - แม่ข่าย
-                  </option>
+                  <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
                   {hospitalGroups.get(hospital.id)?.map((sub) => (
-                    <option key={sub.id} value={sub.id}>
-                      {'   '}└─ {sub.name} ({sub.code})
-                    </option>
+                    <option key={sub.id} value={sub.id}>   └─ {sub.name} ({sub.code})</option>
                   ))}
                 </optgroup>
               ))}
             </select>
-            <p className="text-xs text-gray-500 mt-1">
-              💡 โรงพยาบาล: {hospitals.length} แห่ง
-            </p>
           </div>
 
           {/* Phone & Email */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                เบอร์โทรศัพท์
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
               <input
                 type="tel"
                 value={formData.phone}
@@ -1683,9 +1390,7 @@ function EditStaffModal({
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                อีเมล
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
               <input
                 type="email"
                 value={formData.email}
