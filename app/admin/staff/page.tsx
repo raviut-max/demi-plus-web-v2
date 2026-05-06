@@ -1,13 +1,9 @@
-// app/admin/staff/page.tsx
-// =====================================================
 // ✅ แก้ไขล่าสุด: 6 พฤษภาคม 2569
-// ✅ การแก้ไขใหม่:
-//    1. ✅ แก้ไขปัญหา Hospital Admin ไม่เห็น staff
-//    2. ✅ เพิ่มการตรวจสอบว่า user เองมี hospital_id หรือไม่
-//    3. ✅ ปรับ logic การกรองให้ถูกต้อง
-//    4. ✅ เพิ่ม debug logging
-// =====================================================
-
+// ✅ การแก้ไข:
+//    1. ✅ เพิ่ม debug logging แบบละเอียด
+//    2. ✅ แก้ไขปัญหาการ filter staff ที่ทำให้ไม่แสดงข้อมูล
+//    3. ✅ ตรวจสอบ accessibleHospitalIds ให้ถูกต้อง
+//    4. ✅ แสดง user เองในรายการด้วย
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -37,7 +33,6 @@ import { supabase } from '@/lib/supabase/client';
 // =====================================================
 // 📋 CONSTANTS & INTERFACES
 // =====================================================
-
 const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
@@ -83,7 +78,6 @@ interface PendingStaff {
 // =====================================================
 // 🎯 MAIN COMPONENT
 // =====================================================
-
 export default function StaffManagementPage() {
   const router = useRouter();
   
@@ -107,35 +101,36 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🔄 INITIAL DATA LOADING
   // =====================================================
-
   useEffect(() => {
+    console.log('🔍 [StaffManagement] Component mounted - Checking session...');
     const userData = checkSession();
+    
     if (!userData) {
+      console.warn('⚠️ [StaffManagement] No session found - Redirecting to login');
       router.push('/admin/login');
       return;
     }
+
+    console.log('✅ [StaffManagement] User session:', userData);
+    console.log('👤 User ID:', userData.id);
+    console.log('👤 User Role:', userData.role);
+    console.log('👤 User Hospital ID:', userData.hospital_id);
+
+    // ✅ ตรวจสอบสิทธิ์ Admin เท่านั้น
     if (userData.role !== 'admin') {
+      console.error('❌ [StaffManagement] User not admin:', userData.role);
       alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
       router.push('/admin/login');
       return;
     }
-
-    console.log('👤 [StaffManagement] User:', userData);
-    console.log('👑 [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
-    console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
-    console.log('🏥 [StaffManagement] User hospital_id:', userData.hospital_id);
 
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
     loadHospitals();
     loadPendingStaff();
-    loadStaffList();
+    // ✅ โหลด staff list หลังจากได้ accessibleHospitalIds แล้ว
   }, [router]);
-
-  // =====================================================
-  // 📥 DATA LOADING FUNCTIONS
-  // =====================================================
 
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
@@ -157,6 +152,11 @@ export default function StaffManagementPage() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      
+      // ✅ โหลด staff list หลังจากได้ accessibleHospitalIds แล้ว
+      if (ids.length > 0 || isSuperAdmin(user)) {
+        loadStaffList(ids);
+      }
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
@@ -176,11 +176,15 @@ export default function StaffManagementPage() {
   };
 
   // ✅ โหลดรายชื่อเจ้าหน้าที่ (แก้ไขแล้ว - แก้ปัญหาไม่แสดง staff)
-  const loadStaffList = async () => {
+  const loadStaffList = async (hospitalIds?: string[]) => {
     try {
       console.log('👥 [loadStaffList] Fetching staff list...');
       console.log('👑 [loadStaffList] Is Super Admin:', isSuperAdmin(user));
-      console.log('🏥 [loadStaffList] Accessible hospital IDs:', accessibleHospitalIds);
+      console.log('🏥 [loadStaffList] Hospital IDs from param:', hospitalIds);
+      console.log('🏥 [loadStaffList] Accessible hospital IDs from state:', accessibleHospitalIds);
+      
+      // ✅ ใช้ hospitalIds จาก parameter หรือจาก state
+      const idsToUse = hospitalIds || accessibleHospitalIds;
       
       const allStaff = await getStaffList();
       console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
@@ -198,7 +202,7 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } else if (accessibleHospitalIds.length > 0) {
+      } else if (idsToUse.length > 0) {
         // ✅ Hospital Admin: เห็นเฉพาะ staff ใน รพ.ตัวเอง
         filteredStaff = allStaff.filter(staff => {
           // ✅ 1. ถ้า staff ไม่มี hospital_id → แสดง (เช่น Super Admin)
@@ -208,7 +212,7 @@ export default function StaffManagementPage() {
           }
           
           // ✅ 2. ถ้า staff มี hospital_id → ตรวจสอบว่าอยู่ใน accessible hospitals หรือไม่
-          const isInAccessibleHospital = accessibleHospitalIds.includes(staff.hospital_id);
+          const isInAccessibleHospital = idsToUse.includes(staff.hospital_id);
           
           if (isInAccessibleHospital) {
             console.log('✅ [loadStaffList] Showing staff in accessible hospital:', staff.id_card, staff.hospital_id);
@@ -316,7 +320,6 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🎬 ACTION HANDLERS
   // =====================================================
-
   const handleLogout = () => {
     console.log('🚪 [handleLogout] User logging out...');
     logout();
@@ -413,7 +416,7 @@ export default function StaffManagementPage() {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-      
+       
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff();
       loadStaffList();
@@ -449,6 +452,7 @@ export default function StaffManagementPage() {
   const handleDeactivate = async (staffId: string, staffName: string) => {
     const staff = staffList.find(s => s.id === staffId);
     
+    // ✅ ตรวจสอบสิทธิ์ก่อนลบ
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
@@ -473,6 +477,7 @@ export default function StaffManagementPage() {
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
     
+    // ✅ ตรวจสอบสิทธิ์ก่อนกู้คืน
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
@@ -498,6 +503,7 @@ export default function StaffManagementPage() {
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
     
+    // ✅ ตรวจสอบสิทธิ์ก่อนลบถาวร
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
@@ -522,10 +528,12 @@ export default function StaffManagementPage() {
   };
 
   const handleEdit = (staff: any) => {
+    // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
       return;
     }
+    
     setSelectedStaff(staff);
     setShowEditModal(true);
   };
@@ -539,7 +547,6 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🏥 HOSPITAL GROUPING FUNCTION
   // =====================================================
-
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
@@ -560,7 +567,6 @@ export default function StaffManagementPage() {
   // =====================================================
   // ⏳ LOADING STATE
   // =====================================================
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -575,7 +581,6 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🎨 RENDER UI
   // =====================================================
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -766,6 +771,9 @@ export default function StaffManagementPage() {
                             🔒 คุณเห็นเฉพาะเจ้าหน้าที่ในโรงพยาบาลของคุณ
                           </p>
                         )}
+                        <p className="text-sm text-orange-500 mt-2">
+                          💡 Debug: ตรวจสอบ Console Log เพื่อดูรายละเอียด
+                        </p>
                         <button
                           onClick={() => setShowAddModal(true)}
                           className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
@@ -1103,7 +1111,6 @@ export default function StaffManagementPage() {
 // =====================================================
 // ➕ ADD STAFF MODAL COMPONENT
 // =====================================================
-
 function AddStaffModal({
   hospitals,
   getGroupedHospitals,
@@ -1139,7 +1146,7 @@ function AddStaffModal({
   
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
-
+  
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
@@ -1337,7 +1344,7 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
-              <option value="doctor">👨‍⚕️ แพทย์</option>
+              <option value="doctor">👨‍️ แพทย์</option>
               <option value="helper">👩‍ เจ้าหน้าที่</option>
             </select>
             {!isSuper && (
@@ -1368,7 +1375,7 @@ function AddStaffModal({
                 <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
               </select>
               <p className="text-xs text-purple-600 mt-1">
-                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
+                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ <br/>
                 💡 Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
               </p>
             </div>
@@ -1481,7 +1488,6 @@ function AddStaffModal({
 // =====================================================
 // ✏️ EDIT STAFF MODAL COMPONENT
 // =====================================================
-
 function EditStaffModal({
   staff,
   hospitals,
@@ -1528,7 +1534,7 @@ function EditStaffModal({
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
   const canEditHospital = isSuper || !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id);
-
+  
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
