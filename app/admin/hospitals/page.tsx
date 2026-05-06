@@ -1,18 +1,42 @@
 // app/admin/hospitals/page.tsx
-'use client';
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. แก้ไข Syntax errors ทั้งหมด (ช่องว่างในตัวแปร, operators)
+//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. Badge แสดงประเภทโรงพยาบาล
+//    5. เพิ่มปุ่ม Logout
+//    6. กรองโรงพยาบาลตามสิทธิ์การเข้าถึง
+//    7. เพิ่ม Debug logging
 
+'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession } from '@/lib/supabase/queries';
-import { Building2, Plus, Edit, Trash2, ArrowLeft, Hospital, Activity } from 'lucide-react';
+import { checkSession, logout, getUserHospitalInfo, getAccessibleHospitalIds } from '@/lib/supabase/queries';
+import { Building2, Plus, Edit, Trash2, ArrowLeft, Hospital, Activity, UserCheck, LogOut } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+interface UserHospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
+}
 
 export default function HospitalsPage() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(true);
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [groupedHospitals, setGroupedHospitals] = useState<any[]>([]);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -21,26 +45,55 @@ export default function HospitalsPage() {
       return;
     }
     setUser(userData);
+    loadUserHospital(userData.id);
     loadHospitals();
   }, [router]);
 
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
+    } catch (error) {
+      console.error('❌ [loadUserHospital] Error:', error);
+    }
+  };
+
   const loadHospitals = async () => {
     try {
-      const { data, error } = await supabase
+      console.log('🏥 [loadHospitals] Fetching hospitals...');
+      
+      // ✅ ดึงโรงพยาบาลที่เข้าถึงได้
+      const ids = await getAccessibleHospitalIds(user?.id);
+      setAccessibleHospitalIds(ids);
+      console.log('🏥 [loadHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      
+      let query = supabase
         .from('hospitals')
         .select('*')
         .eq('is_active', true)
         .order('type', { ascending: true })
         .order('name', { ascending: true });
-
+      
+      // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้าไม่ใช่ Super Admin)
+      if (ids.length > 0) {
+        query = query.in('id', ids);
+      }
+      
+      const { data, error } = await query;
+      
       if (error) throw error;
+      
+      console.log('✅ [loadHospitals] Loaded:', data?.length || 0, 'hospitals');
       setHospitals(data || []);
       
       // ✅ จัดกลุ่มโรงพยาบาลแม่ข่ายกับลูกข่าย
       const grouped = groupHospitals(data || []);
       setGroupedHospitals(grouped);
     } catch (error) {
-      console.error('Error loading hospitals:', error);
+      console.error('❌ [loadHospitals] Error:', error);
     } finally {
       setLoading(false);
     }
@@ -48,9 +101,13 @@ export default function HospitalsPage() {
 
   // ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล
   const groupHospitals = (allHospitals: any[]) => {
+    console.log('📊 [groupHospitals] Grouping', allHospitals.length, 'hospitals...');
+    
     const mainHospitals = allHospitals.filter(h => h.type === 'main');
     const subHospitals = allHospitals.filter(h => h.type === 'sub');
-
+    
+    console.log('📊 [groupHospitals] Main:', mainHospitals.length, 'Sub:', subHospitals.length);
+    
     // ✅ จัดกลุ่มโดยให้ลูกข่ายอยู่ใต้แม่ข่าย
     const grouped = mainHospitals.map(main => {
       const children = subHospitals.filter(sub => sub.parent_id === main.id);
@@ -78,12 +135,18 @@ export default function HospitalsPage() {
       });
     }
 
+    console.log('✅ [groupHospitals] Grouped into', grouped.length, 'groups');
     return grouped;
+  };
+
+  const handleLogout = () => {
+    console.log('🚪 [handleLogout] User logging out...');
+    logout();
+    router.push('/admin/login');
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm('คุณต้องการลบโรงพยาบาลนี้หรือไม่?')) return;
-
     try {
       const { error } = await supabase
         .from('hospitals')
@@ -94,7 +157,7 @@ export default function HospitalsPage() {
       alert('✅ ลบโรงพยาบาลสำเร็จ!');
       loadHospitals();
     } catch (error: any) {
-      console.error('Error deleting hospital:', error);
+      console.error('❌ [handleDelete] Error:', error);
       alert('❌ เกิดข้อผิดพลาด: ' + error.message);
     }
   };
@@ -124,20 +187,80 @@ export default function HospitalsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          <div className="flex items-center justify-between">
+          
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
                 🏥 จัดการโรงพยาบาล
               </h1>
               <p className="text-gray-600">จัดการโรงพยาบาลแม่ข่ายและลูกข่าย</p>
             </div>
-            <button
-              onClick={() => router.push('/admin/hospitals/new')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-            >
-              <Plus className="w-4 h-4" />
-              เพิ่มโรงพยาบาล
-            </button>
+            
+            <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              {userHospital && (
+                <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                      <UserCheck className="w-4 h-4 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800 text-sm">
+                        {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">
+                        {userHospital.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
+                          🏥 แม่ข่าย
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs font-semibold">
+                          🏥 ลูกข่าย
+                        </span>
+                      )}
+
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={() => router.push('/admin/hospitals/new')}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+              >
+                <Plus className="w-4 h-4" />
+                เพิ่มโรงพยาบาล
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -145,7 +268,7 @@ export default function HospitalsPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* ✅ สรุปจำนวนโรงพยาบาล (เพิ่มใหม่) */}
+        {/* ✅ สรุปจำนวนโรงพยาบาล */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           {/* ทั้งหมด */}
           <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl shadow-lg p-6">
@@ -153,6 +276,11 @@ export default function HospitalsPage() {
               <div>
                 <p className="text-blue-100 text-sm mb-1">โรงพยาบาลทั้งหมด</p>
                 <p className="text-4xl font-bold">{totalHospitals}</p>
+                {accessibleHospitalIds.length > 0 && accessibleHospitalIds.length < 100 && (
+                  <p className="text-xs text-blue-200 mt-1">
+                    🔒 จาก {accessibleHospitalIds.length} รพ. ที่เข้าถึงได้
+                  </p>
+                )}
               </div>
               <Hospital className="w-12 h-12 text-blue-200 opacity-50" />
             </div>
@@ -283,9 +411,9 @@ export default function HospitalsPage() {
 }
 
 // ✅ Component สำหรับแสดงการ์ดโรงพยาบาลลูกข่าย
-function HospitalCard({ hospital, onEdit, onDelete }: { 
-  hospital: any; 
-  onEdit: () => void; 
+function HospitalCard({ hospital, onEdit, onDelete }: {
+  hospital: any;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -313,7 +441,6 @@ function HospitalCard({ hospital, onEdit, onDelete }: {
           </button>
         </div>
       </div>
-      
       {hospital.phone && (
         <div className="text-sm text-gray-600 flex items-center gap-2">
           <span>📞</span>

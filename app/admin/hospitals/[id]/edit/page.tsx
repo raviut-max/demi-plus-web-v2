@@ -1,20 +1,43 @@
 // app/admin/hospitals/[id]/edit/page.tsx
-// ✅ แก้ไขล่าสุด: 4 พฤษภาคม 2569
+// =====================================================
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. Badge แสดงประเภทโรงพยาบาล
-//    4. โหลดข้อมูลโรงพยาบาลเดิมมาแสดง
-//    5. อัปเดตข้อมูลโรงพยาบาล
-//    6. UI สอดคล้องกับหน้าเพิ่มโรงพยาบาลใหม่
-//    7. เพิ่มปุ่ม Logout
+//    4. ✅ เพิ่มระบบ Super Admin / Hospital Admin
+//    5. ✅ ตรวจสอบสิทธิ์ก่อนแก้ไขโรงพยาบาล
+//    6. ✅ กรองโรงพยาบาลแม่ข่ายตามสิทธิ์การเข้าถึง
+//    7. ✅ Super Admin แก้ไขได้ทั้งหมด
+//    8. ✅ Hospital Admin แก้ไขได้เฉพาะที่ตัวเองเข้าถึง
+//    9. UI สอดคล้องกับหน้าอื่นๆ
+// =====================================================
 
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getUserHospitalInfo } from '@/lib/supabase/queries';
-import { ArrowLeft, Building2, Save, Hospital, UserCheck, LogOut, AlertCircle } from 'lucide-react';
+import { 
+  checkSession, 
+  logout, 
+  getUserHospitalInfo, 
+  getAccessibleHospitalIds,
+  isSuperAdmin
+} from '@/lib/supabase/queries';
+import { 
+  ArrowLeft, 
+  Building2, 
+  Save, 
+  Hospital, 
+  UserCheck, 
+  LogOut, 
+  AlertCircle,
+  Lock
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+// =====================================================
+// 📋 INTERFACES
+// =====================================================
 
 interface UserHospital {
   id: string;
@@ -39,6 +62,10 @@ interface Hospital {
   is_active: boolean;
 }
 
+// =====================================================
+// 🎯 MAIN COMPONENT
+// =====================================================
+
 export default function EditHospitalPage() {
   const router = useRouter();
   const params = useParams();
@@ -49,8 +76,11 @@ export default function EditHospitalPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [mainHospitals, setMainHospitals] = useState<Hospital[]>([]);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [hasPermission, setHasPermission] = useState(false);
+  
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -59,6 +89,10 @@ export default function EditHospitalPage() {
     address: '',
     is_active: true,
   });
+
+  // =====================================================
+  // 🔄 INITIAL DATA LOADING
+  // =====================================================
 
   useEffect(() => {
     const userData = checkSession();
@@ -72,26 +106,44 @@ export default function EditHospitalPage() {
       return;
     }
 
+    console.log('👤 [EditHospital] User:', userData);
     setUser(userData);
     loadUserHospital(userData.id);
-    loadMainHospitals();
+    loadAccessibleHospitals(userData.id);
     loadHospital();
   }, [router, hospitalId]);
+
+  // =====================================================
+  // 📥 DATA LOADING FUNCTIONS
+  // =====================================================
 
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
-  // ✅ โหลดโรงพยาบาลแม่ข่ายทั้งหมด (สำหรับ dropdown)
-  const loadMainHospitals = async () => {
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้ (Super Admin vs Hospital Admin)
+  const loadAccessibleHospitals = async (userId: string) => {
     try {
-      const { data, error } = await supabase
+      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
+      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+
+      // ✅ ตรวจสอบว่าเป็น Super Admin หรือไม่
+      const isSuper = isSuperAdmin(user);
+      console.log('👑 [loadAccessibleHospitals] Is Super Admin:', isSuper);
+
+      // ✅ โหลดโรงพยาบาลแม่ข่ายทั้งหมด (สำหรับ dropdown)
+      let query = supabase
         .from('hospitals')
         .select('*')
         .eq('type', 'main')
@@ -99,16 +151,28 @@ export default function EditHospitalPage() {
         .neq('id', hospitalId) // ไม่รวมโรงพยาบาลที่กำลังแก้ไข
         .order('name');
 
+      // ✅ กรองตามสิทธิ์ (Hospital Admin เห็นเฉพาะที่ตัวเองเข้าถึงได้)
+      if (ids.length > 0 && !isSuper) {
+        console.log('🔒 [loadAccessibleHospitals] Hospital Admin - filtering hospitals');
+        query = query.in('id', ids);
+      } else {
+        console.log('👑 [loadAccessibleHospitals] Super Admin - showing all hospitals');
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
       setMainHospitals(data || []);
+      console.log('✅ [loadAccessibleHospitals] Loaded main hospitals:', data?.length || 0);
     } catch (error) {
-      console.error('Error loading main hospitals:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
   };
 
   // ✅ โหลดข้อมูลโรงพยาบาลที่จะแก้ไข
   const loadHospital = async () => {
     try {
+      console.log('🏥 [loadHospital] Loading hospital:', hospitalId);
       const { data, error } = await supabase
         .from('hospitals')
         .select('*')
@@ -126,9 +190,28 @@ export default function EditHospitalPage() {
           address: data.address || '',
           is_active: data.is_active ?? true,
         });
+
+        // ✅ ตรวจสอบสิทธิ์การแก้ไขโรงพยาบาลนี้
+        const isSuper = isSuperAdmin(user);
+        if (isSuper) {
+          // ✅ Super Admin แก้ไขได้ทั้งหมด
+          setHasPermission(true);
+          console.log('👑 [loadHospital] Super Admin - has permission');
+        } else if (accessibleHospitalIds.length > 0) {
+          // ✅ Hospital Admin แก้ไขได้เฉพาะที่ตัวเองเข้าถึง
+          const hasAccess = accessibleHospitalIds.includes(hospitalId);
+          setHasPermission(hasAccess);
+          console.log(' [loadHospital] Hospital Admin - has permission:', hasAccess);
+          
+          if (!hasAccess) {
+            setError('❌ คุณไม่มีสิทธิ์แก้ไขโรงพยาบาลนี้');
+          }
+        } else {
+          setHasPermission(true);
+        }
       }
     } catch (error: any) {
-      console.error('Error loading hospital:', error);
+      console.error('❌ [loadHospital] Error:', error);
       setError('ไม่พบข้อมูลโรงพยาบาล');
       setTimeout(() => {
         router.push('/admin/hospitals');
@@ -139,15 +222,32 @@ export default function EditHospitalPage() {
   };
 
   const handleLogout = () => {
+    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
 
+  // =====================================================
+  // 📝 FORM SUBMIT
+  // =====================================================
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // ✅ ตรวจสอบสิทธิ์อีกครั้งก่อนบันทึก
+    if (!hasPermission) {
+      setError('❌ คุณไม่มีสิทธิ์แก้ไขโรงพยาบาลนี้');
+      return;
+    }
+
     setError('');
     setSuccess('');
     setSaving(true);
+
+    console.log('📝 [handleSubmit] Form submitted:', formData);
+    console.log(' [handleSubmit] Hospital ID:', hospitalId);
+    console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
+    console.log('🔒 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
 
     // ✅ Validation
     if (!formData.name.trim()) {
@@ -168,6 +268,24 @@ export default function EditHospitalPage() {
       return;
     }
 
+    // ✅ ตรวจสอบสิทธิ์การแก้ไข (Hospital Admin ต้องแก้ไขใน scope ของตัวเอง)
+    if (!isSuperAdmin(user) && accessibleHospitalIds.length > 0) {
+      if (!accessibleHospitalIds.includes(hospitalId)) {
+        setError('❌ คุณไม่มีสิทธิ์แก้ไขโรงพยาบาลนี้');
+        setSaving(false);
+        return;
+      }
+      
+      // ✅ ตรวจสอบว่าเลือกแม่ข่ายใน scope ของตัวเองหรือไม่ (สำหรับลูกข่าย)
+      if (formData.type === 'sub' && formData.parent_id) {
+        if (!accessibleHospitalIds.includes(formData.parent_id)) {
+          setError('❌ คุณไม่มีสิทธิ์เลือกโรงพยาบาลแม่ข่ายนี้');
+          setSaving(false);
+          return;
+        }
+      }
+    }
+
     try {
       const updateData: any = {
         name: formData.name.trim(),
@@ -178,6 +296,8 @@ export default function EditHospitalPage() {
         is_active: formData.is_active,
         // ✅ updated_at จะถูกอัปเดตโดย trigger อัตโนมัติ
       };
+
+      console.log('💾 [handleSubmit] Updating hospital:', hospitalId, 'with data:', updateData);
 
       const { error } = await supabase
         .from('hospitals')
@@ -193,17 +313,22 @@ export default function EditHospitalPage() {
         return;
       }
 
+      console.log('✅ [handleSubmit] Hospital updated successfully');
       setSuccess('✅ แก้ไขโรงพยาบาลสำเร็จ!');
       setTimeout(() => {
         router.push('/admin/hospitals');
       }, 1500);
     } catch (error: any) {
-      console.error('Error updating hospital:', error);
+      console.error('❌ [handleSubmit] Error:', error);
       setError('❌ เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setSaving(false);
     }
   };
+
+  // =====================================================
+  // ⏳ LOADING STATE
+  // =====================================================
 
   if (loading) {
     return (
@@ -215,6 +340,38 @@ export default function EditHospitalPage() {
       </div>
     );
   }
+
+  // =====================================================
+  // 🚫 NO PERMISSION STATE
+  // =====================================================
+
+  if (!hasPermission && !loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center max-w-md">
+          <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="w-10 h-10 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            ❌ ไม่มีสิทธิ์เข้าถึง
+          </h2>
+          <p className="text-gray-600 mb-4">
+            คุณไม่มีสิทธิ์แก้ไขโรงพยาบาลนี้
+          </p>
+          <button
+            onClick={() => router.push('/admin/hospitals')}
+            className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+          >
+            กลับหน้าจัดการโรงพยาบาล
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // =====================================================
+  // 🎨 RENDER UI
+  // =====================================================
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -274,6 +431,13 @@ export default function EditHospitalPage() {
                           🏥 ลูกข่าย
                         </span>
                       )}
+
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -295,6 +459,35 @@ export default function EditHospitalPage() {
       <form onSubmit={handleSubmit} className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 space-y-6">
           
+          {/* ✅ แสดงข้อมูลสิทธิ์ (เพิ่มใหม่) */}
+          <div className={`rounded-lg p-4 border ${
+            isSuperAdmin(user) 
+              ? 'bg-purple-50 border-purple-200' 
+              : 'bg-blue-50 border-blue-200'
+          }`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Lock className={`w-4 h-4 ${
+                isSuperAdmin(user) ? 'text-purple-600' : 'text-blue-600'
+              }`} />
+              <h3 className="text-sm font-semibold text-gray-800">
+                สิทธิ์การแก้ไข
+              </h3>
+            </div>
+            <ul className="text-sm text-gray-700 space-y-1">
+              {isSuperAdmin(user) ? (
+                <>
+                  <li>👑 <strong>Super Admin:</strong> สามารถแก้ไขโรงพยาบาลได้ทั้งหมด</li>
+                  <li>📊 โรงพยาบาลที่แก้ไขได้: ทั้งหมดในระบบ</li>
+                </>
+              ) : (
+                <>
+                  <li>🏥 <strong>Hospital Admin:</strong> แก้ไขได้เฉพาะโรงพยาบาลที่ตัวเองดูแล</li>
+                  <li>📊 โรงพยาบาลที่แก้ไขได้: {accessibleHospitalIds.length} แห่ง</li>
+                </>
+              )}
+            </ul>
+          </div>
+
           {/* Error/Success Messages */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2">
@@ -387,6 +580,11 @@ export default function EditHospitalPage() {
                   ⚠️ ยังไม่มีโรงพยาบาลแม่ข่ายในระบบ
                 </p>
               )}
+              {!isSuperAdmin(user) && accessibleHospitalIds.length > 0 && (
+                <p className="text-xs text-blue-600 mt-1">
+                  🔒 แสดงโรงพยาบาลแม่ข่ายที่คุณมีสิทธิ์เข้าถึง ({mainHospitals.length} แห่ง)
+                </p>
+              )}
             </div>
           )}
 
@@ -426,7 +624,7 @@ export default function EditHospitalPage() {
           <div className="flex gap-4 pt-6 border-t border-gray-200">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || !hasPermission}
               className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <Save className="w-5 h-5" />

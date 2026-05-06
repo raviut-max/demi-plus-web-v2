@@ -1,13 +1,22 @@
+// lib/supabase/queries.ts
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. เพิ่มระบบ Super Admin และ Hospital Admin
+//    2. แก้ไข getPatientList ให้รับ hospitalIds แทน userId
+//    3. เพิ่มฟังก์ชันตรวจสอบสิทธิ์การเข้าถึงโรงพยาบาล
+//    4. แก้ไข Syntax errors ทั้งหมด
+
 import { supabase } from './client';
 
 // =====================================================
-// ฟังก์ชัน Login (รองรับทั้ง Patient และ Staff)
+// 🔐 Authentication Functions
 // =====================================================
+
 export async function login(idCard: string, password: string) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, id_card, password_hash, role, is_active')
+      .select('id, id_card, password_hash, role, admin_type, is_active, hospital_id')
       .eq('id_card', idCard)
       .eq('password_hash', password)
       .eq('is_active', true)
@@ -57,6 +66,8 @@ export async function login(idCard: string, password: string) {
       zone: zone,
       current_step: current_step,
       role: data.role,
+      admin_type: data.admin_type || 'hospital',
+      hospital_id: data.hospital_id,
     };
   } catch (err) {
     console.error('Login error:', err);
@@ -64,18 +75,12 @@ export async function login(idCard: string, password: string) {
   }
 }
 
-// =====================================================
-// ฟังก์ชัน Logout
-// =====================================================
 export async function logout() {
   localStorage.removeItem('user_id');
   localStorage.removeItem('user_data');
   localStorage.removeItem('login_time');
 }
 
-// =====================================================
-// ฟังก์ชันตรวจสอบ Session
-// =====================================================
 export function checkSession() {
   const userId = localStorage.getItem('user_id');
   const userData = localStorage.getItem('user_data');
@@ -89,7 +94,6 @@ export function checkSession() {
     const loginDate = new Date(loginTime);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - loginDate.getTime()) / (1000 * 60 * 60 * 24));
-    
     if (diffDays > 7) {
       logout();
       return null;
@@ -100,31 +104,198 @@ export function checkSession() {
 }
 
 // =====================================================
-// ฟังก์ชันดึงข้อมูลผู้ใช้ (Profile)
+// 👤 Super Admin System Functions (ใหม่)
 // =====================================================
-export async function getProfile(userId: string) {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
 
-  if (error) return null;
-
-  if (data) {
-    data.full_name = data.first_name && data.last_name
-      ? `${data.first_name} ${data.last_name}`
-      : '';
-  }
-
-  return data;
+/**
+ * ตรวจสอบว่าเป็น Super Admin หรือไม่
+ * Super Admin = admin_type = 'super' หรือ role = 'super_admin'
+ */
+export function isSuperAdmin(userData: any): boolean {
+  if (!userData) return false;
+  return userData.admin_type === 'super' || userData.role === 'super_admin';
 }
 
+/**
+ * ตรวจสอบว่าเป็น Hospital Admin หรือไม่
+ * Hospital Admin = admin_type = 'hospital' หรือ role = 'admin' + มี hospital_id
+ */
+export function isHospitalAdmin(userData: any): boolean {
+  if (!userData) return false;
+  return userData.admin_type === 'hospital' || 
+         (userData.role === 'admin' && userData.hospital_id);
+}
+
+/**
+ * ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
+ * - Super Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
+ * - Hospital Admin (แม่ข่าย): เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+ * - Hospital Admin (ลูกข่าย): เข้าถึงเฉพาะตัวเองเท่านั้น
+ */
+export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
+  try {
+    console.log('🔍 [getAccessibleHospitalIds] Getting accessible hospitals for user:', userId);
+    
+    // ✅ 1. ดึงข้อมูลผู้ใช้ (role + admin_type + hospital_id)
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('role, admin_type, hospital_id')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !userData) {
+      console.error('❌ [getAccessibleHospitalIds] Error fetching user data:', userError);
+      return [];
+    }
+
+    console.log('📊 [getAccessibleHospitalIds] User data:', {
+      role: userData.role,
+      admin_type: userData.admin_type,
+      hospital_id: userData.hospital_id
+    });
+
+    // ✅ 2. ถ้าเป็น Super Admin → เข้าถึงทั้งหมด (return empty = ไม่กรอง)
+    if (isSuperAdmin(userData)) {
+      console.log('👑 [getAccessibleHospitalIds] Super Admin - can access all hospitals');
+      return []; // Empty array = ไม่มีการกรอง
+    }
+
+    // ✅ 3. ถ้าไม่มี hospital_id → ไม่สามารถเข้าถึงอะไรได้
+    if (!userData.hospital_id) {
+      console.log('⚠️ [getAccessibleHospitalIds] User has no hospital assigned');
+      return [];
+    }
+
+    // ✅ 4. ดึงข้อมูลโรงพยาบาลของผู้ใช้
+    const { data: hospitalData, error: hospitalError } = await supabase
+      .from('hospitals')
+      .select('id, type, parent_id')
+      .eq('id', userData.hospital_id)
+      .single();
+
+    if (hospitalError || !hospitalData) {
+      console.error('❌ [getAccessibleHospitalIds] Error fetching hospital data:', hospitalError);
+      return [];
+    }
+
+    console.log('🏥 [getAccessibleHospitalIds] User hospital:', {
+      id: hospitalData.id,
+      type: hospitalData.type,
+      parent_id: hospitalData.parent_id
+    });
+
+    // ✅ 5. ตรวจสอบประเภทโรงพยาบาล
+    if (hospitalData.type === 'main') {
+      // ✅ แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+      const accessibleIds: string[] = [hospitalData.id];
+      
+      // ดึงลูกข่ายทั้งหมดที่อยู่ใต้แม่ข่ายนี้
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalData.id)
+        .eq('is_active', true);
+
+      if (subHospitals && subHospitals.length > 0) {
+        subHospitals.forEach(sub => accessibleIds.push(sub.id));
+        console.log('✅ [getAccessibleHospitalIds] Found', subHospitals.length, 'sub hospitals');
+      }
+
+      console.log('🏥 [getAccessibleHospitalIds] Main hospital - accessible:', accessibleIds.length, 'hospitals');
+      return accessibleIds;
+
+    } else if (hospitalData.type === 'sub') {
+      // ✅ ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
+      console.log('🏥 [getAccessibleHospitalIds] Sub hospital - accessible: 1 hospital (own)');
+      return [hospitalData.id];
+    }
+
+    return [];
+  } catch (err) {
+    console.error('❌ [getAccessibleHospitalIds] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
+ */
+export async function getUserHospitalInfo(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        hospital_id,
+        hospitals (
+          id,
+          name,
+          code,
+          type,
+          parent_id,
+          parent_hospital:hospitals!parent_id (
+            id,
+            name,
+            code
+          )
+        )
+      `)
+      .eq('id', userId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data.hospitals;
+  } catch (err) {
+    console.error('Error fetching user hospital info:', err);
+    return null;
+  }
+}
+
+/**
+ * ตรวจสอบสิทธิ์ Admin สำหรับแต่ละหน้า
+ */
+export function checkAdminPermission(userData: any, requiredType?: 'super' | 'hospital'): boolean {
+  if (!userData) return false;
+
+  // ✅ ถ้าไม่ระบุ type → ตรวจสอบแค่ว่าเป็น admin หรือไม่
+  if (!requiredType) {
+    return userData.role === 'admin' || 
+           userData.admin_type === 'super' || 
+           userData.admin_type === 'hospital';
+  }
+
+  // ✅ ตรวจสอบตาม type ที่ต้องการ
+  if (requiredType === 'super') {
+    return isSuperAdmin(userData);
+  }
+
+  if (requiredType === 'hospital') {
+    return isHospitalAdmin(userData);
+  }
+
+  return false;
+}
+
+/**
+ * ฟังก์ชันกรองข้อมูลตามสิทธิ์ (ใช้สำหรับทุกหน้า)
+ */
+export async function filterDataByHospitalPermission<T>(
+  userId: string,
+  fetchData: (hospitalIds: string[]) => Promise<T[]>
+): Promise<T[]> {
+  const hospitalIds = await getAccessibleHospitalIds(userId);
+  return fetchData(hospitalIds);
+}
 
 // =====================================================
-// ฟังก์ชันดึงรายการผู้ป่วยทั้งหมด (Admin)
+// 👥 Patient Management Functions
 // =====================================================
-/*
+
+/**
+ * ✅ แก้ไขแล้ว - รับ hospitalIds แทน userId
+ */
 export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
   try {
     console.log('🔍 [getPatientList] Called with hospitalIds:', hospitalIds);
@@ -143,22 +314,23 @@ export async function getPatientList(search?: string, pamLevel?: string, hospita
         hospitals ( 
           id, 
           name, 
-          code 
+          code,
+          type
         )
       `)
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    // ✅ 2. กรองตามโรงพยาบาล (ถ้ามี hospitalIds)
+    // ✅ 2. กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้ามี hospitalIds)
     if (hospitalIds && hospitalIds.length > 0) {
       console.log('🏥 [getPatientList] Filtering by hospitalIds:', hospitalIds);
       query = query.in('hospital_id', hospitalIds);
     } else if (hospitalIds && hospitalIds.length === 0) {
-      // ✅ Admin → แสดงทั้งหมด (ไม่ต้องกรอง)
-      console.log('👑 [getPatientList] Admin user - showing all patients');
+      // ✅ Super Admin (empty array = ไม่กรอง)
+      console.log('👑 [getPatientList] Super Admin - showing all patients');
     } else {
-      // ✅ ไม่มีการส่ง hospitalIds → แสดงทั้งหมด
-      console.log('⚠️ [getPatientList] No hospitalIds provided - showing all patients');
+      // ✅ ไม่มีการส่ง hospitalIds มา
+      console.log('⚠️ [getPatientList] No hospitalIds provided');
     }
 
     // ✅ 3. ค้นหา
@@ -193,80 +365,8 @@ export async function getPatientList(search?: string, pamLevel?: string, hospita
     console.error('❌ [getPatientList] Exception:', err);
     return [];
   }
-}*/
-
-// =====================================================
-// ฟังก์ชันกู้คืนผู้ป่วย (Restore)
-// =====================================================
-export async function restorePatient(patientId: string) {
-  try {
-    console.log('♻️ Restoring patient:', patientId);
-
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({ 
-        is_active: true,
-        status: 'active',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', patientId);
-
-    if (profileError) {
-      console.error('Error restoring profile:', profileError);
-      return { success: false, error: profileError.message };
-    }
-
-    const { error: userError } = await supabase
-      .from('users')
-      .update({ is_active: true })
-      .eq('id', patientId);
-
-    if (userError) {
-      console.error('Error restoring user:', userError);
-      return { success: false, error: userError.message };
-    }
-
-    console.log('✅ Patient restored successfully');
-    return { success: true };
-  } catch (err) {
-    console.error('Restore patient error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการกู้คืนผู้ป่วย' };
-  }
 }
 
-// =====================================================
-// ฟังก์ชันดึงรายการผู้ป่วยที่ถูกลบแล้ว
-// =====================================================
-export async function getDeletedPatients() {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(`*, users!profiles_id_fkey ( id_card, role, is_active )`)
-      .eq('is_active', false)
-      .order('updated_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching deleted patients:', error);
-      return [];
-    }
-
-    const patientsWithData = data?.map(patient => ({
-      ...patient,
-      full_name: patient.first_name && patient.last_name 
-        ? `${patient.first_name} ${patient.last_name}` 
-        : '',
-    })) || [];
-
-    return patientsWithData;
-  } catch (err) {
-    console.error('Get deleted patients error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันลงทะเบียนผู้ป่วยใหม่ (Admin)
-// =====================================================
 export async function registerPatient(data: {
   id_card: string;
   password: string;
@@ -294,7 +394,6 @@ export async function registerPatient(data: {
   district?: string;
   province?: string;
   postal_code?: string;
-  subdistrict_health_center?: string;
   diabetes_type?: string;
   blood_sugar?: number;
   hba1c_level?: number;
@@ -354,7 +453,6 @@ export async function registerPatient(data: {
         district: data.district,
         province: data.province,
         postal_code: data.postal_code,
-        subdistrict_health_center: data.subdistrict_health_center,
         diabetes_type: data.diabetes_type,
         blood_sugar: data.blood_sugar,
         hba1c_level: data.hba1c_level,
@@ -363,12 +461,9 @@ export async function registerPatient(data: {
         education_level: data.education_level,
         hospital_id: data.hospital_id,
         village_id: data.village_id,
-        
-        // ✅ ใช้ค่าที่ส่งมา หรือ default สำหรับผู้ป่วยใหม่
         pam_level: data.pam_level || 'L0',
         pam_score: data.pam_score ?? 0,
         zone: data.zone || 'Zero Zone',
-        
         current_step: 'Starter',
         is_active: true,
         status: 'active',
@@ -389,13 +484,10 @@ export async function registerPatient(data: {
   }
 }
 
-
-// =====================================================
-// ฟังก์ชันดึงข้อมูลผู้ป่วยรายคน (Admin)
-// =====================================================
 export async function getPatientDetail(userId: string) {
   try {
     console.log('🔍 Fetching patient detail for ID:', userId);
+    
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select(`
@@ -442,9 +534,955 @@ export async function getPatientDetail(userId: string) {
   }
 }
 
+export async function deletePatient(patientId: string) {
+  try {
+    console.log('🗑️ Deleting patient:', patientId);
+    
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ 
+        is_active: false,
+        status: 'inactive',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', patientId);
+
+    if (profileError) {
+      console.error('Error updating profile:', profileError);
+      return { success: false, error: profileError.message };
+    }
+
+    const { error: userError } = await supabase
+      .from('users')
+      .update({ is_active: false })
+      .eq('id', patientId);
+
+    if (userError) {
+      console.error('Error updating user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    console.log('✅ Patient deleted successfully');
+    return { success: true };
+  } catch (err) {
+    console.error('Delete patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วย' };
+  }
+}
+
+export async function restorePatient(patientId: string) {
+  try {
+    console.log('♻️ Restoring patient:', patientId);
+    
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ 
+        is_active: true,
+        status: 'active',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', patientId);
+
+    if (profileError) {
+      console.error('Error restoring profile:', profileError);
+      return { success: false, error: profileError.message };
+    }
+
+    const { error: userError } = await supabase
+      .from('users')
+      .update({ is_active: true })
+      .eq('id', patientId);
+
+    if (userError) {
+      console.error('Error restoring user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    console.log('✅ Patient restored successfully');
+    return { success: true };
+  } catch (err) {
+    console.error('Restore patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการกู้คืนผู้ป่วย' };
+  }
+}
+
+export async function permanentlyDeletePatient(patientId: string) {
+  try {
+    console.log('🗑️ Permanently deleting patient:', patientId);
+    
+    // ✅ 1. ลบ screening_responses ก่อน (foreign key)
+    const screenings = await supabase
+      .from('screenings')
+      .select('id')
+      .eq('user_id', patientId);
+
+    if (screenings.data && screenings.data.length > 0) {
+      await supabase
+        .from('screening_responses')
+        .delete()
+        .in(
+          'screening_id',
+          screenings.data.map((s: any) => s.id)
+        );
+    }
+
+    // ✅ 2. ลบ appointment_followups
+    await supabase
+      .from('appointment_followups')
+      .delete()
+      .eq('user_id', patientId);
+
+    // ✅ 3. ลบ goals
+    await supabase
+      .from('goals')
+      .delete()
+      .eq('user_id', patientId);
+
+    // ✅ 4. ลบ records
+    await supabase
+      .from('records')
+      .delete()
+      .eq('user_id', patientId);
+
+    // ✅ 5. ลบ screenings
+    await supabase.from('screenings').delete().eq('user_id', patientId);
+
+    // ✅ 6. ลบ appointments
+    await supabase.from('appointments').delete().eq('user_id', patientId);
+
+    // ✅ 7. ลบ profiles
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', patientId);
+
+    if (profileError) {
+      console.error('Error deleting profile:', profileError);
+      return { success: false, error: profileError.message };
+    }
+
+    // ✅ 8. ลบ users (สุดท้าย)
+    const { error: userError } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', patientId);
+
+    if (userError) {
+      console.error('Error deleting user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    console.log('✅ Patient permanently deleted with all related data');
+    return { success: true };
+  } catch (err) {
+    console.error('Permanent delete patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วยถาวร' };
+  }
+}
+
+export async function getDeletedPatients() {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        *,
+        users!profiles_id_fkey (
+          id_card,
+          role,
+          is_active
+        )
+      `)
+      .eq('is_active', false)
+      .order('updated_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching deleted patients:', error);
+      return [];
+    }
+
+    const patientsWithData = data?.map(patient => ({
+      ...patient,
+      full_name: patient.first_name && patient.last_name 
+        ? `${patient.first_name} ${patient.last_name}` 
+        : '',
+    })) || [];
+
+    return patientsWithData;
+  } catch (err) {
+    console.error('Get deleted patients error:', err);
+    return [];
+  }
+}
+
 // =====================================================
-// ฟังก์ชันดึงคำถาม Screening
+// 👨‍⚕️ Staff Management Functions
 // =====================================================
+
+export async function getStaffList(role?: string) {
+  try {
+    let query = supabase
+      .from('users')
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          is_active,
+          is_verified
+        ),
+        hospitals (
+          id,
+          name,
+          code
+        )
+      `)
+      .in('role', ['admin', 'doctor', 'helper'])
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+
+    if (role) {
+      query = query.eq('role', role);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching staff list:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Get staff list error:', err);
+    return [];
+  }
+}
+
+export async function addStaff(data: {
+  id_card: string;
+  password: string;
+  full_name_th: string;
+  role: 'doctor' | 'helper';
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;
+  birth_date?: string;
+  created_by: string;
+}) {
+  try {
+    console.log('🔍 [addStaff] Starting staff creation...');
+    
+    // ✅ 1. สร้าง user ในตาราง users
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id_card: data.id_card,
+        password_hash: data.password,
+        role: data.role,
+        is_active: true,
+        created_by: data.created_by,
+        hospital_id: data.hospital_id || null,
+        birth_date: data.birth_date || null,
+      })
+      .select()
+      .single();
+
+    if (userError) {
+      console.error('❌ [addStaff] Error creating user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    console.log('✅ [addStaff] User created:', user.id);
+
+    // ✅ 2. ประกาศ doctorData ก่อน if block
+    let doctorData: any = null;
+
+    if (data.role === 'doctor' || data.role === 'helper') {
+      console.log('💾 [addStaff] Creating doctor record...');
+      
+      const { data: doctorDataResult, error: doctorError } = await supabase
+        .from('doctors')
+        .insert({
+          user_id: user.id,
+          full_name: data.full_name_th,
+          full_name_th: data.full_name_th,
+          specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
+          phone: data.phone || null,
+          email: data.email || null,
+          is_active: true,
+          is_verified: false,
+        })
+        .select()
+        .single();
+
+      if (doctorError) {
+        console.error('❌ [addStaff] Error creating doctor:', doctorError);
+        await supabase.from('users').delete().eq('id', user.id);
+        return { success: false, error: doctorError.message };
+      }
+
+      doctorData = doctorDataResult;
+      console.log('✅ [addStaff] Doctor created:', doctorData.id);
+    }
+
+    console.log('✅ [addStaff] Staff creation completed!');
+
+    return { 
+      success: true, 
+      user,
+      doctor: doctorData
+    };
+  } catch (err: any) {
+    console.error('❌ [addStaff] Unexpected error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function updateStaff(userId: string, data: {
+  full_name_th?: string;
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;
+  birth_date?: string;
+  password_hash?: string;
+  is_active?: boolean;
+}) {
+  try {
+    // ✅ 1. อัปเดตข้อมูลในตาราง users
+    const updateUserData: any = {};
+    
+    if (data.birth_date !== undefined) {
+      updateUserData.birth_date = data.birth_date;
+    }
+
+    if (data.password_hash !== undefined) {
+      updateUserData.password_hash = data.password_hash;
+    }
+
+    if (data.hospital_id !== undefined) {
+      updateUserData.hospital_id = data.hospital_id;
+    }
+
+    if (Object.keys(updateUserData).length > 0) {
+      updateUserData.updated_at = new Date().toISOString();
+      
+      const { error: userError } = await supabase
+        .from('users')
+        .update(updateUserData)
+        .eq('id', userId);
+
+      if (userError) {
+        console.error('Error updating user:', userError);
+        return { success: false, error: userError.message };
+      }
+    }
+
+    // ✅ 2. อัปเดตข้อมูลในตาราง doctors
+    const updateDoctorData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.full_name_th !== undefined) {
+      updateDoctorData.full_name_th = data.full_name_th;
+    }
+
+    if (data.specialization_th !== undefined) {
+      updateDoctorData.specialization_th = data.specialization_th;
+    }
+
+    if (data.is_active !== undefined) {
+      updateDoctorData.is_active = data.is_active;
+    }
+
+    const { error } = await supabase
+      .from('doctors')
+      .update(updateDoctorData)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error updating staff:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Update staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
+  }
+}
+
+export async function deactivateStaff(userId: string) {
+  try {
+    await supabase
+      .from('doctors')
+      .update({ is_active: false })
+      .eq('user_id', userId);
+
+    const { error } = await supabase
+      .from('users')
+      .update({ is_active: false })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error deactivating staff:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error('Deactivate staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการปิดการใช้งาน' };
+  }
+}
+
+export async function restoreStaff(staffId: string) {
+  try {
+    console.log('♻️ Restoring staff:', staffId);
+    
+    await supabase
+      .from('doctors')
+      .update({ is_active: true })
+      .eq('user_id', staffId);
+
+    const { error } = await supabase
+      .from('users')
+      .update({ is_active: true })
+      .eq('id', staffId);
+
+    if (error) {
+      console.error('Error restoring staff:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log('✅ Staff restored successfully');
+    return { success: true };
+  } catch (err) {
+    console.error('Restore staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการกู้คืนเจ้าหน้าที่' };
+  }
+}
+
+export async function permanentlyDeleteStaff(staffId: string) {
+  try {
+    console.log('🗑️ Permanently deleting staff:', staffId);
+    
+    await supabase
+      .from('doctors')
+      .delete()
+      .eq('user_id', staffId);
+
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', staffId);
+
+    if (error) {
+      console.error('Error deleting staff:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log('✅ Staff permanently deleted');
+    return { success: true };
+  } catch (err) {
+    console.error('Permanent delete staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลบเจ้าหน้าที่ถาวร' };
+  }
+}
+
+export async function getDeactivatedStaff() {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          phone,
+          email
+        )
+      `)
+      .in('role', ['admin', 'doctor', 'helper'])
+      .eq('is_active', false)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching deactivated staff:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Get deactivated staff error:', err);
+    return [];
+  }
+}
+
+export async function getStaffDetail(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th,
+          phone,
+          email,
+          is_active,
+          is_verified
+        )
+      `)
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      console.error('Error fetching staff detail:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Get staff detail error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// 🏥 Hospital Management Functions
+// =====================================================
+
+export async function getHospitals() {
+  try {
+    console.log('🏥 Fetching all hospitals...');
+    
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select('*')
+      .eq('is_active', true)
+      .order('type', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('❌ Error fetching hospitals:', error);
+      return [];
+    }
+
+    console.log('✅ Hospitals loaded:', data?.length || 0);
+    return data || [];
+  } catch (err) {
+    console.error('Get hospitals error:', err);
+    return [];
+  }
+}
+
+export async function getHospitalsWithHierarchy() {
+  try {
+    console.log('🏥 Fetching hospitals with hierarchy...');
+    
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select(`
+        *,
+        parent_hospital:hospitals!parent_id (
+          id,
+          name,
+          code
+        )
+      `)
+      .eq('is_active', true)
+      .order('type', { ascending: true })
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('❌ Error fetching hospitals:', error);
+      return [];
+    }
+
+    console.log('✅ Hospitals with hierarchy fetched:', data?.length || 0);
+    return data || [];
+  } catch (err) {
+    console.error('❌ Get hospitals with hierarchy error:', err);
+    return [];
+  }
+}
+
+export async function createHospital(data: {
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id?: string;
+  address?: string;
+  phone?: string;
+  province?: string;
+  district?: string;
+  subdistrict?: string;
+}) {
+  try {
+    const { data: hospital, error } = await supabase
+      .from('hospitals')
+      .insert({
+        name: data.name,
+        code: data.code,
+        type: data.type,
+        parent_id: data.parent_id,
+        address: data.address,
+        phone: data.phone,
+        province: data.province,
+        district: data.district,
+        subdistrict: data.subdistrict,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return { success: true, hospital };
+  } catch (err) {
+    console.error('Create hospital error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างโรงพยาบาล' };
+  }
+}
+
+// =====================================================
+// 🏘️ Village Management Functions
+// =====================================================
+
+export async function getVillages(hospitalId?: string) {
+  try {
+    let query = supabase
+      .from('villages')
+      .select(`
+        *,
+        hospitals (
+          name,
+          type
+        )
+      `)
+      .eq('is_active', true)
+      .order('province', { ascending: true })
+      .order('district', { ascending: true })
+      .order('subdistrict', { ascending: true })
+      .order('village_no', { ascending: true });
+
+    if (hospitalId) {
+      query = query.eq('hospital_id', hospitalId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+
+    return data || [];
+  } catch (err) {
+    console.error('Get villages error:', err);
+    return [];
+  }
+}
+
+export async function createVillage(data: {
+  village_no: string;
+  village_name?: string;
+  subdistrict: string;
+  district: string;
+  province: string;
+  postal_code?: string;
+  hospital_id?: string;
+}) {
+  try {
+    const { data: village, error } = await supabase
+      .from('villages')
+      .insert({
+        village_no: data.village_no,
+        village_name: data.village_name,
+        subdistrict: data.subdistrict,
+        district: data.district,
+        province: data.province,
+        postal_code: data.postal_code,
+        hospital_id: data.hospital_id,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return { success: true, village };
+  } catch (err) {
+    console.error('Create village error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างหมู่บ้าน' };
+  }
+}
+
+// =====================================================
+// 👩‍️ Volunteer Management Functions
+// =====================================================
+
+export async function getVolunteerVillages(volunteerId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('volunteer_villages')
+      .select(`
+        *,
+        villages (
+          village_no,
+          village_name,
+          subdistrict,
+          district,
+          province
+        )
+      `)
+      .eq('volunteer_id', volunteerId)
+      .eq('is_active', true);
+
+    if (error) throw error;
+
+    return data || [];
+  } catch (err) {
+    console.error('Get volunteer villages error:', err);
+    return [];
+  }
+}
+
+export async function assignVolunteerVillage(data: {
+  volunteer_id: string;
+  village_id: string;
+}) {
+  try {
+    const { data: result, error } = await supabase
+      .from('volunteer_villages')
+      .insert({
+        volunteer_id: data.volunteer_id,
+        village_id: data.village_id,
+        is_active: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return { success: true, data: result };
+  } catch (err) {
+    console.error('Assign volunteer village error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการมอบหมายหมู่บ้าน' };
+  }
+}
+
+// =====================================================
+// 📍 Address Functions
+// =====================================================
+
+export async function getProvinces() {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('province')
+      .neq('province', null)
+      .order('province', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching provinces:', error);
+      return [];
+    }
+
+    const provinces = [...new Set(data?.map(v => v.province) || [])];
+    console.log('✅ Provinces fetched:', provinces.length);
+    return provinces;
+  } catch (err) {
+    console.error('Get provinces error:', err);
+    return [];
+  }
+}
+
+export async function getDistricts(province: string) {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('district')
+      .eq('province', province)
+      .neq('district', null)
+      .order('district', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching districts:', error);
+      return [];
+    }
+
+    const districts = [...new Set(data?.map(v => v.district) || [])];
+    console.log('✅ Districts fetched for', province, ':', districts.length);
+    return districts;
+  } catch (err) {
+    console.error('Get districts error:', err);
+    return [];
+  }
+}
+
+export async function getSubdistricts(province: string, district: string) {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('subdistrict, postal_code')
+      .eq('province', province)
+      .eq('district', district)
+      .neq('subdistrict', null)
+      .order('subdistrict', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching subdistricts:', error);
+      return [];
+    }
+
+    console.log('✅ Subdistricts fetched:', data?.length || 0);
+    return data || [];
+  } catch (err) {
+    console.error('Get subdistricts error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 📅 Appointment Functions
+// =====================================================
+
+export async function getAppointments(patientId: string) {
+  try {
+    console.log('📅 [getAppointments] Fetching for patient:', patientId);
+    
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        *,
+        doctors:doctor_id (
+          id,
+          full_name_th,
+          specialization_th
+        )
+      `)
+      .eq('user_id', patientId)
+      .order('appointment_date', { ascending: true });
+
+    if (error) {
+      console.error('❌ [getAppointments] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getAppointments] Found:', data?.length || 0, 'appointments');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getAppointments] Error:', err);
+    return [];
+  }
+}
+
+export async function createAppointment(data: {
+  user_id: string;
+  doctor_id: string;
+  appointment_type: string;
+  appointment_date: string;
+  duration_minutes?: number;
+  location_type?: string;
+  location_detail?: string;
+  notes?: string;
+  created_by: string;
+}) {
+  try {
+    const { data: appointment, error } = await supabase
+      .from('appointments')
+      .insert({
+        user_id: data.user_id,
+        doctor_id: data.doctor_id,
+        appointment_type: data.appointment_type,
+        appointment_date: data.appointment_date,
+        duration_minutes: data.duration_minutes || 30,
+        location_type: data.location_type || 'clinic',
+        location_detail: data.location_detail,
+        status: 'scheduled',
+        notes: data.notes,
+        created_by: data.created_by,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating appointment:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true, appointment };
+  } catch (err) {
+    console.error('Create appointment error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างนัดหมาย' };
+  }
+}
+
+export async function getNextAppointment(userId: string) {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`
+        *,
+        doctors (
+          id,
+          full_name_th,
+          specialization_th
+        )
+      `)
+      .eq('user_id', userId)
+      .in('status', ['scheduled', 'confirmed', 'pending'])
+      .gte('appointment_date', startOfToday.toISOString())
+      .order('appointment_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching appointment:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Appointment error:', err);
+    return null;
+  }
+}
+
+export async function getNextPatientAppointment(patientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('user_id', patientId)
+      .in('status', ['scheduled', 'confirmed'])
+      .gte('appointment_date', new Date().toISOString())
+      .order('appointment_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching next appointment:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('Get next appointment error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// 📋 Screening Functions
+// =====================================================
+
 export async function getScreeningQuestions(questionType: string = 'pam') {
   try {
     const { data, error } = await supabase
@@ -466,9 +1504,6 @@ export async function getScreeningQuestions(questionType: string = 'pam') {
   }
 }
 
-// =====================================================
-// ฟังก์ชันบันทึก Screening
-// =====================================================
 export async function saveScreening(data: {
   user_id: string;
   screening_type: string;
@@ -567,480 +1602,20 @@ export async function saveScreening(data: {
   }
 }
 
-// =====================================================
-// ฟังก์ชันดึงข้อมูลโค้ช/หมอทั้งหมด
-// =====================================================
-export async function getCoaches() {
-  try {
-    const { data, error } = await supabase
-      .from('doctors')
-      .select('id, user_id, full_name_th, specialization_th, is_active')
-      .eq('is_active', true)
-      .order('full_name_th', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching coaches:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (err) {
-    console.error('Get coaches error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงนัดหมายทั้งหมด (Admin)
-// =====================================================
-// ✅ แก้ไขแล้ว - ระบุ relationship ให้ชัดเจน
-export async function getAppointments(patientId: string) {
-  try {
-    console.log('📅 [getAppointments] Fetching for patient:', patientId);
-    
-    const { data, error } = await supabase
-      .from('appointments')
-      .select(`
-        *,
-        doctors:doctor_id (
-          id,
-          full_name_th,
-          specialization_th
-        )
-      `)
-      .eq('user_id', patientId)
-      .order('appointment_date', { ascending: true });
-
-    if (error) {
-      console.error('❌ [getAppointments] Error:', error);
-      return [];
-    }
-
-    console.log('✅ [getAppointments] Found:', data?.length || 0, 'appointments');
-    return data || [];
-  } catch (err) {
-    console.error('❌ [getAppointments] Error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันสร้างนัดหมายใหม่ (Admin)
-// =====================================================
-export async function createAppointment(data: {
-  user_id: string;
-  doctor_id: string;
-  appointment_type: string;
-  appointment_date: string;
-  duration_minutes?: number;
-  location_type?: string;
-  location_detail?: string;
-  notes?: string;
-  created_by: string;
-}) {
-  try {
-    const { data: appointment, error } = await supabase
-      .from('appointments')
-      .insert({
-        user_id: data.user_id,
-        doctor_id: data.doctor_id,
-        appointment_type: data.appointment_type,
-        appointment_date: data.appointment_date,
-        duration_minutes: data.duration_minutes || 30,
-        location_type: data.location_type || 'clinic',
-        location_detail: data.location_detail,
-        status: 'scheduled',
-        notes: data.notes,
-        created_by: data.created_by,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating appointment:', error);
-      return { success: false, error: error.message };
-    }
-
-    return { success: true, appointment };
-  } catch (err) {
-    console.error('Create appointment error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างนัดหมาย' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงสถิติ Dashboard (Admin)
-// =====================================================
-// ✅ ใน lib/supabase/queries.ts
-export async function getDashboardStats(hospitalIds?: string[]) {
-  try {
-    // ✅ 1. นับผู้ป่วยทั้งหมด (กรองตามโรงพยาบาลถ้ามี)
-    let patientsQuery = supabase
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);
-    
-    if (hospitalIds && hospitalIds.length > 0) {
-      patientsQuery = patientsQuery.in('hospital_id', hospitalIds);
-    }
-    
-    const { count: totalPatients } = await patientsQuery;
-    
-    // ✅ 2. นับบันทึกวันนี้ (ต้อง join กับ profiles เพื่อกรองโรงพยาบาล)
-    const today = new Date().toISOString().split('T')[0];
-    
-    let recordsQuery = supabase
-      .from('records')
-      .select('*', { count: 'exact', head: true })
-      .eq('record_date', today);
-    
-    if (hospitalIds && hospitalIds.length > 0) {
-      // ✅ ต้องดึง user_id จาก profiles ที่อยู่ในโรงพยาบาลที่เข้าถึงได้
-      const { data: patientIds } = await supabase
-        .from('profiles')
-        .select('id')
-        .in('hospital_id', hospitalIds)
-        .eq('is_active', true);
-      
-      if (patientIds && patientIds.length > 0) {
-        recordsQuery = recordsQuery.in(
-          'user_id',
-          patientIds.map(p => p.id)
-        );
-      } else {
-        return {
-          totalPatients: 0,
-          todayRecords: 0,
-          todayAppointments: 0,
-          pendingAssessments: 0,
-        };
-      }
-    }
-    
-    const { count: todayRecords } = await recordsQuery;
-
-    // ✅ 3. นับนัดหมายวันนี้ (ต้อง join กับ profiles เพื่อกรองโรงพยาบาล)
-    let appointmentsQuery = supabase
-      .from('appointments')
-      .select('*', { count: 'exact', head: true })
-      .gte('appointment_date', today)
-      .lte('appointment_date', today + 'T23:59:59');
-    
-    if (hospitalIds && hospitalIds.length > 0) {
-      // ✅ ต้องดึง user_id จาก profiles ที่อยู่ในโรงพยาบาลที่เข้าถึงได้
-      const { data: patientIds } = await supabase
-        .from('profiles')
-        .select('id')
-        .in('hospital_id', hospitalIds)
-        .eq('is_active', true);
-      
-      if (patientIds && patientIds.length > 0) {
-        appointmentsQuery = appointmentsQuery.in(
-          'user_id',
-          patientIds.map(p => p.id)
-        );
-      } else {
-        return {
-          totalPatients: 0,
-          todayRecords: 0,
-          todayAppointments: 0,
-          pendingAssessments: 0,
-        };
-      }
-    }
-    
-    const { count: todayAppointments } = await appointmentsQuery;
-
-    // ✅ 4. นับรอประเมิน (กรองตามโรงพยาบาล)
-    let pendingQuery = supabase
-      .from('profiles')
-      .select('*', { count: 'exact', head: true })
-      .eq('pam_level', 'L1')
-      .eq('is_active', true);
-    
-    if (hospitalIds && hospitalIds.length > 0) {
-      pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
-    }
-    
-    const { count: pendingAssessments } = await pendingQuery;
-
-    return {
-      totalPatients: totalPatients || 0,
-      todayRecords: todayRecords || 0,
-      todayAppointments: todayAppointments || 0,
-      pendingAssessments: pendingAssessments || 0,
-    };
-  } catch (err) {
-    console.error('Get dashboard stats error:', err);
-    return {
-      totalPatients: 0,
-      todayRecords: 0,
-      todayAppointments: 0,
-      pendingAssessments: 0,
-    };
-  }
-}
-
-export async function addStaff(data: {
-  id_card: string;
-  password: string;
-  full_name_th: string;
-  role: 'doctor' | 'helper';
-  specialization_th?: string;
-  phone?: string;
-  email?: string;
-  hospital_id?: string;
-  birth_date?: string;
-  created_by: string;
-}) {
-  try {
-    console.log('🔍 [addStaff] Starting staff creation...');
-    
-    // ✅ 1. สร้าง user ในตาราง users
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .insert({
-        id_card: data.id_card,
-        password_hash: data.password,
-        role: data.role,
-        is_active: true,
-        created_by: data.created_by,
-        hospital_id: data.hospital_id || null,
-        birth_date: data.birth_date || null,
-      })
-      .select()
-      .single();
-
-    if (userError) {
-      console.error('❌ [addStaff] Error creating user:', userError);
-      return { success: false, error: userError.message };
-    }
-
-    console.log('✅ [addStaff] User created:', user.id);
-
-    // ✅ 2. ประกาศ doctorData ก่อน if block (สำคัญมาก!)
-    let doctorData: any = null;
-    
-    if (data.role === 'doctor' || data.role === 'helper') {
-      console.log('💾 [addStaff] Creating doctor record...');
-      
-      const { data: doctorDataResult, error: doctorError } = await supabase
-        .from('doctors')
-        .insert({
-          user_id: user.id,
-          full_name: data.full_name_th,
-          full_name_th: data.full_name_th,
-          specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
-          phone: data.phone || null,
-          email: data.email || null,
-          is_active: true,
-          is_verified: false,
-        })
-        .select()
-        .single();
-
-      if (doctorError) {
-        console.error('❌ [addStaff] Error creating doctor:', doctorError);
-        // Rollback user
-        await supabase.from('users').delete().eq('id', user.id);
-        return { success: false, error: doctorError.message };
-      }
-
-      doctorData = doctorDataResult; // ✅ กำหนดค่าให้ตัวแปรที่ประกาศไว้
-      console.log('✅ [addStaff] Doctor created:', doctorData.id);
-    }
-
-    console.log('✅ [addStaff] Staff creation completed!');
-    
-    // ✅ 3. ส่ง doctorData กลับ (ตอนนี้เข้าถึงได้แล้ว)
-    return { 
-      success: true, 
-      user,
-      doctor: doctorData  // ✅ OK - doctorData ถูกประกาศข้างบนแล้ว
-    };
-    
-  } catch (err: any) {
-    console.error('❌ [addStaff] Unexpected error:', err);
-    return { success: false, error: err.message };
-  }
-}
-
-// ✅ แก้ไขฟังก์ชัน updateStaff ใน lib/supabase/queries.ts
-export async function updateStaff(userId: string, data: {
-  full_name_th?: string;
-  specialization_th?: string;
-  phone?: string;
-  email?: string;
-  hospital_id?: string;
-  birth_date?: string;  // ✅ เพิ่ม field นี้
-  password_hash?: string;  // ✅ เพิ่ม field นี้ (สำหรับ reset password)
-  is_active?: boolean;
-}) {
-  try {
-    // ✅ 1. อัปเดตข้อมูลในตาราง users (birth_date, password_hash, hospital_id)
-    const updateUserData: any = {};
-    
-    if (data.birth_date !== undefined) {
-      updateUserData.birth_date = data.birth_date;
-    }
-    
-    if (data.password_hash !== undefined) {
-      updateUserData.password_hash = data.password_hash;
-    }
-    
-    if (data.hospital_id !== undefined) {
-      updateUserData.hospital_id = data.hospital_id;
-    }
-
-    // ✅ อัปเดตตาราง users ถ้ามีข้อมูลที่จะอัปเดต
-    if (Object.keys(updateUserData).length > 0) {
-      updateUserData.updated_at = new Date().toISOString();
-      
-      const { error: userError } = await supabase
-        .from('users')
-        .update(updateUserData)
-        .eq('id', userId);
-
-      if (userError) {
-        console.error('Error updating user:', userError);
-        return { success: false, error: userError.message };
-      }
-    }
-
-    // ✅ 2. อัปเดตข้อมูลในตาราง doctors
-    const updateDoctorData: any = {
-      updated_at: new Date().toISOString(),
-    };
-
-    if (data.full_name_th !== undefined) {
-      updateDoctorData.full_name_th = data.full_name_th;
-    }
-
-    if (data.specialization_th !== undefined) {
-      updateDoctorData.specialization_th = data.specialization_th;
-    }
-
-    if (data.is_active !== undefined) {
-      updateDoctorData.is_active = data.is_active;
-    }
-
-    const { error } = await supabase
-      .from('doctors')
-      .update(updateDoctorData)
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('Error updating staff:', error);
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch (err) {
-    console.error('Update staff error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
-  }
-}
-
-// ✅ แก้ไขฟังก์ชัน getStaffList ให้ดึงข้อมูล birth_date มาด้วย
-export async function getStaffList(role?: string) {
-  try {
-    let query = supabase
-      .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          is_verified
-        ),
-        hospitals (
-          id,
-          name,
-          code
-        )
-      `)
-      .in('role', ['admin', 'doctor', 'helper'])
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-
-    if (role) {
-      query = query.eq('role', role);
-    }
-
-    const {  data, error } = await query;
-
-    if (error) {
-      console.error('Error fetching staff list:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (err) {
-    console.error('Get staff list error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันลบ/ปิดการใช้งานเจ้าหน้าที่
-// =====================================================
-export async function deactivateStaff(userId: string) {
-  try {
-    await supabase
-      .from('doctors')
-      .update({ is_active: false })
-      .eq('user_id', userId);
-
-    const { error } = await supabase
-      .from('users')
-      .update({ is_active: false })
-      .eq('id', userId);
-
-    if (error) {
-      console.error('Error deactivating staff:', error);
-      return { success: false, error: error.message };
-    }
-
-    return { success: true };
-  } catch (err) {
-    console.error('Deactivate staff error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการปิดการใช้งาน' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงข้อมูลเจ้าหน้าที่รายคน
-// =====================================================
-export async function getStaffDetail(userId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email, is_active, is_verified )`)
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      console.error('Error fetching staff detail:', error);
-      return null;
-    }
-
-    return data;
-  } catch (err) {
-    console.error('Get staff detail error:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงประวัติการประเมินพร้อมคำตอบ
-// =====================================================
 export async function getScreeningHistory(patientId: string) {
   try {
     const { data: screenings, error } = await supabase
       .from('screenings')
-      .select(`*, screening_responses ( question_id, question_number, question_type, selected_option, score )`)
+      .select(`
+        *,
+        screening_responses (
+          question_id,
+          question_number,
+          question_type,
+          selected_option,
+          score
+        )
+      `)
       .eq('user_id', patientId)
       .order('screening_date', { ascending: false });
 
@@ -1056,9 +1631,6 @@ export async function getScreeningHistory(patientId: string) {
   }
 }
 
-// =====================================================
-// ฟังก์ชันดึงคำถามทั้งหมด
-// =====================================================
 export async function getAllScreeningQuestions() {
   try {
     const { data, error } = await supabase
@@ -1081,213 +1653,9 @@ export async function getAllScreeningQuestions() {
 }
 
 // =====================================================
-// ฟังก์ชันลบผู้ป่วย (Soft Delete)
+// 🎯 Goals Functions
 // =====================================================
-export async function deletePatient(patientId: string) {
-  try {
-    console.log('🗑️ Deleting patient:', patientId);
 
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({ 
-        is_active: false,
-        status: 'inactive',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', patientId);
-
-    if (profileError) {
-      console.error('Error updating profile:', profileError);
-      return { success: false, error: profileError.message };
-    }
-
-    const { error: userError } = await supabase
-      .from('users')
-      .update({ is_active: false })
-      .eq('id', patientId);
-
-    if (userError) {
-      console.error('Error updating user:', userError);
-      return { success: false, error: userError.message };
-    }
-
-    console.log('✅ Patient deleted successfully');
-    return { success: true };
-  } catch (err) {
-    console.error('Delete patient error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วย' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันลบผู้ป่วยถาวร (Permanent Delete)
-// =====================================================
-// ✅ แก้ไขฟังก์ชัน permanentlyDeletePatient ใน lib/supabase/queries.ts
-export async function permanentlyDeletePatient(patientId: string) {
-  try {
-    console.log('🗑️ Permanently deleting patient:', patientId);
-    
-    // ========================================
-    // ✅ 1. ลบ screening_responses ก่อน (foreign key)
-    // ========================================
-    const screenings = await supabase
-      .from('screenings')
-      .select('id')
-      .eq('user_id', patientId);
-    
-    if (screenings.data && screenings.data.length > 0) {
-      await supabase
-        .from('screening_responses')
-        .delete()
-        .in(
-          'screening_id',
-          screenings.data.map((s: any) => s.id)
-        );
-    }
-    
-    // ========================================
-    // ✅ 2. ลบ appointment_followups (เพิ่มใหม่)
-    // ========================================
-    await supabase
-      .from('appointment_followups')
-      .delete()
-      .eq('user_id', patientId);
-    
-    // ========================================
-    // ✅ 3. ลบ goals (เพิ่มใหม่)
-    // ========================================
-    await supabase
-      .from('goals')
-      .delete()
-      .eq('user_id', patientId);
-    
-    // ========================================
-    // ✅ 4. ลบ records (เพิ่มใหม่)
-    // ========================================
-    await supabase
-      .from('records')
-      .delete()
-      .eq('user_id', patientId);
-    
-    // ========================================
-    // ✅ 5. ลบ screenings
-    // ========================================
-    await supabase.from('screenings').delete().eq('user_id', patientId);
-    
-    // ========================================
-    // ✅ 6. ลบ appointments
-    // ========================================
-    await supabase.from('appointments').delete().eq('user_id', patientId);
-    
-    // ========================================
-    // ✅ 7. ลบ profiles
-    // ========================================
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .delete()
-      .eq('id', patientId);
-    
-    if (profileError) {
-      console.error('Error deleting profile:', profileError);
-      return { success: false, error: profileError.message };
-    }
-    
-    // ========================================
-    // ✅ 8. ลบ users (สุดท้าย)
-    // ========================================
-    const { error: userError } = await supabase
-      .from('users')
-      .delete()
-      .eq('id', patientId);
-    
-    if (userError) {
-      console.error('Error deleting user:', userError);
-      return { success: false, error: userError.message };
-    }
-    
-    console.log('✅ Patient permanently deleted with all related data');
-    return { success: true };
-  } catch (err) {
-    console.error('Permanent delete patient error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วยถาวร' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันลบเจ้าหน้าที่ถาวร (Permanent Delete)
-// =====================================================
-export async function permanentlyDeleteStaff(staffId: string) {
-  try {
-    console.log('🗑️ Permanently deleting staff:', staffId);
-
-    await supabase.from('doctors').delete().eq('user_id', staffId);
-
-    const { error } = await supabase.from('users').delete().eq('id', staffId);
-
-    if (error) {
-      console.error('Error deleting staff:', error);
-      return { success: false, error: error.message };
-    }
-
-    console.log('✅ Staff permanently deleted');
-    return { success: true };
-  } catch (err) {
-    console.error('Permanent delete staff error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการลบเจ้าหน้าที่ถาวร' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันกู้คืนเจ้าหน้าที่ (Restore)
-// =====================================================
-export async function restoreStaff(staffId: string) {
-  try {
-    console.log('♻️ Restoring staff:', staffId);
-
-    await supabase.from('doctors').update({ is_active: true }).eq('user_id', staffId);
-
-    const { error } = await supabase.from('users').update({ is_active: true }).eq('id', staffId);
-
-    if (error) {
-      console.error('Error restoring staff:', error);
-      return { success: false, error: error.message };
-    }
-
-    console.log('✅ Staff restored successfully');
-    return { success: true };
-  } catch (err) {
-    console.error('Restore staff error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการกู้คืนเจ้าหน้าที่' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงรายการเจ้าหน้าที่ที่ปิดการใช้งาน
-// =====================================================
-export async function getDeactivatedStaff() {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email )`)
-      .in('role', ['admin', 'doctor', 'helper'])
-      .eq('is_active', false)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching deactivated staff:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (err) {
-    console.error('Get deactivated staff error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันสร้างเป้าหมายเริ่มต้นตาม PAM Level (แก้ไขแล้ว)
-// =====================================================
 export async function createDefaultGoals(
   userId: string,
   pamLevel: string,
@@ -1301,7 +1669,6 @@ export async function createDefaultGoals(
       return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
     }
 
-    // ✅ 1. ตรวจสอบว่ามี goals อยู่แล้วหรือไม่
     const { data: existingGoals, error: checkError } = await supabase
       .from('goals')
       .select('*')
@@ -1313,22 +1680,18 @@ export async function createDefaultGoals(
       console.error('Error checking existing goals:', checkError);
     }
 
-    // ✅ 2. ถ้ามี goals อยู่แล้ว → ตรวจสอบว่าตรงกับ PAM Level หรือไม่
     if (existingGoals && existingGoals.length > 0) {
       const goalNames = existingGoals.map(g => g.goal_name);
       
-      // ✅ ตรวจสอบว่าเป็น L4 แต่ได้ goals ของ L2/L3 หรือไม่
       const isL4ButHasL2L3Goals = pamLevel === 'L4' && 
         goalNames.some(name => ['stop_sweet', 'reduce_rice', 'protein_vegetable', 'exercise_walk', 'record_weight_sugar'].includes(name));
       
-      // ✅ ตรวจสอบว่าเป็น L2/L3 แต่ได้ goals ของ L4 หรือไม่
       const isL2L3ButHasL4Goals = (pamLevel === 'L2' || pamLevel === 'L3') && 
         goalNames.some(name => ['carb_control', 'protein_intake', 'water_intake', 'stretching', 'cardio', 'strengthening', 'hiit', 'sleep'].includes(name));
 
-      if (isL4ButHasL2L3Goals || isL2L3ButHasL4Goals) {
+      if (isL4ButHasL2L3Goals || isL2L3ButHasL4Goals) { 
         console.log('⚠️ PAM Level changed! Archiving old goals and creating new ones...');
         
-        // ✅ Archive goals เก่า
         const { error: archiveError } = await supabase
           .from('goals')
           .update({ 
@@ -1344,7 +1707,6 @@ export async function createDefaultGoals(
           console.error('Error archiving old goals:', archiveError);
         }
       } else {
-        // ✅ Goals ตรงกับ PAM Level แล้ว → ไม่ต้องสร้างใหม่
         console.log('✅ Goals already exist and match PAM Level:', existingGoals.length, 'goals');
         return { 
           success: true, 
@@ -1355,7 +1717,6 @@ export async function createDefaultGoals(
       }
     }
 
-    // ✅ 3. สร้าง goals ใหม่
     const today = new Date().toISOString().split('T')[0];
     const goals = [];
 
@@ -1410,7 +1771,7 @@ export async function createDefaultGoals(
     }
 
     if (pamLevel === 'L4') {
-      const { data: activities, error: activitiesError } = await supabase
+      const { data: activities, error: activitiesError } = await supabase 
         .from('activities')
         .select('id, activity_code, activity_name_th, description_th, activity_type')
         .in('activity_code', [
@@ -1481,9 +1842,6 @@ export async function createDefaultGoals(
   }
 }
 
-// =====================================================
-// ฟังก์ชันดึงเป้าหมายของผู้ป่วย
-// =====================================================
 export async function getPatientGoals(userId: string) {
   try {
     const { data, error } = await supabase
@@ -1506,9 +1864,6 @@ export async function getPatientGoals(userId: string) {
   }
 }
 
-// =====================================================
-// ฟังก์ชันอัปเดตเวลาออกกำลังกายใน Goals
-// =====================================================
 export async function updateExerciseGoal(
   userId: string,
   goalName: string,
@@ -1540,280 +1895,6 @@ export async function updateExerciseGoal(
   }
 }
 
-// =====================================================
-// ฟังก์ชันบันทึกเวลาออกกำลังกายที่ทำได้จริง
-// =====================================================
-export async function saveExerciseRecord(data: {
-  user_id: string;
-  activity_id: string;
-  record_date: string;
-  exercise_minutes: number;
-  is_completed: boolean;
-}) {
-  try {
-    const { data: result, error } = await supabase
-      .from('records')
-      .upsert({
-        user_id: data.user_id,
-        activity_id: data.activity_id,
-        record_date: data.record_date,
-        exercise_minutes: data.exercise_minutes,
-        is_completed: data.is_completed,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'user_id,activity_id,record_date',
-      })
-      .select();
-
-    if (error) {
-      console.error('Error saving exercise record:', error);
-      return null;
-    }
-
-    return result;
-  } catch (err) {
-    console.error('Save exercise record error:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงกิจกรรมตาม PAM Level
-// =====================================================
-export async function getActivities(pamLevel: string) {
-  console.log('Fetching activities for pamLevel:', pamLevel);
-
-  const { data, error } = await supabase
-    .from('activities')
-    .select('*')
-    .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
-    .eq('is_active', true)
-    .order('sort_order', { ascending: true });
-
-  if (error) {
-    console.error('Error fetching activities:', error);
-    return [];
-  }
-
-  console.log('Activities fetched:', data?.length || 0);
-  return data || [];
-}
-
-// =====================================================
-// ฟังก์ชันบันทึกกิจกรรม (ใช้ upsert)
-// =====================================================
-export async function saveRecord(data: {
-  user_id: string;
-  activity_id: string;
-  record_date: string;
-  is_completed: boolean;
-  weight?: number;
-  blood_sugar?: number;
-  sweet_type?: string[];
-  exercise_minutes?: number;
-}) {
-  try {
-    const { data: result, error } = await supabase
-      .from('records')
-      .upsert({
-        user_id: data.user_id,
-        activity_id: data.activity_id,
-        record_date: data.record_date,
-        is_completed: data.is_completed,
-        updated_at: new Date().toISOString(),
-        ...(data.weight !== undefined && { weight: data.weight }),
-        ...(data.blood_sugar !== undefined && { blood_sugar: data.blood_sugar }),
-        ...(data.sweet_type !== undefined && { sweet_type: data.sweet_type }),
-        ...(data.exercise_minutes !== undefined && { exercise_minutes: data.exercise_minutes }),
-      }, {
-        onConflict: 'user_id,activity_id,record_date',
-      })
-      .select();
-
-    if (error) {
-      console.error('Upsert error:', error);
-      return null;
-    }
-
-    return result;
-  } catch (err) {
-    console.error('Save record error:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงบันทึกวันนี้
-// =====================================================
-export async function getTodayRecords(userId: string) {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-
-    const { data, error } = await supabase
-      .from('records')
-      .select(`
-        id, 
-        activity_id, 
-        is_completed, 
-        record_date, 
-        sweet_type, 
-        weight, 
-        blood_sugar,
-        exercise_minutes
-      `)
-      .eq('user_id', userId)
-      .eq('record_date', today);
-
-    if (error) {
-      console.error('Error fetching today records:', error);
-      return [];
-    }
-
-    console.log('📝 Today records:', data);
-    return data || [];
-  } catch (err) {
-    console.error('Get today records error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงเป้าหมายรายสัปดาห์
-// =====================================================
-export async function getWeeklyGoals(userId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('goals')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .eq('goal_type', 'weekly_activity');
-
-    if (error) {
-      console.error('Error fetching weekly goals:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (err) {
-    console.error('Get weekly goals error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึง Progress 7 วัน
-// =====================================================
-export async function getProgress(userId: string, days: number = 7) {
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-
-  const { data, error } = await supabase
-    .from('records')
-    .select(`*, activities ( activity_code, activity_name_th, activity_type )`)
-    .eq('user_id', userId)
-    .gte('record_date', startDate.toISOString())
-    .order('record_date', { ascending: false });
-
-  if (error) return [];
-  return data;
-}
-
-// =====================================================
-// ฟังก์ชันดึงเป้าหมาย
-// =====================================================
-export async function getGoals(userId: string) {
-  try {
-    console.log('Fetching goals for userId:', userId);
-
-    const { data, error } = await supabase
-      .from('goals')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('priority', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching goals:', error);
-      return [];
-    }
-
-    console.log('Goals fetched:', data?.length || 0);
-    return data || [];
-  } catch (err) {
-    console.error('Get goals error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงนัดหมายครั้งถัดไป
-// =====================================================
-export async function getNextAppointment(userId: string) {
-  try {
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const { data, error } = await supabase
-      .from('appointments')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th
-        )
-      `)
-      .eq('user_id', userId)
-      .in('status', ['scheduled', 'confirmed', 'pending'])
-      .gte('appointment_date', startOfToday.toISOString())
-      .order('appointment_date', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error fetching appointment:', error);
-      return null;
-    }
-
-    return data;
-  } catch (err) {
-    console.error('Appointment error:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงความรู้ (Knowledge)
-// =====================================================
-export async function getKnowledge(pamLevel: string = 'ALL') {
-  try {
-    console.log('📚 [getKnowledge] Fetching for pamLevel:', pamLevel);
-
-    const { data, error } = await supabase
-      .from('knowledge')
-      .select('*')
-      .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('❌ [getKnowledge] Error:', error);
-      return [];
-    }
-
-    console.log('✅ [getKnowledge] Fetched:', data?.length || 0, 'items');
-    return data || [];
-  } catch (err) {
-    console.error('❌ [getKnowledge] Error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันนับจำนวนรอบการบันทึกเป้าหมาย
-// =====================================================
 export async function getGoalRoundCount(userId: string) {
   try {
     const { count, error } = await supabase
@@ -1835,9 +1916,6 @@ export async function getGoalRoundCount(userId: string) {
   }
 }
 
-// =====================================================
-// ฟังก์ชันดึงรอบล่าสุดที่บันทึก
-// =====================================================
 export async function getLatestGoalRound(userId: string) {
   try {
     const { data, error } = await supabase
@@ -1860,9 +1938,6 @@ export async function getLatestGoalRound(userId: string) {
   }
 }
 
-// =====================================================
-// ฟังก์ชันบันทึกเป้าหมายรอบใหม่
-// =====================================================
 export async function saveGoalsNewRound(data: {
   user_id: string;
   goals: Array<{
@@ -1879,9 +1954,10 @@ export async function saveGoalsNewRound(data: {
 }) {
   try {
     console.log('💾 [saveGoalsNewRound] Starting...', data.user_id);
+    
     const today = new Date().toISOString().split('T')[0];
     console.log('[saveGoalsNewRound] Today:', today);
-
+    
     const { data: existingTodayGoals, error: fetchError } = await supabase
       .from('goals')
       .select('id, goal_name, created_at')
@@ -2008,8 +2084,327 @@ export async function saveGoalsNewRound(data: {
 }
 
 // =====================================================
-// ฟังก์ชันบันทึกการติดตามนัดหมาย
+// 📊 Records Functions
 // =====================================================
+
+export async function saveRecord(data: {
+  user_id: string;
+  activity_id: string;
+  record_date: string;
+  is_completed: boolean;
+  weight?: number;
+  blood_sugar?: number;
+  sweet_type?: string[];
+  exercise_minutes?: number;
+}) {
+  try {
+    const { data: result, error } = await supabase
+      .from('records')
+      .upsert({
+        user_id: data.user_id,
+        activity_id: data.activity_id,
+        record_date: data.record_date,
+        is_completed: data.is_completed,
+        updated_at: new Date().toISOString(),
+        ...(data.weight !== undefined && { weight: data.weight }),
+        ...(data.blood_sugar !== undefined && { blood_sugar: data.blood_sugar }),
+        ...(data.sweet_type !== undefined && { sweet_type: data.sweet_type }),
+        ...(data.exercise_minutes !== undefined && { exercise_minutes: data.exercise_minutes }),
+      }, {
+        onConflict: 'user_id,activity_id,record_date',
+      })
+      .select();
+
+    if (error) {
+      console.error('Upsert error:', error);
+      return null;
+    }
+
+    return result;
+  } catch (err) {
+    console.error('Save record error:', err);
+    return null;
+  }
+}
+
+export async function saveExerciseRecord(data: {
+  user_id: string;
+  activity_id: string;
+  record_date: string;
+  exercise_minutes: number;
+  is_completed: boolean;
+}) {
+  try {
+    const { data: result, error } = await supabase
+      .from('records')
+      .upsert({
+        user_id: data.user_id,
+        activity_id: data.activity_id,
+        record_date: data.record_date,
+        exercise_minutes: data.exercise_minutes,
+        is_completed: data.is_completed,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'user_id,activity_id,record_date',
+      })
+      .select();
+
+    if (error) {
+      console.error('Error saving exercise record:', error);
+      return null;
+    }
+
+    return result;
+  } catch (err) {
+    console.error('Save exercise record error:', err);
+    return null;
+  }
+}
+
+export async function getTodayRecords(userId: string) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    const { data, error } = await supabase
+      .from('records')
+      .select(`
+        id, 
+        activity_id, 
+        is_completed, 
+        record_date, 
+        sweet_type, 
+        weight, 
+        blood_sugar,
+        exercise_minutes
+      `)
+      .eq('user_id', userId)
+      .eq('record_date', today);
+
+    if (error) {
+      console.error('Error fetching today records:', error);
+      return [];
+    }
+
+    console.log('📝 Today records:', data);
+    return data || [];
+  } catch (err) {
+    console.error('Get today records error:', err);
+    return [];
+  }
+}
+
+export async function getWeeklyGoals(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .eq('goal_type', 'weekly_activity');
+
+    if (error) {
+      console.error('Error fetching weekly goals:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Get weekly goals error:', err);
+    return [];
+  }
+}
+
+export async function getProgress(userId: string, days: number = 7) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  
+  const { data, error } = await supabase
+    .from('records')
+    .select(`
+      *,
+      activities (
+        activity_code,
+        activity_name_th,
+        activity_type
+      )
+    `)
+    .eq('user_id', userId)
+    .gte('record_date', startDate.toISOString())
+    .order('record_date', { ascending: false });
+
+  if (error) return [];
+  
+  return data;
+}
+
+// =====================================================
+// 📈 Dashboard Functions
+// =====================================================
+
+export async function getDashboardStats(hospitalIds?: string[]) {
+  try {
+    // ✅ 1. นับผู้ป่วยทั้งหมด (กรองตามโรงพยาบาลถ้ามี)
+    let patientsQuery = supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_active', true);
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      patientsQuery = patientsQuery.in('hospital_id', hospitalIds);
+    }
+
+    const { count: totalPatients } = await patientsQuery;
+
+    // ✅ 2. นับบันทึกวันนี้
+    const today = new Date().toISOString().split('T')[0];
+
+    let recordsQuery = supabase
+      .from('records')
+      .select('*', { count: 'exact', head: true })
+      .eq('record_date', today);
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      const { data: patientIds } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('hospital_id', hospitalIds)
+        .eq('is_active', true);
+      
+      if (patientIds && patientIds.length > 0) {
+        recordsQuery = recordsQuery.in(
+          'user_id',
+          patientIds.map(p => p.id)
+        );
+      } else {
+        return {
+          totalPatients: 0,
+          todayRecords: 0,
+          todayAppointments: 0,
+          pendingAssessments: 0,
+        };
+      }
+    }
+
+    const { count: todayRecords } = await recordsQuery;
+
+    // ✅ 3. นับนัดหมายวันนี้
+    let appointmentsQuery = supabase
+      .from('appointments')
+      .select('*', { count: 'exact', head: true })
+      .gte('appointment_date', today)
+      .lte('appointment_date', today + 'T23:59:59');
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      const { data: patientIds } = await supabase
+        .from('profiles')
+        .select('id')
+        .in('hospital_id', hospitalIds)
+        .eq('is_active', true);
+      
+      if (patientIds && patientIds.length > 0) {
+        appointmentsQuery = appointmentsQuery.in(
+          'user_id',
+          patientIds.map(p => p.id)
+        );
+      } else {
+        return {
+          totalPatients: 0,
+          todayRecords: 0,
+          todayAppointments: 0,
+          pendingAssessments: 0,
+        };
+      }
+    }
+
+    const { count: todayAppointments } = await appointmentsQuery;
+
+    // ✅ 4. นับรอประเมิน
+    let pendingQuery = supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('pam_level', 'L1')
+      .eq('is_active', true);
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
+    }
+
+    const { count: pendingAssessments } = await pendingQuery;
+
+    return {
+      totalPatients: totalPatients || 0,
+      todayRecords: todayRecords || 0,
+      todayAppointments: todayAppointments || 0,
+      pendingAssessments: pendingAssessments || 0,
+    };
+  } catch (err) {
+    console.error('Get dashboard stats error:', err);
+    return {
+      totalPatients: 0,
+      todayRecords: 0,
+      todayAppointments: 0,
+      pendingAssessments: 0,
+    };
+  }
+}
+
+// =====================================================
+// 📚 Knowledge Functions
+// =====================================================
+
+export async function getKnowledge(pamLevel: string = 'ALL') {
+  try {
+    console.log('📚 [getKnowledge] Fetching for pamLevel:', pamLevel);
+    
+    const { data, error } = await supabase
+      .from('knowledge')
+      .select('*')
+      .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('❌ [getKnowledge] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getKnowledge] Fetched:', data?.length || 0, 'items');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getKnowledge] Error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 👨‍⚕️ Coach Functions
+// =====================================================
+
+export async function getCoaches() {
+  try {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('id, user_id, full_name_th, specialization_th, is_active')
+      .eq('is_active', true)
+      .order('full_name_th', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching coaches:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Get coaches error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 📋 Appointment Followup Functions
+// =====================================================
+
 export async function saveAppointmentFollowup(data: {
   appointment_id: string;
   user_id: string;
@@ -2071,95 +2466,6 @@ export async function saveAppointmentFollowup(data: {
   }
 }
 
-// =====================================================
-// ฟังก์ชันดึงประวัติการติดตามนัดหมายของผู้ป่วย
-// =====================================================
-export async function getPatientFollowupHistory(userId: string, limit?: number) {
-  try {
-    console.log('📋 Fetching followup history for user:', userId);
-
-    let query = supabase
-      .from('appointment_followups')
-      .select(`
-        *,
-        appointments (
-          appointment_date,
-          appointment_type
-        )
-      `)
-      .eq('user_id', userId)
-      .order('followup_date', { ascending: false })
-      .order('followup_round', { ascending: false });
-
-    if (limit) {
-      query = query.limit(limit);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('❌ Error fetching followup history:', error);
-      return [];
-    }
-
-    console.log('✅ Followup history fetched:', data?.length || 0, 'records');
-    return data || [];
-  } catch (err) {
-    console.error('❌ Get followup history error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงการติดตามตาม appointment_id
-// =====================================================
-export async function getFollowupByAppointmentId(appointmentId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('appointment_followups')
-      .select('*')
-      .eq('appointment_id', appointmentId)
-      .order('followup_round', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error fetching followup:', error);
-      return null;
-    }
-
-    return data;
-  } catch (err) {
-    console.error('Get followup error:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ฟังก์ชันนับจำนวนรอบการติดตาม
-// =====================================================
-export async function getFollowupRoundCount(userId: string) {
-  try {
-    const { count, error } = await supabase
-      .from('appointment_followups')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('Error counting followups:', error);
-      return 1;
-    }
-
-    return (count || 0) + 1;
-  } catch (err) {
-    console.error('Get followup round count error:', err);
-    return 1;
-  }
-}
-
-// =====================================================
-// ฟังก์ชันบันทึกการติดตามนัดหมาย (แบบสมบูรณ์)
-// =====================================================
 export async function saveAppointmentFollowupComplete(data: {
   appointment_id: string;
   user_id: string;
@@ -2191,7 +2497,7 @@ export async function saveAppointmentFollowupComplete(data: {
   try {
     console.log('💾 [saveAppointmentFollowupComplete] Starting...');
     console.log('📝 Data to save:', data);
-
+    
     if (!data.conducted_by) {
       throw new Error('conducted_by is required');
     }
@@ -2244,841 +2550,79 @@ export async function saveAppointmentFollowupComplete(data: {
   }
 }
 
-// =====================================================
-// ✅ ฟังก์ชันดึงนัดหมายครั้งถัดไปของผู้ป่วย (สำหรับการ์ด)
-// =====================================================
-// ✅ แก้ไขฟังก์ชัน getNextPatientAppointment
-export async function getNextPatientAppointment(patientId: string) {
+export async function getPatientFollowupHistory(userId: string, limit?: number) {
   try {
-    const { data, error } = await supabase
-      .from('appointments')
-      .select('*')  // ❌ ลบ doctors ออก
-      .eq('user_id', patientId)
-      .in('status', ['scheduled', 'confirmed'])
-      .gte('appointment_date', new Date().toISOString())
-      .order('appointment_date', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    console.log('📋 Fetching followup history for user:', userId);
+    
+    let query = supabase
+      .from('appointment_followups')
+      .select(`
+        *,
+        appointments (
+          appointment_date,
+          appointment_type
+        )
+      `)
+      .eq('user_id', userId)
+      .order('followup_date', { ascending: false })
+      .order('followup_round', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching next appointment:', error);
-      return null;
+    if (limit) {
+      query = query.limit(limit);
     }
 
-    return data;
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ Error fetching followup history:', error);
+      return [];
+    }
+
+    console.log('✅ Followup history fetched:', data?.length || 0, 'records');
+    return data || [];
   } catch (err) {
-    console.error('Get next appointment error:', err);
-    return null;
+    console.error('❌ Get followup history error:', err);
+    return [];
   }
 }
 
-// =====================================================
-// ✅ ฟังก์ชันดึงการประเมินล่าสุดของผู้ป่วย (สำหรับการ์ด)
-// =====================================================
-export async function getLatestScreening(patientId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('screenings')
-      .select('*')
-      .eq('user_id', patientId)
-      .order('screening_date', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error fetching latest screening:', error);
-      return null;
-    }
-
-    return data;
-  } catch (err) {
-    console.error('Get latest screening error:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ✅ ฟังก์ชันดึงการติดตามล่าสุดของผู้ป่วย (สำหรับการ์ด)
-// =====================================================
-export async function getLatestFollowup(patientId: string) {
+export async function getFollowupByAppointmentId(appointmentId: string) {
   try {
     const { data, error } = await supabase
       .from('appointment_followups')
       .select('*')
-      .eq('user_id', patientId)
-      .order('followup_date', { ascending: false })
+      .eq('appointment_id', appointmentId)
       .order('followup_round', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (error) {
-      console.error('Error fetching latest followup:', error);
+      console.error('Error fetching followup:', error);
       return null;
     }
 
     return data;
   } catch (err) {
-    console.error('Get latest followup error:', err);
+    console.error('Get followup error:', err);
     return null;
   }
 }
 
-// =====================================================
-// ✅ ฟังก์ชันดึงสถิติเป้าหมายของผู้ป่วย (สำหรับการ์ด)
-// =====================================================
-// ✅ แก้ไขฟังก์ชัน getPatientGoalsStats
-export async function getPatientGoalsStats(patientId: string) {
-  try {
-    const { count: total } = await supabase
-      .from('goals')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', patientId)
-      .eq('status', 'active');
-
-    return {
-      total: total || 0,
-      completed: 0,  // ✅ ตั้งเป็น 0 ไปก่อน
-    };
-  } catch (err) {
-    return { total: 0, completed: 0 };
-  }
-}
-
-// =====================================================
-// ✅ ฟังก์ชันดึงจำนวนการประเมินทั้งหมด (สำหรับการ์ด)
-// =====================================================
-export async function getScreeningCount(patientId: string) {
+export async function getFollowupRoundCount(userId: string) {
   try {
     const { count, error } = await supabase
-      .from('screenings')
+      .from('appointment_followups')
       .select('*', { count: 'exact', head: true })
-      .eq('user_id', patientId);
+      .eq('user_id', userId);
 
     if (error) {
-      console.error('Error counting screenings:', error);
-      return 0;
+      console.error('Error counting followups:', error);
+      return 1;
     }
 
-    return count || 0;
+    return (count || 0) + 1;
   } catch (err) {
-    console.error('Get screening count error:', err);
-    return 0;
+    console.error('Get followup round count error:', err);
+    return 1;
   }
-}
-
-// =====================================================
-// ✅ ฟังก์ชันดึงจำนวนเป้าหมายทั้งหมด (สำหรับการ์ด)
-// =====================================================
-export async function getGoalsCount(patientId: string) {
-  try {
-    const { count, error } = await supabase
-      .from('goals')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', patientId);
-
-    if (error) {
-      console.error('Error counting goals:', error);
-      return 0;
-    }
-
-    return count || 0;
-  } catch (err) {
-    console.error('Get goals count error:', err);
-    return 0;
-  }
-}
-
-// =====================================================
-// 🏥 ฟังก์ชันจัดการโรงพยาบาล
-// =====================================================
-
-// =====================================================
-// 🏥 ฟังก์ชันจัดการโรงพยาบาล
-// =====================================================
-// ดึงโรงพยาบาลทั้งหมด (แก้ไขแล้ว - แสดงทั้งหมดไม่กรอง parent_id)
-export async function getHospitals() {
-  try {
-    console.log('🏥 Fetching all hospitals...');
-    
-    const { data, error } = await supabase
-      .from('hospitals')
-      .select('*')
-      .eq('is_active', true)  // ✅ เอาเฉพาะที่ active
-      .order('type', { ascending: true })  // ✅ เรียงตาม type (main ก่อน sub)
-      .order('name', { ascending: true });  // ✅ แล้วเรียงตามชื่อ
-
-    if (error) {
-      console.error('❌ Error fetching hospitals:', error);
-      return [];
-    }
-
-    console.log('✅ Hospitals loaded:', data?.length || 0);
-    return data || [];
-  } catch (err) {
-    console.error('Get hospitals error:', err);
-    return [];
-  }
-}
-
-// เพิ่มโรงพยาบาลใหม่
-export async function createHospital(data: {
-  name: string;
-  code: string;
-  type: 'main' | 'sub';
-  parent_id?: string;
-  address?: string;
-  phone?: string;
-  province?: string;
-  district?: string;
-  subdistrict?: string;
-}) {
-  try {
-    const { data: hospital, error } = await supabase
-      .from('hospitals')
-      .insert({
-        name: data.name,
-        code: data.code,
-        type: data.type,
-        parent_id: data.parent_id,
-        address: data.address,
-        phone: data.phone,
-        province: data.province,
-        district: data.district,
-        subdistrict: data.subdistrict,
-        is_active: true,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return { success: true, hospital };
-  } catch (err) {
-    console.error('Create hospital error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างโรงพยาบาล' };
-  }
-}
-
-// =====================================================
-// 🏘️ ฟังก์ชันจัดการหมู่บ้าน
-// =====================================================
-
-// ดึงหมู่บ้านทั้งหมด
-export async function getVillages(hospitalId?: string) {
-  try {
-    let query = supabase
-      .from('villages')
-      .select(`
-        *,
-        hospitals (
-          name,
-          type
-        )
-      `)
-      .eq('is_active', true)
-      .order('province', { ascending: true })
-      .order('district', { ascending: true })
-      .order('subdistrict', { ascending: true })
-      .order('village_no', { ascending: true });
-
-    if (hospitalId) {
-      query = query.eq('hospital_id', hospitalId);
-    }
-
-    const { data, error } = await query;
-    if (error) throw error;
-    return data || [];
-  } catch (err) {
-    console.error('Get villages error:', err);
-    return [];
-  }
-}
-
-// เพิ่มหมู่บ้านใหม่
-export async function createVillage(data: {
-  village_no: string;
-  village_name?: string;
-  subdistrict: string;
-  district: string;
-  province: string;
-  postal_code?: string;
-  hospital_id?: string;
-}) {
-  try {
-    const { data: village, error } = await supabase
-      .from('villages')
-      .insert({
-        village_no: data.village_no,
-        village_name: data.village_name,
-        subdistrict: data.subdistrict,
-        district: data.district,
-        province: data.province,
-        postal_code: data.postal_code,
-        hospital_id: data.hospital_id,
-        is_active: true,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return { success: true, village };
-  } catch (err) {
-    console.error('Create village error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างหมู่บ้าน' };
-  }
-}
-
-// =====================================================
-// 👩‍⚕️ ฟังก์ชันจัดการ อสม. และหมู่บ้านที่ดูแล
-// =====================================================
-
-// ดึงหมู่บ้านที่ อสม. ดูแล
-export async function getVolunteerVillages(volunteerId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('volunteer_villages')
-      .select(`
-        *,
-        villages (
-          village_no,
-          village_name,
-          subdistrict,
-          district,
-          province
-        )
-      `)
-      .eq('volunteer_id', volunteerId)
-      .eq('is_active', true);
-
-    if (error) throw error;
-    return data || [];
-  } catch (err) {
-    console.error('Get volunteer villages error:', err);
-    return [];
-  }
-}
-
-// เพิ่มหมู่บ้านให้อสม. ดูแล
-export async function assignVolunteerVillage(data: {
-  volunteer_id: string;
-  village_id: string;
-}) {
-  try {
-    const { data: result, error } = await supabase
-      .from('volunteer_villages')
-      .insert({
-        volunteer_id: data.volunteer_id,
-        village_id: data.village_id,
-        is_active: true,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return { success: true, data: result };
-  } catch (err) {
-    console.error('Assign volunteer village error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการมอบหมายหมู่บ้าน' };
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงรายการจังหวัดทั้งหมด (จาก villages)
-// =====================================================
-export async function getProvinces() {
-  try {
-    const { data, error } = await supabase
-      .from('villages')
-      .select('province')
-      .neq('province', null)
-      .order('province', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching provinces:', error);
-      return [];
-    }
-
-    // ✅ ดึง province ที่ไม่ซ้ำกัน
-    const provinces = [...new Set(data?.map(v => v.province) || [])];
-    console.log('✅ Provinces fetched:', provinces.length);
-    return provinces;
-  } catch (err) {
-    console.error('Get provinces error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ฟังก์ชันดึงรายการอำเภอในจังหวัดที่เลือก
-// =====================================================
-export async function getDistricts(province: string) {
-  try {
-    const { data, error } = await supabase
-      .from('villages')
-      .select('district')
-      .eq('province', province)
-      .neq('district', null)
-      .order('district', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching districts:', error);
-      return [];
-    }
-
-    // ✅ ดึง district ที่ไม่ซ้ำกัน
-    const districts = [...new Set(data?.map(v => v.district) || [])];
-    console.log('✅ Districts fetched for', province, ':', districts.length);
-    return districts;
-  } catch (err) {
-    console.error('Get districts error:', err);
-    return [];
-  }
-}
-
-
-
-// =====================================================
-// ✅ ฟังก์ชันดึงรายการตำบลในอำเภอที่เลือก
-// =====================================================
-export async function getSubdistricts(province: string, district: string) {
-  try {
-    const { data, error } = await supabase
-      .from('villages')
-      .select('subdistrict, postal_code')
-      .eq('province', province)
-      .eq('district', district)
-      .neq('subdistrict', null)
-      .order('subdistrict', { ascending: true });
-
-    if (error) {
-      console.error('Error fetching subdistricts:', error);
-      return [];
-    }
-
-    console.log('✅ Subdistricts fetched:', data?.length || 0);
-    return data || [];
-  } catch (err) {
-    console.error('Get subdistricts error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// 🏥 ฟังก์ชันดึงโรงพยาบาลแบบ Hierarchical (พร้อมลูกข่าย)
-// =====================================================
-export async function getHospitalsWithHierarchy() {
-  try {
-    console.log('🏥 Fetching hospitals with hierarchy...');
-    
-    const { data, error } = await supabase
-      .from('hospitals')
-      .select(`
-        *,
-        parent_hospital:hospitals!parent_id (
-          id,
-          name,
-          code
-        )
-      `)
-      .eq('is_active', true)
-      .order('type', { ascending: true })
-      .order('name', { ascending: true });
-
-    if (error) {
-      console.error('❌ Error fetching hospitals:', error);
-      return [];
-    }
-
-    console.log('✅ Hospitals with hierarchy fetched:', data?.length || 0);
-    return data || [];
-  } catch (err) {
-    console.error('❌ Get hospitals with hierarchy error:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// 🏥 ฟังก์ชันจัดการสิทธิ์การเข้าถึงผู้ป่วยตามโรงพยาบาล
-// =====================================================
-
-/**
- * ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
- * - Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
- * - แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
- * - ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
- */
-/*
-export async function getAccessibleHospitalIds_0(userId: string): Promise<string[]> {
-  try {
-    console.log('🔍 Getting accessible hospitals for user:', userId);
-    
-    // ✅ 1. ดึงข้อมูลผู้ใช้ (role + hospital_id)
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('role, hospital_id')
-      .eq('id', userId)
-      .single();
-
-    if (userError || !userData) {
-      console.error('Error fetching user data:', userError);
-      return [];
-    }
-
-    // ✅ 2. ถ้าเป็น Admin → เข้าถึงทั้งหมด (return empty = ไม่กรอง)
-    if (userData.role === 'admin') {
-      console.log('👑 Admin user - can access all hospitals');
-      return []; // Empty array = ไม่มีการกรอง
-    }
-
-    // ✅ 3. ถ้าไม่มี hospital_id → ไม่สามารถเข้าถึงอะไรได้
-    if (!userData.hospital_id) {
-      console.log('⚠️ User has no hospital assigned');
-      return [];
-    }
-
-    // ✅ 4. ดึงข้อมูลโรงพยาบาลของผู้ใช้
-    const { data: hospitalData, error: hospitalError } = await supabase
-      .from('hospitals')
-      .select('id, type, parent_id')
-      .eq('id', userData.hospital_id)
-      .single();
-
-    if (hospitalError || !hospitalData) {
-      console.error('Error fetching hospital data:', hospitalError);
-      return [];
-    }
-
-    console.log('🏥 User hospital:', hospitalData.id, 'Type:', hospitalData.type);
-
-    // ✅ 5. ตรวจสอบประเภทโรงพยาบาล
-    if (hospitalData.type === 'main') {
-      // ✅ แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
-      const accessibleIds: string[] = [hospitalData.id];
-      
-      // ดึงลูกข่ายทั้งหมดที่อยู่ใต้แม่ข่ายนี้
-      const { data: subHospitals } = await supabase
-        .from('hospitals')
-        .select('id')
-        .eq('parent_id', hospitalData.id)
-        .eq('is_active', true);
-
-      if (subHospitals && subHospitals.length > 0) {
-        subHospitals.forEach(sub => accessibleIds.push(sub.id));
-      }
-
-      console.log('🏥 Main hospital - accessible:', accessibleIds.length, 'hospitals');
-      return accessibleIds;
-
-    } else if (hospitalData.type === 'sub') {
-      // ✅ ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
-      console.log('🏥 Sub hospital - accessible: 1 hospital (own)');
-      return [hospitalData.id];
-    }
-
-    return [];
-  } catch (err) {
-    console.error('Error in getAccessibleHospitalIds:', err);
-    return [];
-  }
-}
-*/
-
-/**
- * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
- */
-/*
-export async function getUserHospitalInfo_0(userId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(`
-        hospital_id,
-        hospitals (
-          id,
-          name,
-          code,
-          type,
-          parent_id,
-          parent_hospital:hospitals!parent_id (
-            id,
-            name,
-            code
-          )
-        )
-      `)
-      .eq('id', userId)
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return data.hospitals;
-  } catch (err) {
-    console.error('Error fetching user hospital info:', err);
-    return null;
-  }
-}
-*/
-
-// =====================================================
-// ✅ เพิ่มใหม่: Helper Functions สำหรับ Super Admin System
-// =====================================================
-
-/**
- * ตรวจสอบว่าเป็น Super Admin หรือไม่
- * Super Admin = admin_type = 'super' หรือ role = 'super_admin'
- */
-export function isSuperAdmin(userData: any): boolean {
-  if (!userData) return false;
-  return userData.admin_type === 'super' || userData.role === 'super_admin';
-}
-
-/**
- * ตรวจสอบว่าเป็น Hospital Admin หรือไม่
- * Hospital Admin = admin_type = 'hospital' หรือ role = 'admin' + มี hospital_id
- */
-export function isHospitalAdmin(userData: any): boolean {
-  if (!userData) return false;
-  return userData.admin_type === 'hospital' || 
-         (userData.role === 'admin' && userData.hospital_id);
-}
-
-/**
- * ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
- * - Super Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
- * - Hospital Admin (แม่ข่าย): เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
- * - Hospital Admin (ลูกข่าย): เข้าถึงเฉพาะตัวเองเท่านั้น
- */
-export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
-  try {
-    console.log('🔍 [getAccessibleHospitalIds] Getting accessible hospitals for user:', userId);
-    
-    // ✅ 1. ดึงข้อมูลผู้ใช้ (role + admin_type + hospital_id)
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('role, admin_type, hospital_id')
-      .eq('id', userId)
-      .single();
-    
-    if (userError || !userData) {
-      console.error('❌ [getAccessibleHospitalIds] Error fetching user data:', userError);
-      return [];
-    }
-    
-    console.log('📊 [getAccessibleHospitalIds] User data:', {
-      role: userData.role,
-      admin_type: userData.admin_type,
-      hospital_id: userData.hospital_id
-    });
-    
-    // ✅ 2. ถ้าเป็น Super Admin → เข้าถึงทั้งหมด (return empty = ไม่กรอง)
-    if (isSuperAdmin(userData)) {
-      console.log('👑 [getAccessibleHospitalIds] Super Admin - can access all hospitals');
-      return []; // Empty array = ไม่มีการกรอง
-    }
-    
-    // ✅ 3. ถ้าไม่มี hospital_id → ไม่สามารถเข้าถึงอะไรได้
-    if (!userData.hospital_id) {
-      console.log('⚠️ [getAccessibleHospitalIds] User has no hospital assigned');
-      return [];
-    }
-    
-    // ✅ 4. ดึงข้อมูลโรงพยาบาลของผู้ใช้
-    const { data: hospitalData, error: hospitalError } = await supabase
-      .from('hospitals')
-      .select('id, type, parent_id')
-      .eq('id', userData.hospital_id)
-      .single();
-    
-    if (hospitalError || !hospitalData) {
-      console.error('❌ [getAccessibleHospitalIds] Error fetching hospital data:', hospitalError);
-      return [];
-    }
-    
-    console.log('🏥 [getAccessibleHospitalIds] User hospital:', {
-      id: hospitalData.id,
-      type: hospitalData.type,
-      parent_id: hospitalData.parent_id
-    });
-    
-    // ✅ 5. ตรวจสอบประเภทโรงพยาบาล
-    if (hospitalData.type === 'main') {
-      // ✅ แม่ข่าย: เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
-      const accessibleIds: string[] = [hospitalData.id];
-      
-      // ดึงลูกข่ายทั้งหมดที่อยู่ใต้แม่ข่ายนี้
-      const { data: subHospitals } = await supabase
-        .from('hospitals')
-        .select('id')
-        .eq('parent_id', hospitalData.id)
-        .eq('is_active', true);
-      
-      if (subHospitals && subHospitals.length > 0) {
-        subHospitals.forEach(sub => accessibleIds.push(sub.id));
-        console.log('✅ [getAccessibleHospitalIds] Found', subHospitals.length, 'sub hospitals');
-      }
-      
-      console.log('🏥 [getAccessibleHospitalIds] Main hospital - accessible:', accessibleIds.length, 'hospitals');
-      return accessibleIds;
-      
-    } else if (hospitalData.type === 'sub') {
-      // ✅ ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
-      console.log('🏥 [getAccessibleHospitalIds] Sub hospital - accessible: 1 hospital (own)');
-      return [hospitalData.id];
-    }
-    
-    return [];
-    
-  } catch (err) {
-    console.error('❌ [getAccessibleHospitalIds] Exception:', err);
-    return [];
-  }
-}
-
-/**
- * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
- */
-export async function getUserHospitalInfo(userId: string) {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(`
-        hospital_id,
-        hospitals (
-          id,
-          name,
-          code,
-          type,
-          parent_id,
-          parent_hospital:hospitals!parent_id (
-            id,
-            name,
-            code
-          )
-        )
-      `)
-      .eq('id', userId)
-      .single();
-    
-    if (error || !data) {
-      return null;
-    }
-    
-    return data.hospitals;
-  } catch (err) {
-    console.error('Error fetching user hospital info:', err);
-    return null;
-  }
-}
-
-// =====================================================
-// ✅ อัปเดตฟังก์ชันเดิมให้ใช้ Helper Functions ใหม่
-// =====================================================
-
-// ✅ อัปเดต getPatientList ให้รับ hospitalIds แทน userId
-export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
-  try {
-    console.log('🔍 [getPatientList] Called with hospitalIds:', hospitalIds);
-    
-    // ✅ 1. สร้าง query
-    let query = supabase
-      .from('profiles')
-      .select(`
-        *, 
-        users!profiles_id_fkey ( 
-          id_card, 
-          role, 
-          is_active, 
-          created_at 
-        ), 
-        hospitals ( 
-          id, 
-          name, 
-          code,
-          type
-        )
-      `)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-
-    // ✅ 2. กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้ามี hospitalIds)
-    if (hospitalIds && hospitalIds.length > 0) {
-      console.log('🏥 [getPatientList] Filtering by hospitalIds:', hospitalIds);
-      query = query.in('hospital_id', hospitalIds);
-    } else if (hospitalIds && hospitalIds.length === 0) {
-      // ✅ Super Admin (empty array = ไม่กรอง)
-      console.log('👑 [getPatientList] Super Admin - showing all patients');
-    } else {
-      // ✅ ไม่มีการส่ง hospitalIds มา
-      console.log('⚠️ [getPatientList] No hospitalIds provided');
-    }
-
-    // ✅ 3. ค้นหา
-    if (search) {
-      query = query.or(
-        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
-      );
-    }
-
-    // ✅ 4. กรองตาม PAM Level
-    if (pamLevel) {
-      query = query.eq('pam_level', pamLevel);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('❌ [getPatientList] Error:', error);
-      return [];
-    }
-
-    const patientsWithData = data?.map(patient => ({
-      ...patient,
-      full_name: patient.first_name && patient.last_name 
-        ? `${patient.first_name} ${patient.last_name}` 
-        : '',
-    })) || [];
-
-    console.log('📊 [getPatientList] Total patients (filtered):', patientsWithData.length);
-    return patientsWithData;
-  } catch (err) {
-    console.error('❌ [getPatientList] Exception:', err);
-    return [];
-  }
-}
-
-// =====================================================
-// ✅ ฟังก์ชันเดิมที่เหลือ (คงไว้)
-// =====================================================
-
-// ... (ฟังก์ชันเดิมทั้งหมดคงไว้ เช่น login, logout, checkSession, etc.)
-
-// ✅ เพิ่มฟังก์ชันตรวจสอบสิทธิ์สำหรับแต่ละหน้า
-export function checkAdminPermission(userData: any, requiredType?: 'super' | 'hospital'): boolean {
-  if (!userData) return false;
-  
-  // ✅ ถ้าไม่ระบุ type → ตรวจสอบแค่ว่าเป็น admin หรือไม่
-  if (!requiredType) {
-    return userData.role === 'admin' || userData.admin_type === 'super' || userData.admin_type === 'hospital';
-  }
-  
-  // ✅ ตรวจสอบตาม type ที่ต้องการ
-  if (requiredType === 'super') {
-    return isSuperAdmin(userData);
-  }
-  
-  if (requiredType === 'hospital') {
-    return isHospitalAdmin(userData);
-  }
-  
-  return false;
-}
-
-// ✅ ฟังก์ชันกรองข้อมูลตามสิทธิ์ (ใช้สำหรับทุกหน้า)
-export async function filterDataByHospitalPermission<T>(
-  userId: string,
-  fetchData: (hospitalIds: string[]) => Promise<T[]>
-): Promise<T[]> {
-  const hospitalIds = await getAccessibleHospitalIds(userId);
-  return fetchData(hospitalIds);
 }

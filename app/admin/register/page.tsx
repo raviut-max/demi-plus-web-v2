@@ -1,17 +1,21 @@
 // app/admin/register/page.tsx
+// =====================================================
 // ✅ หน้าลงทะเบียนบุคลากรแบบ Public (รออนุมัติ)
 // ✅ ไม่ต้องล็อกอิน → ส่งข้อมูลไปรอใน pending_staff
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// =====================================================
 
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getHospitalsWithHierarchy } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { 
-  UserPlus, 
-  Calendar, 
-  Key, 
-  Save, 
+import {
+  UserPlus,
+  Calendar,
+  Key,
+  Save,
   ArrowLeft,
   User,
   Phone,
@@ -20,87 +24,200 @@ import {
   Stethoscope,
   Shield,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 
-// ✅ เดือนภาษาไทย
+// =====================================================
+// 📅 ค่าคงที่: เดือนภาษาไทย
+// =====================================================
 const THAI_MONTHS = [
-  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+  'มกราคม',
+  'กุมภาพันธ์',
+  'มีนาคม',
+  'เมษายน',
+  'พฤษภาคม',
+  'มิถุนายน',
+  'กรกฎาคม',
+  'สิงหาคม',
+  'กันยายน',
+  'ตุลาคม',
+  'พฤศจิกายน',
+  'ธันวาคม'
 ];
 
+// =====================================================
+// 🔧 Interfaces
+// =====================================================
 interface Hospital {
   id: string;
   name: string;
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
+  parent_hospital?: {
+    id: string;
+    name: string;
+    code: string;
+  };
 }
 
+interface HospitalGroups {
+  mainHospitals: Hospital[];
+  hospitalGroups: Map<string, Hospital[]>;
+}
+
+// =====================================================
+// 🎯 Main Component
+// =====================================================
 export default function PublicRegisterPage() {
   const router = useRouter();
+
+  // ✅ States สำหรับข้อมูล
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [generatedPassword, setGeneratedPassword] = useState('');
 
+  // ✅ States สำหรับฟอร์ม
   const [formData, setFormData] = useState({
     id_card: '',
     birth_day: '',
     birth_month: '',
     birth_year: '',
     full_name_th: '',
-    role: 'doctor' as 'doctor' | 'helper',
+    role: 'doctor' as 'doctor' | 'helper' | 'admin',
     specialization_th: '',
     phone: '',
     email: '',
     hospital_id: '',
   });
 
-  const [generatedPassword, setGeneratedPassword] = useState('');
-
+  // ✅ Debug: Log เมื่อ component mount
   useEffect(() => {
+    console.log('🔍 [PublicRegisterPage] Component mounted');
     loadHospitals();
   }, []);
 
+  // =====================================================
+  // 📥 Functions: โหลดข้อมูล
+  // =====================================================
+
+  /**
+   * โหลดรายการโรงพยาบาลแบบ Hierarchical
+   */
   const loadHospitals = async () => {
     try {
+      console.log('🏥 [loadHospitals] Fetching hospitals with hierarchy...');
+      
       const data = await getHospitalsWithHierarchy();
+      
+      console.log('✅ [loadHospitals] Loaded:', data.length, 'hospitals');
+      console.log('📊 [loadHospitals] Sample:', data[0]);
+      
       setHospitals(data);
     } catch (error) {
-      console.error('Error loading hospitals:', error);
+      console.error('❌ [loadHospitals] Error:', error);
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
     }
   };
 
-  // ✅ สร้างรหัสผ่านจากวันเกิด
-  const generatePassword = () => {
+  // =====================================================
+  // 🔐 Functions: รหัสผ่าน
+  // =====================================================
+
+  /**
+   * สร้างรหัสผ่านจากวันเกิด (dd-mm-yyyy)
+   */
+  const generatePassword = (): string => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       return '';
     }
-    return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
+    
+    const password = `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
+    console.log('🔐 [generatePassword] Generated:', password);
+    
+    return password;
   };
 
+  // =====================================================
+  // 📝 Functions: จัดการฟอร์ม
+  // =====================================================
+
+  /**
+   * จัดกลุ่มโรงพยาบาลแบบ Hierarchical (แม่ข่าย → ลูกข่าย)
+   */
+  const getGroupedHospitals = (): HospitalGroups => {
+    console.log('🏥 [getGroupedHospitals] Grouping hospitals...');
+    
+    const mainHospitals = hospitals.filter(h => h.type === 'main');
+    const subHospitals = hospitals.filter(h => h.type === 'sub');
+    
+    console.log('📊 [getGroupedHospitals] Main:', mainHospitals.length, 'Sub:', subHospitals.length);
+    
+    const hospitalGroups = new Map<string, Hospital[]>();
+
+    subHospitals.forEach(sub => {
+      if (sub.parent_id) {
+        if (!hospitalGroups.has(sub.parent_id)) {
+          hospitalGroups.set(sub.parent_id, []);
+        }
+        hospitalGroups.get(sub.parent_id)!.push(sub);
+      }
+    });
+
+    console.log('✅ [getGroupedHospitals] Grouped into', hospitalGroups.size, 'groups');
+    
+    return { mainHospitals, hospitalGroups };
+  };
+
+  /**
+   * Handle Form Submit
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // ✅ ตรวจสอบว่ากรอกวันเกิดครบหรือไม่
+    console.log('📝 [handleSubmit] Form submitted');
+    console.log('📋 [handleSubmit] Form data:', formData);
+    
+    // ✅ Validate: วันเกิดต้องครบ
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+      console.error('❌ [handleSubmit] Birth date incomplete');
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
+      return;
+    }
+
+    // ✅ Validate: ID Card ต้อง 13 หลัก
+    if (formData.id_card.length !== 13) {
+      console.error('❌ [handleSubmit] ID Card length invalid:', formData.id_card.length);
+      alert('เลขบัตรประชาชนต้อง 13 หลัก');
+      return;
+    }
+
+    // ✅ Validate: ชื่อ-นามสกุล
+    if (!formData.full_name_th.trim()) {
+      console.error('❌ [handleSubmit] Name is empty');
+      alert('กรุณากรอกชื่อ-นามสกุล');
       return;
     }
 
     setLoading(true);
 
     try {
-      // ✅ สร้างรหัสผ่านจากวันเกิด
+      // ✅ 1. สร้างรหัสผ่านจากวันเกิด
       const password = generatePassword();
       setGeneratedPassword(password);
+      console.log('🔐 [handleSubmit] Password:', password);
 
-      // ✅ แปลงวันเกิดเป็น ค.ศ.
+      // ✅ 2. แปลงวันเกิดเป็น ค.ศ.
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
+      console.log('📅 [handleSubmit] Birth date (AD):', birthDate);
 
-      // ✅ บันทึกไปยังตาราง pending_staff
-      const { error } = await supabase
+      // ✅ 3. บันทึกไปยังตาราง pending_staff
+      console.log('💾 [handleSubmit] Inserting to pending_staff...');
+      
+      const { data, error } = await supabase
         .from('pending_staff')
         .insert({
           id_card: formData.id_card,
@@ -113,12 +230,16 @@ export default function PublicRegisterPage() {
           hospital_id: formData.hospital_id || null,
           birth_date: birthDate,
           status: 'pending',
-        });
+        })
+        .select()
+        .single();
 
       if (error) {
-        console.error('Error submitting registration:', error);
+        console.error('❌ [handleSubmit] Supabase error:', error);
         
-        if (error.code === '23505') { // Unique violation
+        // ✅ Handle Unique violation (ID Card ซ้ำ)
+        if (error.code === '23505') {
+          console.error('❌ [handleSubmit] Duplicate ID Card');
           alert('ID Card นี้ได้ลงทะเบียนไว้แล้ว กรุณารอการอนุมัติ');
         } else {
           alert('เกิดข้อผิดพลาด: ' + error.message);
@@ -126,51 +247,40 @@ export default function PublicRegisterPage() {
         return;
       }
 
-      // ✅ แสดงหน้าสำเร็จ
+      console.log('✅ [handleSubmit] Registration successful:', data);
+
+      // ✅ 4. แสดงหน้าสำเร็จ
       setSubmitted(true);
       
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ [handleSubmit] Exception:', error);
       alert('เกิดข้อผิดพลาดในการลงทะเบียน');
     } finally {
       setLoading(false);
+      console.log('✅ [handleSubmit] Process completed');
     }
   };
 
-  // ✅ จัดกลุ่มโรงพยาบาลแบบ Hierarchical
-  const getGroupedHospitals = () => {
-    const mainHospitals = hospitals.filter(h => h.type === 'main');
-    const subHospitals = hospitals.filter(h => h.type === 'sub');
-    
-    const hospitalGroups = new Map<string, Hospital[]>();
-    
-    subHospitals.forEach(sub => {
-      if (sub.parent_id) {
-        if (!hospitalGroups.has(sub.parent_id)) {
-          hospitalGroups.set(sub.parent_id, []);
-        }
-        hospitalGroups.get(sub.parent_id)!.push(sub);
-      }
-    });
-
-    return { mainHospitals, hospitalGroups };
-  };
-
-  const { mainHospitals, hospitalGroups } = getGroupedHospitals();
-
-  // ✅ หน้าสำเร็จ
+  // =====================================================
+  // 🎨 Render: หน้าสำเร็จ
+  // =====================================================
   if (submitted) {
+    console.log('✅ [Render] Showing success page');
+    
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full text-center">
+          {/* ✅ Icon */}
           <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-10 h-10 text-green-600" />
           </div>
-          
+
+          {/* ✅ Title */}
           <h2 className="text-2xl font-bold text-gray-800 mb-4">
             ลงทะเบียนสำเร็จ!
           </h2>
           
+          {/* ✅ Info Box */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 text-left">
             <div className="flex items-start gap-2">
               <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
@@ -187,6 +297,7 @@ export default function PublicRegisterPage() {
             </div>
           </div>
 
+          {/* ✅ Buttons */}
           <div className="space-y-3">
             <button
               onClick={() => router.push('/admin/login')}
@@ -198,6 +309,7 @@ export default function PublicRegisterPage() {
             
             <button
               onClick={() => {
+                console.log('🔄 [Reset] Form reset');
                 setSubmitted(false);
                 setFormData({
                   id_card: '',
@@ -223,23 +335,37 @@ export default function PublicRegisterPage() {
     );
   }
 
-  // ✅ ฟอร์มลงทะเบียน
+  // =====================================================
+  // 🎨 Render: ฟอร์มลงทะเบียน
+  // =====================================================
+  const { mainHospitals, hospitalGroups } = getGroupedHospitals();
+  
+  console.log('🎨 [Render] Rendering form');
+  console.log('🏥 [Render] Hospitals:', hospitals.length);
+  console.log('🏥 [Render] Main hospitals:', mainHospitals.length);
+  console.log('🏥 [Render] Hospital groups:', hospitalGroups.size);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 py-12 px-4">
       <div className="max-w-2xl mx-auto">
-        {/* Header */}
+        
+        {/* ✅ Header */}
         <div className="text-center mb-8">
           <button
-            onClick={() => router.push('/admin/login')}
+            onClick={() => {
+              console.log('🔙 [Back] Navigate to login');
+              router.push('/admin/login');
+            }}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 mx-auto"
           >
             <ArrowLeft className="w-4 h-4" />
             กลับหน้าเข้าสู่ระบบ
           </button>
-          
+
           <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <UserPlus className="w-8 h-8 text-white" />
           </div>
+
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
             ลงทะเบียนบุคลากรใหม่
           </h1>
@@ -248,10 +374,11 @@ export default function PublicRegisterPage() {
           </p>
         </div>
 
-        {/* Form */}
+        {/* ✅ Form */}
         <div className="bg-white rounded-2xl shadow-xl p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* ID Card & Password Preview */}
+            
+            {/* 1. ID Card & Password Preview */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -261,7 +388,11 @@ export default function PublicRegisterPage() {
                 <input
                   type="text"
                   value={formData.id_card}
-                  onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
+                  onChange={(e) => {
+                    const value = e.target.value.replace(/\D/g, '').slice(0, 13);
+                    setFormData({ ...formData, id_card: value });
+                    console.log('📝 [Input] ID Card:', value);
+                  }}
                   required
                   maxLength={13}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -286,7 +417,7 @@ export default function PublicRegisterPage() {
               </div>
             </div>
 
-            {/* Birth Date */}
+            {/* 2. Birth Date */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Calendar className="w-4 h-4 inline mr-1" />
@@ -295,7 +426,10 @@ export default function PublicRegisterPage() {
               <div className="grid grid-cols-3 gap-3">
                 <select
                   value={formData.birth_day}
-                  onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, birth_day: e.target.value });
+                    console.log('📝 [Input] Birth day:', e.target.value);
+                  }}
                   required
                   className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
@@ -304,9 +438,13 @@ export default function PublicRegisterPage() {
                     <option key={day} value={day}>{day}</option>
                   ))}
                 </select>
+
                 <select
                   value={formData.birth_month}
-                  onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, birth_month: e.target.value });
+                    console.log('📝 [Input] Birth month:', e.target.value);
+                  }}
                   required
                   className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
@@ -315,9 +453,13 @@ export default function PublicRegisterPage() {
                     <option key={index + 1} value={index + 1}>{month}</option>
                   ))}
                 </select>
+
                 <select
                   value={formData.birth_year}
-                  onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, birth_year: e.target.value });
+                    console.log('📝 [Input] Birth year:', e.target.value);
+                  }}
                   required
                   className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
@@ -329,7 +471,7 @@ export default function PublicRegisterPage() {
               </div>
             </div>
 
-            {/* Full Name */}
+            {/* 3. Full Name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <User className="w-4 h-4 inline mr-1" />
@@ -338,14 +480,17 @@ export default function PublicRegisterPage() {
               <input
                 type="text"
                 value={formData.full_name_th}
-                onChange={(e) => setFormData({ ...formData, full_name_th: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, full_name_th: e.target.value });
+                  console.log('📝 [Input] Full name:', e.target.value);
+                }}
                 required
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 placeholder="เช่น สมชาย ใจดี"
               />
             </div>
 
-            {/* Role & Specialization */}
+            {/* 4. Role & Specialization */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -354,11 +499,15 @@ export default function PublicRegisterPage() {
                 </label>
                 <select
                   value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value as 'doctor' | 'helper' })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, role: e.target.value as 'doctor' | 'helper' | 'admin' });
+                    console.log('📝 [Input] Role:', e.target.value);
+                  }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="doctor">👨‍⚕️ แพทย์</option>
-                  <option value="helper">👩‍ เจ้าหน้าที่</option>
+                  <option value="doctor">👨‍️ แพทย์</option>
+                  <option value="helper">👩‍💼 เจ้าหน้าที่</option>
+                  <option value="admin">👑 ผู้ดูแลระบบ</option>
                 </select>
               </div>
               
@@ -370,14 +519,17 @@ export default function PublicRegisterPage() {
                 <input
                   type="text"
                   value={formData.specialization_th}
-                  onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, specialization_th: e.target.value });
+                    console.log('📝 [Input] Specialization:', e.target.value);
+                  }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="เช่น อายุรกรรม, ศัลยกรรม"
                 />
               </div>
             </div>
 
-            {/* Hospital Selection */}
+            {/* 5. Hospital Selection */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Building2 className="w-4 h-4 inline mr-1" />
@@ -385,7 +537,10 @@ export default function PublicRegisterPage() {
               </label>
               <select
                 value={formData.hospital_id}
-                onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+                onChange={(e) => {
+                  setFormData({ ...formData, hospital_id: e.target.value });
+                  console.log('📝 [Input] Hospital:', e.target.value);
+                }}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
               >
                 <option value="">-- เลือกโรงพยาบาล --</option>
@@ -403,9 +558,14 @@ export default function PublicRegisterPage() {
                   </optgroup>
                 ))}
               </select>
+              {hospitals.length === 0 && (
+                <p className="text-xs text-orange-500 mt-1">
+                  ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
+                </p>
+              )}
             </div>
 
-            {/* Phone & Email */}
+            {/* 6. Phone & Email */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -415,7 +575,10 @@ export default function PublicRegisterPage() {
                 <input
                   type="tel"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, phone: e.target.value });
+                    console.log('📝 [Input] Phone:', e.target.value);
+                  }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="0812345678"
                 />
@@ -429,14 +592,17 @@ export default function PublicRegisterPage() {
                 <input
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    console.log('📝 [Input] Email:', e.target.value);
+                  }}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholder="email@example.com"
                 />
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* 7. Submit Button */}
             <button
               type="submit"
               disabled={loading}
@@ -444,7 +610,7 @@ export default function PublicRegisterPage() {
             >
               {loading ? (
                 <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <Loader2 className="w-5 h-5 animate-spin" />
                   กำลังลงทะเบียน...
                 </>
               ) : (
@@ -455,7 +621,7 @@ export default function PublicRegisterPage() {
               )}
             </button>
 
-            {/* Info */}
+            {/* 8. Info Box */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />

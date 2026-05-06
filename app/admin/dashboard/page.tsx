@@ -1,11 +1,12 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 28 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. Badge แสดงประเภทโรงพยาบาล (ไม่แสดงโค้ด)
-//    4. เมนูแสดงตามสิทธิ์ (Admin เห็นทั้งหมด, บุคลากรเห็นเฉพาะเมนูที่อนุญาต)
-//    5. ✅ สถิติ Dashboard กรองตามโรงพยาบาลที่เข้าถึงได้
+//    3. Badge แสดงประเภทโรงพยาบาล
+//    4. ✅ สถิติ Dashboard กรองตามโรงพยาบาลที่เข้าถึงได้
+//    5. ✅ Super Admin เห็นทั้งหมด, Hospital Admin เห็นเฉพาะที่สังกัด
+//    6. เพิ่มปุ่ม Logout และ UI สอดคล้องกับหน้าอื่นๆ
 
 'use client';
 import { useEffect, useState } from 'react';
@@ -48,11 +49,13 @@ interface MenuItem {
 interface UserHospital {
   id: string;
   name: string;
+  code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
   parent_hospital?: {
     id: string;
     name: string;
+    code: string;
   };
 }
 
@@ -75,7 +78,6 @@ export default function AdminDashboard() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -90,45 +92,47 @@ export default function AdminDashboard() {
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 Loading user hospital for:', userId);
-      
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ User hospital:', hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
+      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 Hospital IDs:', ids);
+      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       
       // ✅ โหลดสถิติหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไปด้วย)
       loadDashboardStats(ids);
     } catch (error) {
-      console.error('Error loading accessible hospitals:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
   };
 
+  // ✅ โหลดสถิติ Dashboard (กรองตามโรงพยาบาลที่เข้าถึงได้)
   const loadDashboardStats = async (hospitalIds?: string[]) => {
     try {
-      console.log('📊 Loading dashboard stats with hospitalIds:', hospitalIds);
+      console.log('📊 [loadDashboardStats] Loading stats with hospitalIds:', hospitalIds);
       const data = await getDashboardStats(hospitalIds);
-      console.log('📊 Dashboard stats:', data);
+      console.log('📊 [loadDashboardStats] Dashboard stats:', data);
       setStats(data);
     } catch (error) {
-      console.error('Error loading dashboard stats:', error);
+      console.error('❌ [loadDashboardStats] Error:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogout = () => {
+    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
@@ -218,7 +222,7 @@ export default function AdminDashboard() {
               </h1>
               <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
             </div>
-            
+
             <div className="flex items-center gap-4">
               {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
@@ -232,11 +236,11 @@ export default function AdminDashboard() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
-                
+
                 {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
@@ -246,7 +250,7 @@ export default function AdminDashboard() {
                         {userHospital.name}
                       </span>
                     </div>
-                    
+
                     {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
@@ -258,7 +262,7 @@ export default function AdminDashboard() {
                           🏥 ลูกข่าย
                         </span>
                       )}
-                      
+
                       {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">

@@ -1,31 +1,46 @@
 // app/admin/screening/page.tsx
-// ✅ แก้ไขล่าสุด: 29 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละรายใน dropdown
+//    3. Badge แสดงประเภทโรงพยาบาล
+//    4. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล (Super Admin vs Hospital Admin)
+//    5. เพิ่ม Debug Logging
+//    6. UI สอดคล้องกับหน้าอื่นๆ
 
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getPatientList, getScreeningQuestions, saveScreening, createDefaultGoals, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { 
+  checkSession, 
+  logout, 
+  getPatientList, 
+  getScreeningQuestions, 
+  saveScreening, 
+  createDefaultGoals, 
+  getAccessibleHospitalIds, 
+  getUserHospitalInfo,
+  isSuperAdmin
+} from '@/lib/supabase/queries';
 import { FileText, Save, ArrowLeft, LogOut, AlertCircle, User, Hospital, Building2, UserCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
   id: string;
   name: string;
+  code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
   parent_hospital?: {
     id: string;
     name: string;
+    code: string;
   };
 }
 
 export default function ScreeningPage() {
   const router = useRouter();
+  
   // ✅ ใช้ state + useEffect แทน useSearchParams (แก้ปัญหา Suspense boundary)
   const [patientIdFromUrl, setPatientIdFromUrl] = useState<string | null>(null);
   const [user, setUser] = useState<any>(null);
@@ -36,18 +51,22 @@ export default function ScreeningPage() {
   const [selectedPatient, setSelectedPatient] = useState('');
   const [patientData, setPatientData] = useState<any>(null);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-
+  
   // PAM Questions & Answers
   const [pamQuestions, setPamQuestions] = useState<any[]>([]);
   const [pamAnswers, setPamAnswers] = useState<Record<string, number>>({});
-
+  
   // PROMs Questions & Answers
   const [promsQuestions, setPromsQuestions] = useState<any[]>([]);
   const [promsAnswers, setPromsAnswers] = useState<Record<string, number>>({});
-
+  
   // Confidence
   const [confidenceScore, setConfidenceScore] = useState(0);
   const [confidencePlan, setConfidencePlan] = useState('');
+
+  // =====================================================
+  // 🔄 INITIAL DATA LOADING
+  // =====================================================
 
   // ✅ useEffect สำหรับดึง patient_id จาก URL (ใช้ window.location.search)
   useEffect(() => {
@@ -55,7 +74,7 @@ export default function ScreeningPage() {
       const urlParams = new URLSearchParams(window.location.search);
       const pid = urlParams.get('patient_id');
       setPatientIdFromUrl(pid);
-
+      
       // ✅ Auto-select patient ถ้ามีใน URL
       if (pid) {
         setSelectedPatient(pid);
@@ -70,7 +89,6 @@ export default function ScreeningPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -82,56 +100,67 @@ export default function ScreeningPage() {
     loadAccessibleHospitals(userData.id);
   }, [router]);
 
+  // =====================================================
+  // 📥 DATA LOADING FUNCTIONS
+  // =====================================================
+
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
   // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
+      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 Accessible hospitals for screening:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      
+      // ✅ ตรวจสอบว่าเป็น Super Admin หรือไม่
+      const isSuper = isSuperAdmin(user);
+      console.log('👑 [loadAccessibleHospitals] Is Super Admin:', isSuper);
       
       // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
       loadPatients(ids);
       loadQuestions();
     } catch (error) {
-      console.error('Error loading accessible hospitals:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
   };
 
   // ✅ แก้ไขฟังก์ชัน loadPatients ให้กรองตามโรงพยาบาล
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
+      console.log('📡 [loadPatients] Loading patients...');
+      console.log('🏥 [loadPatients] Hospital IDs for filtering:', hospitalIds);
+      
       let query = supabase
         .from('profiles')
-        .select(`
-          *,
-          hospitals (
-            id,
-            name,
-            type
-          )
-        `)
+        .select(`*, hospitals ( id, name, type )`)
         .eq('is_active', true)
         .order('first_name', { ascending: true });
-
+      
       // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้
       if (hospitalIds && hospitalIds.length > 0) {
+        console.log(' [loadPatients] Filtering by hospitalIds:', hospitalIds);
         query = query.in('hospital_id', hospitalIds);
+      } else {
+        console.log('👑 [loadPatients] Super Admin - showing all patients');
       }
 
       const { data, error } = await query;
 
       if (error) {
-        console.error('Error loading patients:', error);
+        console.error('❌ [loadPatients] Error:', error);
         return;
       }
 
@@ -142,10 +171,10 @@ export default function ScreeningPage() {
           : '',
       })) || [];
 
-      console.log('📊 Loaded patients:', patientsWithData.length);
+      console.log('📊 [loadPatients] Loaded patients:', patientsWithData.length);
       setPatients(patientsWithData);
     } catch (error) {
-      console.error('Error loading patients:', error);
+      console.error('❌ [loadPatients] Error:', error);
     }
   };
 
@@ -161,24 +190,31 @@ export default function ScreeningPage() {
       const patient = patients.find(p => p.id === patientId);
       if (patient) {
         setPatientData(patient);
+        console.log('✅ [loadPatientData] Patient data loaded:', patient);
       }
     } catch (error) {
-      console.error('Error loading patient data:', error);
+      console.error('❌ [loadPatientData] Error:', error);
     }
   };
 
   const loadQuestions = async () => {
     try {
+      console.log('❓ [loadQuestions] Loading screening questions...');
       const pamData = await getScreeningQuestions('pam');
       const promsData = await getScreeningQuestions('proms');
       setPamQuestions(pamData);
       setPromsQuestions(promsData);
+      console.log('✅ [loadQuestions] PAM questions:', pamData.length, 'PROMs questions:', promsData.length);
     } catch (error) {
-      console.error('Error loading questions:', error);
+      console.error('❌ [loadQuestions] Error:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  // =====================================================
+  //  FORM HANDLERS
+  // =====================================================
 
   const handlePamAnswer = (questionId: string, score: number) => {
     setPamAnswers(prev => ({
@@ -203,7 +239,7 @@ export default function ScreeningPage() {
     const pamTotal = pamScores.reduce((a, b) => a + b, 0);
     const pamAvg = pamScores.length > 0 ? pamTotal / pamScores.length : 0;
     const pamMax = 20; // 5 ข้อ × 4 คะแนน
-
+    
     // คำนวณคะแนน PROMs
     const promsScores = Object.values(promsAnswers);
     const promsTotal = promsScores.reduce((a, b) => a + b, 0);
@@ -338,12 +374,10 @@ export default function ScreeningPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
-
     if (Object.keys(pamAnswers).length === 0) {
       alert('กรุณาตอบคำถาม PAM ให้ครบ');
       return;
     }
-
     if (Object.keys(promsAnswers).length < 4) {
       alert('กรุณาตอบคำถาม PROMs ให้ครบทั้ง 4 ข้อ');
       return;
@@ -354,6 +388,7 @@ export default function ScreeningPage() {
     try {
       // คำนวณระดับผู้ป่วย
       const patientLevel = calculatePatientLevel();
+      console.log('📊 [handleSubmit] Patient Level:', patientLevel);
 
       // ดึงคะแนนแต่ละข้อของ PROMs
       const promsEntries = Object.entries(promsAnswers);
@@ -437,7 +472,7 @@ export default function ScreeningPage() {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('Error saving screening:', error);
+      console.error('❌ [handleSubmit] Error:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
@@ -445,11 +480,16 @@ export default function ScreeningPage() {
   };
 
   const handleLogout = () => {
+    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
 
   const patientLevel = calculatePatientLevel();
+
+  // =====================================================
+  // ⏳ LOADING STATE
+  // =====================================================
 
   if (loading) {
     return (
@@ -458,6 +498,10 @@ export default function ScreeningPage() {
       </div>
     );
   }
+
+  // =====================================================
+  // 🎨 RENDER UI
+  // =====================================================
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -482,24 +526,24 @@ export default function ScreeningPage() {
 
             <div className="flex items-center gap-4">
               {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
-              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <UserCheck className="w-5 h-5 text-blue-600" />
+              {userHospital && (
+                <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                      <UserCheck className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">
+                        {user?.full_name_th || 'ผู้ดูแลระบบ'}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-semibold text-gray-800">
-                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
-                    </p>
-                  </div>
-                </div>
 
-                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
-                {userHospital ? (
+                  {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
@@ -529,12 +573,8 @@ export default function ScreeningPage() {
                       )}
                     </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-gray-400 mt-2">
-                    ไม่สังกัดโรงพยาบาล
-                  </p>
-                )}
-              </div>
+                </div>
+              )}
 
               <button
                 onClick={handleLogout}
@@ -629,7 +669,7 @@ export default function ScreeningPage() {
                               key={score}
                               onClick={() => handlePamAnswer(q.id, score)}
                               className={`px-3 py-3 rounded-lg border-2 transition-all text-sm ${
-                                pamAnswers[q.id] === score
+                                pamAnswers[q.id] === score 
                                   ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
                                   : 'border-gray-300 hover:border-gray-400 bg-white'
                               }`}
@@ -687,7 +727,7 @@ export default function ScreeningPage() {
                             key={score}
                             onClick={() => handlePromsAnswer(q.id, score)}
                             className={`px-2 py-3 rounded-lg border-2 transition-all text-xs ${
-                              promsAnswers[q.id] === score
+                              promsAnswers[q.id] === score 
                                 ? 'border-purple-500 bg-purple-50 text-purple-700 font-semibold'
                                 : 'border-gray-300 hover:border-gray-400 bg-white'
                             }`}
