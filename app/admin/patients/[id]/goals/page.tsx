@@ -1,21 +1,24 @@
 // app/admin/patients/[id]/goals/page.tsx
+// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
+// ✅ การแก้ไข: แสดงจำนวนวัน/สัปดาห์ สำหรับแต่ละเป้าหมาย
+
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  getPatientDetail, 
+import {
+  checkSession,
+  logout,
+  getPatientDetail,
   getPatientGoals,
   getGoalRoundCount,
   createDefaultGoals,
   getProgress
 } from '@/lib/supabase/queries';
-import { 
-  ArrowLeft, 
-  Target, 
-  TrendingUp, 
+import {
+  ArrowLeft,
+  Target,
+  TrendingUp,
   Calendar,
   CheckCircle,
   Clock,
@@ -25,7 +28,11 @@ import {
   AlertCircle,
   FileText,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Edit,
+  LogOut,
+  Activity,
+  ClipboardCheck
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -54,8 +61,8 @@ export default function PatientGoalsPage() {
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   const [goals, setGoals] = useState<any[]>([]);
-  const [goalRounds, setGoalRounds] = useState<number>(1);
-  const [selectedRound, setSelectedRound] = useState<number>(1);
+  const [goalRounds, setGoalRounds] = useState(1);
+  const [selectedRound, setSelectedRound] = useState(1);
   const [records, setRecords] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('goals');
   const [creatingGoals, setCreatingGoals] = useState(false);
@@ -68,7 +75,6 @@ export default function PatientGoalsPage() {
       router.push('/admin/login');
       return;
     }
-
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -101,13 +107,7 @@ export default function PatientGoalsPage() {
     try {
       const { data, error } = await supabase
         .from('goals')
-        .select(`
-          *,
-          activities (
-            activity_name_th,
-            description_th
-          )
-        `)
+        .select(`*, activities ( activity_name_th, description_th )`)
         .eq('user_id', patientId)
         .eq('round_number', round)
         .order('priority', { ascending: true });
@@ -151,7 +151,6 @@ export default function PatientGoalsPage() {
 
   const handleCreateDefaultGoals = async () => {
     if (!patient) return;
-
     if (!confirm('ต้องการสร้างเป้าหมายเริ่มต้นตาม PAM Level หรือไม่?\n\nL2/L3: กฎทอง 5 ข้อ\nL4: แชมป์ 8 กิจกรรม')) {
       return;
     }
@@ -183,7 +182,6 @@ export default function PatientGoalsPage() {
     if (!confirm('ต้องการเก็บถาวรเป้าหมายรอบปัจจุบันหรือไม่?')) {
       return;
     }
-
     try {
       const { error } = await supabase
         .from('goals')
@@ -219,13 +217,13 @@ export default function PatientGoalsPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
-        return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">🟢 กำลังดำเนินการ</span>;
+        return '🟢 กำลังดำเนินการ';
       case 'completed':
-        return <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">✅ สำเร็จ</span>;
+        return '✅ สำเร็จ';
       case 'archived':
-        return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">📦 เก็บถาวร</span>;
+        return '📦 เก็บถาวร';
       default:
-        return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">{status}</span>;
+        return status;
     }
   };
 
@@ -243,9 +241,7 @@ export default function PatientGoalsPage() {
 
   // 🎯 จัดกลุ่มเป้าหมายและคำนวณสถิติ
   const getGroupedGoals = (): GoalWithRecords[] => {
-    // จัดกลุ่ม goals ตาม goal_name
     const grouped: Record<string, any[]> = {};
-    
     goals.forEach(goal => {
       const key = goal.goal_name || goal.activity_id;
       if (!grouped[key]) {
@@ -254,28 +250,23 @@ export default function PatientGoalsPage() {
       grouped[key].push(goal);
     });
 
-    // แปลงเป็น array และ sort ตาม priority
     const goalGroups = Object.values(grouped).sort((a, b) => {
       const priorityA = a[0]?.priority || 999;
       const priorityB = b[0]?.priority || 999;
       return priorityA - priorityB;
     });
 
-    // คำนวณสถิติสำหรับแต่ละกลุ่ม
     return goalGroups.map(goalGroup => {
       const firstGoal = goalGroup[0];
       
-      // หา records ที่เกี่ยวข้องกับ goal group นี้
       const goalRecords = records.filter(record => 
         record.activity_id === firstGoal.activity_id || 
         record.activities?.activity_code === firstGoal.goal_name
       );
 
-      // แยก records ที่สำเร็จและไม่สำเร็จ
       const completedRecords = goalRecords.filter(r => r.is_completed);
       const notCompletedRecords = goalRecords.filter(r => !r.is_completed);
 
-      // จัดรูปแบบข้อมูล
       const formattedRecords: GoalRecord[] = [
         ...completedRecords.map(r => ({
           date: r.record_date,
@@ -289,7 +280,6 @@ export default function PatientGoalsPage() {
         })),
       ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-      // คำนวณเปอร์เซ็นต์
       const totalRecords = goalRecords.length;
       const percentage = totalRecords > 0 
         ? Math.round((completedRecords.length / totalRecords) * 100) 
@@ -307,7 +297,6 @@ export default function PatientGoalsPage() {
 
   const groupedGoals = getGroupedGoals();
 
-  // คำนวณสถิติ
   const stats = {
     total: goals.length,
     completed: goals.filter(g => g.is_completed).length,
@@ -315,11 +304,9 @@ export default function PatientGoalsPage() {
     progress: goals.length > 0 ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) : 0,
   };
 
-  // 📊 Weekly View Data
   const getWeeklyData = () => {
     const weekData = [];
     const today = new Date();
-    
     for (let i = 6; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -336,15 +323,13 @@ export default function PatientGoalsPage() {
         total: goals.length,
       });
     }
-    
+
     return weekData;
   };
 
-  // 📅 Calendar Heatmap Data
   const getCalendarData = () => {
     const today = new Date();
     const days = [];
-    
     for (let i = 29; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -369,41 +354,43 @@ export default function PatientGoalsPage() {
                'bg-gray-200',
       });
     }
-    
+
     return days;
   };
 
   const weeklyData = getWeeklyData();
   const calendarData = getCalendarData();
 
+  const handleLogout = () => {
+    logout();
+    router.push('/admin/login');
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}`)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            <ArrowLeft className="w-5 h-5" />
-            <span>กลับหน้าผู้ป่วย</span>
+            <ArrowLeft className="w-4 h-4" />
+            กลับหน้าผู้ป่วย
           </button>
           
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                ประวัติเป้าหมาย
+                📋 ประวัติเป้าหมาย
               </h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
@@ -415,12 +402,11 @@ export default function PatientGoalsPage() {
             <div className="flex gap-2">
               {goals.length === 0 && (
                 <button
-                  onClick={handleCreateDefaultGoals}
-                  disabled={creatingGoals || patient?.pam_level === 'L1'}
-                  className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg"
                 >
-                  <RefreshCw className={`w-4 h-4 ${creatingGoals ? 'animate-spin' : ''}`} />
-                  {creatingGoals ? 'กำลังสร้าง...' : 'สร้างเป้าหมายอัตโนมัติ'}
+                  <Target className="w-5 h-5" />
+                  ไปตั้งเป้าหมาย
                 </button>
               )}
               
@@ -441,43 +427,6 @@ export default function PatientGoalsPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* Tab Navigation */}
-        <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-lg p-2 border border-gray-200 overflow-x-auto">
-          <button
-            onClick={() => setViewMode('goals')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-              viewMode === 'goals' 
-                ? 'bg-blue-500 text-white shadow-lg' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <Target className="w-5 h-5" />
-            ภาพรวม
-          </button>
-          <button
-            onClick={() => setViewMode('weekly')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-              viewMode === 'weekly' 
-                ? 'bg-blue-500 text-white shadow-lg' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <TrendingUp className="w-5 h-5" />
-            บันทึกประจำวัน
-          </button>
-          <button
-            onClick={() => setViewMode('calendar')}
-            className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-medium transition-all whitespace-nowrap ${
-              viewMode === 'calendar' 
-                ? 'bg-blue-500 text-white shadow-lg' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            <Calendar className="w-5 h-5" />
-            ปฏิทิน
-          </button>
-        </div>
-
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -573,7 +522,7 @@ export default function PatientGoalsPage() {
                     {patient.pam_level === 'L2' || patient.pam_level === 'L3' 
                       ? '📋 กฎทอง 5 ข้อ - 5 วัน/สัปดาห์' 
                       : patient.pam_level === 'L4'
-                      ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
+                       ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
                       : '⚠️ ระดับ L1 - ยังไม่สร้างเป้าหมาย'}
                   </p>
                 )}
@@ -585,7 +534,7 @@ export default function PatientGoalsPage() {
                   <p className="text-gray-500 mb-4">ยังไม่มีเป้าหมายในรอบนี้</p>
                   {patient?.pam_level !== 'L1' && (
                     <button
-                      onClick={handleCreateDefaultGoals}
+                      onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
                       className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
                     >
                       สร้างเป้าหมายอัตโนมัติ
@@ -614,6 +563,12 @@ export default function PatientGoalsPage() {
                               <p className="text-sm text-gray-500">
                                 {goal.activities?.activity_name_th || goal.description_th || '-'}
                               </p>
+                              {/* ✅ แสดงจำนวนวัน/สัปดาห์ */}
+                              {goal.target_days && (
+                                <p className="text-xs text-blue-600 mt-1 font-medium">
+                                  📅 เป้าหมาย: {goal.target_days} วัน/สัปดาห์
+                                </p>
+                              )}
                             </div>
                           </div>
                           
