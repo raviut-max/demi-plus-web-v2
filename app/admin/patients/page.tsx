@@ -7,9 +7,10 @@
 //    4. ✅ รวมช่องค้นหาทั้งหมดไว้ในบรรทัดเดียว
 //    5. ✅ ปุ่มดูรายละเอียด (ตา) ไปที่ /admin/patients/[id] โดยตรง
 //    6. ✅ เพิ่ม Badge แสดงประเภทโรงพยาบาลในตาราง
+//    7. ✅ แก้ปัญหา useSearchParams ด้วย window.location.search
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { checkSession, logout, getPatientList, getAccessibleHospitalIds, getUserHospitalInfo, isSuperAdmin, deletePatient, restorePatient, getDeletedPatients, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
 import { Search, Plus, Eye, Trash2, RotateCcw, Filter, UserPlus, LogOut, ArrowLeft, Hospital, Building2, UserCheck, AlertCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -34,7 +35,9 @@ interface UserHospital {
 
 export default function PatientsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  
+  // ✅ ใช้ state + useEffect แทน useSearchParams (แก้ปัญหา Suspense boundary)
+  const [patientIdFromUrl, setPatientIdFromUrl] = useState<string | null>(null);
   
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
@@ -42,13 +45,21 @@ export default function PatientsPage() {
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-  
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedHospital, setSelectedHospital] = useState('');
   const [selectedPamLevel, setSelectedPamLevel] = useState('');
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // ✅ useEffect สำหรับดึง patient_id จาก URL (ใช้ window.location.search)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pid = urlParams.get('patient_id');
+      setPatientIdFromUrl(pid);
+    }
+  }, []);
 
   useEffect(() => {
     const userData = checkSession();
@@ -61,7 +72,6 @@ export default function PatientsPage() {
       router.push('/admin/login');
       return;
     }
-    
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
@@ -158,7 +168,6 @@ export default function PatientsPage() {
   const loadDeletedPatients = async (hospitalIds?: string[]) => {
     try {
       const data = await getDeletedPatients();
-      
       // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้
       let filteredData = data;
       if (hospitalIds && hospitalIds.length > 0) {
@@ -209,7 +218,6 @@ export default function PatientsPage() {
     if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" หรือไม่?\n\nผู้ป่วยจะย้ายไปอยู่ในรายการ "ที่ถูกลบ" และสามารถกู้คืนได้`)) {
       return;
     }
-    
     setDeletingId(patientId);
     try {
       const result = await deletePatient(patientId);
@@ -232,7 +240,6 @@ export default function PatientsPage() {
     if (!confirm(`คุณต้องการกู้คืนผู้ป่วย "${patientName}" กลับมาหรือไม่?`)) {
       return;
     }
-    
     try {
       const result = await restorePatient(patientId);
       if (result.success) {
@@ -255,7 +262,6 @@ export default function PatientsPage() {
     if (!confirm('ยืนยันครั้งสุดท้าย: พิมพ์ "YES" เพื่อยืนยันการลบถาวร') || prompt('พิมพ์ "YES" เพื่อยืนยัน') !== 'YES') {
       return;
     }
-    
     try {
       const { error } = await supabase
         .from('profiles')
@@ -280,16 +286,16 @@ export default function PatientsPage() {
     router.push('/admin/login');
   };
 
-  // ✅ Group hospitals for dropdown display
+  // ✅ Group hospitals for dropdown display - กรองเฉพาะที่เข้าถึงได้
   const getGroupedHospitals = () => {
     // ✅ กรองเฉพาะโรงพยาบาลที่ผู้ใช้เข้าถึงได้
     const availableHospitals = accessibleHospitalIds.length > 0 && !isSuperAdmin(user)
       ? hospitals.filter(h => accessibleHospitalIds.includes(h.id))
       : hospitals;
-
+    
     const mainHospitals = availableHospitals.filter(h => h.type === 'main');
     const subHospitals = availableHospitals.filter(h => h.type === 'sub');
-    
+
     const hospitalGroups = new Map<string, Hospital[]>();
     subHospitals.forEach(sub => {
       if (sub.parent_id) {
@@ -336,7 +342,7 @@ export default function PatientsPage() {
               </h1>
               <p className="text-gray-600">ดูและจัดการข้อมูลผู้ป่วยทั้งหมด</p>
             </div>
-
+            
             {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
             <div className="flex items-center gap-4">
               {userHospital && (
