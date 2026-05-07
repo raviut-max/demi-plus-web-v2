@@ -1,14 +1,12 @@
 // app/admin/staff/page.tsx
 // =====================================================
 // ✅ แก้ไขล่าสุด: 7 พฤษภาคม 2569
-// ✅ การแก้ไขครบ 7 ข้อ:
-//    1. ✅ loadStaffList - Hospital Admin เห็น staff ใน รพ.แม่ข่าย+ลูกข่ายตัวเอง
-//    2. ✅ loadPendingStaff - Hospital Admin เห็น pending เฉพาะใน รพ.แม่ข่าย+ลูกข่ายตัวเอง
-//    3. ✅ loadDeactivatedStaff - กรองตาม accessibleHospitalIds
-//    4. ✅ canEditStaff/canDeleteStaff - ตรวจสอบสิทธิ์ก่อนแก้ไข/ลบ
-//    5. ✅ AddStaffModal - กรองโรงพยาบาลตามสิทธิ์ + ซ่อน option สร้าง Admin
-//    6. ✅ EditStaffModal - กรองโรงพยาบาล + ป้องกันย้ายออกนอกขอบเขต
-//    7. ✅ แก้ไข Syntax Errors - ลบช่องว่างทั้งหมดในโค้ด
+// ✅ การแก้ไข:
+//    1. ✅ แก้ไข Timing Issue - ส่ง hospitalIds เป็น parameter
+//    2. ✅ Hospital Admin เห็น staff ใน รพ.ตัวเอง (แม่ข่าย+ลูกข่าย)
+//    3. ✅ Super Admin เห็น staff ทั้งหมด
+//    4. ✅ ซ่อน Super Admin จาก Hospital Admin
+//    5. ✅ รออนุมัติ แสดงเฉพาะ รพ.ในเครือข่ายตัวเอง
 // =====================================================
 'use client';
 
@@ -126,22 +124,68 @@ export default function StaffManagementPage() {
 
     setUser(userData);
     loadUserHospital(userData.id);
-    loadAccessibleHospitals(userData.id);
     loadHospitals();
     loadPendingStaff();
-    loadStaffList();
+    // ✅ โหลด hospitals ก่อน แล้วค่อยโหลด staff ใน loadAccessibleHospitals
+    loadAccessibleHospitals(userData.id);
   }, [router]);
 
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
   
-  // ✅ ข้อ 1: loadStaffList - Hospital Admin เห็น staff ใน รพ.แม่ข่าย+ลูกข่ายตัวเอง
-  const loadStaffList = async () => {
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      console.log('🏥 [loadUserHospital] Loading for user:', userId);
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
+    } catch (error) {
+      console.error('❌ [loadUserHospital] Error:', error);
+    }
+  };
+
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย + ลูกข่าย) - ✅ แก้ไข Timing Issue
+  const loadAccessibleHospitals = async (userId: string) => {
+    try {
+      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
+      const ids = await getAccessibleHospitalIds(userId);
+      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      
+      // ✅ ตั้งค่า state
+      setAccessibleHospitalIds(ids);
+      
+      // ✅ แล้วค่อยโหลด staff list โดยส่ง ids เป็น parameter (แก้ Timing Issue)
+      await loadStaffList(ids);
+      
+    } catch (error) {
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      setAccessibleHospitalIds([]);
+      await loadStaffList([]);
+    }
+  };
+
+  // ✅ โหลดรายชื่อโรงพยาบาลแบบ Hierarchical
+  const loadHospitals = async () => {
+    try {
+      console.log('🏥 [loadHospitals] Fetching hospitals with hierarchy...');
+      const data = await getHospitalsWithHierarchy();
+      console.log(`✅ [loadHospitals] Loaded ${data.length} hospitals`);
+      setHospitals(data);
+    } catch (error) {
+      console.error('❌ [loadHospitals] Error:', error);
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
+    }
+  };
+
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ - ✅ แก้ไขแล้ว (รับ hospitalIds เป็น parameter)
+  const loadStaffList = async (hospitalIds?: string[]) => {
     try {
       console.log('👥 [loadStaffList] Fetching staff list...');
       console.log('👑 [loadStaffList] Is Super Admin:', isSuperAdmin(user));
-      console.log('🏥 [loadStaffList] Accessible hospital IDs:', accessibleHospitalIds);
+      console.log('🏥 [loadStaffList] Hospital IDs from param:', hospitalIds);
       
       const allStaff = await getStaffList();
       console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
@@ -151,7 +195,7 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } else if (accessibleHospitalIds.length > 0) {
+      } else if (hospitalIds && hospitalIds.length > 0) {
         // ✅ Hospital Admin: เห็นเฉพาะ staff ใน รพ.ตัวเอง (แม่ข่าย+ลูกข่าย)
         filteredStaff = allStaff.filter(staff => {
           // ✅ 1. ซ่อน Super Admin จาก Hospital Admin
@@ -166,8 +210,8 @@ export default function StaffManagementPage() {
             return true;
           }
           
-          // ✅ 3. แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
-          const isInAccessibleHospital = accessibleHospitalIds.includes(staff.hospital_id);
+          // ✅ 3. แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้
+          const isInAccessibleHospital = hospitalIds.includes(staff.hospital_id);
           
           if (isInAccessibleHospital) {
             console.log('✅ [loadStaffList] Showing staff in accessible hospital:', staff.id_card, staff.hospital_id);
@@ -193,7 +237,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ ข้อ 2: loadPendingStaff - Hospital Admin เห็น pending เฉพาะใน รพ.แม่ข่าย+ลูกข่ายตัวเอง
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่รออนุมัติ (กรองตามสิทธิ์)
   const loadPendingStaff = async () => {
     try {
       console.log('⏳ [loadPendingStaff] Fetching pending staff...');
@@ -215,7 +259,7 @@ export default function StaffManagementPage() {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadPendingStaff] Super Admin - showing all pending:', filteredPending.length);
       } else if (accessibleHospitalIds.length > 0) {
-        // ✅ Hospital Admin: เห็นเฉพาะ pending จาก รพ.ที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
+        // ✅ Hospital Admin: เห็นเฉพาะ pending จาก รพ.ที่เข้าถึงได้
         filteredPending = filteredPending.filter(pending => {
           if (!pending.hospital_id) {
             return true;
@@ -240,7 +284,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ ข้อ 3: loadDeactivatedStaff - กรองตาม accessibleHospitalIds
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ที่ปิดการใช้งาน
   const loadDeactivatedStaff = async () => {
     try {
       console.log('🗑️ [loadDeactivatedStaff] Fetching deactivated staff...');
@@ -265,41 +309,6 @@ export default function StaffManagementPage() {
     }
   };
 
-  const loadUserHospital = async (userId: string) => {
-    try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
-      const hospitalInfo = await getUserHospitalInfo(userId);
-      setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
-    } catch (error) {
-      console.error('❌ [loadUserHospital] Error:', error);
-    }
-  };
-
-  const loadAccessibleHospitals = async (userId: string) => {
-    try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
-      const ids = await getAccessibleHospitalIds(userId);
-      setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-    } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
-    }
-  };
-
-  const loadHospitals = async () => {
-    try {
-      console.log('🏥 [loadHospitals] Fetching hospitals with hierarchy...');
-      const data = await getHospitalsWithHierarchy();
-      console.log(`✅ [loadHospitals] Loaded ${data.length} hospitals`);
-      setHospitals(data);
-    } catch (error) {
-      console.error('❌ [loadHospitals] Error:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
-    }
-  };
-
   // =====================================================
   // 🎬 ACTION HANDLERS
   // =====================================================
@@ -309,7 +318,7 @@ export default function StaffManagementPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ข้อ 4: canEditStaff - ตรวจสอบสิทธิ์ก่อนแก้ไข
+  // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข
   const canEditStaff = (staff: any): boolean => {
     // ✅ Super Admin แก้ไขได้ทั้งหมด
     if (isSuperAdmin(user)) {
@@ -334,7 +343,7 @@ export default function StaffManagementPage() {
     return false;
   };
 
-  // ✅ ข้อ 4: canDeleteStaff - ตรวจสอบสิทธิ์ก่อนลบ
+  // ✅ ตรวจสอบสิทธิ์ก่อนลบ
   const canDeleteStaff = (staff: any): boolean => {
     return canEditStaff(staff);
   };
@@ -400,7 +409,7 @@ export default function StaffManagementPage() {
       
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff();
-      loadStaffList();
+      loadStaffList(accessibleHospitalIds);
     } catch (error: any) {
       console.error('❌ [handleApprove] Error:', error);
       alert('เกิดข้อผิดพลาด: ' + error.message);
@@ -431,19 +440,17 @@ export default function StaffManagementPage() {
 
   const handleDeactivate = async (staffId: string, staffName: string) => {
     const staff = staffList.find(s => s.id === staffId);
-    // ✅ ข้อ 4: ตรวจสอบสิทธิ์ก่อนลบ
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
     }
-
     if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
 
     try {
       const result = await deactivateStaff(staffId);
       if (result.success) {
         alert('ปิดการใช้งานสำเร็จ!');
-        loadStaffList();
+        loadStaffList(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -455,12 +462,10 @@ export default function StaffManagementPage() {
 
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
-    // ✅ ข้อ 4: ตรวจสอบสิทธิ์ก่อนกู้คืน
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
     }
-
     if (!confirm(`กู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) return;
 
     try {
@@ -468,7 +473,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         alert('กู้คืนสำเร็จ!');
         loadDeactivatedStaff();
-        loadStaffList();
+        loadStaffList(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -480,12 +485,10 @@ export default function StaffManagementPage() {
 
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
-    // ✅ ข้อ 4: ตรวจสอบสิทธิ์ก่อนลบถาวร
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
     }
-
     if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
     if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
 
@@ -494,7 +497,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         alert('ลบถาวรสำเร็จ!');
         loadDeactivatedStaff();
-        loadStaffList();
+        loadStaffList(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -505,7 +508,6 @@ export default function StaffManagementPage() {
   };
 
   const handleEdit = (staff: any) => {
-    // ✅ ข้อ 4: ตรวจสอบสิทธิ์ก่อนแก้ไข
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
       return;
@@ -535,7 +537,6 @@ export default function StaffManagementPage() {
         hospitalGroups.get(sub.parent_id)!.push(sub);
       }
     });
-
     return { mainHospitals, hospitalGroups };
   };
 
@@ -568,7 +569,7 @@ export default function StaffManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
@@ -960,7 +961,7 @@ export default function StaffManagementPage() {
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
-            loadStaffList();
+            loadStaffList(accessibleHospitalIds);
           }}
           userId={user?.id}
         />
@@ -980,7 +981,7 @@ export default function StaffManagementPage() {
           onSuccess={() => {
             setShowEditModal(false);
             setSelectedStaff(null);
-            loadStaffList();
+            loadStaffList(accessibleHospitalIds);
           }}
         />
       )}
@@ -1083,7 +1084,6 @@ export default function StaffManagementPage() {
 // =====================================================
 // ➕ ADD STAFF MODAL COMPONENT
 // =====================================================
-// ✅ ข้อ 5: กรองโรงพยาบาลตามสิทธิ์ + ซ่อน option สร้าง Admin
 function AddStaffModal({
   hospitals,
   getGroupedHospitals,
@@ -1180,7 +1180,7 @@ function AddStaffModal({
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
   
-  // ✅ ข้อ 5: กรองโรงพยาบาลที่แสดงในฟอร์มตามสิทธิ์
+  // ✅ กรองโรงพยาบาลที่แสดงในฟอร์มตามสิทธิ์
   const getAvailableHospitals = () => {
     if (isSuper) return hospitals;
     return hospitals.filter(h => accessibleHospitalIds.includes(h.id));
@@ -1457,7 +1457,6 @@ function AddStaffModal({
 // =====================================================
 // ✏️ EDIT STAFF MODAL COMPONENT
 // =====================================================
-// ✅ ข้อ 6: กรองโรงพยาบาล + ป้องกันย้ายออกนอกขอบเขต
 function EditStaffModal({
   staff,
   hospitals,
@@ -1501,8 +1500,6 @@ function EditStaffModal({
   const [resetPassword, setResetPassword] = useState(false);
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
-  
-  // ✅ ข้อ 6: ตรวจสอบสิทธิ์ในการแก้ไขโรงพยาบาล
   const canEditHospital = isSuper || !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id);
   
   const generatePassword = () => {
@@ -1512,14 +1509,13 @@ function EditStaffModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     // ✅ Hospital Admin ไม่สามารถแก้ไขสิทธิ์ของ admin อื่น
     if (!isSuper && staff.role === 'admin' && formData.admin_type !== staff.admin_type) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขประเภทผู้ดูแลระบบ');
       return;
     }
 
-    // ✅ ข้อ 6: Hospital Admin ไม่สามารถย้ายเจ้าหน้าที่ออกนอกขอบเขต
+    // ✅ Hospital Admin ไม่สามารถย้ายเจ้าหน้าที่ออกนอกขอบเขต
     if (!isSuper && formData.hospital_id !== staff.hospital_id && 
         formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์ย้ายเจ้าหน้าที่ไปโรงพยาบาลนี้');
@@ -1574,8 +1570,6 @@ function EditStaffModal({
   };
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
-  
-  // ✅ ข้อ 6: กรองโรงพยาบาลที่แสดงในฟอร์มตามสิทธิ์
   const availableHospitals = isSuper ? hospitals : hospitals.filter(h => accessibleHospitalIds.includes(h.id));
 
   return (
