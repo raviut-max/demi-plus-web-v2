@@ -1,20 +1,21 @@
 // app/admin/patients/[id]/goals/page.tsx
 'use client';
+
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import {
-  checkSession,
-  logout,
-  getPatientDetail,
+import { 
+  checkSession, 
+  logout, 
+  getPatientDetail, 
   getPatientGoals,
   getGoalRoundCount,
   createDefaultGoals,
   getProgress
 } from '@/lib/supabase/queries';
-import {
-  ArrowLeft,
-  Target,
-  TrendingUp,
+import { 
+  ArrowLeft, 
+  Target, 
+  TrendingUp, 
   Calendar,
   CheckCircle,
   Clock,
@@ -53,8 +54,8 @@ export default function PatientGoalsPage() {
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   const [goals, setGoals] = useState<any[]>([]);
-  const [goalRounds, setGoalRounds] = useState(1);
-  const [selectedRound, setSelectedRound] = useState(1);
+  const [goalRounds, setGoalRounds] = useState<number>(1);
+  const [selectedRound, setSelectedRound] = useState<number>(1);
   const [records, setRecords] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('goals');
   const [creatingGoals, setCreatingGoals] = useState(false);
@@ -67,6 +68,7 @@ export default function PatientGoalsPage() {
       router.push('/admin/login');
       return;
     }
+
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -99,7 +101,13 @@ export default function PatientGoalsPage() {
     try {
       const { data, error } = await supabase
         .from('goals')
-        .select(`*, activities ( activity_name_th, description_th )`)
+        .select(`
+          *,
+          activities (
+            activity_name_th,
+            description_th
+          )
+        `)
         .eq('user_id', patientId)
         .eq('round_number', round)
         .order('priority', { ascending: true });
@@ -143,6 +151,7 @@ export default function PatientGoalsPage() {
 
   const handleCreateDefaultGoals = async () => {
     if (!patient) return;
+
     if (!confirm('ต้องการสร้างเป้าหมายเริ่มต้นตาม PAM Level หรือไม่?\n\nL2/L3: กฎทอง 5 ข้อ\nL4: แชมป์ 8 กิจกรรม')) {
       return;
     }
@@ -174,6 +183,7 @@ export default function PatientGoalsPage() {
     if (!confirm('ต้องการเก็บถาวรเป้าหมายรอบปัจจุบันหรือไม่?')) {
       return;
     }
+
     try {
       const { error } = await supabase
         .from('goals')
@@ -209,13 +219,13 @@ export default function PatientGoalsPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
-        return '🟢 กำลังดำเนินการ';
+        return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">🟢 กำลังดำเนินการ</span>;
       case 'completed':
-        return '✅ สำเร็จ';
+        return <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold">✅ สำเร็จ</span>;
       case 'archived':
-        return '📦 เก็บถาวร';
+        return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">📦 เก็บถาวร</span>;
       default:
-        return status;
+        return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-semibold">{status}</span>;
     }
   };
 
@@ -233,7 +243,9 @@ export default function PatientGoalsPage() {
 
   // 🎯 จัดกลุ่มเป้าหมายและคำนวณสถิติ
   const getGroupedGoals = (): GoalWithRecords[] => {
+    // จัดกลุ่ม goals ตาม goal_name
     const grouped: Record<string, any[]> = {};
+    
     goals.forEach(goal => {
       const key = goal.goal_name || goal.activity_id;
       if (!grouped[key]) {
@@ -242,23 +254,28 @@ export default function PatientGoalsPage() {
       grouped[key].push(goal);
     });
 
+    // แปลงเป็น array และ sort ตาม priority
     const goalGroups = Object.values(grouped).sort((a, b) => {
       const priorityA = a[0]?.priority || 999;
       const priorityB = b[0]?.priority || 999;
       return priorityA - priorityB;
     });
 
+    // คำนวณสถิติสำหรับแต่ละกลุ่ม
     return goalGroups.map(goalGroup => {
       const firstGoal = goalGroup[0];
       
+      // หา records ที่เกี่ยวข้องกับ goal group นี้
       const goalRecords = records.filter(record => 
         record.activity_id === firstGoal.activity_id || 
         record.activities?.activity_code === firstGoal.goal_name
       );
 
+      // แยก records ที่สำเร็จและไม่สำเร็จ
       const completedRecords = goalRecords.filter(r => r.is_completed);
       const notCompletedRecords = goalRecords.filter(r => !r.is_completed);
 
+      // จัดรูปแบบข้อมูล
       const formattedRecords: GoalRecord[] = [
         ...completedRecords.map(r => ({
           date: r.record_date,
@@ -272,6 +289,7 @@ export default function PatientGoalsPage() {
         })),
       ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
+      // คำนวณเปอร์เซ็นต์
       const totalRecords = goalRecords.length;
       const percentage = totalRecords > 0 
         ? Math.round((completedRecords.length / totalRecords) * 100) 
@@ -289,6 +307,7 @@ export default function PatientGoalsPage() {
 
   const groupedGoals = getGroupedGoals();
 
+  // คำนวณสถิติ
   const stats = {
     total: goals.length,
     completed: goals.filter(g => g.is_completed).length,
@@ -296,9 +315,11 @@ export default function PatientGoalsPage() {
     progress: goals.length > 0 ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) : 0,
   };
 
+  // 📊 Weekly View Data
   const getWeeklyData = () => {
     const weekData = [];
     const today = new Date();
+    
     for (let i = 6; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -315,13 +336,15 @@ export default function PatientGoalsPage() {
         total: goals.length,
       });
     }
-
+    
     return weekData;
   };
 
+  // 📅 Calendar Heatmap Data
   const getCalendarData = () => {
     const today = new Date();
     const days = [];
+    
     for (let i = 29; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -346,7 +369,7 @@ export default function PatientGoalsPage() {
                'bg-gray-200',
       });
     }
-
+    
     return days;
   };
 
@@ -356,28 +379,31 @@ export default function PatientGoalsPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">กำลังโหลด...</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 pb-20">
       {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200">
+      <div className="bg-white/80 backdrop-blur-sm border-b border-white/50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push(`/admin/patients/${patientId}`)}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
-            <ArrowLeft className="w-4 h-4" />
-            กลับหน้าผู้ป่วย
+            <ArrowLeft className="w-5 h-5" />
+            <span>กลับหน้าผู้ป่วย</span>
           </button>
           
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                📋 ประวัติเป้าหมาย
+                ประวัติเป้าหมาย
               </h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
@@ -387,14 +413,14 @@ export default function PatientGoalsPage() {
             </div>
             
             <div className="flex gap-2">
-              {/* ✅ แก้ไขตรงนี้ - เปลี่ยนจากสร้างอัตโนมัติ เป็นไปตั้งเป้าหมาย */}
               {goals.length === 0 && (
                 <button
-                  onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
-                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all shadow-lg"
+                  onClick={handleCreateDefaultGoals}
+                  disabled={creatingGoals || patient?.pam_level === 'L1'}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Target className="w-5 h-5" />
-                  ไปตั้งเป้าหมาย
+                  <RefreshCw className={`w-4 h-4 ${creatingGoals ? 'animate-spin' : ''}`} />
+                  {creatingGoals ? 'กำลังสร้าง...' : 'สร้างเป้าหมายอัตโนมัติ'}
                 </button>
               )}
               
@@ -415,40 +441,6 @@ export default function PatientGoalsPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         
-        {/* ✅ Alert Banner - แสดงเมื่อไม่มี goals (เพิ่มใหม่) */}
-        {goals.length === 0 && (
-          <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-xl p-6 mb-6 animate-pulse">
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0">
-                <div className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center">
-                  <span className="text-2xl">⚠️</span>
-                </div>
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-yellow-900 mb-2">
-                  ยังไม่มีเป้าหมายสำหรับผู้ป่วยคนนี้
-                </h3>
-                <p className="text-sm text-yellow-800 mb-3">
-                  กรุณาสร้างเป้าหมายเริ่มต้นก่อนที่จะบันทึกข้อมูลอื่นๆ ผู้ป่วยจะต้องมีเป้าหมายก่อนที่จะทำกิจกรรมหรือติดตามผลได้
-                </p>
-                <div className="flex items-center gap-2 text-xs text-yellow-700 mb-4">
-                  <span className="font-semibold">💡 คำแนะนำ:</span>
-                  <span>กดปุ่ม "ไปตั้งเป้าหมาย" ด้านบนเพื่อสร้างเป้าหมายตามระดับ PAM</span>
-                </div>
-                <button
-                  onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
-                  className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg shadow-lg transition-all"
-                >
-                  <div className="flex items-center gap-2">
-                    <Target className="w-5 h-5" />
-                    <span>ไปตั้งเป้าหมายตอนนี้</span>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Tab Navigation */}
         <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-lg p-2 border border-gray-200 overflow-x-auto">
           <button
@@ -581,56 +573,24 @@ export default function PatientGoalsPage() {
                     {patient.pam_level === 'L2' || patient.pam_level === 'L3' 
                       ? '📋 กฎทอง 5 ข้อ - 5 วัน/สัปดาห์' 
                       : patient.pam_level === 'L4'
-                       ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
+                      ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
                       : '⚠️ ระดับ L1 - ยังไม่สร้างเป้าหมาย'}
                   </p>
                 )}
               </div>
 
-              {/* ✅ แก้ไขตรงนี้ - Empty State */}
               {groupedGoals.length === 0 ? (
                 <div className="text-center py-12">
-                  <div className="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <Target className="w-10 h-10 text-yellow-600" />
-                  </div>
-                  
-                  <h2 className="text-2xl font-bold text-gray-800 mb-3">
-                    ยังไม่มีเป้าหมาย
-                  </h2>
-                  
-                  <p className="text-gray-600 mb-8 max-w-md mx-auto">
-                    ผู้ป่วยคนนี้ยังไม่มีเป้าหมาย กรุณาตั้งเป้าหมายก่อนที่จะทำกิจกรรมหรือติดตามผล
-                  </p>
-                  
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  <Target className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500 mb-4">ยังไม่มีเป้าหมายในรอบนี้</p>
+                  {patient?.pam_level !== 'L1' && (
                     <button
-                      onClick={() => router.push(`/admin/goals?patient_id=${patientId}`)}
-                      className="px-8 py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold rounded-lg shadow-lg hover:shadow-xl transition-all"
+                      onClick={handleCreateDefaultGoals}
+                      className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
                     >
-                      <div className="flex items-center gap-3">
-                        <Target className="w-5 h-5" />
-                        <span>ไปตั้งเป้าหมาย</span>
-                      </div>
+                      สร้างเป้าหมายอัตโนมัติ
                     </button>
-                    
-                    <button
-                      onClick={() => router.back()}
-                      className="px-8 py-4 bg-gray-500 hover:bg-gray-600 text-white font-bold rounded-lg transition-all"
-                    >
-                      ยกเลิก
-                    </button>
-                  </div>
-                  
-                  <div className="mt-8 p-4 bg-blue-50 border border-blue-200 rounded-lg text-left max-w-md mx-auto">
-                    <p className="text-sm text-blue-800 font-semibold mb-2">
-                      💡 คำแนะนำ:
-                    </p>
-                    <ul className="text-sm text-blue-700 space-y-1">
-                      <li>• ระบบจะนำคุณไปยังหน้าจัดการเป้าหมาย</li>
-                      <li>• คุณสามารถสร้างเป้าหมายเริ่มต้นตามระดับ PAM</li>
-                      <li>• หรือกำหนดเป้าหมายเองตามความต้องการ</li>
-                    </ul>
-                  </div>
+                  )}
                 </div>
               ) : (
                 <div className="divide-y divide-gray-200">
