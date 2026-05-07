@@ -2,10 +2,11 @@
 // =====================================================
 // ✅ แก้ไขล่าสุด: 7 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไข Timing Issue - loadStaffList หลัง set accessibleHospitalIds
-//    2. ✅ Hospital Admin เห็น staff ใน รพ.ตัวเอง (แม่ข่าย+ลูกข่าย)
-//    3. ✅ Super Admin เห็น staff ทั้งหมด
+//    1. ✅ Super Admin เห็นและแก้ไขได้ทั้งหมด
+//    2. ✅ Hospital Admin เห็นเฉพาะ staff ใน รพ.แม่ข่าย/ลูกข่ายตัวเอง
+//    3. ✅ กรองตาม accessibleHospitalIds
 //    4. ✅ ซ่อน Super Admin จาก Hospital Admin
+//    5. ✅ รออนุมัติ - เห็นเฉพาะในเครือข่ายตัวเอง
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -115,7 +116,7 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
-
+    
     console.log('👤 [StaffManagement] User:', userData);
     console.log('👑 [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
     console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
@@ -123,10 +124,16 @@ export default function StaffManagementPage() {
     setUser(userData);
     loadUserHospital(userData.id);
     loadHospitals();
-    loadPendingStaff();
-    // ✅ โหลด hospitals ก่อน แล้วค่อยโหลด staff ใน loadAccessibleHospitals
+    // ✅ โหลด hospitals และ accessible IDs ก่อน
     loadAccessibleHospitals(userData.id);
   }, [router]);
+
+  // ✅ โหลด pending staff หลังจาก accessibleHospitalIds พร้อม
+  useEffect(() => {
+    if (accessibleHospitalIds.length > 0 || (user && isSuperAdmin(user))) {
+      loadPendingStaff();
+    }
+  }, [accessibleHospitalIds, user]);
 
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
@@ -149,19 +156,16 @@ export default function StaffManagementPage() {
     try {
       console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       
-      // ✅ ตั้งค่า state ก่อน
-      setAccessibleHospitalIds(ids);
-      
-      // ✅ แล้วค่อยโหลด staff list (แก้ Timing Issue)
-      await loadStaffList(ids);
-      
+      // ✅ โหลด staff list หลังจากได้ accessibleHospitalIds
+      await loadStaffList();
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
       setAccessibleHospitalIds([]);
-      await loadStaffList([]);
+      await loadStaffList();
     }
   };
 
@@ -178,12 +182,12 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ (แก้ไขแล้ว - รับ hospitalIds เป็น parameter)
-  const loadStaffList = async (hospitalIds?: string[]) => {
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ (กรองตามสิทธิ์)
+  const loadStaffList = async () => {
     try {
       console.log('👥 [loadStaffList] Fetching staff list...');
       console.log('👑 [loadStaffList] Is Super Admin:', isSuperAdmin(user));
-      console.log('🏥 [loadStaffList] Hospital IDs from param:', hospitalIds);
+      console.log('🏥 [loadStaffList] Accessible hospital IDs:', accessibleHospitalIds);
       
       const allStaff = await getStaffList();
       console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
@@ -193,7 +197,7 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } else if (hospitalIds && hospitalIds.length > 0) {
+      } else if (accessibleHospitalIds.length > 0) {
         // ✅ Hospital Admin: เห็นเฉพาะ staff ใน รพ.ตัวเอง (แม่ข่าย+ลูกข่าย)
         filteredStaff = allStaff.filter(staff => {
           // ✅ 1. ซ่อน Super Admin จาก Hospital Admin
@@ -202,18 +206,15 @@ export default function StaffManagementPage() {
             return false;
           }
           
-          // ✅ 2. แสดง staff ที่ไม่มี hospital_id
+          // ✅ 2. แสดง staff ที่ไม่มี hospital_id (เช่น Super Admin)
           if (!staff.hospital_id) {
-            console.log('✅ [loadStaffList] Showing staff without hospital_id:', staff.id_card);
             return true;
           }
           
           // ✅ 3. แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้
-          const isInAccessibleHospital = hospitalIds.includes(staff.hospital_id);
+          const isInAccessibleHospital = accessibleHospitalIds.includes(staff.hospital_id);
           
-          if (isInAccessibleHospital) {
-            console.log('✅ [loadStaffList] Showing staff in accessible hospital:', staff.id_card, staff.hospital_id);
-          } else {
+          if (!isInAccessibleHospital) {
             console.log('🚫 [loadStaffList] Hiding staff from other hospital:', staff.id_card, staff.hospital_id);
           }
           
@@ -239,6 +240,8 @@ export default function StaffManagementPage() {
   const loadPendingStaff = async () => {
     try {
       console.log('⏳ [loadPendingStaff] Fetching pending staff...');
+      console.log('🏥 [loadPendingStaff] Accessible Hospital IDs:', accessibleHospitalIds);
+      
       const { data, error } = await supabase
         .from('pending_staff')
         .select(`*, hospitals (name, code)`)
@@ -257,22 +260,30 @@ export default function StaffManagementPage() {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadPendingStaff] Super Admin - showing all pending:', filteredPending.length);
       } else if (accessibleHospitalIds.length > 0) {
-        // ✅ Hospital Admin: เห็นเฉพาะ pending จาก รพ.ที่เข้าถึงได้
+        // ✅ Hospital Admin: เห็นเฉพาะ pending จาก รพ.ที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
         filteredPending = filteredPending.filter(pending => {
+          // ✅ 1. ถ้าไม่มี hospital_id → แสดง (เช่น Super Admin ที่กำลังลงทะเบียน)
           if (!pending.hospital_id) {
+            console.log('✅ [loadPendingStaff] Showing pending without hospital_id:', pending.id_card);
             return true;
           }
           
+          // ✅ 2. ตรวจสอบว่าอยู่ในโรงพยาบาลที่เข้าถึงได้หรือไม่
           const isInAccessibleHospital = accessibleHospitalIds.includes(pending.hospital_id);
           
-          if (!isInAccessibleHospital) {
-            console.log('🚫 [loadPendingStaff] Hiding pending from other hospital:', pending.id_card, pending.hospital_id);
+          if (isInAccessibleHospital) {
+            console.log('✅ [loadPendingStaff] Showing pending in accessible hospital:', pending.full_name_th, pending.hospital_id);
+          } else {
+            console.log('🚫 [loadPendingStaff] Hiding pending from other hospital:', pending.full_name_th, pending.hospital_id);
           }
           
           return isInAccessibleHospital;
         });
         
         console.log('📊 [loadPendingStaff] Filtered pending for Hospital Admin:', filteredPending.length);
+      } else {
+        console.log('⚠️ [loadPendingStaff] No accessible hospitals - showing no pending');
+        filteredPending = [];
       }
       
       setPendingStaff(filteredPending);
@@ -287,6 +298,7 @@ export default function StaffManagementPage() {
     try {
       console.log('🗑️ [loadDeactivatedStaff] Fetching deactivated staff...');
       const data = await getDeactivatedStaff();
+      
       let filteredData = data;
       
       if (isSuperAdmin(user)) {
@@ -310,6 +322,7 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🎬 ACTION HANDLERS
   // =====================================================
+  
   const handleLogout = () => {
     console.log('🚪 [handleLogout] User logging out...');
     logout();
@@ -349,6 +362,7 @@ export default function StaffManagementPage() {
 
   const handleApprove = async (pendingId: string, staffName: string) => {
     if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
+    
     try {
       const { data: pendingData, error: fetchError } = await supabase
         .from('pending_staff')
@@ -408,7 +422,7 @@ export default function StaffManagementPage() {
       
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff();
-      loadStaffList(accessibleHospitalIds);
+      loadStaffList();
     } catch (error: any) {
       console.error('❌ [handleApprove] Error:', error);
       alert('เกิดข้อผิดพลาด: ' + error.message);
@@ -418,6 +432,7 @@ export default function StaffManagementPage() {
   const handleReject = async (pendingId: string, staffName: string) => {
     const reason = prompt('เหตุผลในการปฏิเสธ:', '');
     if (!reason) return;
+    
     try {
       await supabase
         .from('pending_staff')
@@ -439,6 +454,8 @@ export default function StaffManagementPage() {
 
   const handleDeactivate = async (staffId: string, staffName: string) => {
     const staff = staffList.find(s => s.id === staffId);
+    
+    // ✅ ตรวจสอบสิทธิ์ก่อนลบ
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
@@ -450,7 +467,7 @@ export default function StaffManagementPage() {
       const result = await deactivateStaff(staffId);
       if (result.success) {
         alert('ปิดการใช้งานสำเร็จ!');
-        loadStaffList(accessibleHospitalIds);
+        loadStaffList();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -462,6 +479,8 @@ export default function StaffManagementPage() {
 
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
+    
+    // ✅ ตรวจสอบสิทธิ์ก่อนกู้คืน
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
@@ -474,7 +493,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         alert('กู้คืนสำเร็จ!');
         loadDeactivatedStaff();
-        loadStaffList(accessibleHospitalIds);
+        loadStaffList();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -486,6 +505,8 @@ export default function StaffManagementPage() {
 
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
+    
+    // ✅ ตรวจสอบสิทธิ์ก่อนลบถาวร
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
@@ -499,7 +520,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         alert('ลบถาวรสำเร็จ!');
         loadDeactivatedStaff();
-        loadStaffList(accessibleHospitalIds);
+        loadStaffList();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -510,10 +531,12 @@ export default function StaffManagementPage() {
   };
 
   const handleEdit = (staff: any) => {
+    // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
       return;
     }
+    
     setSelectedStaff(staff);
     setShowEditModal(true);
   };
@@ -531,7 +554,7 @@ export default function StaffManagementPage() {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-
+    
     subHospitals.forEach(sub => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -603,6 +626,7 @@ export default function StaffManagementPage() {
                 <Clock className="w-4 h-4" />
                 รออนุมัติ ({pendingStaff.length})
               </button>
+              
               <button
                 onClick={handleOpenDeactivatedModal}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
@@ -610,6 +634,7 @@ export default function StaffManagementPage() {
                 <Archive className="w-4 h-4" />
                 ที่ปิดการใช้งาน ({deactivatedStaff.length})
               </button>
+              
               <button
                 onClick={() => setShowAddModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -617,6 +642,7 @@ export default function StaffManagementPage() {
                 <Plus className="w-4 h-4" />
                 เพิ่มเจ้าหน้าที่
               </button>
+              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -640,6 +666,7 @@ export default function StaffManagementPage() {
               <UserCheck className="w-4 h-4 inline mr-2" />
               ใช้งาน ({staffList.length})
             </button>
+            
             <button
               onClick={() => setActiveTab('pending')}
               className={`px-4 py-2 font-semibold transition-colors ${
@@ -651,6 +678,7 @@ export default function StaffManagementPage() {
               <Clock className="w-4 h-4 inline mr-2" />
               รออนุมัติ ({pendingStaff.length})
             </button>
+            
             <button
               onClick={() => setActiveTab('deactivated')}
               className={`px-4 py-2 font-semibold transition-colors ${
@@ -682,6 +710,7 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
+            
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
@@ -695,6 +724,7 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
+            
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -708,6 +738,7 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
+            
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -882,6 +913,11 @@ export default function StaffManagementPage() {
                         <p className="text-sm text-gray-400 mt-2">
                           บุคลากรสามารถลงทะเบียนได้ที่ /admin/register
                         </p>
+                        {!isSuperAdmin(user) && accessibleHospitalIds.length > 0 && (
+                          <p className="text-sm text-blue-600 mt-2">
+                            🔒 คุณเห็นเฉพาะคำขอจากโรงพยาบาลในเครือข่ายของคุณ ({accessibleHospitalIds.length} แห่ง)
+                          </p>
+                        )}
                       </td>
                     </tr>
                   ) : (
@@ -965,7 +1001,7 @@ export default function StaffManagementPage() {
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
-            loadStaffList(accessibleHospitalIds);
+            loadStaffList();
           }}
           userId={user?.id}
         />
@@ -985,7 +1021,7 @@ export default function StaffManagementPage() {
           onSuccess={() => {
             setShowEditModal(false);
             setSelectedStaff(null);
-            loadStaffList(accessibleHospitalIds);
+            loadStaffList();
           }}
         />
       )}
@@ -1123,7 +1159,7 @@ function AddStaffModal({
   
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
-  
+
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
@@ -1131,6 +1167,7 @@ function AddStaffModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
@@ -1320,7 +1357,7 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
-              <option value="doctor">👨‍️ แพทย์</option>
+              <option value="doctor">👨‍⚕️ แพทย์</option>
               <option value="helper">👩‍ เจ้าหน้าที่</option>
             </select>
             {!isSuper && (
@@ -1492,6 +1529,7 @@ function EditStaffModal({
   };
 
   const initialBirthDate = parseBirthDate(staff.birth_date);
+  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
