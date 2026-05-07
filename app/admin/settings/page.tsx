@@ -2,12 +2,11 @@
 // ✅ แก้ไขล่าสุด: 7 พฤษภาคม 2569
 // ✅ การแก้ไข: แก้ไขโครงสร้าง JSX และเพิ่มระบบสิทธิ์การเข้าถึง
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
+import {
+  checkSession,
+  logout,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
   isSuperAdmin
@@ -23,9 +22,6 @@ import {
   UserCheck,
   Hospital,
   LogOut,
-  Database,
-  FileText,
-  Activity,
   AlertCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -67,19 +63,18 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const userData = checkSession();
-    
     if (!userData) {
       router.push('/admin/login');
       return;
     }
-    
+
     // ✅ ตรวจสอบสิทธิ์: เฉพาะ Super Admin หรือ Hospital Admin เท่านั้น
     if (!isSuperAdmin(userData) && userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบระดับสูงเท่านั้นที่เข้าถึงได้');
       router.push('/admin/dashboard');
       return;
     }
-    
+
     setUser(userData);
     loadUserHospital(userData.id);
     loadSystemStats();
@@ -142,7 +137,6 @@ export default function SettingsPage() {
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
     // ✅ ตรวจสอบรหัสผ่าน (แนะนำให้เปลี่ยนเป็นระบบที่ปลอดภัยกว่าในผลิต)
     if (password === '12345678') {
       setIsAuthenticated(true);
@@ -178,7 +172,7 @@ export default function SettingsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -328,7 +322,7 @@ export default function SettingsPage() {
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                    <Activity className="w-6 h-6 text-green-600" />
+                    <Shield className="w-6 h-6 text-green-600" />
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">ผู้ป่วย</p>
@@ -340,7 +334,7 @@ export default function SettingsPage() {
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-orange-600" />
+                    <AlertCircle className="w-6 h-6 text-orange-600" />
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">รออนุมัติ</p>
@@ -418,75 +412,6 @@ export default function SettingsPage() {
                 </div>
                 <p className="text-gray-600 text-sm">
                   เพิ่ม/แก้ไข/ลบ ข้อมูลเจ้าหน้าที่และกำหนดสิทธิ์การเข้าถึง
-                </p>
-              </button>
-
-              {/* 📊 ปุ่มรายงาน */}
-              <button
-                onClick={() => router.push('/admin/reports')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-green-100 rounded-lg flex items-center justify-center group-hover:bg-green-200 transition-all">
-                    <Activity className="w-7 h-7 text-green-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      รายงานและสถิติ
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      Dashboard และรายงาน
-                    </p>
-                  </div>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  ดูสถิติการใช้งานและรายงานต่างๆ ของระบบ
-                </p>
-              </button>
-
-              {/* 💾 ปุ่มฐานข้อมูล */}
-              <button
-                onClick={() => router.push('/admin/database')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-red-100 rounded-lg flex items-center justify-center group-hover:bg-red-200 transition-all">
-                    <Database className="w-7 h-7 text-red-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      ฐานข้อมูล
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      Backup และ Restore
-                    </p>
-                  </div>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  จัดการฐานข้อมูล สำรองข้อมูล และกู้คืนระบบ
-                </p>
-              </button>
-
-              {/* 🔐 ปุ่มตั้งค่าความปลอดภัย */}
-              <button
-                onClick={() => router.push('/admin/security')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-yellow-100 rounded-lg flex items-center justify-center group-hover:bg-yellow-200 transition-all">
-                    <Lock className="w-7 h-7 text-yellow-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      ความปลอดภัย
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      รหัสผ่านและสิทธิ์
-                    </p>
-                  </div>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  จัดการรหัสผ่าน การเข้าถึง และความปลอดภัยของระบบ
                 </p>
               </button>
             </div>
