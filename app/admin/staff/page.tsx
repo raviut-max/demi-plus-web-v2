@@ -2,9 +2,9 @@
 // =====================================================
 // ✅ แก้ไขล่าสุด: 7 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ Super Admin เห็นและแก้ไขได้ทั้งหมด
-//    2. ✅ Hospital Admin เห็นเฉพาะ staff ใน รพ.แม่ข่าย/ลูกข่ายตัวเอง
-//    3. ✅ กรองตาม accessibleHospitalIds
+//    1. ✅ แก้ไข Timing Issue - loadStaffList หลัง set accessibleHospitalIds
+//    2. ✅ Hospital Admin เห็น staff ใน รพ.ตัวเอง (แม่ข่าย+ลูกข่าย)
+//    3. ✅ Super Admin เห็น staff ทั้งหมด
 //    4. ✅ ซ่อน Super Admin จาก Hospital Admin
 // =====================================================
 'use client';
@@ -110,7 +110,6 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
-    
     if (userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
       router.push('/admin/login');
@@ -123,10 +122,10 @@ export default function StaffManagementPage() {
 
     setUser(userData);
     loadUserHospital(userData.id);
-    loadAccessibleHospitals(userData.id);
     loadHospitals();
     loadPendingStaff();
-    loadStaffList();
+    // ✅ โหลด hospitals ก่อน แล้วค่อยโหลด staff ใน loadAccessibleHospitals
+    loadAccessibleHospitals(userData.id);
   }, [router]);
 
   // =====================================================
@@ -150,11 +149,19 @@ export default function StaffManagementPage() {
     try {
       console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
-      setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      
+      // ✅ ตั้งค่า state ก่อน
+      setAccessibleHospitalIds(ids);
+      
+      // ✅ แล้วค่อยโหลด staff list (แก้ Timing Issue)
+      await loadStaffList(ids);
+      
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
+      setAccessibleHospitalIds([]);
+      await loadStaffList([]);
     }
   };
 
@@ -171,12 +178,12 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อเจ้าหน้าที่ (กรองตามสิทธิ์)
-  const loadStaffList = async () => {
+  // ✅ โหลดรายชื่อเจ้าหน้าที่ (แก้ไขแล้ว - รับ hospitalIds เป็น parameter)
+  const loadStaffList = async (hospitalIds?: string[]) => {
     try {
       console.log('👥 [loadStaffList] Fetching staff list...');
       console.log('👑 [loadStaffList] Is Super Admin:', isSuperAdmin(user));
-      console.log('🏥 [loadStaffList] Accessible hospital IDs:', accessibleHospitalIds);
+      console.log('🏥 [loadStaffList] Hospital IDs from param:', hospitalIds);
       
       const allStaff = await getStaffList();
       console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
@@ -186,7 +193,7 @@ export default function StaffManagementPage() {
       if (isSuperAdmin(user)) {
         // ✅ Super Admin: เห็นทั้งหมด
         console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } else if (accessibleHospitalIds.length > 0) {
+      } else if (hospitalIds && hospitalIds.length > 0) {
         // ✅ Hospital Admin: เห็นเฉพาะ staff ใน รพ.ตัวเอง (แม่ข่าย+ลูกข่าย)
         filteredStaff = allStaff.filter(staff => {
           // ✅ 1. ซ่อน Super Admin จาก Hospital Admin
@@ -195,15 +202,18 @@ export default function StaffManagementPage() {
             return false;
           }
           
-          // ✅ 2. แสดง staff ที่ไม่มี hospital_id (เช่น Super Admin)
+          // ✅ 2. แสดง staff ที่ไม่มี hospital_id
           if (!staff.hospital_id) {
+            console.log('✅ [loadStaffList] Showing staff without hospital_id:', staff.id_card);
             return true;
           }
           
           // ✅ 3. แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้
-          const isInAccessibleHospital = accessibleHospitalIds.includes(staff.hospital_id);
+          const isInAccessibleHospital = hospitalIds.includes(staff.hospital_id);
           
-          if (!isInAccessibleHospital) {
+          if (isInAccessibleHospital) {
+            console.log('✅ [loadStaffList] Showing staff in accessible hospital:', staff.id_card, staff.hospital_id);
+          } else {
             console.log('🚫 [loadStaffList] Hiding staff from other hospital:', staff.id_card, staff.hospital_id);
           }
           
@@ -300,7 +310,6 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🎬 ACTION HANDLERS
   // =====================================================
-  
   const handleLogout = () => {
     console.log('🚪 [handleLogout] User logging out...');
     logout();
@@ -340,7 +349,6 @@ export default function StaffManagementPage() {
 
   const handleApprove = async (pendingId: string, staffName: string) => {
     if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
-    
     try {
       const { data: pendingData, error: fetchError } = await supabase
         .from('pending_staff')
@@ -400,7 +408,7 @@ export default function StaffManagementPage() {
       
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff();
-      loadStaffList();
+      loadStaffList(accessibleHospitalIds);
     } catch (error: any) {
       console.error('❌ [handleApprove] Error:', error);
       alert('เกิดข้อผิดพลาด: ' + error.message);
@@ -410,7 +418,6 @@ export default function StaffManagementPage() {
   const handleReject = async (pendingId: string, staffName: string) => {
     const reason = prompt('เหตุผลในการปฏิเสธ:', '');
     if (!reason) return;
-    
     try {
       await supabase
         .from('pending_staff')
@@ -432,8 +439,6 @@ export default function StaffManagementPage() {
 
   const handleDeactivate = async (staffId: string, staffName: string) => {
     const staff = staffList.find(s => s.id === staffId);
-    
-    // ✅ ตรวจสอบสิทธิ์ก่อนลบ
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
@@ -445,7 +450,7 @@ export default function StaffManagementPage() {
       const result = await deactivateStaff(staffId);
       if (result.success) {
         alert('ปิดการใช้งานสำเร็จ!');
-        loadStaffList();
+        loadStaffList(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -457,8 +462,6 @@ export default function StaffManagementPage() {
 
   const handleRestoreStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
-    
-    // ✅ ตรวจสอบสิทธิ์ก่อนกู้คืน
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
@@ -471,7 +474,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         alert('กู้คืนสำเร็จ!');
         loadDeactivatedStaff();
-        loadStaffList();
+        loadStaffList(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -483,8 +486,6 @@ export default function StaffManagementPage() {
 
   const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
     const staff = deactivatedStaff.find(s => s.id === staffId);
-    
-    // ✅ ตรวจสอบสิทธิ์ก่อนลบถาวร
     if (!canDeleteStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
@@ -498,7 +499,7 @@ export default function StaffManagementPage() {
       if (result.success) {
         alert('ลบถาวรสำเร็จ!');
         loadDeactivatedStaff();
-        loadStaffList();
+        loadStaffList(accessibleHospitalIds);
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
@@ -509,12 +510,10 @@ export default function StaffManagementPage() {
   };
 
   const handleEdit = (staff: any) => {
-    // ✅ ตรวจสอบสิทธิ์ก่อนแก้ไข
     if (!canEditStaff(staff)) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
       return;
     }
-    
     setSelectedStaff(staff);
     setShowEditModal(true);
   };
@@ -574,7 +573,7 @@ export default function StaffManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
@@ -604,7 +603,6 @@ export default function StaffManagementPage() {
                 <Clock className="w-4 h-4" />
                 รออนุมัติ ({pendingStaff.length})
               </button>
-              
               <button
                 onClick={handleOpenDeactivatedModal}
                 className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
@@ -612,7 +610,6 @@ export default function StaffManagementPage() {
                 <Archive className="w-4 h-4" />
                 ที่ปิดการใช้งาน ({deactivatedStaff.length})
               </button>
-              
               <button
                 onClick={() => setShowAddModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -620,7 +617,6 @@ export default function StaffManagementPage() {
                 <Plus className="w-4 h-4" />
                 เพิ่มเจ้าหน้าที่
               </button>
-              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -644,7 +640,6 @@ export default function StaffManagementPage() {
               <UserCheck className="w-4 h-4 inline mr-2" />
               ใช้งาน ({staffList.length})
             </button>
-            
             <button
               onClick={() => setActiveTab('pending')}
               className={`px-4 py-2 font-semibold transition-colors ${
@@ -656,7 +651,6 @@ export default function StaffManagementPage() {
               <Clock className="w-4 h-4 inline mr-2" />
               รออนุมัติ ({pendingStaff.length})
             </button>
-            
             <button
               onClick={() => setActiveTab('deactivated')}
               className={`px-4 py-2 font-semibold transition-colors ${
@@ -688,7 +682,6 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
-            
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
@@ -702,7 +695,6 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
-            
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -716,7 +708,6 @@ export default function StaffManagementPage() {
                 </div>
               </div>
             </div>
-            
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -974,7 +965,7 @@ export default function StaffManagementPage() {
           onClose={() => setShowAddModal(false)}
           onSuccess={() => {
             setShowAddModal(false);
-            loadStaffList();
+            loadStaffList(accessibleHospitalIds);
           }}
           userId={user?.id}
         />
@@ -994,7 +985,7 @@ export default function StaffManagementPage() {
           onSuccess={() => {
             setShowEditModal(false);
             setSelectedStaff(null);
-            loadStaffList();
+            loadStaffList(accessibleHospitalIds);
           }}
         />
       )}
@@ -1016,7 +1007,6 @@ export default function StaffManagementPage() {
                 </button>
               </div>
             </div>
-            
             <div className="p-6">
               {deactivatedStaff.length === 0 ? (
                 <div className="text-center py-12">
@@ -1080,7 +1070,6 @@ export default function StaffManagementPage() {
                 </div>
               )}
             </div>
-            
             <div className="p-6 border-t border-gray-200 bg-gray-50">
               <button
                 onClick={() => setShowDeactivatedModal(false)}
@@ -1134,7 +1123,7 @@ function AddStaffModal({
   
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
-
+  
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
@@ -1142,7 +1131,6 @@ function AddStaffModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
@@ -1211,10 +1199,11 @@ function AddStaffModal({
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* ✅ Box แสดงสิทธิ์ */}
-          <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
+          <div className={`rounded-lg p-4 border ${
+            isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'
+          }`}>
             <div className="flex items-center gap-2 mb-2">
               <Lock className={`w-4 h-4 ${isSuper ? 'text-purple-600' : 'text-blue-600'}`} />
               <h3 className="text-sm font-semibold text-gray-800">สิทธิ์การสร้างเจ้าหน้าที่</h3>
@@ -1248,7 +1237,6 @@ function AddStaffModal({
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">🔐 รหัสผ่าน (อัตโนมัติ)</label>
               <input
@@ -1279,7 +1267,6 @@ function AddStaffModal({
                   <option key={day} value={day}>{day}</option>
                 ))}
               </select>
-              
               <select
                 value={formData.birth_month}
                 onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
@@ -1291,7 +1278,6 @@ function AddStaffModal({
                   <option key={index + 1} value={index + 1}>{month}</option>
                 ))}
               </select>
-              
               <select
                 value={formData.birth_year}
                 onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
@@ -1334,7 +1320,7 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
-              <option value="doctor">👨‍⚕️ แพทย์</option>
+              <option value="doctor">👨‍️ แพทย์</option>
               <option value="helper">👩‍ เจ้าหน้าที่</option>
             </select>
             {!isSuper && (
@@ -1431,7 +1417,6 @@ function AddStaffModal({
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
               <input
@@ -1462,7 +1447,6 @@ function AddStaffModal({
                 </>
               )}
             </button>
-            
             <button
               type="button"
               onClick={onClose}
@@ -1508,7 +1492,6 @@ function EditStaffModal({
   };
 
   const initialBirthDate = parseBirthDate(staff.birth_date);
-  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
@@ -1607,7 +1590,6 @@ function EditStaffModal({
             {staff.doctors?.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
@@ -1637,7 +1619,6 @@ function EditStaffModal({
                   <option key={day} value={day}>{day}</option>
                 ))}
               </select>
-              
               <select
                 value={formData.birth_month}
                 onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
@@ -1648,7 +1629,6 @@ function EditStaffModal({
                   <option key={index + 1} value={index + 1}>{month}</option>
                 ))}
               </select>
-              
               <select
                 value={formData.birth_year}
                 onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
@@ -1760,7 +1740,6 @@ function EditStaffModal({
                 placeholder="0812345678"
               />
             </div>
-            
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
               <input
@@ -1792,7 +1771,6 @@ function EditStaffModal({
                 </>
               )}
             </button>
-            
             <button
               type="button"
               onClick={onClose}
