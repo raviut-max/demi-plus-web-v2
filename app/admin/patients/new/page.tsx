@@ -1,10 +1,9 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 8 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ โหลดโค้ชจากทั้งหมด (ไม่กรองตามสิทธิ์)
-//    2. ✅ เมื่อเลือกโรงพยาบาล → แสดงโค้ชจากแม่ข่าย + ลูกข่าย
-//    3. ✅ เมื่อไม่เลือก → แสดงโค้ชทั้งหมด
-//    4. ✅ แสดงข้อมูลโค้ชพร้อมชื่อโรงพยาบาล
+//    1. ✅ โหลดโค้ชจากโรงพยาบาลแม่ข่าย/ลูกข่ายที่ผู้ใช้สังกัด
+//    2. ✅ ใช้ getCoachesByUserHospital แทน getCoaches
+//    3. ✅ แสดงข้อมูลโค้ชพร้อมชื่อโรงพยาบาล
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -12,7 +11,7 @@ import {
   checkSession,
   logout,
   registerPatient,
-  getCoachesByHospital,
+  getCoachesByUserHospital,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
@@ -101,7 +100,6 @@ export default function NewPatientPage() {
   const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [selectedHospitalId, setSelectedHospitalId] = useState<string>('');
   
   const [addressData, setAddressData] = useState({
     province: '',
@@ -162,7 +160,7 @@ export default function NewPatientPage() {
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-    loadHospitals();
+    loadCoaches(userData.id); // ✅ โหลดโค้ชตามโรงพยาบาลที่ผู้ใช้สังกัด
   }, [router]);
 
   // =====================================================
@@ -209,38 +207,21 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ โหลดรายชื่อโรงพยาบาลแบบ Hierarchical
-  const loadHospitals = async () => {
+  // ✅ โหลดโค้ชตามโรงพยาบาลที่ผู้ใช้สังกัด (แก้ไขแล้ว)
+  const loadCoaches = async (userId: string) => {
     try {
-      console.log('🏥 [loadHospitals] Fetching hospitals with hierarchy...');
-      const data = await getHospitalsWithHierarchy();
-      console.log('✅ [loadHospitals] Loaded:', data.length, 'hospitals');
-      setHospitals(data);
-    } catch (error) {
-      console.error('❌ [loadHospitals] Error:', error);
-    }
-  };
-
-  // ✅ โหลดโค้ชตามโรงพยาบาลที่เลือก (แก้ไขแล้ว)
-  const loadCoaches = async (hospitalId?: string) => {
-    try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospital:', hospitalId || 'ALL');
-      const allCoaches = await getCoachesByHospital(hospitalId);
+      console.log('👨‍️ [loadCoaches] Loading coaches for user:', userId);
+      const allCoaches = await getCoachesByUserHospital(userId);
       setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
     }
   };
 
-  // ✅ Handle เมื่อเปลี่ยนโรงพยาบาลที่เลือก
   const handleHospitalChange = (hospitalId: string) => {
     console.log('🏥 [handleHospitalChange] Selected hospital:', hospitalId);
-    setSelectedHospitalId(hospitalId);
     setFormData({ ...formData, hospital_id: hospitalId, village_id: '' });
-    
-    // ✅ โหลดโค้ชตามโรงพยาบาลที่เลือก
-    loadCoaches(hospitalId || undefined);
     
     const loadVillages = async () => {
       try {
@@ -329,7 +310,7 @@ export default function NewPatientPage() {
     console.log('📋 [handleSubmit] Form data:', formData);
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
     console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
-    
+
     // ✅ ตรวจสอบรหัสผ่าน
     if (formData.password !== formData.confirmPassword) {
       setError('❌ รหัสผ่านไม่ตรงกัน');
@@ -573,7 +554,7 @@ export default function NewPatientPage() {
               <li>• ผู้ป่วยจะสังกัดโรงพยาบาล: <strong>{userHospital?.name || 'ไม่ได้กำหนด'}</strong></li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
               <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
-              <li>• โค้ชที่เลือกได้: {coaches.length} คน</li>
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากโรงพยาบาลแม่ข่าย/ลูกข่าย)</li>
               {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
                 <li className="text-blue-600">• 🔒 แสดงเฉพาะโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง</li>
               )}
@@ -1138,7 +1119,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช (โหลดตามโรงพยาบาลที่เลือก) */}
+        {/* 6. กำหนดโค้ช (โหลดตามโรงพยาบาลที่ผู้ใช้สังกัด) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1152,7 +1133,7 @@ export default function NewPatientPage() {
               name="coach_id"
               value={formData.coach_id}
               onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent max-h-64 overflow-y-auto"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             >
               <option value="">-- เลือกโค้ช --</option>
               {coaches.map((coach) => {
@@ -1168,11 +1149,11 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨‍⚕️ แสดงโค้ช: {selectedHospitalId ? 'จากโรงพยาบาลที่เลือก (รวมแม่ข่าย/ลูกข่าย)' : 'ทั้งหมด'} ({coaches.length} คน)
+              👨‍⚕️ แสดงโค้ชจากโรงพยาบาลแม่ข่าย/ลูกข่ายที่คุณสังกัด ({coaches.length} คน)
             </p>
             {isSuperAdmin(user) && (
               <p className="text-xs text-purple-600 mt-1">
-                👑 Super Admin - สามารถเลือกโค้ชจากทุกโรงพยาบาล
+                👑 Super Admin - แสดงโค้ชทั้งหมด
               </p>
             )}
           </div>
