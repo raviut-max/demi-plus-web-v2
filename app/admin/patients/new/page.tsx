@@ -1,15 +1,16 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 8 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    3. Badge แสดงประเภทโรงพยาบาล
-//    4. ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
-//    5. ✅ แสดงข้อมูลโค้ชแบบละเอียด (ชื่อ, สถานะ, รพ., ประเภท)
-//    6. ✅ ข้อความ error ภาษาไทยที่เข้าใจง่าย
-//    7. เพิ่ม Debug Logging
-
+//    1. ✅ แสดงข้อมูลผู้ลงทะเบียน (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. ✅ Badge แสดงประเภทโรงพยาบาล
+//    4. ✅ กรองโรงพยาบาลตามสิทธิ์การเข้าถึง (Super Admin vs Hospital Admin)
+//    5. ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
+//    6. ✅ ใช้ isSuperAdmin(), getAccessibleHospitalIds(), getUserHospitalInfo()
+//    7. ✅ เพิ่มฟิลด์ blood_sugar (ค่าน้ำตาล)
+//    8. ✅ UI สอดคล้องกับหน้าอื่นๆ
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -70,28 +71,12 @@ interface UserHospital {
   };
 }
 
-interface Coach {
-  id: string;
-  user_id: string;
-  full_name_th: string;
-  specialization_th: string;
-  hospital_id?: string;
-  hospitals?: {
-    name: string;
-    code: string;
-    type: 'main' | 'sub';
-    parent_hospital?: {
-      name: string;
-    };
-  };
-}
-
 export default function NewPatientPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(false);
-  const [coaches, setCoaches] = useState<Coach[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [villages, setVillages] = useState<any[]>([]);
@@ -148,7 +133,7 @@ export default function NewPatientPage() {
       return;
     }
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-      setError('❌ คุณไม่มีสิทธิ์เข้าถึงหน้านี้ กรุณาเข้าสู่ระบบใหม่');
+      alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
@@ -201,14 +186,13 @@ export default function NewPatientPage() {
       console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
-      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
     }
   };
 
   // ✅ โหลดโค้ช (กรองตามโรงพยาบาลที่เข้าถึงได้)
   const loadCoaches = async () => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches...');
+      console.log('👨‍️ [loadCoaches] Loading coaches...');
       const allCoaches = await getCoaches();
       
       // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
@@ -223,10 +207,9 @@ export default function NewPatientPage() {
       }
       
       setCoaches(filteredCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Filtered coaches:', filteredCoaches.length);
+      console.log('👨‍️ [loadCoaches] Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
-      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
     }
   };
 
@@ -287,6 +270,7 @@ export default function NewPatientPage() {
     subdistrict: string;
     postalCode: string;
   }) => {
+    console.log('📍 [handleAddressChange] Address changed:', data);
     setAddressData(data);
   };
 
@@ -308,18 +292,6 @@ export default function NewPatientPage() {
     return { mainHospitals, hospitalGroups };
   };
 
-  // ✅ ฟังก์ชันแปลงข้อความเป็นภาษาไทยที่เข้าใจง่าย
-  const getFriendlyErrorMessage = (message: string): string => {
-    if (message.includes('id_card')) return '❌ เลขบัตรประชาชนไม่ถูกต้อง หรือซ้ำกับผู้ป่วยคนอื่น';
-    if (message.includes('hospital_number')) return '❌ เลข HN (เลขที่ผู้ป่วย) ซ้ำ กรุณาตรวจสอบใหม่';
-    if (message.includes('phone')) return '❌ เบอร์โทรศัพท์ไม่ถูกต้อง ต้องเป็นเลข 9-10 หลัก';
-    if (message.includes('email')) return '❌ อีเมลไม่ถูกต้อง กรุณาตรวจสอบรูปแบบ';
-    if (message.includes('birth')) return '❌ วันเกิดไม่ถูกต้อง กรุณากรอกให้ครบถ้วน';
-    if (message.includes('required')) return '❌ กรุณากรอกข้อมูลให้ครบถ้วน';
-    if (message.includes('duplicate')) return '❌ ข้อมูลนี้ถูกใช้งานแล้ว กรุณาใช้ข้อมูลอื่น';
-    return '❌ ' + message;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -329,39 +301,34 @@ export default function NewPatientPage() {
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
     console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
 
-    // ✅ ตรวจสอบรหัสผ่าน
+    // ✅ Validation
     if (formData.password !== formData.confirmPassword) {
-      setError('❌ รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง');
+      setError('รหัสผ่านไม่ตรงกัน');
       return;
     }
 
-    // ✅ ตรวจสอบเลขบัตรประชาชน
     if (formData.id_card.length !== 13) {
-      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก กรุณาตรวจสอบใหม่');
+      setError('เลขบัตรประชาชนต้อง 13 หลัก');
       return;
     }
 
-    // ✅ ตรวจสอบข้อมูลที่จำเป็น
     if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
-      setError('❌ กรุณากรอก ชื่อ, นามสกุล และ HN (เลขที่ผู้ป่วย) ให้ครบถ้วน');
+      setError('กรุณากรอกข้อมูลให้ครบถ้วน');
       return;
     }
 
-    // ✅ ตรวจสอบวันเกิด
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน (วัน/เดือน/ปี)');
+      setError('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
     }
 
-    // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
-      setError('❌ กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
+      setError('กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
       return;
     }
 
-    // ✅ ตรวจสอบโรงพยาบาล
     if (!formData.hospital_id) {
-      setError('❌ กรุณาเลือกโรงพยาบาลสังกัด');
+      setError('กรุณาเลือกโรงพยาบาลสังกัด');
       return;
     }
 
@@ -397,7 +364,6 @@ export default function NewPatientPage() {
         blood_sugar: formData.blood_sugar ? parseFloat(formData.blood_sugar) : undefined,
         hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
         notes: formData.notes || undefined,
-        
         house_number: formData.house_number || undefined,
         address_line1: formData.address_line1 || undefined,
         soi: formData.soi || undefined,
@@ -408,22 +374,16 @@ export default function NewPatientPage() {
         district: addressData.district || undefined,
         province: addressData.province || undefined,
         postal_code: addressData.postalCode || undefined,
-        
-        // ✅ บันทึก hospital_id
         hospital_id: formData.hospital_id || undefined,
-        
         emergency_contact_name: formData.emergency_contact_name || undefined,
         emergency_contact_phone: formData.emergency_contact_phone || undefined,
         emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
-        
         village_id: formData.village_id || undefined,
-        
         pam_level: 'L0',
         pam_score: 0,
         zone: 'Zero Zone',
-        
         created_by: user?.id,
       });
 
@@ -437,11 +397,11 @@ export default function NewPatientPage() {
         }, 2000);
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
-        setError(getFriendlyErrorMessage(result.error || 'เกิดข้อผิดพลาดในการลงทะเบียน'));
+        setError(result.error || 'เกิดข้อผิดพลาด');
       }
     } catch (err: any) {
       console.error('❌ [handleSubmit] Registration error:', err);
-      setError(getFriendlyErrorMessage(err.message || 'เกิดข้อผิดพลาดในการลงทะเบียน กรุณาลองใหม่อีกครั้ง'));
+      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
       setLoading(false);
     }
   };
@@ -1154,20 +1114,12 @@ export default function NewPatientPage() {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             >
               <option value="">-- เลือกโค้ช --</option>
-              {coaches.map((coach) => {
-                // ✅ แสดงข้อมูลโค้ชแบบละเอียด
-                const hospitalType = coach.hospitals?.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย';
-                const parentHospital = coach.hospitals?.type === 'sub' && coach.hospitals?.parent_hospital 
-                  ? ` (แม่ข่าย ${coach.hospitals.parent_hospital.name})` 
-                  : '';
-                
-                return (
-                  <option key={coach.id} value={coach.user_id}>
-                    {coach.full_name_th} ({coach.specialization_th || 'แพทย์'}) - 
-                    {coach.hospitals?.name || 'ไม่มีโรงพยาบาล'} {hospitalType}{parentHospital}
-                  </option>
-                );
-              })}
+              {coaches.map((coach) => (
+                <option key={coach.id} value={coach.user_id}>
+                  {coach.full_name_th} {coach.specialization_th ? `(${coach.specialization_th})` : ''}
+                  {coach.hospitals?.name ? ` - ${coach.hospitals.name}` : ''}
+                </option>
+              ))}
             </select>
             <p className="text-xs text-gray-500 mt-1">
               🔒 แสดงโค้ชจากโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({coaches.length} คน)
