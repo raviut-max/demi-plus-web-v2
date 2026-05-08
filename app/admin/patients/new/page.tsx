@@ -9,7 +9,6 @@
 //    6. ✅ ข้อความ error ภาษาไทยที่เข้าใจง่าย
 //    7. ✅ เพิ่ม Debug Logging
 //    8. ✅ แก้ไข getCoaches() join กับ hospitals พร้อม parent_hospital
-
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -212,46 +211,13 @@ export default function NewPatientPage() {
   const loadCoaches = async () => {
     try {
       console.log('👨‍⚕️ [loadCoaches] Loading coaches...');
-      
-      // ✅ ดึงโค้ชพร้อมข้อมูลโรงพยาบาลแบบเต็ม
-      const { data: allCoaches, error: coachesError } = await supabase
-        .from('doctors')
-        .select(`
-          id,
-          user_id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type,
-            parent_id,
-            parent_hospital:hospitals!parent_id (
-              id,
-              name,
-              code
-            )
-          )
-        `)
-        .eq('is_active', true)
-        .order('full_name_th', { ascending: true });
-
-      if (coachesError) {
-        console.error('❌ [loadCoaches] Error fetching coaches:', coachesError);
-        setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
-        return;
-      }
-
-      console.log('📊 [loadCoaches] Total coaches from DB:', allCoaches?.length || 0);
+      const allCoaches = await getCoaches();
       
       // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้
-      let filteredCoaches = allCoaches || [];
-      
+      let filteredCoaches = allCoaches;
       if (accessibleHospitalIds.length > 0 && !isSuperAdmin(user)) {
         console.log('🔒 [loadCoaches] Hospital Admin - filtering coaches');
-        filteredCoaches = filteredCoaches.filter(coach => 
+        filteredCoaches = allCoaches.filter(coach => 
           coach.hospital_id && accessibleHospitalIds.includes(coach.hospital_id)
         );
       } else {
@@ -260,12 +226,6 @@ export default function NewPatientPage() {
       
       setCoaches(filteredCoaches);
       console.log('👨‍⚕️ [loadCoaches] Filtered coaches:', filteredCoaches.length);
-      console.log('👨‍️ [loadCoaches] Coaches data:', filteredCoaches.map(c => ({
-        id: c.id,
-        name: c.full_name_th,
-        hospital: c.hospitals?.name,
-        hospital_type: c.hospitals?.type
-      })));
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -337,7 +297,7 @@ export default function NewPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-
+    
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
