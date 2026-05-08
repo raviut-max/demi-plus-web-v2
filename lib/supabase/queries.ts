@@ -2444,49 +2444,6 @@ export async function getKnowledge(pamLevel: string = 'ALL') {
   }
 }
 
-// =====================================================
-// 👨‍⚕️ Coach Functions
-// =====================================================
-export async function getCoaches() {
-  try {
-    console.log('🔍 [getCoaches] Fetching coaches with hospital info...');
-    const { data, error } = await supabase
-      .from('doctors')
-      .select(`
-        id, 
-        user_id, 
-        full_name_th, 
-        specialization_th, 
-        is_active,
-        hospital_id,
-        hospitals (
-          id,
-          name,
-          code,
-          type,
-          parent_id,
-          parent_hospital:hospitals!parent_id (
-            id,
-            name,
-            code
-          )
-        )
-      `)
-      .eq('is_active', true)
-      .order('full_name_th', { ascending: true });
-    
-    if (error) {
-      console.error('❌ [getCoaches] Error:', error);
-      return [];
-    }
-
-    console.log('✅ [getCoaches] Fetched:', data?.length || 0, 'coaches');
-    return data || [];
-  } catch (err) {
-    console.error('❌ [getCoaches] Exception:', err);
-    return [];
-  }
-}
 
 // =====================================================
 // 📋 Appointment Followup Functions
@@ -2711,5 +2668,175 @@ export async function getFollowupRoundCount(userId: string) {
   } catch (err) {
     console.error('Get followup round count error:', err);
     return 1;
+  }
+}
+
+
+// =====================================================
+// 👨‍⚕️ Coach Functions (แก้ไขแล้ว)
+// =====================================================
+
+/**
+ * ดึงรายชื่อโค้ชทั้งหมด (ไม่กรองตามสิทธิ์)
+ * ใช้สำหรับหน้าลงทะเบียนผู้ป่วยที่ Super Admin เข้าถึง
+ */
+export async function getAllCoaches() {
+  try {
+    console.log('👨‍⚕️ [getAllCoaches] Fetching all coaches...');
+    
+    const { data, error } = await supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        specialization_th,
+        is_active,
+        is_verified,
+        users (
+          hospital_id,
+          role,
+          admin_type,
+          is_active,
+          hospitals (
+            id,
+            name,
+            code,
+            type,
+            parent_id
+          )
+        )
+      `)
+      .eq('is_active', true)
+      .order('full_name_th', { ascending: true });
+
+    if (error) {
+      console.error('❌ [getAllCoaches] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getAllCoaches] Fetched:', data?.length || 0, 'coaches');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getAllCoaches] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * ดึงรายชื่อโค้ชตามโรงพยาบาลที่เลือก (รวมแม่ข่ายและลูกข่าย)
+ * - ถ้าเลือกแม่ข่าย → แสดงโค้ชจากแม่ข่าย + ลูกข่ายทั้งหมดที่อยู่ใต้
+ * - ถ้าเลือกลูกข่าย → แสดงโค้ชจากลูกข่าย + แม่ข่ายที่เป็น parent
+ * - ถ้าไม่เลือก → แสดงโค้ชทั้งหมด
+ */
+export async function getCoachesByHospital(hospitalId?: string) {
+  try {
+    console.log('👨‍⚕️ [getCoachesByHospital] Fetching coaches for hospital:', hospitalId || 'ALL');
+    
+    // ถ้าไม่เลือกโรงพยาบาล → โหลดทั้งหมด
+    if (!hospitalId) {
+      return await getAllCoaches();
+    }
+
+    // ดึงข้อมูลโรงพยาบาลที่เลือก
+    const { data: hospitalData, error: hospitalError } = await supabase
+      .from('hospitals')
+      .select('id, type, parent_id')
+      .eq('id', hospitalId)
+      .single();
+
+    if (hospitalError || !hospitalData) {
+      console.error('❌ [getCoachesByHospital] Error fetching hospital:', hospitalError);
+      return await getAllCoaches();
+    }
+
+    // รวบรวม hospital IDs ที่จะใช้กรองโค้ช
+    let hospitalIds: string[] = [hospitalId];
+
+    // ถ้าเป็นแม่ข่าย → เพิ่มลูกข่ายทั้งหมดที่อยู่ใต้
+    if (hospitalData.type === 'main') {
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalId)
+        .eq('is_active', true);
+
+      if (subHospitals && subHospitals.length > 0) {
+        hospitalIds = [...hospitalIds, ...subHospitals.map(h => h.id)];
+        console.log('🏥 [getCoachesByHospital] Main hospital - adding', subHospitals.length, 'sub hospitals');
+      }
+    } 
+    // ถ้าเป็นลูกข่าย → เพิ่มแม่ข่ายที่เป็น parent
+    else if (hospitalData.type === 'sub' && hospitalData.parent_id) {
+      hospitalIds = [...hospitalIds, hospitalData.parent_id];
+      console.log('🏥 [getCoachesByHospital] Sub hospital - adding parent hospital');
+    }
+
+    console.log('🏥 [getCoachesByHospital] Filtering by hospital IDs:', hospitalIds);
+
+    const { data, error } = await supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        specialization_th,
+        is_active,
+        is_verified,
+        users (
+          hospital_id,
+          role,
+          admin_type,
+          is_active,
+          hospitals (
+            id,
+            name,
+            code,
+            type,
+            parent_id
+          )
+        )
+      `)
+      .eq('is_active', true)
+      .in('users.hospital_id', hospitalIds)
+      .order('full_name_th', { ascending: true });
+
+    if (error) {
+      console.error('❌ [getCoachesByHospital] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getCoachesByHospital] Fetched:', data?.length || 0, 'coaches');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getCoachesByHospital] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * ดึงรายชื่อโค้ชแบบง่าย (ไม่รวมข้อมูลโรงพยาบาล)
+ * ใช้สำหรับหน้าที่ไม่ต้องการแสดงข้อมูลโรงพยาบาลของโค้ช
+ */
+export async function getCoaches() {
+  try {
+    console.log('👨‍⚕️ [getCoaches] Fetching coaches (simple)...');
+    
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('id, user_id, full_name_th, specialization_th, is_active')
+      .eq('is_active', true)
+      .order('full_name_th', { ascending: true });
+
+    if (error) {
+      console.error('❌ [getCoaches] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getCoaches] Fetched:', data?.length || 0, 'coaches');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getCoaches] Exception:', err);
+    return [];
   }
 }
