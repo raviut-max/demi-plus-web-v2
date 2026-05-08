@@ -2905,3 +2905,52 @@ export async function getCoachesByUserHospital(hospitalIds?: string[]) {
   }
 }
 
+// ✅ ฟังก์ชันดึงโค้ชพร้อมข้อมูลโรงพยาบาล (กรองตาม hospitalIds)
+export async function getCoachesByHospitals(hospitalIds: string[]) {
+  try {
+    console.log('👨‍️ [getCoachesByHospitals] Loading coaches for hospitals:', hospitalIds);
+    
+    let query = supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        specialization_th,
+        is_active,
+        is_verified,
+        users (
+          hospital_id,
+          role,
+          admin_type,
+          hospitals (
+            id,
+            name,
+            code,
+            type
+          )
+        )
+      `)
+      .eq('is_active', true)
+      .in('role', ['doctor', 'helper']);
+
+    // ✅ กรองตามโรงพยาบาลที่ระบุ
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ [getCoachesByHospitals] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getCoachesByHospitals] Loaded:', data?.length || 0, 'coaches');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getCoachesByHospitals] Exception:', err);
+    return [];
+  }
+}
+
