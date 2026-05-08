@@ -1981,26 +1981,7 @@ export async function updateExerciseGoal(
   }
 }
 
-export async function getGoalRoundCount(userId: string) {
-  try {
-    const { count, error } = await supabase
-      .from('goals')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('goal_type', 'weekly_activity')
-      .eq('status', 'archived');
 
-    if (error) {
-      console.error('Error counting goal rounds:', error);
-      return 1;
-    }
-
-    return (count || 0) + 1;
-  } catch (err) {
-    console.error('Get goal round count error:', err);
-    return 1;
-  }
-}
 
 export async function getLatestGoalRound(userId: string) {
   try {
