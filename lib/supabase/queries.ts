@@ -2840,3 +2840,68 @@ export async function getCoaches() {
     return [];
   }
 }
+
+// ✅ เพิ่มฟังก์ชันใหม่ต่อจาก getCoaches() เดิม
+
+/**
+ * ✅ ดึงรายชื่อโค้ชพร้อมโรงพยาบาล (กรองตาม hospital_ids ที่กำหนด)
+ * @param hospitalIds - รายการ ID โรงพยาบาลที่ต้องการกรอง (ถ้าเป็น empty array = ไม่กรอง)
+ */
+export async function getCoachesByUserHospital(hospitalIds?: string[]) {
+  try {
+    console.log('👨‍️ [getCoachesByUserHospital] Fetching coaches...', { hospitalIds });
+    
+    let query = supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        specialization_th,
+        is_active,
+        is_verified,
+        hospital_id,
+        hospitals (
+          id,
+          name,
+          code,
+          type
+        )
+      `)
+      .eq('is_active', true)
+      .not('hospital_id', 'is', null); // กรองเฉพาะโค้ชที่มี hospital_id
+
+    // ✅ กรองตาม hospital_ids ถ้ามีการระบุ
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+      console.log('🔒 [getCoachesByUserHospital] Filtering by hospitalIds:', hospitalIds);
+    } else {
+      console.log('👑 [getCoachesByUserHospital] No hospital filter - showing all coaches');
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ [getCoachesByUserHospital] Error:', error);
+      return [];
+    }
+
+    // ✅ กรองเอาเฉพาะโค้ชที่มี hospital_id และ hospital name
+    const filteredCoaches = (data || []).filter(coach => 
+      coach.hospital_id && coach.hospitals?.name
+    );
+
+    console.log('✅ [getCoachesByUserHospital] Fetched:', filteredCoaches.length, 'coaches with hospitals');
+    console.log('📋 [getCoachesByUserHospital] Coaches:', filteredCoaches.map(c => ({
+      name: c.full_name_th,
+      hospital: c.hospitals?.name,
+      hospital_id: c.hospital_id
+    })));
+
+    return filteredCoaches;
+  } catch (err) {
+    console.error('❌ [getCoachesByUserHospital] Exception:', err);
+    return [];
+  }
+}
+
