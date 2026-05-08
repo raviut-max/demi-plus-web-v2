@@ -1,16 +1,16 @@
 // app/admin/patients/[id]/edit/page.tsx
-// ✅ แก้ไขล่าสุด: เพิ่มการแก้ไขเลขบัตรประชาชน
+// ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มฟิลด์ id_card ใน formData และโหลดจาก users table
-//    2. เพิ่ม validation เลขบัตรประชาชน 13 หลัก
-//    3. อัปเดตทั้งตาราง users และ profiles เมื่อบันทึก
-//    4. จัดการ unique constraint ของ id_card
+//    1. ✅ แก้ไข Dropdown จังหวัด/อำเภอ/ตำบล ไม่แสดงรายการ
+//    2. ✅ รวม label "จังหวัด อำเภอ ตำบล" เป็นบรรทัดเดียวด้านบน
+//    3. ✅ ปรับปรุงการจัดการ state ของ address data
+//    4. ✅ แก้ไขการส่ง initialData ให้ ThaiAddressSelector
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getPatientDetail, getHospitalsWithHierarchy, getProvinces, getDistricts, getSubdistricts } from '@/lib/supabase/queries';
+import { checkSession, logout, getPatientDetail, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { ArrowLeft, LogOut, Save, AlertCircle, CheckCircle } from 'lucide-react';
+import { ArrowLeft, LogOut, Save, AlertCircle, CheckCircle, MapPin } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 
 // เดือนภาษาไทย
@@ -33,12 +33,7 @@ export default function EditPatientPage() {
   const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
 
-  // ✅ State สำหรับ dropdown ที่อยู่
-  const [provinces, setProvinces] = useState<string[]>([]);
-  const [districts, setDistricts] = useState<string[]>([]);
-  const [subdistricts, setSubdistricts] = useState<{ subdistrict: string; postal_code: string }[]>([]);
-
-  // ✅ State สำหรับที่อยู่จาก ThaiAddressSelector
+  // ✅ State สำหรับที่อยู่ - แยกชัดเจน
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
@@ -47,10 +42,8 @@ export default function EditPatientPage() {
   });
 
   const [formData, setFormData] = useState({
-    // ✅ ข้อมูลบัตรประชาชน (เพิ่มใหม่)
-    id_card: '',
-    
     // ข้อมูลส่วนตัว
+    id_card: '',
     first_name: '',
     last_name: '',
     hospital_number: '',
@@ -72,7 +65,7 @@ export default function EditPatientPage() {
     occupation: '',
     education_level: '',
     
-    // ที่อยู่
+    // ที่อยู่ (แบบข้อความ)
     house_number: '',
     address_line1: '',
     soi: '',
@@ -100,62 +93,10 @@ export default function EditPatientPage() {
       router.push('/admin/login');
       return;
     }
-    
     setUser(userData);
     loadPatientData();
     loadHospitals();
-    loadProvinces(); // ✅ โหลดจังหวัดล่วงหน้า
   }, [router]);
-
-  // ✅ โหลดรายการจังหวัดล่วงหน้า
-  const loadProvinces = async () => {
-    try {
-      console.log('📍 Loading provinces...');
-      const data = await getProvinces();
-      console.log('✅ Provinces loaded:', data.length);
-      setProvinces(data);
-    } catch (error) {
-      console.error('Error loading provinces:', error);
-    }
-  };
-
-  // ✅ โหลดอำเภอเมื่อเลือกจังหวัด
-  const handleProvinceChange = async (province: string) => {
-    setAddressData({ ...addressData, province, district: '', subdistrict: '', postalCode: '' });
-    if (province) {
-      try {
-        const data = await getDistricts(province);
-        setDistricts(data);
-      } catch (error) {
-        console.error('Error loading districts:', error);
-        setDistricts([]);
-      }
-    } else {
-      setDistricts([]);
-      setSubdistricts([]);
-    }
-  };
-
-  // ✅ โหลดตำบลเมื่อเลือกอำเภอ
-  const handleDistrictChange = async (district: string) => {
-    setAddressData({ ...addressData, district, subdistrict: '', postalCode: '' });
-    if (addressData.province && district) {
-      try {
-        const data = await getSubdistricts(addressData.province, district);
-        setSubdistricts(data);
-      } catch (error) {
-        console.error('Error loading subdistricts:', error);
-        setSubdistricts([]);
-      }
-    } else {
-      setSubdistricts([]);
-    }
-  };
-
-  // ✅ อัปเดตตำบลและรหัสไปรษณีย์
-  const handleSubdistrictChange = (subdistrict: string, postalCode: string) => {
-    setAddressData({ ...addressData, subdistrict, postalCode });
-  };
 
   // ✅ โหลดรายการโรงพยาบาล (แบบมีลำดับชั้น)
   const loadHospitals = async () => {
@@ -172,8 +113,11 @@ export default function EditPatientPage() {
   // ✅ โหลดข้อมูลผู้ป่วย
   const loadPatientData = async () => {
     try {
+      console.log('🔍 Fetching patient detail for ID:', patientId);
       const data = await getPatientDetail(patientId);
+      
       if (data) {
+        console.log('✅ Patient data fetched:', data);
         setPatient(data);
         
         // ✅ แยกวันเกิดเป็น 3 ช่อง (แปลงจาก ค.ศ. เป็น พ.ศ.)
@@ -188,14 +132,9 @@ export default function EditPatientPage() {
           birthYear = (birthDate.getFullYear() + 543).toString();
         }
 
-        // ✅ โหลด id_card จาก users table
-        let idCard = '';
-        if (data.users) {
-          idCard = data.users.id_card || '';
-        }
-
+        // ✅ ตั้งค่า formData
         setFormData({
-          id_card: idCard, // ✅ ตั้งค่าเลขบัตรประชาชน
+          id_card: data.users?.id_card || '',
           first_name: data.first_name || '',
           last_name: data.last_name || '',
           hospital_number: data.hospital_number || '',
@@ -226,30 +165,19 @@ export default function EditPatientPage() {
           emergency_contact_relationship: data.emergency_contact_relationship || '',
         });
 
-        // ✅ ตั้งค่าเริ่มต้นสำหรับที่อยู่ (แสดงข้อมูลเดิมก่อน)
+        // ✅ ตั้งค่า addressData จากข้อมูลผู้ป่วย
         const initialAddress = {
           province: data.province || '',
           district: data.district || '',
           subdistrict: data.subdistrict || '',
           postalCode: data.postal_code || '',
         };
+        
+        console.log('📍 Setting initial address:', initialAddress);
         setAddressData(initialAddress);
-
-        // ✅ โหลดอำเภอและตำบลถ้ามีข้อมูล
-        if (data.province) {
-          const districtsData = await getDistricts(data.province);
-          setDistricts(districtsData);
-          if (data.district) {
-            const subdistrictsData = await getSubdistricts(data.province, data.district);
-            setSubdistricts(subdistrictsData);
-          }
-        }
-
-        console.log('✅ Patient data loaded:', data);
-        console.log('📍 Address data:', initialAddress);
       }
     } catch (error) {
-      console.error('Error loading patient data:', error);
+      console.error('❌ Error loading patient data:', error);
     } finally {
       setLoading(false);
     }
@@ -262,7 +190,7 @@ export default function EditPatientPage() {
     subdistrict: string;
     postalCode: string;
   }) => {
-    console.log('📍 Address changed:', data);
+    console.log('📍 Address changed from selector:', data);
     setAddressData(data);
   };
 
@@ -282,25 +210,6 @@ export default function EditPatientPage() {
     });
 
     return { mainHospitals, hospitalGroups };
-  };
-
-  // ✅ ฟังก์ชันตรวจสอบเลขบัตรประชาชน (13 หลัก)
-  const validateIdCard = (idCard: string): { valid: boolean; message: string } => {
-    if (!idCard) {
-      return { valid: false, message: 'เลขบัตรประชาชนเป็นข้อมูลจำเป็น' };
-    }
-    
-    const cleaned = idCard.replace(/[\s-]/g, '');
-    
-    if (!/^\d+$/.test(cleaned)) {
-      return { valid: false, message: 'เลขบัตรประชาชนต้องเป็นตัวเลขเท่านั้น' };
-    }
-    
-    if (cleaned.length !== 13) {
-      return { valid: false, message: 'เลขบัตรประชาชนต้องมี 13 หลัก' };
-    }
-    
-    return { valid: true, message: 'เลขบัตรประชาชนถูกต้อง' };
   };
 
   // ✅ ฟังก์ชันตรวจสอบเบอร์โทรศัพท์ไทย
@@ -362,14 +271,6 @@ export default function EditPatientPage() {
     const errors: Record<string, string> = {};
     const success: Record<string, boolean> = {};
 
-    // ✅ ตรวจสอบเลขบัตรประชาชน
-    const idCardResult = validateIdCard(formData.id_card);
-    if (!idCardResult.valid) {
-      errors.id_card = idCardResult.message;
-    } else if (formData.id_card) {
-      success.id_card = true;
-    }
-
     const phoneResult = validatePhoneNumber(formData.phone);
     if (!phoneResult.valid) {
       errors.phone = phoneResult.message;
@@ -416,49 +317,32 @@ export default function EditPatientPage() {
     if (error.message?.includes('profiles_diabetes_type_check')) {
       return '❌ ประเภทเบาหวานไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกประเภทเบาหวานจากเมนู dropdown\n- ต้องเป็น: กลุ่มเสี่ยง หรือ เบาหวาน เท่านั้น';
     }
-    
     if (error.message?.includes('waist_circumference')) {
       return '❌ รอบเอวต้องอยู่ระหว่าง 26-200 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่ารอบเอวที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
-    
     if (error.message?.includes('current_weight')) {
       return '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 กก.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าน้ำหนักที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
-    
     if (error.message?.includes('height')) {
       return '❌ ส่วนสูงต้องอยู่ระหว่าง 100-250 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าส่วนสูงที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
-    
     if (error.message?.includes('hospital_number')) {
       return '❌ เลข HN (Hospital Number) ซ้ำกับผู้ป่วยคนอื่น\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลข HN ให้ถูกต้อง\n- หรือใช้เลข HN ใหม่ที่ไม่ซ้ำ';
     }
-    
-    if (error.message?.includes('users_id_card_key') || error.message?.includes('id_card_unique')) {
-      return '❌ เลขบัตรประชาชนนี้มีผู้ใช้งานแล้วในระบบ\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลขบัตรประชาชนให้ถูกต้อง\n- หรือใช้เลขบัตรประชาชนใหม่ที่ไม่ซ้ำ';
-    }
-    
     if (error.message?.includes('profiles_gender_check')) {
       return '❌ เพศไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกเพศจากเมนู dropdown\n- ต้องเป็น: ชาย หรือ หญิง เท่านั้น';
     }
-    
+    if (error.message?.includes('users_id_card_key')) {
+      return '❌ เลขบัตรประชาชนนี้มีในระบบแล้ว\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลขบัตรประชาชน\n- หรือใช้เลขบัตรประชาชนอื่น';
+    }
+
     return `❌ เกิดข้อผิดพลาด: ${error.message}\n\n💡 วิธีแก้ไข:\n- ตรวจสอบข้อมูลที่กรอก\n- ลองใหม่อีกครั้ง`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
     const errors: string[] = [];
-
-    // ✅ ตรวจสอบเลขบัตรประชาชน
-    if (!formData.id_card) {
-      errors.push('• เลขบัตรประชาชนเป็นข้อมูลจำเป็น');
-    } else {
-      const idCardResult = validateIdCard(formData.id_card);
-      if (!idCardResult.valid) {
-        errors.push(`• ${idCardResult.message}`);
-      }
-    }
 
     if (!formData.hospital_number) {
       errors.push('• HN เป็นข้อมูลจำเป็น');
@@ -510,9 +394,9 @@ export default function EditPatientPage() {
     if (errors.length > 0) {
       setError(
         `❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\n` +
-          `กรุณาแก้ไขข้อมูลดังต่อไปนี้:\n\n` +
-          errors.join('\n') +
-          `\n\n💡 คำแนะนำ: ดูข้อความแจ้งเตือนใต้ช่องกรอกข้อมูล`
+        `กรุณาแก้ไขข้อมูลดังต่อไปนี้:\n\n` +
+        errors.join('\n') +
+        `\n\n💡 คำแนะนำ: ดูข้อความแจ้งเตือนใต้ช่องกรอกข้อมูล`
       );
       return;
     }
@@ -523,8 +407,7 @@ export default function EditPatientPage() {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
-      // ✅ อัปเดตข้อมูลใน profiles table
-      const profileUpdateData: any = {
+      const updateData: any = {
         first_name: formData.first_name,
         last_name: formData.last_name,
         hospital_number: formData.hospital_number,
@@ -563,24 +446,33 @@ export default function EditPatientPage() {
         updated_at: new Date().toISOString(),
       };
 
-      const { error: profileError } = await supabase
+      console.log('💾 Updating patient with data:', updateData);
+
+      const { error } = await supabase
         .from('profiles')
-        .update(profileUpdateData)
+        .update(updateData)
         .eq('id', patientId);
 
-      if (profileError) throw profileError;
+      if (error) {
+        console.error('❌ Error updating patient:', error);
+        const friendlyError = getFriendlyErrorMessage(error);
+        setError(friendlyError);
+        return;
+      }
 
-      // ✅ อัปเดต id_card ใน users table (ถ้ามีการเปลี่ยนแปลง)
-      if (formData.id_card && patient?.users?.id_card !== formData.id_card) {
+      // ✅ อัปเดต id_card ในตาราง users ถ้ามีการเปลี่ยน
+      if (formData.id_card && patient.users?.id_card !== formData.id_card) {
         const { error: userError } = await supabase
           .from('users')
-          .update({
-            id_card: formData.id_card,
-            updated_at: new Date().toISOString(),
-          })
+          .update({ id_card: formData.id_card })
           .eq('id', patientId);
-
-        if (userError) throw userError;
+        
+        if (userError) {
+          console.error('❌ Error updating user id_card:', userError);
+          const friendlyError = getFriendlyErrorMessage(userError);
+          setError(friendlyError);
+          return;
+        }
       }
 
       setError('✅ แก้ไขข้อมูลผู้ป่วยสำเร็จ!');
@@ -588,7 +480,7 @@ export default function EditPatientPage() {
         router.push(`/admin/patients/${patientId}`);
       }, 1500);
     } catch (error: any) {
-      console.error('Exception during update:', error);
+      console.error('❌ Exception during update:', error);
       const friendlyError = getFriendlyErrorMessage(error);
       setError(friendlyError);
     } finally {
@@ -631,7 +523,7 @@ export default function EditPatientPage() {
                 HN: {patient?.hospital_number} | {patient?.first_name} {patient?.last_name}
               </p>
             </div>
-
+            
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -646,48 +538,36 @@ export default function EditPatientPage() {
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* ✅ ข้อมูลบัตรประชาชน (เพิ่มใหม่) */}
+          
+          {/* เลขบัตรประชาชน */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">🆔 ข้อมูลบัตรประชาชน</h2>
+            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+              <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">A3</span>
+              ข้อมูลบัตรประชาชน
+            </h2>
             
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                เลขบัตรประชาชน (13 หลัก) *
+                เลขบัตรประชาชน * <span className="text-red-500">(ไม่สามารถเปลี่ยนแปลง)</span>
               </label>
               <input
                 type="text"
                 value={formData.id_card}
-                onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
-                placeholder="1234567890123"
-                maxLength={13}
-                className={`w-full px-4 py-2 border rounded-lg ${
-                  validationErrors.id_card
-                    ? 'border-red-500'
-                    : validationSuccess.id_card
-                    ? 'border-green-500'
-                    : 'border-gray-300'
-                }`}
+                readOnly
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
+                placeholder="กรอกเลขบัตรประชาชน 13 หลัก"
               />
-              <p className="text-xs text-gray-500 mt-1">รูปแบบ: 1234567890123 (13 หลัก)</p>
-              {validationErrors.id_card && (
-                <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  {validationErrors.id_card}
-                </p>
-              )}
-              {validationSuccess.id_card && (
-                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                  <CheckCircle className="w-3 h-3" />
-                  {validationSuccess.id_card}
-                </p>
-              )}
+              <div className="flex items-center gap-4 mt-2 text-xs">
+                <span className="text-gray-500">รูปแบบ: 1234567890123 (13 หลัก)</span>
+                <span className="text-gray-500">• ระบบจะตรวจสอบความถูกต้องอัตโนมัติ</span>
+              </div>
             </div>
           </div>
 
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลส่วนตัว</h2>
-
+            
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ *</label>
@@ -699,7 +579,7 @@ export default function EditPatientPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">นามสกุล *</label>
                 <input
@@ -710,7 +590,7 @@ export default function EditPatientPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">HN (Hospital Number) *</label>
                 <input
@@ -721,7 +601,7 @@ export default function EditPatientPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">วันเกิด *</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -733,11 +613,10 @@ export default function EditPatientPage() {
                   >
                     <option value="">วัน</option>
                     {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                      <option key={day} value={day}>
-                        {day}
-                      </option>
+                      <option key={day} value={day}>{day}</option>
                     ))}
                   </select>
+                  
                   <select
                     value={formData.birth_month}
                     onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
@@ -746,11 +625,10 @@ export default function EditPatientPage() {
                   >
                     <option value="">เดือน</option>
                     {THAI_MONTHS.map((month, index) => (
-                      <option key={index + 1} value={index + 1}>
-                        {month}
-                      </option>
+                      <option key={index + 1} value={index + 1}>{month}</option>
                     ))}
                   </select>
+                  
                   <select
                     value={formData.birth_year}
                     onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
@@ -759,14 +637,12 @@ export default function EditPatientPage() {
                   >
                     <option value="">ปี พ.ศ.</option>
                     {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
+                      <option key={year} value={year}>{year}</option>
                     ))}
                   </select>
                 </div>
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">เพศ</label>
                 <select
@@ -779,7 +655,7 @@ export default function EditPatientPage() {
                   <option value="female">หญิง</option>
                 </select>
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
                 <input
@@ -809,7 +685,7 @@ export default function EditPatientPage() {
                   </p>
                 )}
               </div>
-
+              
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
                 <input
@@ -844,7 +720,7 @@ export default function EditPatientPage() {
           {/* ข้อมูลสุขภาพ */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลสุขภาพ</h2>
-
+            
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">น้ำหนัก (kg)</label>
@@ -876,7 +752,7 @@ export default function EditPatientPage() {
                   </p>
                 )}
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ส่วนสูง (cm)</label>
                 <input
@@ -907,7 +783,7 @@ export default function EditPatientPage() {
                   </p>
                 )}
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">รอบเอว (cm)</label>
                 <input
@@ -938,8 +814,8 @@ export default function EditPatientPage() {
                   </p>
                 )}
               </div>
-
-              {/* ✅ ประเภทเบาหวาน */}
+              
+              {/* ประเภทเบาหวาน */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทเบาหวาน</label>
                 <select
@@ -952,8 +828,8 @@ export default function EditPatientPage() {
                   <option value="เบาหวาน">เบาหวาน</option>
                 </select>
               </div>
-
-              {/* ✅ ค่าน้ำตาล */}
+              
+              {/* ค่าน้ำตาล */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ค่าน้ำตาล (mg/dL)</label>
                 <input
@@ -966,7 +842,7 @@ export default function EditPatientPage() {
                 />
                 <p className="text-xs text-gray-500 mt-1">ค่าปกติ: 70-100 mg/dL (งดอาหาร 8 ชม.)</p>
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ค่า HbA1c</label>
                 <input
@@ -979,7 +855,7 @@ export default function EditPatientPage() {
                 />
                 <p className="text-xs text-gray-500 mt-1">เว้นว่างได้ถ้าไม่มีข้อมูล</p>
               </div>
-
+              
               <div className="col-span-3">
                 <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (คำแนะนำเพิ่มเติม)</label>
                 <input
@@ -996,7 +872,7 @@ export default function EditPatientPage() {
           {/* ที่อยู่ */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ที่อยู่</h2>
-
+            
             <div className="space-y-4">
               {/* เลขที่ + ที่อยู่เพิ่มเติม */}
               <div className="grid grid-cols-3 gap-4">
@@ -1070,84 +946,25 @@ export default function EditPatientPage() {
                 </div>
               </div>
 
-              {/* ✅ แสดงข้อมูลเดิม + Dropdown จังหวัด/อำเภอ/ตำบล */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    จังหวัด {addressData.province && <span className="text-green-600 text-xs">(ปัจจุบัน: {addressData.province})</span>}
-                  </label>
-                  <select
-                    value={addressData.province}
-                    onChange={(e) => handleProvinceChange(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">-- เลือกจังหวัด --</option>
-                    {provinces.map((province) => (
-                      <option key={province} value={province}>
-                        {province}
-                      </option>
-                    ))}
-                  </select>
+              {/* ✅ จังหวัด อำเภอ ตำบล - รวม label เป็นบรรทัดเดียว */}
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <MapPin className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold text-gray-800">จังหวัด อำเภอ ตำบล</h3>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    อำเภอ/เขต {addressData.district && <span className="text-green-600 text-xs">(ปัจจุบัน: {addressData.district})</span>}
-                  </label>
-                  <select
-                    value={addressData.district}
-                    onChange={(e) => handleDistrictChange(e.target.value)}
-                    disabled={!addressData.province}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                  >
-                    <option value="">-- เลือกอำเภอ/เขต --</option>
-                    {districts.map((district) => (
-                      <option key={district} value={district}>
-                        {district}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    ตำบล {addressData.subdistrict && <span className="text-green-600 text-xs">(ปัจจุบัน: {addressData.subdistrict})</span>}
-                  </label>
-                  <select
-                    value={addressData.subdistrict}
-                    onChange={(e) => {
-                      const selected = subdistricts.find(s => s.subdistrict === e.target.value);
-                      if (selected) {
-                        handleSubdistrictChange(selected.subdistrict, selected.postal_code);
-                      }
-                    }}
-                    disabled={!addressData.district}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                  >
-                    <option value="">-- เลือกตำบล --</option>
-                    {subdistricts.map((sub) => (
-                      <option key={sub.subdistrict} value={sub.subdistrict}>
-                        {sub.subdistrict}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    รหัสไปรษณีย์ {addressData.postalCode && <span className="text-green-600 text-xs">(ปัจจุบัน: {addressData.postalCode})</span>}
-                  </label>
-                  <input
-                    type="text"
-                    value={addressData.postalCode}
-                    readOnly
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
-                    placeholder="รหัสไปรษณีย์จะอัตโนมัติเมื่อเลือกตำบล"
-                  />
-                </div>
+                
+                <ThaiAddressSelector
+                  onAddressChange={handleAddressChange}
+                  initialData={{
+                    province: addressData.province,
+                    district: addressData.district,
+                    subdistrict: addressData.subdistrict,
+                    postal_code: addressData.postalCode,
+                  }}
+                />
               </div>
 
-              {/* ✅ เลือกโรงพยาบาล (แบบลำดับชั้น) */}
+              {/* เลือกโรงพยาบาล (แบบลำดับชั้น) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">🏥 โรงพยาบาลสังกัด</label>
                 <select
@@ -1157,11 +974,11 @@ export default function EditPatientPage() {
                 >
                   <option value="">-- เลือกโรงพยาบาล --</option>
                   
-                  {/* ✅ แม่ข่าย */}
+                  {/* แม่ข่าย */}
                   {mainHospitals.map((hospital) => (
                     <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
                       <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
-                      {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
+                      {/* ลูกข่ายของแม่ข่ายนี้ */}
                       {hospitalGroups.get(hospital.id)?.map((sub) => (
                         <option key={sub.id} value={sub.id}>
                           {'   '}└─ {sub.name} ({sub.code})
@@ -1181,7 +998,7 @@ export default function EditPatientPage() {
           {/* ผู้ติดต่อฉุกเฉิน */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ผู้ติดต่อฉุกเฉิน</h2>
-
+            
             <div className="grid grid-cols-3 gap-4">
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อผู้ติดต่อ</label>
@@ -1192,7 +1009,7 @@ export default function EditPatientPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
-
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
                 <input
@@ -1202,7 +1019,7 @@ export default function EditPatientPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
-
+              
               <div className="col-span-3">
                 <label className="block text-sm font-medium text-gray-700 mb-1">ความสัมพันธ์</label>
                 <input
@@ -1216,7 +1033,7 @@ export default function EditPatientPage() {
             </div>
           </div>
 
-          {/* ✅ Error/Success Message */}
+          {/* Error/Success Message */}
           {error && (
             <div
               className={`rounded-xl p-6 border-2 ${
@@ -1273,6 +1090,7 @@ export default function EditPatientPage() {
                 </>
               )}
             </button>
+            
             <button
               type="button"
               onClick={() => router.push(`/admin/patients/${patientId}`)}
