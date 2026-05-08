@@ -1842,24 +1842,110 @@ export async function createDefaultGoals(
   }
 }
 
-export async function getPatientGoals(userId: string) {
+// =====================================================
+// 🎯 Patient Goals Functions
+// =====================================================
+export async function getPatientGoals(userId: string, roundNumber?: number) {
   try {
-    const { data, error } = await supabase
+    console.log('🎯 [getPatientGoals] Fetching for user:', userId, 'Round:', roundNumber);
+    
+    let query = supabase
       .from('goals')
-      .select('*')
+      .select(`
+        *,
+        activities (
+          activity_code,
+          activity_name_th,
+          description_th
+        )
+      `)
       .eq('user_id', userId)
-      .eq('status', 'active')
-      .order('priority', { ascending: true })
-      .order('created_at', { ascending: false });
-
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active');
+    
+    if (roundNumber) {
+      query = query.eq('round_number', roundNumber);
+    } else {
+      // ถ้าไม่ระบุ round ให้เอารอบล่าสุด
+      query = query.eq('is_current', true);
+    }
+    
+    query = query.order('priority', { ascending: true });
+    
+    const { data, error } = await query;
+    
     if (error) {
-      console.error('Error fetching goals:', error);
+      console.error('❌ [getPatientGoals] Error:', error);
       return [];
     }
-
+    
+    console.log('✅ [getPatientGoals] Fetched:', data?.length || 0, 'goals');
     return data || [];
   } catch (err) {
-    console.error('Get patient goals error:', err);
+    console.error('❌ [getPatientGoals] Exception:', err);
+    return [];
+  }
+}
+
+export async function getGoalRoundCount(userId: string) {
+  try {
+    const { count, error } = await supabase
+      .from('goals')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity');
+    
+    if (error) {
+      console.error('Error counting goal rounds:', error);
+      return 1;
+    }
+    
+    // นับจำนวน round ที่ไม่ซ้ำกัน
+    const { data } = await supabase
+      .from('goals')
+      .select('round_number')
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity');
+    
+    if (!data || data.length === 0) return 1;
+    
+    const uniqueRounds = [...new Set(data.map(g => g.round_number))];
+    return Math.max(...uniqueRounds, 1);
+  } catch (err) {
+    console.error('Get goal round count error:', err);
+    return 1;
+  }
+}
+
+export async function getPatientRecords(userId: string, days: number = 30) {
+  try {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    console.log('📝 [getPatientRecords] Fetching for user:', userId, 'Days:', days);
+    
+    const { data, error } = await supabase
+      .from('records')
+      .select(`
+        *,
+        activities (
+          activity_code,
+          activity_name_th
+        )
+      `)
+      .eq('user_id', userId)
+      .gte('record_date', startDate.toISOString())
+      .order('record_date', { ascending: false });
+    
+    if (error) {
+      console.error('❌ [getPatientRecords] Error:', error);
+      return [];
+    }
+    
+    console.log('✅ [getPatientRecords] Fetched:', data?.length || 0, 'records');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getPatientRecords] Exception:', err);
     return [];
   }
 }

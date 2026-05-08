@@ -1,9 +1,12 @@
 // app/admin/patients/[id]/goals/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569
-// ✅ การแก้ไข: แสดงจำนวนวัน/สัปดาห์ สำหรับแต่ละเป้าหมาย
+// ✅ แก้ไขล่าสุด: 8 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. ✅ แก้ไขการจับคู่ records กับ goals ให้ถูกต้อง
+//    2. ✅ ใช้ activity_id ในการ match แทน goal_name
+//    3. ✅ กรองตาม round_number ให้ถูกต้อง
+//    4. ✅ แสดงผลเฉพาะ goals และ records ของ round ที่เลือก
 
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import {
@@ -13,7 +16,7 @@ import {
   getPatientGoals,
   getGoalRoundCount,
   createDefaultGoals,
-  getProgress
+  getPatientRecords
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -66,7 +69,6 @@ export default function PatientGoalsPage() {
   const [records, setRecords] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('goals');
   const [creatingGoals, setCreatingGoals] = useState(false);
-  const [selectedWeek, setSelectedWeek] = useState(new Date());
   const [expandedGoals, setExpandedGoals] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -80,23 +82,23 @@ export default function PatientGoalsPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadData();
   }, [router]);
 
   const loadData = async () => {
     try {
+      console.log('📊 [loadData] Loading data for patient:', patientId);
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
-
+      
       const rounds = await getGoalRoundCount(patientId);
       setGoalRounds(rounds);
-
+      
       await loadGoals(selectedRound);
       await loadRecords();
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('❌ [loadData] Error:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -105,25 +107,39 @@ export default function PatientGoalsPage() {
 
   const loadGoals = async (round: number) => {
     try {
+      console.log('🎯 [loadGoals] Loading goals for round:', round);
       const { data, error } = await supabase
         .from('goals')
-        .select(`*, activities ( activity_name_th, description_th )`)
+        .select(`
+          *,
+          activities (
+            activity_code,
+            activity_name_th,
+            description_th
+          )
+        `)
         .eq('user_id', patientId)
         .eq('round_number', round)
+        .eq('goal_type', 'weekly_activity')
+        .eq('status', 'active')
         .order('priority', { ascending: true });
-
+      
       if (error) throw error;
+      
+      console.log('✅ [loadGoals] Loaded:', data?.length || 0, 'goals');
       setGoals(data || []);
     } catch (error) {
-      console.error('Error loading goals:', error);
+      console.error('❌ [loadGoals] Error:', error);
+      setGoals([]);
     }
   };
 
   const loadRecords = async () => {
     try {
+      console.log('📝 [loadRecords] Loading records for patient:', patientId);
       const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
-
+      startDate.setDate(startDate.getDate() - 90); // โหลด 90 วัน
+      
       const { data, error } = await supabase
         .from('records')
         .select(`
@@ -136,15 +152,19 @@ export default function PatientGoalsPage() {
         .eq('user_id', patientId)
         .gte('record_date', startDate.toISOString())
         .order('record_date', { ascending: false });
-
+      
       if (error) throw error;
+      
+      console.log('✅ [loadRecords] Loaded:', data?.length || 0, 'records');
       setRecords(data || []);
     } catch (error) {
-      console.error('Error loading records:', error);
+      console.error('❌ [loadRecords] Error:', error);
+      setRecords([]);
     }
   };
 
   const handleRoundChange = (round: number) => {
+    console.log('🔄 [handleRoundChange] Changing to round:', round);
     setSelectedRound(round);
     loadGoals(round);
   };
@@ -154,16 +174,15 @@ export default function PatientGoalsPage() {
     if (!confirm('ต้องการสร้างเป้าหมายเริ่มต้นตาม PAM Level หรือไม่?\n\nL2/L3: กฎทอง 5 ข้อ\nL4: แชมป์ 8 กิจกรรม')) {
       return;
     }
-
+    
     setCreatingGoals(true);
-
     try {
       const result = await createDefaultGoals(
         patientId,
         patient.pam_level || 'L2',
         user.id
       );
-
+      
       if (result.success) {
         alert(`✅ สร้างเป้าหมายสำเร็จ!\n\nจำนวน: ${result.count || 0} กิจกรรม`);
         loadData();
@@ -171,7 +190,7 @@ export default function PatientGoalsPage() {
         alert('เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error: any) {
-      console.error('Error creating goals:', error);
+      console.error('❌ [handleCreateDefaultGoals] Error:', error);
       alert(error.message || 'เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
     } finally {
       setCreatingGoals(false);
@@ -182,6 +201,7 @@ export default function PatientGoalsPage() {
     if (!confirm('ต้องการเก็บถาวรเป้าหมายรอบปัจจุบันหรือไม่?')) {
       return;
     }
+    
     try {
       const { error } = await supabase
         .from('goals')
@@ -191,15 +211,16 @@ export default function PatientGoalsPage() {
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', patientId)
+        .eq('round_number', selectedRound)
         .eq('goal_type', 'weekly_activity')
         .eq('status', 'active');
-
+      
       if (error) throw error;
-
+      
       alert('✅ เก็บถาวรเป้าหมายสำเร็จ!');
       loadData();
     } catch (error) {
-      console.error('Error archiving goals:', error);
+      console.error('❌ [handleArchiveCurrentRound] Error:', error);
       alert('เกิดข้อผิดพลาดในการเก็บถาวร');
     }
   };
@@ -214,19 +235,6 @@ export default function PatientGoalsPage() {
     setExpandedGoals(newExpanded);
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'active':
-        return '🟢 กำลังดำเนินการ';
-      case 'completed':
-        return '✅ สำเร็จ';
-      case 'archived':
-        return '📦 เก็บถาวร';
-      default:
-        return status;
-    }
-  };
-
   const getGoalIcon = (goalName: string) => {
     if (goalName?.includes('sweet')) return '🍬';
     if (goalName?.includes('rice') || goalName?.includes('carb')) return '🍚';
@@ -239,34 +247,45 @@ export default function PatientGoalsPage() {
     return '🎯';
   };
 
-  // 🎯 จัดกลุ่มเป้าหมายและคำนวณสถิติ
+  // 🎯 จัดกลุ่มเป้าหมายและคำนวณสถิติ (แก้ไขแล้ว)
   const getGroupedGoals = (): GoalWithRecords[] => {
+    console.log('🎯 [getGroupedGoals] Processing goals:', goals.length);
+    console.log('📝 [getGroupedGoals] Available records:', records.length);
+    
+    // จัดกลุ่ม goals ตาม activity_id
     const grouped: Record<string, any[]> = {};
     goals.forEach(goal => {
-      const key = goal.goal_name || goal.activity_id;
+      const key = goal.activity_id || goal.id;
       if (!grouped[key]) {
         grouped[key] = [];
       }
       grouped[key].push(goal);
     });
-
+    
     const goalGroups = Object.values(grouped).sort((a, b) => {
       const priorityA = a[0]?.priority || 999;
       const priorityB = b[0]?.priority || 999;
       return priorityA - priorityB;
     });
-
+    
     return goalGroups.map(goalGroup => {
       const firstGoal = goalGroup[0];
+      const activityId = firstGoal.activity_id;
       
-      const goalRecords = records.filter(record => 
-        record.activity_id === firstGoal.activity_id || 
-        record.activities?.activity_code === firstGoal.goal_name
-      );
-
+      console.log('🔍 [getGroupedGoals] Processing goal:', firstGoal.goal_name, 'Activity ID:', activityId);
+      
+      // ✅ แก้ไข: ใช้ activity_id ในการ match แทน goal_name
+      const goalRecords = records.filter(record => {
+        const match = record.activity_id === activityId;
+        if (match) {
+          console.log('✅ [getGroupedGoals] Matched record:', record.record_date);
+        }
+        return match;
+      });
+      
       const completedRecords = goalRecords.filter(r => r.is_completed);
       const notCompletedRecords = goalRecords.filter(r => !r.is_completed);
-
+      
       const formattedRecords: GoalRecord[] = [
         ...completedRecords.map(r => ({
           date: r.record_date,
@@ -279,12 +298,17 @@ export default function PatientGoalsPage() {
           notes: r.notes,
         })),
       ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
+      
       const totalRecords = goalRecords.length;
       const percentage = totalRecords > 0 
         ? Math.round((completedRecords.length / totalRecords) * 100) 
         : 0;
-
+      
+      console.log('📊 [getGroupedGoals] Goal:', firstGoal.goal_name, 
+        'Completed:', completedRecords.length, 
+        'Not Completed:', notCompletedRecords.length,
+        'Percentage:', percentage);
+      
       return {
         goal: firstGoal,
         completedCount: completedRecords.length,
@@ -296,17 +320,20 @@ export default function PatientGoalsPage() {
   };
 
   const groupedGoals = getGroupedGoals();
-
+  
   const stats = {
     total: goals.length,
     completed: goals.filter(g => g.is_completed).length,
     active: goals.filter(g => g.status === 'active').length,
-    progress: goals.length > 0 ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) : 0,
+    progress: goals.length > 0 
+      ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) 
+      : 0,
   };
 
   const getWeeklyData = () => {
     const weekData = [];
     const today = new Date();
+    
     for (let i = 6; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -323,13 +350,14 @@ export default function PatientGoalsPage() {
         total: goals.length,
       });
     }
-
+    
     return weekData;
   };
 
   const getCalendarData = () => {
     const today = new Date();
     const days = [];
+    
     for (let i = 29; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -354,7 +382,7 @@ export default function PatientGoalsPage() {
                'bg-gray-200',
       });
     }
-
+    
     return days;
   };
 
@@ -522,8 +550,8 @@ export default function PatientGoalsPage() {
                     {patient.pam_level === 'L2' || patient.pam_level === 'L3' 
                       ? '📋 กฎทอง 5 ข้อ - 5 วัน/สัปดาห์' 
                       : patient.pam_level === 'L4'
-                       ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
-                      : '⚠️ ระดับ L1 - ยังไม่สร้างเป้าหมาย'}
+                        ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
+                        : '⚠️ ระดับ L1 - ยังไม่สร้างเป้าหมาย'}
                   </p>
                 )}
               </div>
@@ -544,7 +572,7 @@ export default function PatientGoalsPage() {
               ) : (
                 <div className="divide-y divide-gray-200">
                   {groupedGoals.map(({ goal, completedCount, notCompletedCount, records: goalRecords, percentage }) => {
-                    const goalKey = goal.goal_name || goal.activity_id || goal.id;
+                    const goalKey = goal.activity_id || goal.id;
                     const isExpanded = expandedGoals.has(goalKey);
 
                     return (
@@ -563,7 +591,6 @@ export default function PatientGoalsPage() {
                               <p className="text-sm text-gray-500">
                                 {goal.activities?.activity_name_th || goal.description_th || '-'}
                               </p>
-                              {/* ✅ แสดงจำนวนวัน/สัปดาห์ */}
                               {goal.target_days && (
                                 <p className="text-xs text-blue-600 mt-1 font-medium">
                                   📅 เป้าหมาย: {goal.target_days} วัน/สัปดาห์
@@ -742,7 +769,7 @@ export default function PatientGoalsPage() {
                 <h3 className="font-bold text-gray-800 mb-4">📊 รายละเอียดกิจกรรมแต่ละวัน</h3>
                 
                 {groupedGoals.map(({ goal }) => (
-                  <div key={goal.goal_name || goal.id} className="border border-gray-200 rounded-lg p-4">
+                  <div key={goal.activity_id || goal.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex items-center gap-3 mb-3">
                       <span className="text-2xl">{getGoalIcon(goal.goal_name)}</span>
                       <h4 className="font-bold text-gray-800">{goal.goal_name_th || goal.goal_name}</h4>
@@ -751,8 +778,7 @@ export default function PatientGoalsPage() {
                     <div className="grid grid-cols-7 gap-2">
                       {weeklyData.map((day) => {
                         const activityRecords = day.records.filter(
-                          r => r.activity_id === goal.activity_id || 
-                               r.activities?.activity_code === goal.goal_name
+                          r => r.activity_id === goal.activity_id
                         );
                         const isCompleted = activityRecords.some(r => r.is_completed);
                         
