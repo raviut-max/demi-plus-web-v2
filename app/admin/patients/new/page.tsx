@@ -15,7 +15,7 @@ import {
   checkSession,
   logout,
   registerPatient,
-  getCoachesWithHospitals,
+  getCoaches,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
@@ -167,7 +167,7 @@ export default function NewPatientPage() {
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
+
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -209,13 +209,25 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ โหลดโค้ชจากทุกโรงพยาบาล (แสดงชื่อ + ความเชี่ยวชาญ + โรงพยาบาล)
+  // ✅ โหลดโค้ช (กรองตามโรงพยาบาลที่เข้าถึงได้)
   const loadCoaches = async () => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading all coaches with hospitals...');
-      const allCoaches = await getCoachesWithHospitals();
-      setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Total coaches loaded:', allCoaches.length);
+      console.log('👨‍⚕️ [loadCoaches] Loading coaches...');
+      const allCoaches = await getCoaches();
+      
+      // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย + ลูกข่าย)
+      let filteredCoaches = allCoaches;
+      if (accessibleHospitalIds.length > 0 && !isSuperAdmin(user)) {
+        console.log('🔒 [loadCoaches] Hospital Admin - filtering coaches');
+        filteredCoaches = allCoaches.filter(coach => 
+          coach.users?.hospital_id && accessibleHospitalIds.includes(coach.users.hospital_id)
+        );
+      } else {
+        console.log('👑 [loadCoaches] Super Admin - showing all coaches');
+      }
+      
+      setCoaches(filteredCoaches);
+      console.log('👨‍⚕️ [loadCoaches] Filtered coaches:', filteredCoaches.length);
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -476,7 +488,7 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -580,7 +592,7 @@ export default function NewPatientPage() {
               </li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
               <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
-              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากทุกโรงพยาบาล)</li>
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากแม่ข่าย/ลูกข่ายของคุณ)</li>
               {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
                 <li className="text-blue-600">• 🔒 แสดงเฉพาะโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง</li>
               )}
@@ -1145,7 +1157,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช (แสดงโค้ชจากทุกโรงพยาบาล) */}
+        {/* 6. กำหนดโค้ช (กรองตามโรงพยาบาลที่เข้าถึงได้) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1176,7 +1188,7 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👥 แสดงโค้ช/บุคลากรจากทุกโรงพยาบาล ({coaches.length} คน)
+              👥 แสดงโค้ชจากโรงพยาบาลแม่ข่าย/ลูกข่ายที่คุณมีสิทธิ์ ({coaches.length} คน)
             </p>
             <p className="text-xs text-blue-600 mt-1">
               💡 รูปแบบ: ชื่อ | ความเชี่ยวชาญ | โรงพยาบาล (ประเภท)
