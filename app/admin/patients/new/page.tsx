@@ -1,14 +1,10 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แสดงข้อมูลผู้จัดทำ: ชื่อ, บทบาท, โรงพยาบาล (ระบุแม่ข่าย/ลูกข่าย)
-//    2. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย) ใน dropdown
-//    3. ✅ Badge แสดงประเภทโรงพยาบาลของผู้จัดทำ
-//    4. ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (m แห่ง) เท่านั้น
-//    5. ✅ แสดงโค้ช: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
-//    6. ✅ ข้อความใน Info Banner ถูกต้องตามข้อกำหนด
-//    7. ✅ ข้อความ error ภาษาไทยที่เข้าใจง่าย
-//    8. ✅ เพิ่ม Debug Logging
+//    1. ✅ แก้ไขการโหลดโค้ช - join กับ hospitals และ users
+//    2. ✅ แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
+//    3. ✅ แสดงข้อมูลโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
+//    4. ✅ แก้ไขปัญหา n=0 เมื่อมีโค้ชในฐานข้อมูล
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -16,7 +12,7 @@ import {
   checkSession,
   logout,
   registerPatient,
-  getCoachesByAccessibleHospitals,
+  getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
@@ -78,12 +74,18 @@ interface Coach {
   specialization_th?: string;
   is_active: boolean;
   is_verified: boolean;
-  hospital_id?: string;
-  hospitals?: {
-    id?: string;
-    name?: string;
-    code?: string;
-    type?: 'main' | 'sub';
+  users?: {
+    hospital_id?: string;
+    role?: string;
+    admin_type?: string | null;
+    is_active?: boolean;
+    hospitals?: {
+      id?: string;
+      name?: string;
+      code?: string;
+      type?: 'main' | 'sub';
+      parent_id?: string | null;
+    };
   };
 }
 
@@ -98,12 +100,14 @@ export default function NewPatientPage() {
   const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
+
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -147,7 +151,7 @@ export default function NewPatientPage() {
       return;
     }
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-      setError('❌ คุณไม่มีสิทธิ์เข้าถึงหน้านี้ กรุณาเข้าสู่ระบบใหม่');
+      alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
@@ -161,7 +165,7 @@ export default function NewPatientPage() {
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้ (ผู้จัดทำ)
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       console.log('🏥 [loadUserHospital] Loading for user:', userId);
@@ -197,21 +201,20 @@ export default function NewPatientPage() {
       setHospitals(filteredHospitals);
       console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
       
-      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
-      loadCoaches(ids);
+      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว (แก้ไขแล้ว)
+      await loadCoaches(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
-      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
     }
   };
 
-  // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (m แห่ง)
+  // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และ users)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for accessible hospitals:', hospitalIds);
-      const allCoaches = await getCoachesByAccessibleHospitals(hospitalIds);
+      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
+      const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches from', hospitalIds.length, 'hospitals');
+      console.log('👨‍️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -228,6 +231,7 @@ export default function NewPatientPage() {
           setVillages([]);
           return;
         }
+        
         const { data, error } = await supabase
           .from('villages')
           .select('*')
@@ -242,6 +246,7 @@ export default function NewPatientPage() {
         console.error('❌ [loadVillages] Error:', error);
       }
     };
+
     loadVillages();
   };
 
@@ -286,7 +291,7 @@ export default function NewPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-    
+
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -299,18 +304,6 @@ export default function NewPatientPage() {
     return { mainHospitals, hospitalGroups };
   };
 
-  // ✅ ฟังก์ชันแปลงข้อความเป็นภาษาไทยที่เข้าใจง่าย
-  const getFriendlyErrorMessage = (message: string): string => {
-    if (message.includes('id_card')) return '❌ เลขบัตรประชาชนไม่ถูกต้อง หรือซ้ำกับผู้ป่วยคนอื่น';
-    if (message.includes('hospital_number')) return '❌ เลข HN (เลขที่ผู้ป่วย) ซ้ำ กรุณาตรวจสอบใหม่';
-    if (message.includes('phone')) return '❌ เบอร์โทรศัพท์ไม่ถูกต้อง ต้องเป็นเลข 9-10 หลัก';
-    if (message.includes('email')) return '❌ อีเมลไม่ถูกต้อง กรุณาตรวจสอบรูปแบบ';
-    if (message.includes('birth')) return '❌ วันเกิดไม่ถูกต้อง กรุณากรอกให้ครบถ้วน';
-    if (message.includes('required')) return '❌ กรุณากรอกข้อมูลให้ครบถ้วน';
-    if (message.includes('duplicate')) return '❌ ข้อมูลนี้ถูกใช้งานแล้ว กรุณาใช้ข้อมูลอื่น';
-    return '❌ ' + message;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -321,13 +314,13 @@ export default function NewPatientPage() {
 
     // ✅ ตรวจสอบรหัสผ่าน
     if (formData.password !== formData.confirmPassword) {
-      setError('❌ รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง');
+      setError('❌ รหัสผ่านไม่ตรงกัน');
       return;
     }
 
     // ✅ ตรวจสอบเลขบัตรประชาชน
     if (formData.id_card.length !== 13) {
-      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก กรุณาตรวจสอบใหม่');
+      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก');
       return;
     }
 
@@ -339,7 +332,7 @@ export default function NewPatientPage() {
 
     // ✅ ตรวจสอบวันเกิด
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน (วัน/เดือน/ปี)');
+      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
     }
 
@@ -349,7 +342,7 @@ export default function NewPatientPage() {
       return;
     }
 
-    // ✅ ตรวจสอบโรงพยาบาล
+    // ✅ ตรวจสอบว่าเลือกโรงพยาบาลแล้ว
     if (!formData.hospital_id) {
       setError('❌ กรุณาเลือกโรงพยาบาลสังกัด');
       return;
@@ -427,13 +420,18 @@ export default function NewPatientPage() {
         }, 2000);
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
-        setError(getFriendlyErrorMessage(result.error || 'เกิดข้อผิดพลาดในการลงทะเบียน'));
+        setError(result.error || 'เกิดข้อผิดพลาด');
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error('❌ [handleSubmit] Registration error:', err);
-      setError(getFriendlyErrorMessage(err.message || 'เกิดข้อผิดพลาดในการลงทะเบียน กรุณาลองใหม่อีกครั้ง'));
+      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
       setLoading(false);
     }
+  };
+
+  const handleLogout = () => {
+    logout();
+    router.push('/admin/login');
   };
 
   if (success) {
@@ -475,6 +473,7 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -486,7 +485,7 @@ export default function NewPatientPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้จัดทำและโรงพยาบาล */}
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -499,12 +498,12 @@ export default function NewPatientPage() {
                       </p>
                       <p className="text-xs text-gray-500">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
 
-                  {/* ✅ แสดงข้อมูลโรงพยาบาลของผู้จัดทำ */}
+                  {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
@@ -552,7 +551,7 @@ export default function NewPatientPage() {
         </div>
       </div>
 
-      {/* Info Banner - ✅ แสดงข้อมูลตามที่ระบุ */}
+      {/* Info Banner - แสดงข้อมูลการลงทะเบียน */}
       <div className="max-w-5xl mx-auto px-4 py-4">
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
           <div className="text-sm text-blue-800">
@@ -567,8 +566,10 @@ export default function NewPatientPage() {
               </li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
               <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
-              {/* ✅ แก้ไขข้อความโค้ชตามที่ระบุ */}
               <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)</li>
+              {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
+                <li className="text-blue-600">• 🔒 แสดงเฉพาะโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง</li>
+              )}
               {isSuperAdmin(user) && (
                 <li className="text-purple-600">• 👑 Super Admin - เข้าถึงได้ทั้งหมด</li>
               )}
@@ -947,6 +948,11 @@ export default function NewPatientPage() {
                 ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
               </p>
             )}
+            {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
+              <p className="text-xs text-blue-600 mt-1">
+                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
+              </p>
+            )}
             {isSuperAdmin(user) && (
               <p className="text-xs text-purple-600 mt-1">
                 👑 Super Admin - แสดงโรงพยาบาลทั้งหมด ({hospitals.length} แห่ง)
@@ -1125,7 +1131,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช (แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้) */}
+        {/* 6. กำหนดโค้ช (แก้ไขแล้ว - แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1143,8 +1149,8 @@ export default function NewPatientPage() {
             >
               <option value="">-- เลือกโค้ช --</option>
               {coaches.map((coach) => {
-                // ✅ แสดงข้อมูลโค้ชแบบละเอียด: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
-                const hospitalName = coach.hospitals?.name || 'ไม่มีโรงพยาบาล';
+                // ✅ แสดงข้อมูลโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
+                const hospitalName = coach.users?.hospitals?.name || 'ไม่มีโรงพยาบาล';
                 const specialization = coach.specialization_th || 'ไม่ระบุ';
                 
                 return (
@@ -1155,14 +1161,16 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👥 แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
-            </p>
-            <p className="text-xs text-blue-600 mt-1">
-              💡 รูปแบบ: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
+              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
                 ⚠️ ยังไม่มีโค้ชในโรงพยาบาลที่คุณมีสิทธิ์
+              </p>
+            )}
+            {isSuperAdmin(user) && (
+              <p className="text-xs text-purple-600 mt-1">
+                👑 Super Admin - สามารถเลือกโค้ชจากทุกโรงพยาบาล
               </p>
             )}
           </div>
