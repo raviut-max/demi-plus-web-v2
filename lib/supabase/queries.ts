@@ -2447,23 +2447,43 @@ export async function getKnowledge(pamLevel: string = 'ALL') {
 // =====================================================
 // 👨‍⚕️ Coach Functions
 // =====================================================
-
 export async function getCoaches() {
   try {
+    console.log('🔍 [getCoaches] Fetching coaches with hospital info...');
     const { data, error } = await supabase
       .from('doctors')
-      .select('id, user_id, full_name_th, specialization_th, is_active')
+      .select(`
+        id, 
+        user_id, 
+        full_name_th, 
+        specialization_th, 
+        is_active,
+        hospital_id,
+        hospitals (
+          id,
+          name,
+          code,
+          type,
+          parent_id,
+          parent_hospital:hospitals!parent_id (
+            id,
+            name,
+            code
+          )
+        )
+      `)
       .eq('is_active', true)
       .order('full_name_th', { ascending: true });
-
+    
     if (error) {
-      console.error('Error fetching coaches:', error);
+      console.error('❌ [getCoaches] Error:', error);
       return [];
     }
 
+    console.log('✅ [getCoaches] Fetched:', data?.length || 0, 'coaches');
     return data || [];
   } catch (err) {
-    console.error('Get coaches error:', err);
+    console.error('❌ [getCoaches] Exception:', err);
     return [];
   }
 }
