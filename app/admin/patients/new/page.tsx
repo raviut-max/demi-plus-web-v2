@@ -1,20 +1,22 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ใช้โรงพยาบาลของผู้จัดทำเป็นหลัก
-//    2. ✅ แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
-//    3. ✅ แสดงข้อมูลโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
-//    4. ✅ แก้ไข Info Banner ให้ชัดเจน
-//    5. ✅ ใช้ getCoachesByHospitals แทน getCoaches
+//    1. ✅ แสดงข้อมูลผู้จัดทำ: ชื่อ, บทบาท, โรงพยาบาล (ระบุแม่ข่าย/ลูกข่าย)
+//    2. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย) ใน dropdown
+//    3. ✅ Badge แสดงประเภทโรงพยาบาลของผู้จัดทำ
+//    4. ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (m แห่ง) เท่านั้น
+//    5. ✅ แสดงโค้ช: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
+//    6. ✅ ข้อความใน Info Banner ถูกต้องตามข้อกำหนด
+//    7. ✅ ข้อความ error ภาษาไทยที่เข้าใจง่าย
+//    8. ✅ เพิ่ม Debug Logging
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   checkSession,
   logout,
   registerPatient,
-  getCoachesByHospitals,
+  getCoachesByAccessibleHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
@@ -76,16 +78,12 @@ interface Coach {
   specialization_th?: string;
   is_active: boolean;
   is_verified: boolean;
-  users?: {
-    hospital_id?: string;
-    role?: string;
-    admin_type?: string | null;
-    hospitals?: {
-      id?: string;
-      name?: string;
-      code?: string;
-      type?: 'main' | 'sub';
-    };
+  hospital_id?: string;
+  hospitals?: {
+    id?: string;
+    name?: string;
+    code?: string;
+    type?: 'main' | 'sub';
   };
 }
 
@@ -100,14 +98,12 @@ export default function NewPatientPage() {
   const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
-
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -164,8 +160,8 @@ export default function NewPatientPage() {
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้ (ผู้จัดทำ)
   const loadUserHospital = async (userId: string) => {
     try {
       console.log('🏥 [loadUserHospital] Loading for user:', userId);
@@ -200,23 +196,22 @@ export default function NewPatientPage() {
       
       setHospitals(filteredHospitals);
       console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
-
-      // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
-      await loadCoaches(ids);
       
+      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
+      loadCoaches(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
     }
   };
 
-  // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (แก้ไขแล้ว)
+  // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (m แห่ง)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
-      const allCoaches = await getCoachesByHospitals(hospitalIds);
+      console.log('👨‍⚕️ [loadCoaches] Loading coaches for accessible hospitals:', hospitalIds);
+      const allCoaches = await getCoachesByAccessibleHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches from', hospitalIds.length, 'hospitals');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -233,7 +228,6 @@ export default function NewPatientPage() {
           setVillages([]);
           return;
         }
-        
         const { data, error } = await supabase
           .from('villages')
           .select('*')
@@ -248,7 +242,6 @@ export default function NewPatientPage() {
         console.error('❌ [loadVillages] Error:', error);
       }
     };
-
     loadVillages();
   };
 
@@ -482,7 +475,6 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -494,7 +486,7 @@ export default function NewPatientPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              {/* ✅ แสดงข้อมูลผู้จัดทำและโรงพยาบาล */}
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -507,12 +499,12 @@ export default function NewPatientPage() {
                       </p>
                       <p className="text-xs text-gray-500">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
 
-                  {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                  {/* ✅ แสดงข้อมูลโรงพยาบาลของผู้จัดทำ */}
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
@@ -560,7 +552,7 @@ export default function NewPatientPage() {
         </div>
       </div>
 
-      {/* Info Banner - ✅ แก้ไขแล้ว */}
+      {/* Info Banner - ✅ แสดงข้อมูลตามที่ระบุ */}
       <div className="max-w-5xl mx-auto px-4 py-4">
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
           <div className="text-sm text-blue-800">
@@ -573,14 +565,10 @@ export default function NewPatientPage() {
                   {userHospital?.type === 'main' ? ' (แม่ข่าย)' : userHospital?.type === 'sub' ? ' (ลูกข่าย)' : ''}
                 </strong>
               </li>
-              <li>• ผู้ป่วยจะสังกัดแม่ข่ายหรือลูกข่ายก็ได้</li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
-              <li>• โรงพยาบาลที่เลือกได้: <strong>{hospitals.length}</strong> แห่ง</li>
-              {/* ✅ แก้ไขข้อความโค้ช */}
-              <li>• โค้ชที่เลือกได้: <strong>{coaches.length}</strong> คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)</li>
-              {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
-                <li className="text-blue-600">• 🔒 แสดงเฉพาะโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง</li>
-              )}
+              <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
+              {/* ✅ แก้ไขข้อความโค้ชตามที่ระบุ */}
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)</li>
               {isSuperAdmin(user) && (
                 <li className="text-purple-600">• 👑 Super Admin - เข้าถึงได้ทั้งหมด</li>
               )}
@@ -959,11 +947,6 @@ export default function NewPatientPage() {
                 ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
               </p>
             )}
-            {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
-              <p className="text-xs text-blue-600 mt-1">
-                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
-              </p>
-            )}
             {isSuperAdmin(user) && (
               <p className="text-xs text-purple-600 mt-1">
                 👑 Super Admin - แสดงโรงพยาบาลทั้งหมด ({hospitals.length} แห่ง)
@@ -1142,7 +1125,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช (แก้ไขแล้ว - แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้) */}
+        {/* 6. กำหนดโค้ช (แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1160,23 +1143,22 @@ export default function NewPatientPage() {
             >
               <option value="">-- เลือกโค้ช --</option>
               {coaches.map((coach) => {
-                // ✅ แสดงข้อมูลโค้ชแบบละเอียด: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
-                const hospitalName = coach.users?.hospitals?.name || 'ไม่มีโรงพยาบาล';
-                const hospitalType = coach.users?.hospitals?.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย';
+                // ✅ แสดงข้อมูลโค้ชแบบละเอียด: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
+                const hospitalName = coach.hospitals?.name || 'ไม่มีโรงพยาบาล';
                 const specialization = coach.specialization_th || 'ไม่ระบุ';
                 
                 return (
                   <option key={coach.id} value={coach.user_id}>
-                    {coach.full_name_th} | {specialization} | {hospitalName} ({hospitalType})
+                    {coach.full_name_th} | {specialization} | {hospitalName}
                   </option>
                 );
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👥 แสดงโค้ช/บุคลากรจากโรงพยาบาลที่เลือกได้ ({coaches.length} คน)
+              👥 แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
             </p>
             <p className="text-xs text-blue-600 mt-1">
-              💡 รูปแบบ: ชื่อ | ความเชี่ยวชาญ | โรงพยาบาล (ประเภท)
+              💡 รูปแบบ: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
