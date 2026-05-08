@@ -353,7 +353,7 @@ export default function NewPatientPage() {
       setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน (วัน/เดือน/ปี)');
       return;
     }
- 
+
     // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       setError('❌ กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
