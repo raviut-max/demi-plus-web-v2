@@ -1,10 +1,12 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไข query ให้ join กับ hospitals table ถูกต้อง
-//    2. ✅ กรองโค้ชตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (แม่ข่าย + ลูกข่าย)
-//    3. ✅ แสดงชื่อโรงพยาบาลสำหรับโค้ชทุกคน (ยกเว้น Super Admin)
-//    4. ✅ กรอง Super Admin ออกจากรายการโค้ช
+//    1. ✅ เปลี่ยน "ผู้ป่วยจะสังกัด" เป็น "ผู้จัดทำสังกัดโรงพยาบาล" พร้อมระบุประเภท
+//    2. ✅ แก้ไขข้อความโค้ชเป็น "จากโรงพยาบาลแม่ข่ายลูกข่ายของผู้จัดทำ"
+//    3. ✅ กรองโค้ชตามโรงพยาบาลที่ผู้จัดทำเข้าถึงได้ (แม่ข่าย+ลูกข่าย)
+//    4. ✅ แสดงโค้ชแบบ: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
+//    5. ✅ ข้อความ error ภาษาไทยที่เข้าใจง่าย
+//    6. ✅ เพิ่ม Debug Logging
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -12,6 +14,7 @@ import {
   checkSession,
   logout,
   registerPatient,
+  getCoaches,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
@@ -70,21 +73,24 @@ interface Coach {
   id: string;
   user_id: string;
   full_name_th: string;
-  specialization_th?: string;
-  is_active: boolean;
-  is_verified: boolean;
+  specialization_th: string;
   hospital_id?: string;
   hospitals?: {
-    id?: string;
-    name?: string;
-    code?: string;
-    type?: 'main' | 'sub';
+    id: string;
+    name: string;
+    code: string;
+    type: 'main' | 'sub';
+    parent_id: string | null;
+    parent_hospital?: {
+      id: string;
+      name: string;
+      code: string;
+    };
   };
 }
 
 export default function NewPatientPage() {
   const router = useRouter();
-  
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(false);
@@ -94,14 +100,12 @@ export default function NewPatientPage() {
   const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
-  
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -145,21 +149,21 @@ export default function NewPatientPage() {
       return;
     }
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
+      setError('❌ คุณไม่มีสิทธิ์เข้าถึงหน้านี้ กรุณาเข้าสู่ระบบใหม่');
       router.push('/admin/login');
       return;
     }
-    
     console.log('👤 [NewPatient] User:', userData);
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
+    loadCoaches();
   }, [router]);
 
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
+
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -180,7 +184,7 @@ export default function NewPatientPage() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-      
+
       // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
       const allHospitals = await getHospitalsWithHierarchy();
       
@@ -195,68 +199,34 @@ export default function NewPatientPage() {
       
       setHospitals(filteredHospitals);
       console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
-      
-      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
-      loadCoaches(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
+      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
     }
   };
 
-  // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และกรองตาม accessibleHospitalIds)
-  const loadCoaches = async (hospitalIds: string[]) => {
+  // ✅ โหลดโค้ช (กรองตามโรงพยาบาลที่เข้าถึงได้ - แม่ข่าย+ลูกข่าย)
+  const loadCoaches = async () => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍⚕️ [loadCoaches] Loading coaches...');
+      const allCoaches = await getCoaches();
       
-      // ✅ Query ที่แก้ไขแล้ว - join กับ hospitals และกรองตาม hospital_id
-      let query = supabase
-        .from('doctors')
-        .select(`
-          id,
-          user_id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          is_verified,
-          hospital_id,
-          hospitals (
-            id,
-            name,
-            code,
-            type
-          )
-        `)
-        .eq('is_active', true)
-        .not('hospital_id', 'is', null); // ✅ กรองเฉพาะโค้ชที่มี hospital_id (ไม่รวม Super Admin)
-
-      // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้าไม่ใช่ Super Admin)
-      if (hospitalIds && hospitalIds.length > 0 && !isSuperAdmin(user)) {
-        query = query.in('hospital_id', hospitalIds);
+      // ✅ กรองโค้ชตามโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย + ลูกข่าย ของผู้จัดทำ)
+      let filteredCoaches = allCoaches;
+      if (accessibleHospitalIds.length > 0 && !isSuperAdmin(user)) {
+        console.log('🔒 [loadCoaches] Hospital Admin - filtering coaches by accessible hospitals');
+        filteredCoaches = allCoaches.filter(coach => 
+          coach.hospital_id && accessibleHospitalIds.includes(coach.hospital_id)
+        );
+      } else {
+        console.log('👑 [loadCoaches] Super Admin - showing all coaches');
       }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error('❌ [loadCoaches] Error:', error);
-        setCoaches([]);
-        return;
-      }
-
-      // ✅ กรองเอาเฉพาะโค้ชที่มี hospital_id และ hospital name
-      const filteredCoaches = (data || []).filter(coach => 
-        coach.hospital_id && coach.hospitals?.name
-      );
-
+      
       setCoaches(filteredCoaches);
-      console.log('✅ [loadCoaches] Loaded:', filteredCoaches.length, 'coaches with hospitals');
-      console.log('📋 [loadCoaches] Coaches:', filteredCoaches.map(c => ({
-        name: c.full_name_th,
-        hospital: c.hospitals?.name,
-        hospital_id: c.hospital_id
-      })));
+      console.log('👨‍⚕️ [loadCoaches] Filtered coaches:', filteredCoaches.length);
     } catch (error) {
-      console.error('❌ [loadCoaches] Exception:', error);
-      setCoaches([]);
+      console.error('❌ [loadCoaches] Error:', error);
+      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
     }
   };
 
@@ -266,11 +236,6 @@ export default function NewPatientPage() {
     
     const loadVillages = async () => {
       try {
-        if (!hospitalId) {
-          setVillages([]);
-          return;
-        }
-        
         const { data, error } = await supabase
           .from('villages')
           .select('*')
@@ -343,24 +308,35 @@ export default function NewPatientPage() {
     return { mainHospitals, hospitalGroups };
   };
 
+  // ✅ ฟังก์ชันแปลงข้อความเป็นภาษาไทยที่เข้าใจง่าย
+  const getFriendlyErrorMessage = (message: string): string => {
+    if (message.includes('id_card')) return '❌ เลขบัตรประชาชนไม่ถูกต้อง หรือซ้ำกับผู้ป่วยคนอื่น';
+    if (message.includes('hospital_number')) return '❌ เลข HN (เลขที่ผู้ป่วย) ซ้ำ กรุณาตรวจสอบใหม่';
+    if (message.includes('phone')) return '❌ เบอร์โทรศัพท์ไม่ถูกต้อง ต้องเป็นเลข 9-10 หลัก';
+    if (message.includes('email')) return '❌ อีเมลไม่ถูกต้อง กรุณาตรวจสอบรูปแบบ';
+    if (message.includes('birth')) return '❌ วันเกิดไม่ถูกต้อง กรุณากรอกให้ครบถ้วน';
+    if (message.includes('required')) return '❌ กรุณากรอกข้อมูลให้ครบถ้วน';
+    if (message.includes('duplicate')) return '❌ ข้อมูลนี้ถูกใช้งานแล้ว กรุณาใช้ข้อมูลอื่น';
+    return '❌ ' + message;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
     console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
     console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
-    
+
     // ✅ ตรวจสอบรหัสผ่าน
     if (formData.password !== formData.confirmPassword) {
-      setError('❌ รหัสผ่านไม่ตรงกัน');
+      setError('❌ รหัสผ่านไม่ตรงกัน กรุณาตรวจสอบอีกครั้ง');
       return;
     }
 
     // ✅ ตรวจสอบเลขบัตรประชาชน
     if (formData.id_card.length !== 13) {
-      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก');
+      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก กรุณาตรวจสอบใหม่');
       return;
     }
 
@@ -370,17 +346,19 @@ export default function NewPatientPage() {
       return;
     }
 
+    // ✅ ตรวจสอบวันเกิด
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน');
+      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน (วัน/เดือน/ปี)');
       return;
     }
 
+    // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       setError('❌ กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
       return;
     }
 
-    // ✅ ตรวจสอบว่าเลือกโรงพยาบาลแล้ว
+    // ✅ ตรวจสอบโรงพยาบาล
     if (!formData.hospital_id) {
       setError('❌ กรุณาเลือกโรงพยาบาลสังกัด');
       return;
@@ -458,18 +436,13 @@ export default function NewPatientPage() {
         }, 2000);
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
-        setError(result.error || 'เกิดข้อผิดพลาด');
+        setError(getFriendlyErrorMessage(result.error || 'เกิดข้อผิดพลาดในการลงทะเบียน'));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ [handleSubmit] Registration error:', err);
-      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
+      setError(getFriendlyErrorMessage(err.message || 'เกิดข้อผิดพลาดในการลงทะเบียน กรุณาลองใหม่อีกครั้ง'));
       setLoading(false);
     }
-  };
-
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
   };
 
   if (success) {
@@ -589,16 +562,23 @@ export default function NewPatientPage() {
         </div>
       </div>
 
-      {/* Info Banner - แสดงโรงพยาบาลที่ผู้ป่วยจะสังกัด */}
+      {/* Info Banner - ✅ แก้ไข: แสดงโรงพยาบาลของผู้จัดทำ */}
       <div className="max-w-5xl mx-auto px-4 py-4">
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
           <div className="text-sm text-blue-800">
             <p className="font-semibold mb-1">📋 ข้อมูลการลงทะเบียน</p>
             <ul className="space-y-1">
-              <li>• ผู้ป่วยจะสังกัดโรงพยาบาล: <strong>{userHospital?.name || 'ไม่ได้กำหนด'}</strong></li>
+              {/* ✅ เปลี่ยนเป็นแสดงโรงพยาบาลของผู้จัดทำ พร้อมระบุประเภท */}
+              <li>
+                • ผู้จัดทำสังกัดโรงพยาบาล: <strong>
+                  {userHospital?.name || 'ไม่ได้กำหนด'}
+                  {userHospital?.type === 'main' ? ' (แม่ข่าย)' : userHospital?.type === 'sub' ? ' (ลูกข่าย)' : ''}
+                </strong>
+              </li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
               <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
-              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากโรงพยาบาลที่คุณมีสิทธิ์)</li>
+              {/* ✅ แก้ไขข้อความโค้ช */}
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากโรงพยาบาลแม่ข่ายลูกข่ายของผู้จัดทำ)</li>
               {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
                 <li className="text-blue-600">• 🔒 แสดงเฉพาะโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง</li>
               )}
@@ -835,9 +815,10 @@ export default function NewPatientPage() {
               </label>
               <input
                 type="number"
-                step="0.1"
+                name="current_weight"
                 value={formData.current_weight}
                 onChange={handleChange}
+                step="0.1"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 placeholder="75.5"
               />
@@ -849,9 +830,10 @@ export default function NewPatientPage() {
               </label>
               <input
                 type="number"
-                step="0.1"
+                name="height"
                 value={formData.height}
                 onChange={handleChange}
+                step="0.1"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 placeholder="170"
               />
@@ -863,9 +845,10 @@ export default function NewPatientPage() {
               </label>
               <input
                 type="number"
-                step="0.1"
+                name="waist_circumference"
                 value={formData.waist_circumference}
                 onChange={handleChange}
+                step="0.1"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 placeholder="92"
               />
@@ -889,33 +872,35 @@ export default function NewPatientPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                ค่าน้ำตาล (mg/dL)
+                ค่าน้ำตาลในเลือด (mg/dL)
               </label>
               <input
                 type="number"
-                step="0.1"
+                name="blood_sugar"
                 value={formData.blood_sugar}
                 onChange={handleChange}
+                step="0.1"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                placeholder="110"
+                placeholder="เช่น 110"
               />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                ค่า HbA1c
+                ค่า HbA1c ล่าสุด
               </label>
               <input
                 type="number"
-                step="0.1"
+                name="hba1c_level"
                 value={formData.hba1c_level}
                 onChange={handleChange}
+                step="0.1"
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 placeholder="7.5"
               />
             </div>
 
-            <div className="md:col-span-3">
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 หมายเหตุ (คำแนะนำเพิ่มเติม)
               </label>
@@ -1152,13 +1137,13 @@ export default function NewPatientPage() {
                 value={formData.emergency_contact_relationship}
                 onChange={handleChange}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                placeholder="เช่น พ่อ, แม่, สามี"
+                placeholder="เช่น สามี, ภรรยา, ลูก"
               />
             </div>
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช (แก้ไขแล้ว - แสดงโค้ชที่มีโรงพยาบาลเท่านั้น) */}
+        {/* 6. กำหนดโค้ช (กรองตามโรงพยาบาลแม่ข่าย+ลูกข่ายของผู้จัดทำ) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1172,17 +1157,26 @@ export default function NewPatientPage() {
               name="coach_id"
               value={formData.coach_id}
               onChange={handleChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent max-h-96 overflow-y-auto"
             >
               <option value="">-- เลือกโค้ช --</option>
-              {coaches.map((coach) => (
-                <option key={coach.id} value={coach.user_id}>
-                  {coach.full_name_th} {coach.specialization_th ? `(${coach.specialization_th})` : ''} - {coach.hospitals?.name || 'ไม่มีสังกัด'}
-                </option>
-              ))}
+              {coaches.map((coach) => {
+                // ✅ แสดงข้อมูลโค้ชแบบละเอียด: ชื่อ | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
+                const hospitalName = coach.hospitals?.name || 'ไม่มีโรงพยาบาล';
+                const specialization = coach.specialization_th || 'ไม่ระบุ';
+                
+                return (
+                  <option key={coach.id} value={coach.user_id}>
+                    {coach.full_name_th} | {specialization} | {hospitalName}
+                  </option>
+                );
+              })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่คุณมีสิทธิ์)
+              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลแม่ข่ายลูกข่ายของผู้จัดทำ)
+            </p>
+            <p className="text-xs text-blue-600 mt-1">
+              💡 รูปแบบ: ชื่อโค้ช | ความเชี่ยวชาญ | ชื่อโรงพยาบาล
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
@@ -1191,7 +1185,7 @@ export default function NewPatientPage() {
             )}
             {isSuperAdmin(user) && (
               <p className="text-xs text-purple-600 mt-1">
-                👑 Super Admin - สามารถเลือกโค้ชจากทุกโรงพยาบาล
+                👑 Super Admin - แสดงโค้ชทั้งหมด
               </p>
             )}
           </div>
@@ -1226,7 +1220,7 @@ export default function NewPatientPage() {
           <button
             type="button"
             onClick={() => router.back()}
-            className="flex-1 bg-gray-500 text-white font-bold py-4 rounded-xl hover:bg-gray-600 transition-all"
+            className="px-6 py-4 bg-gray-500 text-white font-bold rounded-xl hover:bg-gray-600 transition-all"
           >
             ยกเลิก
           </button>
