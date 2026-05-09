@@ -2,12 +2,11 @@
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. ✅ ลบ useSearchParams ที่ไม่จำเป็น (แก้ข้อผิดพลาด build)
-//    2. ✅ เพิ่ม export const dynamic = 'force-dynamic'
-//    3. ✅ แก้ไขช่องว่างในโค้ดทั้งหมด (ปัดฝุ่นโค้ด)
-//    4. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    5. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    6. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    7. ✅ แสดงโรงพยาบาลของผู้ป่วยแต่ละราย
+//    2. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    3. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    4. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    5. ✅ แสดงโรงพยาบาลของผู้ป่วยแต่ละราย
+
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -20,22 +19,20 @@ import {
   getLatestGoalRound,
   saveGoalsNewRound,
   getAccessibleHospitalIds,
-  getUserHospitalInfo
+  getUserHospitalInfo,
+  createDefaultGoals
 } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   ArrowLeft, LogOut, Save, Target, Trophy, Plus,
   CheckCircle2, Circle, Search, User, History, Calendar,
-  Hospital, Building2, UserCheck
+  Hospital, Building2, UserCheck, AlertCircle
 } from 'lucide-react';
-
-// ✅ ป้องกัน Static Generation Error ใน Next.js App Router
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 // =====================================================
 // 📋 ค่าคงที่และ Interfaces
 // =====================================================
+
 // ✅ Default days ตาม PAM Level
 const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
   L2: 3,
@@ -119,12 +116,12 @@ export default function AdminGoalsPage() {
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
-  
+
   // ✅ State สำหรับ Round Number
   const [currentRound, setCurrentRound] = useState(1);
   const [lastRecordedDate, setLastRecordedDate] = useState('');
   const [isSameDay, setIsSameDay] = useState(false);
-  
+
   // ✅ State สำหรับค้นหาผู้ป่วย
   const [searchHN, setSearchHN] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -136,6 +133,7 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🔄 Effects
   // =====================================================
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
@@ -166,6 +164,7 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 📥 Data Loading Functions
   // =====================================================
+
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -378,6 +377,7 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🎯 Handler Functions
   // =====================================================
+
   const handlePatientSelect = (patientId: string) => {
     setSelectedPatient(patientId);
     if (patientId) {
@@ -557,6 +557,7 @@ export default function AdminGoalsPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
+
     const today = new Date().toISOString().split('T')[0];
     console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
 
@@ -733,11 +734,12 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🔧 Helper Functions
   // =====================================================
+
   const foodActivities = activities.filter(a => a.activity_type === 'food');
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
   const restActivities = activities.filter(a => a.activity_type === 'rest');
-  
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('th-TH', {
       year: 'numeric',
@@ -749,6 +751,7 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🎨 Render
   // =====================================================
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -769,7 +772,7 @@ export default function AdminGoalsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-800 mb-1">
