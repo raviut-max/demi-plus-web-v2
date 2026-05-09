@@ -1,13 +1,13 @@
 // app/admin/goals/page.tsx
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ รับ patient_id จาก query parameter อัตโนมัติด้วย useSearchParams
-//    2. ✅ ปุ่ม back กลับถูกต้องตามเงื่อนไข (มี patient_id → กลับหน้าผู้ป่วย, ไม่มี → กลับ dashboard)
-//    3. ✅ ซ่อนส่วนค้นหาและเลือกผู้ป่วยเมื่อมี patient_id จาก query
-//    4. ✅ ยังคงใช้งานแบบเดิมได้ (ไม่มี patient_id)
+//    1. ✅ เพิ่ม Suspense boundary สำหรับ useSearchParams
+//    2. ✅ รับ patient_id จาก query parameter อัตโนมัติ
+//    3. ✅ ปรับปรุง back navigation ให้ถูกต้อง
+//    4. ✅ ซ่อน dropdown เมื่อมี patient_id
 'use client';
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation'; // ✅ เพิ่ม useSearchParams
+import { useEffect, useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -23,12 +23,9 @@ import { supabase } from '@/lib/supabase/client';
 import {
   ArrowLeft, LogOut, Save, Target, Trophy, Plus,
   CheckCircle2, Circle, Search, User, History, Calendar,
-  Hospital, Building2, UserCheck, AlertCircle
+  Hospital, Building2, UserCheck
 } from 'lucide-react';
 
-// =====================================================
-// 📋 ค่าคงที่และ Interfaces
-// =====================================================
 // ✅ Default days ตาม PAM Level
 const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
   L2: 3,
@@ -94,10 +91,11 @@ interface UserHospital {
   };
 }
 
-export default function AdminGoalsPage() {
+// ✅ Component หลักที่ใช้งาน useSearchParams
+function GoalsPageContent() {
   const router = useRouter();
-  const searchParams = useSearchParams(); // ✅ ดึง query params
-  const patientIdFromQuery = searchParams?.get('patient_id'); // ✅ รับ patient_id จาก URL
+  const searchParams = useSearchParams();
+  const patientIdFromQuery = searchParams.get('patient_id');
 
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
@@ -106,6 +104,7 @@ export default function AdminGoalsPage() {
   const [saving, setSaving] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState('');
   const [patientPamLevel, setPatientPamLevel] = useState('');
+  const [patientData, setPatientData] = useState<any>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [editedGoals, setEditedGoals] = useState<Record<string, { target_days: number; target_value?: string }>>({});
@@ -124,11 +123,7 @@ export default function AdminGoalsPage() {
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [searchType, setSearchType] = useState<'hn' | 'name' | null>(null);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-  const [patientFromQuery, setPatientFromQuery] = useState<any>(null); // ✅ เก็บข้อมูลผู้ป่วยจาก query
 
-  // =====================================================
-  // 🔄 Effects
-  // =====================================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const userData = checkSession();
@@ -136,31 +131,27 @@ export default function AdminGoalsPage() {
       router.push('/admin/login');
       return;
     }
+
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-    
-    // ✅ ถ้ามี patient_id จาก query → โหลดข้อมูลผู้ป่วยทันที
-    if (patientIdFromQuery) {
-      loadPatientFromQuery(patientIdFromQuery);
-    }
-  }, [router, patientIdFromQuery]);
+  }, [router]);
 
-  // ✅ useEffect สำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน (เฉพาะกรณีไม่มี patient_id จาก query)
+  // ✅ โหลดผู้ป่วยอัตโนมัติเมื่อมี patient_id จาก query
   useEffect(() => {
-    if (selectedPatient && patients.length > 0 && !patientIdFromQuery) {
-      loadPatientData(selectedPatient);
+    if (patientIdFromQuery && patients.length > 0) {
+      console.log(' [Auto-select] Patient ID from query:', patientIdFromQuery);
+      handlePatientSelect(patientIdFromQuery);
     }
-  }, [selectedPatient, patients, patientIdFromQuery]);
+  }, [patientIdFromQuery, patients]);
 
-  // =====================================================
-  // 📥 Data Loading Functions
-  // =====================================================
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -170,6 +161,7 @@ export default function AdminGoalsPage() {
     }
   };
 
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       const ids = await getAccessibleHospitalIds(userId);
@@ -181,6 +173,7 @@ export default function AdminGoalsPage() {
     }
   };
 
+  // ✅ โหลดรายการผู้ป่วย (กรองตามสิทธิ์)
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       let query = supabase
@@ -194,6 +187,7 @@ export default function AdminGoalsPage() {
       }
 
       const { data, error } = await query;
+
       if (error) {
         console.error('Error loading patients:', error);
         return;
@@ -215,37 +209,19 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // ✅ โหลดข้อมูลผู้ป่วยจาก query parameter (ใหม่)
-  const loadPatientFromQuery = async (patientId: string) => {
-    try {
-      console.log('🔍 [loadPatientFromQuery] Loading patient:', patientId);
-      const patientData = await getPatientDetail(patientId);
-      
-      if (patientData) {
-        setPatientFromQuery(patientData);
-        setSelectedPatient(patientId); // ตั้งค่า selectedPatient เพื่อให้ใช้ฟังก์ชันเดิมได้
-        setPatientPamLevel(patientData.pam_level || 'L2');
-        
-        // ✅ โหลดข้อมูลเป้าหมายและกิจกรรม
-        await loadPatientData(patientId);
-      } else {
-        console.error('❌ Patient not found:', patientId);
-        alert('ไม่พบข้อมูลผู้ป่วย');
-        handleBack(); // กลับไปหน้าก่อนหน้า
-      }
-    } catch (error) {
-      console.error('❌ [loadPatientFromQuery] Error:', error);
-      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ป่วย');
-      handleBack();
+  // ✅ useEffect สำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
+  useEffect(() => {
+    if (selectedPatient && patients.length > 0) {
+      loadPatientData(selectedPatient);
     }
-  };
+  }, [selectedPatient, patients]);
 
+  // ✅ โหลดข้อมูลผู้ป่วยเมื่อเลือก
   const loadPatientData = async (patientId: string) => {
     try {
-      // ถ้าโหลดจาก query แล้ว ให้ใช้ข้อมูลนั้นเลย
-      const patient = patientFromQuery || patients.find(p => p.id === patientId);
-      
+      const patient = patients.find(p => p.id === patientId);
       if (patient) {
+        setPatientData(patient);
         const pamLevel = patient.pam_level || 'L2';
         setPatientPamLevel(pamLevel);
 
@@ -261,6 +237,8 @@ export default function AdminGoalsPage() {
           console.error('Error loading activities:', activitiesError);
           return;
         }
+
+        console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
         // ✅ 2. ดึง goals ปัจจุบัน
@@ -286,6 +264,8 @@ export default function AdminGoalsPage() {
           }
         });
         const uniqueGoals = Array.from(uniqueGoalsMap.values());
+
+        console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
         // ✅ 3. โหลดค่าที่แก้ไขแล้ว
@@ -308,6 +288,7 @@ export default function AdminGoalsPage() {
           .order('round_number', { ascending: false })
           .order('created_at', { ascending: false });
 
+        // จัดกลุ่มประวัติตาม round_number
         const roundsMap = new Map<number, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
           const round = goal.round_number || 1;
@@ -325,6 +306,7 @@ export default function AdminGoalsPage() {
           round_number: round,
         }));
 
+        // เพิ่ม current goals เข้าไปด้วย
         if (uniqueGoals && uniqueGoals.length > 0) {
           const currentRoundNum = uniqueGoals[0].round_number || 1;
           history.unshift({
@@ -335,6 +317,7 @@ export default function AdminGoalsPage() {
             round_number: currentRoundNum,
           });
         }
+
         setGoalHistory(history);
 
         // ✅ 5. โหลด primary goal
@@ -344,6 +327,7 @@ export default function AdminGoalsPage() {
             .select('primary_goal_code')
             .eq('id', patientId)
             .single();
+
           setPrimaryGoal(profileData?.primary_goal_code || '');
         } catch (err) {
           console.error('Error loading primary goal:', err);
@@ -367,9 +351,13 @@ export default function AdminGoalsPage() {
         const latestRound = await getLatestGoalRound(patientId);
         if (latestRound) {
           setLastRecordedDate(latestRound.created_at);
+
+          // ✅ ตรวจสอบว่าบันทึกในวันเดิมหรือไม่
           const today = new Date().toISOString().split('T')[0];
           const lastDate = new Date(latestRound.created_at).toISOString().split('T')[0];
           setIsSameDay(today === lastDate);
+
+          console.log('📅 Last recorded:', lastDate, '| Today:', today, '| Same day:', today === lastDate);
         }
       }
     } catch (error) {
@@ -377,9 +365,6 @@ export default function AdminGoalsPage() {
     }
   };
 
-  // =====================================================
-  // 🎯 Handler Functions
-  // =====================================================
   const handlePatientSelect = (patientId: string) => {
     setSelectedPatient(patientId);
     if (patientId) {
@@ -396,9 +381,11 @@ export default function AdminGoalsPage() {
       setCurrentRound(1);
       setLastRecordedDate('');
       setIsSameDay(false);
+      setPatientData(null);
     }
   };
 
+  // ✅ ฟังก์ชันค้นหาผู้ป่วยด้วย HN
   const handleSearchHN = (value: string) => {
     setSearchHN(value);
     setSearchType('hn');
@@ -415,6 +402,7 @@ export default function AdminGoalsPage() {
     setShowSearchDropdown(true);
   };
 
+  // ✅ ฟังก์ชันค้นหาผู้ป่วยด้วยชื่อ
   const handleSearchName = (value: string) => {
     setSearchName(value);
     setSearchType('name');
@@ -440,17 +428,7 @@ export default function AdminGoalsPage() {
     loadPatientData(patient.id);
   };
 
-  // ✅ ปุ่มกลับที่ถูกต้องตามเงื่อนไข
-  const handleBack = () => {
-    if (patientIdFromQuery) {
-      // ✅ มี patient_id → กลับไปหน้าประวัติเป้าหมายของผู้ป่วยนั้น
-      router.push(`/admin/patients/${patientIdFromQuery}/goals`);
-    } else {
-      // ✅ ไม่มี patient_id → กลับไป dashboard
-      router.push('/admin/dashboard');
-    }
-  };
-
+  // ✅ เปลี่ยนเป้าหมายหลัก
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     setSavingPrimaryGoal(true);
@@ -474,7 +452,9 @@ export default function AdminGoalsPage() {
         }
         return;
       }
+
       setPrimaryGoal(goalCode);
+      console.log('✅ Primary goal updated:', goalCode);
     } catch (err) {
       console.error('Update primary goal error:', err);
       alert('เกิดข้อผิดพลาดในการบันทึก');
@@ -483,6 +463,7 @@ export default function AdminGoalsPage() {
     }
   };
 
+  // ✅ สร้างเป้าหมายเริ่มต้นอัตโนมัติ
   const handleCreateDefaultGoals = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
@@ -529,6 +510,7 @@ export default function AdminGoalsPage() {
         }));
 
         const { error } = await supabase.from('goals').insert(newGoals);
+
         if (error) {
           alert('เกิดข้อผิดพลาด: ' + error.message);
           return;
@@ -545,7 +527,9 @@ export default function AdminGoalsPage() {
     }
   };
 
+  // ✅ อัปเดตค่าเป้าหมาย
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
+    console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
       ...prev,
       [goalName]: {
@@ -555,13 +539,16 @@ export default function AdminGoalsPage() {
     }));
   };
 
+  // ✅ บันทึกเป้าหมายรอบใหม่
   const handleSaveNewRound = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
     const today = new Date().toISOString().split('T')[0];
+    console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
 
+    // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
     const { data: existingToday, error: fetchError } = await supabase
       .from('goals')
       .select('id, goal_name, round_number, created_at')
@@ -572,10 +559,13 @@ export default function AdminGoalsPage() {
       .lte('created_at', today + 'T23:59:59');
 
     if (fetchError) {
-      console.error('Error fetching:', fetchError);
+      console.error('❌ [DEBUG] Error fetching:', fetchError);
     }
 
+    console.log('📋 [DEBUG] Existing goals today:', existingToday?.length || 0);
+
     let confirmMessage = 'ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\n';
+
     if (existingToday && existingToday.length > 0) {
       confirmMessage += `⚠️ คุณได้บันทึกเป้าหมายไปแล้ววันนี้ (${existingToday.length} กิจกรรม)\n\n`;
       confirmMessage += 'การบันทึกครั้งนี้จะลบข้อมูลเดิมของวันนี้และบันทึกใหม่\n\n';
@@ -585,6 +575,7 @@ export default function AdminGoalsPage() {
     }
 
     if (!confirm(confirmMessage)) {
+      console.log('❌ [DEBUG] User cancelled');
       return;
     }
 
@@ -593,7 +584,10 @@ export default function AdminGoalsPage() {
     try {
       // ✅ 2. ลบ goals ของวันนี้ก่อน (ถ้ามี)
       if (existingToday && existingToday.length > 0) {
-        await supabase
+        console.log('🗑️ [DEBUG] Deleting goals...');
+        console.log('🗑️ [DEBUG] Goal IDs:', existingToday.map(g => g.id));
+
+        const { error: deleteError } = await supabase
           .from('goals')
           .delete()
           .eq('user_id', selectedPatient)
@@ -601,10 +595,18 @@ export default function AdminGoalsPage() {
           .eq('is_current', true)
           .gte('created_at', today + 'T00:00:00')
           .lte('created_at', today + 'T23:59:59');
+
+        if (deleteError) {
+          console.error('❌ [DEBUG] Delete error:', deleteError);
+        } else {
+          console.log('✅ [DEBUG] Deleted successfully');
+        }
       }
 
       // ✅ 3. Archive goals เดิม (เฉพาะของวันก่อนหน้า)
       if (!existingToday || existingToday.length === 0) {
+        console.log('📦 [DEBUG] Archiving old goals...');
+
         const { data: goalsToArchive } = await supabase
           .from('goals')
           .select('id, goal_name, round_number')
@@ -612,8 +614,10 @@ export default function AdminGoalsPage() {
           .eq('goal_type', 'weekly_activity')
           .eq('is_current', true);
 
+        console.log('📦 [DEBUG] Goals to archive:', goalsToArchive?.length || 0);
+
         if (goalsToArchive && goalsToArchive.length > 0) {
-          await supabase
+          const { error: archiveError } = await supabase
             .from('goals')
             .update({
               is_current: false,
@@ -623,27 +627,46 @@ export default function AdminGoalsPage() {
             .eq('user_id', selectedPatient)
             .eq('goal_type', 'weekly_activity')
             .eq('is_current', true);
+
+          if (archiveError) {
+            console.error('❌ [DEBUG] Archive error:', archiveError);
+          } else {
+            console.log('✅ [DEBUG] Archived successfully');
+          }
         }
       }
 
-      // ✅ 4. นับ round_number ใหม่
+      // ✅ 4. นับ round_number ใหม่ (นับจากวันที่ไม่ซ้ำ)
+      console.log('🔢 [DEBUG] Calculating new round number...');
+
       let newRoundNumber: number;
+
       if (existingToday && existingToday.length > 0) {
+        // วันนี้บันทึกไปแล้ว → ใช้ round เดิม
         newRoundNumber = existingToday[0].round_number || 1;
+        console.log('📅 [DEBUG] Same day - using existing round:', newRoundNumber);
       } else {
+        // วันใหม่ → archive ของเก่า + นับรอบใหม่
         const { data: allGoals } = await supabase
           .from('goals')
           .select('created_at')
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity');
+
+        // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
         const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
         newRoundNumber = uniqueDates.size;
+
+        console.log('🔢 [DEBUG] Unique dates:', Array.from(uniqueDates));
+        console.log('🔢 [DEBUG] New round number:', newRoundNumber);
       }
 
       // ✅ 5. สร้าง goals ใหม่
       const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
+
       const newGoals = activities.map(activity => {
         const edit = editedGoals[activity.activity_code] || { target_days: defaultDays };
+
         return {
           user_id: selectedPatient,
           goal_type: 'weekly_activity' as const,
@@ -666,16 +689,24 @@ export default function AdminGoalsPage() {
         };
       });
 
+      console.log('💾 [DEBUG] Saving goals:', newGoals.length);
+      console.log('💾 [DEBUG] Round number:', newRoundNumber);
+
       const { error } = await supabase.from('goals').insert(newGoals);
+
       if (error) {
+        console.error('❌ [DEBUG] Insert error:', error);
         alert('เกิดข้อผิดพลาด: ' + error.message);
         return;
       }
 
+      console.log('✅ [DEBUG] Saved successfully');
       alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
+
       await loadPatientData(selectedPatient);
+
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ [DEBUG] Error:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
@@ -687,9 +718,17 @@ export default function AdminGoalsPage() {
     router.push('/admin/login');
   };
 
-  // =====================================================
-  // 🔧 Helper Functions
-  // =====================================================
+  // ✅ ปุ่ม back ที่ถูกต้อง
+  const handleBack = () => {
+    if (patientIdFromQuery) {
+      // ✅ ถ้ามี patient_id → กลับไปหน้า goals ของผู้ป่วยนั้น
+      router.push(`/admin/patients/${patientIdFromQuery}/goals`);
+    } else {
+      // ✅ ไม่มี → กลับไป dashboard
+      router.push('/admin/dashboard');
+    }
+  };
+
   const foodActivities = activities.filter(a => a.activity_type === 'food');
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
@@ -703,9 +742,9 @@ export default function AdminGoalsPage() {
     });
   };
 
-  // =====================================================
-  // 🎨 Render
-  // =====================================================
+  // ✅ ตรวจสอบว่าควรแสดง search/dropdown หรือไม่
+  const shouldShowSearch = !patientIdFromQuery;
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -714,15 +753,11 @@ export default function AdminGoalsPage() {
     );
   }
 
-  // ✅ ใช้ข้อมูลผู้ป่วยจากแหล่งที่ถูกต้อง
-  const currentPatient = patientFromQuery || patients.find(p => p.id === selectedPatient);
-
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับที่ถูกต้อง */}
           <button
             onClick={handleBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
@@ -730,7 +765,6 @@ export default function AdminGoalsPage() {
             <ArrowLeft className="w-4 h-4" />
             {patientIdFromQuery ? 'กลับหน้าผู้ป่วย' : 'กลับ Dashboard'}
           </button>
-
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-800 mb-1">
@@ -740,7 +774,7 @@ export default function AdminGoalsPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -752,10 +786,12 @@ export default function AdminGoalsPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
+
+                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
@@ -764,6 +800,8 @@ export default function AdminGoalsPage() {
                         {userHospital.name}
                       </span>
                     </div>
+
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -774,6 +812,8 @@ export default function AdminGoalsPage() {
                           🏥 ลูกข่าย
                         </span>
                       )}
+
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -783,7 +823,9 @@ export default function AdminGoalsPage() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
+                  <p className="text-xs text-gray-400 mt-2">
+                    ไม่สังกัดโรงพยาบาล
+                  </p>
                 )}
               </div>
 
@@ -801,28 +843,8 @@ export default function AdminGoalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        
-        {/* ✅ แสดงผู้ป่วยที่เลือกจาก query parameter (ถ้ามี) */}
-        {patientIdFromQuery && currentPatient && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-            <div className="flex items-center gap-3">
-              <User className="w-5 h-5 text-blue-600" />
-              <div>
-                <p className="font-semibold text-blue-800">
-                  👤 กำลังจัดการเป้าหมาย: {currentPatient.first_name} {currentPatient.last_name}
-                </p>
-                <p className="text-sm text-blue-600">
-                  HN: {currentPatient.hospital_number} | 
-                  PAM: {currentPatient.pam_level} |
-                  {currentPatient.hospitals?.name && ` 🏥 ${currentPatient.hospitals.name}`}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ✅ ส่วนเลือกผู้ป่วย - ซ่อนเมื่อมี patient_id จาก query */}
-        {!patientIdFromQuery && (
+        {/* ✅ แสดงเฉพาะเมื่อไม่มี patient_id */}
+        {shouldShowSearch && (
           <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -892,13 +914,16 @@ export default function AdminGoalsPage() {
                         <p className="text-sm text-gray-500">
                           PAM: {patient.pam_level} | {patient.phone || 'ไม่มีเบอร์โทร'}
                         </p>
+                        {/* ✅ แสดงโรงพยาบาลของผู้ป่วย */}
                         {patient.hospitals && (
                           <p className="text-xs text-blue-600 mt-1">
                             🏥 {patient.hospitals.name} {patient.hospitals.type === 'main' ? '(แม่ข่าย)' : '(ลูกข่าย)'}
                           </p>
                         )}
                       </div>
-                      <div className="text-sm text-blue-600 font-medium">คลิกเลือก</div>
+                      <div className="text-sm text-blue-600 font-medium">
+                        คลิกเลือก
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -932,62 +957,66 @@ export default function AdminGoalsPage() {
           </div>
         )}
 
-        {/* ✅ แสดงเนื้อหาเมื่อมีผู้ป่วยที่เลือก */}
-        {(selectedPatient || patientIdFromQuery) && patientPamLevel && (
-          <>
-            {/* Info Banner */}
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <p className="text-sm text-blue-800">
-                    <strong>ระดับผู้ป่วย:</strong> {patientPamLevel} | 
-                    <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
-                    {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
-                    {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
-                    {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
-                  </p>
-                  
-                  {/* แสดง Round Number และวันที่บันทึก */}
-                  <div className="mt-2 flex items-center gap-4">
-                    <div className="flex items-center gap-1 text-xs text-blue-600">
-                      <History className="w-3 h-3" />
-                      <span>รอบที่: <strong>{currentRound}</strong></span>
-                    </div>
-                    {lastRecordedDate && (
-                      <div className="flex items-center gap-1 text-xs text-blue-600">
-                        <Calendar className="w-3 h-3" />
-                        <span>บันทึกครั้งล่าสุด: <strong>{formatDate(lastRecordedDate)}</strong></span>
-                      </div>
-                    )}
-                    {isSameDay && (
-                      <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
-                        ⚠️ บันทึกวันนี้แล้ว
-                      </span>
-                    )}
-                  </div>
-                  
-                  {goalHistory[0]?.is_current && (
-                    <p className="text-xs text-blue-600 mt-1">
-                      📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
-                    </p>
-                  )}
-                  <p className="text-xs text-blue-600 mt-1">
-                    💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
-                  </p>
-                </div>
-                
-                {goals.length === 0 && (
-                  <button
-                    onClick={handleCreateDefaultGoals}
-                    disabled={saving}
-                    className="shrink-0 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
-                  >
-                    🎯 สร้างเป้าหมาย
-                  </button>
-                )}
-              </div>
-            </div>
+        {/* ✅ แสดงข้อมูลผู้ป่วยที่เลือก (จาก query หรือ manual) */}
+        {patientData && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-sm text-blue-800">
+                  <strong>ผู้ป่วยที่เลือก:</strong> {patientData.hospital_number} - {patientData.full_name}
+                </p>
+                <p className="text-sm text-blue-800 mt-1">
+                  <strong>PAM Level:</strong> {patientPamLevel} | 
+                  <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
+                  {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
+                  {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
+                  {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
+                </p>
 
+                {/* ✅ แสดง Round Number และวันที่บันทึก */}
+                <div className="mt-2 flex items-center gap-4">
+                  <div className="flex items-center gap-1 text-xs text-blue-600">
+                    <History className="w-3 h-3" />
+                    <span>รอบที่: <strong>{currentRound}</strong></span>
+                  </div>
+                  {lastRecordedDate && (
+                    <div className="flex items-center gap-1 text-xs text-blue-600">
+                      <Calendar className="w-3 h-3" />
+                      <span>บันทึกครั้งล่าสุด: <strong>{formatDate(lastRecordedDate)}</strong></span>
+                    </div>
+                  )}
+                  {isSameDay && (
+                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                      ⚠️ บันทึกวันนี้แล้ว
+                    </span>
+                  )}
+                </div>
+
+                {goalHistory[0]?.is_current && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
+                  </p>
+                )}
+                <p className="text-xs text-blue-600 mt-1">
+                  💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
+                </p>
+              </div>
+
+              {goals.length === 0 && (
+                <button
+                  onClick={handleCreateDefaultGoals}
+                  disabled={saving}
+                  className="shrink-0 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
+                >
+                  🎯 สร้างเป้าหมาย
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {selectedPatient && patientPamLevel && (
+          <>
             {/* Long-term Goals */}
             <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
               <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -995,18 +1024,17 @@ export default function AdminGoalsPage() {
                 เป้าหมายหลัก 4 ประการ (Core Performance Goals)
                 <span className="text-sm font-normal text-gray-500 ml-2">- เลือก 1 ข้อที่เป็นเป้าหมายหลักของผู้ป่วย</span>
               </h2>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {LONG_TERM_GOALS.map((goal) => {
                   const isSelected = primaryGoal === goal.code;
                   return (
                     <label
                       key={goal.code}
-                      className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-purple-500 bg-purple-50 shadow-md'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
+                      className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${isSelected
+                        ? 'border-purple-500 bg-purple-50 shadow-md'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
                     >
                       <div className="flex items-start gap-3">
                         <div className="mt-1">
@@ -1054,9 +1082,11 @@ export default function AdminGoalsPage() {
                   💡 หมายเหตุนี้จะถูกบันทึกกับเป้าหมายหลักของผู้ป่วย
                 </p>
               </div>
-              
+
               {savingPrimaryGoal && (
-                <p className="text-sm text-gray-500 mt-3 text-center">กำลังบันทึก...</p>
+                <p className="text-sm text-gray-500 mt-3 text-center">
+                  กำลังบันทึก...
+                </p>
               )}
             </div>
 
@@ -1277,21 +1307,20 @@ export default function AdminGoalsPage() {
             )}
           </>
         )}
-
-        {/* ✅ แสดงข้อความเมื่อไม่มีผู้ป่วยที่เลือก (เฉพาะกรณีไม่มี patient_id จาก query) */}
-        {!patientIdFromQuery && !selectedPatient && (
-          <div className="text-center py-12">
-            <Target className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-            <p className="text-gray-500 mb-4">กรุณาเลือกผู้ป่วยเพื่อเริ่มจัดการเป้าหมาย</p>
-            <button
-              onClick={() => router.push('/admin/patients')}
-              className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
-            >
-              👥 ไปหน้ารายการผู้ป่วย
-            </button>
-          </div>
-        )}
       </div>
     </div>
+  );
+}
+
+// ✅ Component หลักที่ wrap ด้วย Suspense
+export default function AdminGoalsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    }>
+      <GoalsPageContent />
+    </Suspense>
   );
 }
