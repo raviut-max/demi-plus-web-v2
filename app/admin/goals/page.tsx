@@ -1,12 +1,12 @@
 // app/admin/goals/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ลบ useSearchParams ที่ไม่จำเป็น (แก้ข้อผิดพลาด build)
-//    2. ✅ ใช้ router.query แทนสำหรับรับ patient_id
-//    3. ✅ เพิ่มการตรวจสอบสิทธิ์การเข้าถึงโรงพยาบาล
+//    1. ✅ ตรวจสอบ patient_id จาก URL และโหลดข้อมูลอัตโนมัติ
+//    2. ✅ ซ่อนส่วนค้นหาเมื่อมี patient_id
+//    3. ✅ แก้ไขปุ่มกลับให้กลับไปหน้าประวัติเป้าหมายที่ถูกต้อง
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation'; // ✅ ไม่ต้องใช้ useSearchParams
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -15,7 +15,8 @@ import {
   getLatestGoalRound,
   saveGoalsNewRound,
   getAccessibleHospitalIds,
-  getUserHospitalInfo
+  getUserHospitalInfo,
+  getPatientDetail
 } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
@@ -91,6 +92,7 @@ interface UserHospital {
 
 export default function AdminGoalsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -104,15 +106,13 @@ export default function AdminGoalsPage() {
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState('');
-  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
+  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); 
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
-  
   // ✅ State สำหรับ Round Number
   const [currentRound, setCurrentRound] = useState(1);
   const [lastRecordedDate, setLastRecordedDate] = useState('');
   const [isSameDay, setIsSameDay] = useState(false);
-  
   // ✅ State สำหรับค้นหาผู้ป่วย
   const [searchHN, setSearchHN] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -120,13 +120,11 @@ export default function AdminGoalsPage() {
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [searchType, setSearchType] = useState<'hn' | 'name' | null>(null);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  // ✅ State สำหรับตรวจสอบว่ามาจากหน้าไหน
+  const [fromPage, setFromPage] = useState<string>('');
 
-  // =====================================================
-  // 🔄 Effects
-  // =====================================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
     const userData = checkSession();
     if (!userData) {
       router.push('/admin/login');
@@ -140,13 +138,28 @@ export default function AdminGoalsPage() {
     }
 
     setUser(userData);
+    
+    // ✅ ตรวจสอบว่ามาจากหน้าไหน
+    const from = searchParams.get('from');
+    setFromPage(from || '');
+    
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-  }, [router]);
+  }, [router, searchParams]);
+
+  // ✅ useEffect สำหรับโหลดผู้ป่วยเมื่อมี patient_id ใน URL
+  useEffect(() => {
+    const patientId = searchParams.get('patient_id');
+    if (patientId && patients.length > 0) {
+      console.log('🎯 Auto-loading patient from URL:', patientId);
+      setSelectedPatient(patientId);
+      loadPatientData(patientId);
+    }
+  }, [searchParams, patients]);
 
   // ✅ useEffect แยกสำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
   useEffect(() => {
-    if (selectedPatient && patients.length > 0) {
+    if (selectedPatient && patients.length > 0 && !searchParams.get('patient_id')) {
       loadPatientData(selectedPatient);
     }
   }, [selectedPatient, patients]);
@@ -170,7 +183,6 @@ export default function AdminGoalsPage() {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 Accessible hospitals for goals:', ids.length, 'hospitals');
-      
       // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
       loadPatients(ids);
     } catch (error) {
@@ -239,7 +251,7 @@ export default function AdminGoalsPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน
+        // ✅ 2. ดึง goals ปัจจุบัน    
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -443,6 +455,7 @@ export default function AdminGoalsPage() {
 
       if (error) {
         console.error('Error updating primary goal:', error);
+        
         if (error.code === '42P01') {
           alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
         } else if (error.code === '42703') {
@@ -718,6 +731,17 @@ export default function AdminGoalsPage() {
     router.push('/admin/login');
   };
 
+  // ✅ ปุ่มกลับ - แก้ไขให้กลับไปหน้าประวัติเป้าหมายของผู้ป่วย
+  const handleBack = () => {
+    if (fromPage === 'patient-goals' && selectedPatient) {
+      // ✅ กลับไปหน้าประวัติเป้าหมายของผู้ป่วย
+      router.push(`/admin/patients/${selectedPatient}/goals`);
+    } else {
+      // ✅ กลับไปหน้า Dashboard
+      router.push('/admin/dashboard');
+    }
+  };
+
   // =====================================================
   // 🔧 Helper Functions
   // =====================================================
@@ -725,7 +749,6 @@ export default function AdminGoalsPage() {
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
   const restActivities = activities.filter(a => a.activity_type === 'rest');
-  
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('th-TH', {
       year: 'numeric',
@@ -733,6 +756,9 @@ export default function AdminGoalsPage() {
       day: 'numeric',
     });
   };
+
+  // ✅ ตรวจสอบว่ามี patient_id และโหลดข้อมูลแล้วหรือยัง
+  const hasPatientData = searchParams.get('patient_id') && selectedPatient && activities.length > 0;
 
   // =====================================================
   // 🎨 Render
@@ -751,13 +777,13 @@ export default function AdminGoalsPage() {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
-            onClick={() => router.push('/admin/dashboard')}
+            onClick={handleBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ Dashboard
+            {fromPage === 'patient-goals' ? 'กลับหน้าประวัติเป้าหมาย' : 'กลับ Dashboard'}
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-800 mb-1">
@@ -836,117 +862,119 @@ export default function AdminGoalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Select Patient */}
-        <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-              <Target className="w-5 h-5 text-blue-600" />
-              เลือกผู้ป่วย
-            </h2>
-            {selectedPatient && goals.length === 0 && (
-              <button
-                onClick={handleCreateDefaultGoals}
-                disabled={saving}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
-              >
-                <Plus className="w-4 h-4" />
-                {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
-              </button>
-            )}
-          </div>
-
-          {/* Search by HN */}
-          <div className="mb-4">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              🔍 ค้นหาด้วย HN (Hospital Number)
-            </label>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                value={searchHN}
-                onChange={(e) => handleSearchHN(e.target.value)}
-                placeholder="พิมพ์ HN เพื่อค้นหา..."
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Search by Name */}
-          <div className="mb-4">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              👤 ค้นหาด้วยชื่อผู้ป่วย
-            </label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                value={searchName}
-                onChange={(e) => handleSearchName(e.target.value)}
-                placeholder="พิมพ์ชื่อผู้ป่วยเพื่อค้นหา..."
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-
-          {/* Search Results Dropdown */}
-          {showSearchDropdown && filteredPatients.length > 0 && (
-            <div className="mb-4 border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
-              {filteredPatients.map((patient) => (
+        {/* ✅ แสดงส่วนค้นหาเฉพาะเมื่อไม่มี patient_id */}
+        {!hasPatientData && (
+          <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Target className="w-5 h-5 text-blue-600" />
+                เลือกผู้ป่วย
+              </h2>
+              {selectedPatient && goals.length === 0 && (
                 <button
-                  key={patient.id}
-                  onClick={() => handleSelectPatient(patient)}
-                  className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                  onClick={handleCreateDefaultGoals}
+                  disabled={saving}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-semibold text-gray-800">
-                        {patient.hospital_number} - {patient.full_name}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        PAM: {patient.pam_level} | {patient.phone || 'ไม่มีเบอร์โทร'}
-                      </p>
-                      {/* ✅ แสดงโรงพยาบาลของผู้ป่วย */}
-                      {patient.hospitals && (
-                        <p className="text-xs text-blue-600 mt-1">
-                          🏥 {patient.hospitals.name} {patient.hospitals.type === 'main' ? '(แม่ข่าย)' : '(ลูกข่าย)'}
-                        </p>
-                      )}
-                    </div>
-                    <div className="text-sm text-blue-600 font-medium">
-                      คลิกเลือก
-                    </div>
-                  </div>
+                  <Plus className="w-4 h-4" />
+                  {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
                 </button>
-              ))}
+              )}
             </div>
-          )}
 
-          {/* Dropdown แบบเดิม (สำรอง) */}
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              หรือเลือกรายการทั้งหมด
-            </label>
-            <select
-              value={selectedPatient}
-              onChange={(e) => handlePatientSelect(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">-- เลือกผู้ป่วย --</option>
-              {patients.map((patient) => (
-                <option key={patient.id} value={patient.id}>
-                  {patient.hospital_number} - {patient.full_name} (PAM: {patient.pam_level})
-                  {patient.hospitals?.name ? ` - ${patient.hospitals.name}` : ''}
-                </option>
-              ))}
-            </select>
-            {accessibleHospitalIds.length > 0 && (
-              <p className="text-xs text-gray-500 mt-2">
-                🔒 แสดงผู้ป่วยจาก {accessibleHospitalIds.length} โรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
-              </p>
+            {/* Search by HN */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                🔍 ค้นหาด้วย HN (Hospital Number)
+              </label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  value={searchHN}
+                  onChange={(e) => handleSearchHN(e.target.value)}
+                  placeholder="พิมพ์ HN เพื่อค้นหา..."
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {/* Search by Name */}
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                👤 ค้นหาด้วยชื่อผู้ป่วย
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  value={searchName}
+                  onChange={(e) => handleSearchName(e.target.value)}
+                  placeholder="พิมพ์ชื่อผู้ป่วยเพื่อค้นหา..."
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+
+            {/* Search Results Dropdown */}
+            {showSearchDropdown && filteredPatients.length > 0 && (
+              <div className="mb-4 border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
+                {filteredPatients.map((patient) => (
+                  <button
+                    key={patient.id}
+                    onClick={() => handleSelectPatient(patient)}
+                    className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-gray-800">
+                          {patient.hospital_number} - {patient.full_name}
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          PAM: {patient.pam_level} | {patient.phone || 'ไม่มีเบอร์โทร'}
+                        </p>
+                        {/* ✅ แสดงโรงพยาบาลของผู้ป่วย */}
+                        {patient.hospitals && (
+                          <p className="text-xs text-blue-600 mt-1">
+                            🏥 {patient.hospitals.name} {patient.hospitals.type === 'main' ? '(แม่ข่าย)' : '(ลูกข่าย)'}
+                          </p>
+                        )}
+                      </div>
+                      <div className="text-sm text-blue-600 font-medium">
+                        คลิกเลือก
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             )}
+
+            {/* Dropdown แบบเดิม (สำรอง) */}
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                หรือเลือกรายการทั้งหมด
+              </label>
+              <select
+                value={selectedPatient}
+                onChange={(e) => handlePatientSelect(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">-- เลือกผู้ป่วย --</option>
+                {patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>
+                    {patient.hospital_number} - {patient.full_name} (PAM: {patient.pam_level})
+                    {patient.hospitals?.name ? ` - ${patient.hospitals.name}` : ''}
+                  </option>
+                ))}
+              </select>
+              {accessibleHospitalIds.length > 0 && (
+                <p className="text-xs text-gray-500 mt-2">
+                  🔒 แสดงผู้ป่วยจาก {accessibleHospitalIds.length} โรงพยาบาลที่คุณมีสิทธิ์เข้าถึง
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {selectedPatient && patientPamLevel && (
           <>
