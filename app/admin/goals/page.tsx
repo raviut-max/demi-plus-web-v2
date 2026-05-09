@@ -5,7 +5,6 @@
 //    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    3. กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
 //    4. แสดงโรงพยาบาลของผู้ป่วยแต่ละราย
-
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -96,10 +95,12 @@ export default function AdminGoalsPage() {
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); 
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
+  
   // ✅ State สำหรับ Round Number
   const [currentRound, setCurrentRound] = useState(1);
   const [lastRecordedDate, setLastRecordedDate] = useState('');
   const [isSameDay, setIsSameDay] = useState(false);
+  
   // ✅ State สำหรับค้นหาผู้ป่วย
   const [searchHN, setSearchHN] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -157,14 +158,7 @@ export default function AdminGoalsPage() {
     try {
       let query = supabase
         .from('profiles')
-        .select(`
-          *,
-          hospitals (
-            id,
-            name,
-            type
-          )
-        `)
+        .select(`*, hospitals ( id, name, type )`)
         .eq('is_active', true)
         .order('first_name', { ascending: true });
 
@@ -268,7 +262,7 @@ export default function AdminGoalsPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน   
+        // ✅ 2. ดึง goals ปัจจุบัน    
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -291,7 +285,7 @@ export default function AdminGoalsPage() {
           }
         });
         const uniqueGoals = Array.from(uniqueGoalsMap.values());
-
+        
         console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
@@ -315,7 +309,7 @@ export default function AdminGoalsPage() {
           .order('round_number', { ascending: false })
           .order('created_at', { ascending: false });
 
-        // จัดกลุ่มประวัติตาม round_number
+        // จัดกลุ่มประวัติ ตาม round_number
         const roundsMap = new Map<number, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
           const round = goal.round_number || 1;
@@ -413,6 +407,7 @@ export default function AdminGoalsPage() {
 
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
+    
     setSavingPrimaryGoal(true);
     try {
       const { error } = await supabase
@@ -451,6 +446,7 @@ export default function AdminGoalsPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
+
     if (confirm(`ต้องการสร้างเป้าหมายเริ่มต้นสำหรับผู้ป่วยระดับ ${patientPamLevel} หรือไม่?`)) {
       setSaving(true);
       try {
@@ -525,9 +521,10 @@ export default function AdminGoalsPage() {
       alert('กรุณาเลือกผู้ป่วย');
       return;
     }
+
     const today = new Date().toISOString().split('T')[0];
     console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
-    
+
     // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
     const { data: existingToday, error: fetchError } = await supabase
       .from('goals')
@@ -543,7 +540,7 @@ export default function AdminGoalsPage() {
     }
 
     console.log('📋 [DEBUG] Existing goals today:', existingToday?.length || 0);
-    
+
     let confirmMessage = 'ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\n';
 
     if (existingToday && existingToday.length > 0) {
