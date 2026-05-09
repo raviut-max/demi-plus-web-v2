@@ -1,12 +1,12 @@
 // app/admin/goals/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ลบ useSearchParams ที่ไม่จำเป็น (แก้ข้อผิดพลาด build)
-//    2. ✅ ใช้ router.query แทนสำหรับรับ patient_id
-//    3. ✅ เพิ่มการตรวจสอบสิทธิ์การเข้าถึงโรงพยาบาล
+//    1. ✅ แก้ไขปุ่ม "กลับ" ให้ใช้ router.back() แทน router.push('/admin/dashboard')
+//    2. ✅ เปลี่ยนข้อความปุ่มเป็น "กลับ" แทน "กลับ Dashboard"
+//    3. ✅ ลบ useSearchParams ที่ไม่จำเป็น
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation'; // ✅ ไม่ต้องใช้ useSearchParams
+import { useRouter } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -107,12 +107,10 @@ export default function AdminGoalsPage() {
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); 
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
-  
   // ✅ State สำหรับ Round Number
   const [currentRound, setCurrentRound] = useState(1);
   const [lastRecordedDate, setLastRecordedDate] = useState('');
   const [isSameDay, setIsSameDay] = useState(false);
-  
   // ✅ State สำหรับค้นหาผู้ป่วย
   const [searchHN, setSearchHN] = useState('');
   const [searchName, setSearchName] = useState('');
@@ -121,12 +119,8 @@ export default function AdminGoalsPage() {
   const [searchType, setSearchType] = useState<'hn' | 'name' | null>(null);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
-  // =====================================================
-  // 🔄 Effects
-  // =====================================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
     const userData = checkSession();
     if (!userData) {
       router.push('/admin/login');
@@ -142,13 +136,6 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-    
-    // ✅ ตรวจสอบ patient_id จาก URL query (แทน useSearchParams)
-    const urlParams = new URLSearchParams(window.location.search);
-    const patientIdFromUrl = urlParams.get('patient_id');
-    if (patientIdFromUrl) {
-      setSelectedPatient(patientIdFromUrl);
-    }
   }, [router]);
 
   // ✅ useEffect แยกสำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
@@ -177,7 +164,6 @@ export default function AdminGoalsPage() {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 Accessible hospitals for goals:', ids.length, 'hospitals');
-      
       // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
       loadPatients(ids);
     } catch (error) {
@@ -246,7 +232,7 @@ export default function AdminGoalsPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน
+        // ✅ 2. ดึง goals ปัจจุบัน    
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -450,6 +436,7 @@ export default function AdminGoalsPage() {
 
       if (error) {
         console.error('Error updating primary goal:', error);
+        
         if (error.code === '42P01') {
           alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
         } else if (error.code === '42703') {
@@ -662,7 +649,7 @@ export default function AdminGoalsPage() {
 
         // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
         const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
-        newRoundNumber = uniqueDates.size;
+        newRoundNumber = uniqueDates.size;  // ✅ แก้ไข: ไม่ต้องบวก 1
         
         console.log('🔢 [DEBUG] Unique dates:', Array.from(uniqueDates));
         console.log('🔢 [DEBUG] New round number:', newRoundNumber);
@@ -732,7 +719,7 @@ export default function AdminGoalsPage() {
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
   const restActivities = activities.filter(a => a.activity_type === 'rest');
-  
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('th-TH', {
       year: 'numeric',
@@ -757,14 +744,15 @@ export default function AdminGoalsPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ แก้ไข: ใช้ router.back() แทน router.push('/admin/dashboard') */}
           <button
-            onClick={() => router.push('/admin/dashboard')}
+            onClick={() => router.back()}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ Dashboard
+            กลับ
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-800 mb-1">
@@ -786,7 +774,7 @@ export default function AdminGoalsPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
