@@ -1,11 +1,10 @@
 // app/admin/hospitals/page.tsx
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ปุ่มด้านบน "เพิ่มโรงพยาบาลแม่ข่าย" สำหรับ Super Admin เท่านั้น
-//    2. ✅ Hospital Admin ไม่มีปุ่มเพิ่มแม่ข่าย
-//    3. ✅ ปุ่ม "เพิ่มลูกข่าย" อยู่ภายในแต่ละโรงพยาบาลแม่ข่าย
-//    4. ✅ แสดงเฉพาะโรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง
-//    5. ✅ ส่ง parent_id เมื่อเพิ่มลูกข่าย
+//    1. ✅ ปุ่มเพิ่มลูกข่ายแสดงเฉพาะในแม่ข่ายที่ผู้ใช้มีสิทธิ์เพิ่มได้
+//    2. ✅ Hospital Admin เห็นปุ่มเฉพาะในโรงพยาบาลของตัวเอง
+//    3. ✅ Super Admin เห็นปุ่มในทุกแม่ข่าย
+//    4. ✅ ตรวจสอบสิทธิ์ก่อนแสดงปุ่มเพิ่มลูกข่ายในแต่ละกลุ่ม
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -58,6 +57,7 @@ export default function HospitalsPage() {
     }
   };
 
+  // ✅ โหลดโรงพยาบาลทั้งหมด
   const loadHospitals = async () => {
     try {
       console.log('🏥 [loadHospitals] Fetching hospitals...');
@@ -101,9 +101,9 @@ export default function HospitalsPage() {
     console.log('📊 [groupHospitals] Grouping', allHospitals.length, 'hospitals...');
     const mainHospitals = allHospitals.filter(h => h.type === 'main');
     const subHospitals = allHospitals.filter(h => h.type === 'sub');
-    
+
     console.log('📊 [groupHospitals] Main:', mainHospitals.length, 'Sub:', subHospitals.length);
-    
+
     // ✅ จัดกลุ่มโดยให้ลูกข่ายอยู่ใต้แม่ข่าย
     const grouped = mainHospitals.map(main => {
       const children = subHospitals.filter(sub => sub.parent_id === main.id);
@@ -113,13 +113,13 @@ export default function HospitalsPage() {
         childrenCount: children.length,
       };
     });
-    
+
     // ✅ เพิ่มแม่ข่ายที่ไม่มีลูกข่าย (แสดงเดี่ยว)
     const orphanSubs = subHospitals.filter(sub => {
       const hasParent = mainHospitals.some(main => main.id === sub.parent_id);
       return !hasParent;
     });
-    
+
     // ✅ เพิ่มลูกข่ายที่ไม่มีแม่ข่าย (ถ้ามี)
     if (orphanSubs.length > 0) {
       grouped.push({
@@ -130,9 +130,24 @@ export default function HospitalsPage() {
         childrenCount: orphanSubs.length,
       });
     }
-    
+
     console.log('✅ [groupHospitals] Grouped into', grouped.length, 'groups');
     return grouped;
+  };
+
+  // ✅ ตรวจสอบว่าผู้ใช้มีสิทธิ์เพิ่มลูกข่ายในแม่ข่ายนี้หรือไม่
+  const canAddSubHospital = (mainHospitalId: string): boolean => {
+    // ✅ Super Admin เพิ่มได้ทุกแม่ข่าย
+    if (isSuperAdmin(user)) {
+      return true;
+    }
+    
+    // ✅ Hospital Admin เพิ่มได้เฉพาะแม่ข่ายของตัวเอง
+    if (userHospital && userHospital.id === mainHospitalId) {
+      return true;
+    }
+    
+    return false;
   };
 
   const handleLogout = () => {
@@ -143,7 +158,6 @@ export default function HospitalsPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('คุณต้องการลบโรงพยาบาลนี้หรือไม่?')) return;
-    
     try {
       const { error } = await supabase
         .from('hospitals')
@@ -252,7 +266,7 @@ export default function HospitalsPage() {
                   </div>
                 </div>
               )}
-              
+
               {/* ✅ ปุ่มเพิ่มโรงพยาบาลแม่ข่าย - แสดงเฉพาะ Super Admin */}
               {isSuperAdmin(user) && (
                 <button
@@ -263,7 +277,7 @@ export default function HospitalsPage() {
                   เพิ่มโรงพยาบาลแม่ข่าย
                 </button>
               )}
-              
+
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -296,7 +310,7 @@ export default function HospitalsPage() {
               <Hospital className="w-12 h-12 text-blue-200 opacity-50" />
             </div>
           </div>
-          
+
           {/* แม่ข่าย */}
           <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between">
@@ -307,7 +321,7 @@ export default function HospitalsPage() {
               <Building2 className="w-12 h-12 text-green-200 opacity-50" />
             </div>
           </div>
-          
+
           {/* ลูกข่าย */}
           <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between">
@@ -322,101 +336,110 @@ export default function HospitalsPage() {
 
         {/* ✅ แสดงเป็นกลุ่ม แม่ข่าย + ลูกข่าย */}
         <div className="space-y-8">
-          {groupedHospitals.map((group) => (
-            <div key={group.id} className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              {/* ✅ Header ของกลุ่ม (แม่ข่าย) */}
-              {group.type !== 'orphan' && (
-                <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <Building2 className="w-8 h-8" />
-                      <div>
-                        <h2 className="text-xl font-bold">{group.name}</h2>
-                        <p className="text-blue-100 text-sm">{group.code}</p>
+          {groupedHospitals.map((group) => {
+            // ✅ ตรวจสอบว่าผู้ใช้มีสิทธิ์เพิ่มลูกข่ายในแม่ข่ายนี้หรือไม่
+            const canAddSub = canAddSubHospital(group.id);
+            
+            return (
+              <div key={group.id} className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+                {/* ✅ Header ของกลุ่ม (แม่ข่าย) */}
+                {group.type !== 'orphan' && (
+                  <div className="bg-gradient-to-r from-blue-500 to-blue-600 text-white p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <Building2 className="w-8 h-8" />
+                        <div>
+                          <h2 className="text-xl font-bold">{group.name}</h2>
+                          <p className="text-blue-100 text-sm">{group.code}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="bg-white/20 px-3 py-1 rounded-full text-sm">
+                          {group.childrenCount} ลูกข่าย
+                        </span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => router.push(`/admin/hospitals/${group.id}/edit`)}
+                            className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(group.id)}
+                            className="p-2 hover:bg-white/20 rounded-lg transition-all"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <span className="bg-white/20 px-3 py-1 rounded-full text-sm">
-                        {group.childrenCount} ลูกข่าย
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => router.push(`/admin/hospitals/${group.id}/edit`)}
-                          className="p-2 hover:bg-white/20 rounded-lg transition-all"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(group.id)}
-                          className="p-2 hover:bg-white/20 rounded-lg transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              {/* ✅ รายการลูกข่าย */}
-              <div className="p-6">
-                {group.type === 'orphan' ? (
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                      <Building2 className="w-5 h-5 text-orange-500" />
-                      {group.name}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {group.children.map((sub: any) => (
-                        <HospitalCard 
-                          key={sub.id} 
-                          hospital={sub} 
-                          onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
-                          onDelete={() => handleDelete(sub.id)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                ) : group.children.length > 0 ? (
-                  <div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {group.children.map((sub: any) => (
-                        <HospitalCard 
-                          key={sub.id} 
-                          hospital={sub} 
-                          onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
-                          onDelete={() => handleDelete(sub.id)}
-                        />
-                      ))}
-                    </div>
-                    
-                    {/* ✅ ปุ่มเพิ่มลูกข่าย - แสดงภายในแม่ข่าย */}
-                    <div className="mt-6 text-center">
-                      <button
-                        onClick={() => router.push(`/admin/hospitals/new?type=sub&parent=${group.id}`)}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all font-medium"
-                      >
-                        <Plus className="w-4 h-4" />
-                        เพิ่มลูกข่าย
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-gray-500">
-                    <p>ยังไม่มีโรงพยาบาลลูกข่าย</p>
-                    
-                    {/* ✅ ปุ่มเพิ่มลูกข่าย - แสดงแม้จะยังไม่มี */}
-                    <button
-                      onClick={() => router.push(`/admin/hospitals/new?type=sub&parent=${group.id}`)}
-                      className="mt-2 text-blue-500 hover:text-blue-600 font-medium"
-                    >
-                      + เพิ่มลูกข่าย
-                    </button>
                   </div>
                 )}
+
+                {/* ✅ รายการลูกข่าย */}
+                <div className="p-6">
+                  {group.type === 'orphan' ? (
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                        <Building2 className="w-5 h-5 text-orange-500" />
+                        {group.name}
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {group.children.map((sub: any) => (
+                          <HospitalCard 
+                            key={sub.id} 
+                            hospital={sub} 
+                            onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
+                            onDelete={() => handleDelete(sub.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : group.children.length > 0 ? (
+                    <div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {group.children.map((sub: any) => (
+                          <HospitalCard 
+                            key={sub.id} 
+                            hospital={sub} 
+                            onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
+                            onDelete={() => handleDelete(sub.id)}
+                          />
+                        ))}
+                      </div>
+                      
+                      {/* ✅ ปุ่มเพิ่มลูกข่าย - แสดงเฉพาะในแม่ข่ายที่ผู้ใช้มีสิทธิ์เพิ่มได้ */}
+                      {canAddSub && (
+                        <div className="mt-6 text-center">
+                          <button
+                            onClick={() => router.push(`/admin/hospitals/new?type=sub&parent=${group.id}`)}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all font-medium"
+                          >
+                            <Plus className="w-4 h-4" />
+                            เพิ่มลูกข่าย
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>ยังไม่มีโรงพยาบาลลูกข่าย</p>
+                      
+                      {/* ✅ ปุ่มเพิ่มลูกข่าย - แสดงเฉพาะในแม่ข่ายที่ผู้ใช้มีสิทธิ์เพิ่มได้ */}
+                      {canAddSub && (
+                        <button
+                          onClick={() => router.push(`/admin/hospitals/new?type=sub&parent=${group.id}`)}
+                          className="mt-2 text-blue-500 hover:text-blue-600 font-medium"
+                        >
+                          + เพิ่มลูกข่าย
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {groupedHospitals.length === 0 && (
