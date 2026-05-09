@@ -1,9 +1,9 @@
 // app/admin/goals/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ใช้ useSearchParams ตรวจสอบหน้าต้นทาง (จาก= 'dashboard' หรือ 'patient-detail')
-//    2. ✅ เพิ่ม handleBack() ที่นำทางกลับได้ถูกต้องทั้ง 2 กรณี
-//    3. ✅ รับ patientId จาก query params เมื่อมาจากหน้าประวัติเป้าหมาย
+//    1. ✅ แก้ไขการนำทางกลับ - กลับไปหน้าผู้ป่วยเมื่อมี patient_id
+//    2. ✅ ใช้ router.back() เป็น fallback เมื่อไม่มีพารามิเตอร์
+//    3. ✅ ลบ useSearchParams ที่ไม่จำเป็น (แก้ข้อผิดพลาด build)
 //    4. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
 //    5. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
 //    6. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
@@ -151,7 +151,13 @@ export default function AdminGoalsPage() {
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-  }, [router]);
+    
+    // ✅ โหลด patient_id จากพารามิเตอร์ถ้ามี
+    const patientId = searchParams.get('patient_id');
+    if (patientId) {
+      setSelectedPatient(patientId);
+    }
+  }, [router, searchParams]);
 
   // ✅ useEffect แยกสำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
   useEffect(() => {
@@ -375,25 +381,6 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🎯 Handler Functions
   // =====================================================
-  // ✅ ฟังก์ชันจัดการการกลับหน้า (แก้ไขแล้ว - รองรับทั้ง 2 กรณี)
-  const handleBack = () => {
-    const from = searchParams?.get('from');
-    const patientId = searchParams?.get('patient_id');
-    
-    console.log('🔙 [handleBack] from:', from, 'patient_id:', patientId);
-    
-    if (from === 'patient-detail' && patientId) {
-      // ✅ กลับไปหน้ารายละเอียดผู้ป่วย
-      router.push(`/admin/patients/${patientId}`);
-    } else if (from === 'patient-list') {
-      // ✅ กลับไปหน้ารายการผู้ป่วย
-      router.push('/admin/patients');
-    } else {
-      // ✅ fallback: กลับไป dashboard หรือหน้าก่อนหน้า
-      router.push('/admin/dashboard');
-    }
-  };
-
   const handlePatientSelect = (patientId: string) => {
     setSelectedPatient(patientId);
     if (patientId) {
@@ -741,6 +728,19 @@ export default function AdminGoalsPage() {
     }
   };
 
+  // ✅ ฟังก์ชันกลับหน้า - แก้ไขแล้ว ✅
+  const handleBack = () => {
+    const patientId = searchParams.get('patient_id');
+    
+    if (patientId) {
+      // ✅ ถ้ามี patient_id → กลับไปหน้าผู้ป่วย
+      router.push(`/admin/patients/${patientId}`);
+    } else {
+      // ✅ ไม่มีพารามิเตอร์ → กลับไปหน้าก่อนหน้า
+      router.back();
+    }
+  };
+
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
@@ -853,7 +853,7 @@ export default function AdminGoalsPage() {
 
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
               >
                 <LogOut className="w-4 h-4" />
                 ออกจากระบบ
@@ -876,7 +876,7 @@ export default function AdminGoalsPage() {
               <button
                 onClick={handleCreateDefaultGoals}
                 disabled={saving}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
               >
                 <Plus className="w-4 h-4" />
                 {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
