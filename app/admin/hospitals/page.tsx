@@ -1,19 +1,13 @@
 // app/admin/hospitals/page.tsx
-// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. แก้ไข Syntax errors ทั้งหมด (ช่องว่างในตัวแปร, operators)
-//    2. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    3. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    4. Badge แสดงประเภทโรงพยาบาล
-//    5. เพิ่มปุ่ม Logout
-//    6. กรองโรงพยาบาลตามสิทธิ์การเข้าถึง
-//    7. เพิ่ม Debug logging
-
+//    1. ✅ แสดงปุ่ม "+ เพิ่มลูกข่าย" แม้จะมีลูกข่ายแล้ว
+//    2. ✅ แสดงระดับแอดมิน (Super Admin / Hospital Admin) ชัดเจน
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, getUserHospitalInfo, getAccessibleHospitalIds } from '@/lib/supabase/queries';
-import { Building2, Plus, Edit, Trash2, ArrowLeft, Hospital, Activity, UserCheck, LogOut } from 'lucide-react';
+import { checkSession, logout, getUserHospitalInfo, getAccessibleHospitalIds, isSuperAdmin } from '@/lib/supabase/queries';
+import { Building2, Plus, Edit, Trash2, ArrowLeft, Hospital, Activity, UserCheck, LogOut, Shield } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -64,7 +58,6 @@ export default function HospitalsPage() {
   const loadHospitals = async () => {
     try {
       console.log('🏥 [loadHospitals] Fetching hospitals...');
-      
       // ✅ ดึงโรงพยาบาลที่เข้าถึงได้
       const ids = await getAccessibleHospitalIds(user?.id);
       setAccessibleHospitalIds(ids);
@@ -102,12 +95,11 @@ export default function HospitalsPage() {
   // ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล
   const groupHospitals = (allHospitals: any[]) => {
     console.log('📊 [groupHospitals] Grouping', allHospitals.length, 'hospitals...');
-    
     const mainHospitals = allHospitals.filter(h => h.type === 'main');
     const subHospitals = allHospitals.filter(h => h.type === 'sub');
-    
+
     console.log('📊 [groupHospitals] Main:', mainHospitals.length, 'Sub:', subHospitals.length);
-    
+
     // ✅ จัดกลุ่มโดยให้ลูกข่ายอยู่ใต้แม่ข่าย
     const grouped = mainHospitals.map(main => {
       const children = subHospitals.filter(sub => sub.parent_id === main.id);
@@ -152,7 +144,7 @@ export default function HospitalsPage() {
         .from('hospitals')
         .update({ is_active: false })
         .eq('id', id);
-
+      
       if (error) throw error;
       alert('✅ ลบโรงพยาบาลสำเร็จ!');
       loadHospitals();
@@ -197,7 +189,7 @@ export default function HospitalsPage() {
             </div>
             
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล พร้อมระดับแอดมิน */}
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -209,8 +201,19 @@ export default function HospitalsPage() {
                         {user?.full_name_th || 'ผู้ดูแลระบบ'}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                        {user?.role === 'admin' ? (
+                          isSuperAdmin(user) ? (
+                            <span className="flex items-center gap-1">
+                              <Shield className="w-3 h-3 text-purple-600" />
+                              👑 Super Admin
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1">
+                              <Hospital className="w-3 h-3 text-blue-600" />
+                              🏥 Hospital Admin
+                            </span>
+                          )
+                        ) : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
@@ -365,17 +368,39 @@ export default function HospitalsPage() {
                         />
                       ))}
                     </div>
+                    {/* ✅ ปุ่มเพิ่มลูกข่าย - แสดงเสมอ */}
+                    <div className="mt-6 text-center">
+                      <button
+                        onClick={() => router.push('/admin/hospitals/new?type=sub')}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all font-medium"
+                      >
+                        <Plus className="w-4 h-4" />
+                        เพิ่มลูกข่าย
+                      </button>
+                    </div>
                   </div>
                 ) : group.children.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {group.children.map((sub: any) => (
-                      <HospitalCard 
-                        key={sub.id} 
-                        hospital={sub} 
-                        onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
-                        onDelete={() => handleDelete(sub.id)}
-                      />
-                    ))}
+                  <div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {group.children.map((sub: any) => (
+                        <HospitalCard 
+                          key={sub.id} 
+                          hospital={sub} 
+                          onEdit={() => router.push(`/admin/hospitals/${sub.id}/edit`)}
+                          onDelete={() => handleDelete(sub.id)}
+                        />
+                      ))}
+                    </div>
+                    {/* ✅ ปุ่มเพิ่มลูกข่าย - แสดงเสมอ แม้จะมีลูกข่ายแล้ว */}
+                    <div className="mt-6 text-center">
+                      <button
+                        onClick={() => router.push(`/admin/hospitals/new?type=sub&parent=${group.id}`)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all font-medium"
+                      >
+                        <Plus className="w-4 h-4" />
+                        เพิ่มลูกข่าย
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="text-center py-8 text-gray-500">
@@ -441,6 +466,7 @@ function HospitalCard({ hospital, onEdit, onDelete }: {
           </button>
         </div>
       </div>
+      
       {hospital.phone && (
         <div className="text-sm text-gray-600 flex items-center gap-2">
           <span>📞</span>
