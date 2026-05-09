@@ -1,10 +1,11 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไขการโหลดโค้ช - join กับ hospitals และ users
-//    2. ✅ แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
-//    3. ✅ แสดงข้อมูลโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
-//    4. ✅ แก้ไขปัญหา n=0 เมื่อมีโค้ชในฐานข้อมูล
+//    1. ✅ ลบ dropdown หมู่บ้านออกจากส่วนที่ 4
+//    2. ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย+ลูกข่ายของผู้จัดทำ)
+//    3. ✅ แสดงโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
+//    4. ✅ แสดงข้อมูลผู้จัดทำพร้อมประเภทโรงพยาบาล
+//    5. ✅ แก้ไข Info Banner ให้แสดงข้อมูลที่ถูกต้อง
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -97,17 +98,14 @@ export default function NewPatientPage() {
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-  const [villages, setVillages] = useState<any[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
-
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -141,7 +139,6 @@ export default function NewPatientPage() {
     occupation: '',
     education_level: '',
     coach_id: '',
-    village_id: '',
   });
 
   useEffect(() => {
@@ -164,7 +161,7 @@ export default function NewPatientPage() {
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-
+  
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -185,7 +182,7 @@ export default function NewPatientPage() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-
+      
       // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
       const allHospitals = await getHospitalsWithHierarchy();
       
@@ -201,7 +198,7 @@ export default function NewPatientPage() {
       setHospitals(filteredHospitals);
       console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
       
-      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว (แก้ไขแล้ว)
+      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
       await loadCoaches(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
@@ -223,31 +220,7 @@ export default function NewPatientPage() {
 
   const handleHospitalChange = (hospitalId: string) => {
     console.log('🏥 [handleHospitalChange] Selected hospital:', hospitalId);
-    setFormData({ ...formData, hospital_id: hospitalId, village_id: '' });
-    
-    const loadVillages = async () => {
-      try {
-        if (!hospitalId) {
-          setVillages([]);
-          return;
-        }
-        
-        const { data, error } = await supabase
-          .from('villages')
-          .select('*')
-          .eq('hospital_id', hospitalId)
-          .eq('is_active', true)
-          .order('village_no');
-        
-        if (error) throw error;
-        setVillages(data || []);
-        console.log('🏘️ [loadVillages] Loaded:', data?.length || 0, 'villages');
-      } catch (error) {
-        console.error('❌ [loadVillages] Error:', error);
-      }
-    };
-
-    loadVillages();
+    setFormData({ ...formData, hospital_id: hospitalId });
   };
 
   const generatePasswordFromBirthDate = (day: string, month: string, year: string) => {
@@ -291,7 +264,7 @@ export default function NewPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-
+    
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -401,8 +374,6 @@ export default function NewPatientPage() {
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
         
-        village_id: formData.village_id || undefined,
-        
         pam_level: 'L0',
         pam_score: 0,
         zone: 'Zero Zone',
@@ -473,7 +444,7 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -498,7 +469,7 @@ export default function NewPatientPage() {
                       </p>
                       <p className="text-xs text-gray-500">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
@@ -551,7 +522,7 @@ export default function NewPatientPage() {
         </div>
       </div>
 
-      {/* Info Banner - แสดงข้อมูลการลงทะเบียน */}
+      {/* Info Banner - ✅ แสดงโรงพยาบาลของผู้จัดทำ */}
       <div className="max-w-5xl mx-auto px-4 py-4">
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
           <div className="text-sm text-blue-800">
@@ -960,29 +931,6 @@ export default function NewPatientPage() {
             )}
           </div>
         
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {formData.hospital_id && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  หมู่บ้าน
-                </label>
-                <select
-                  name="village_id"
-                  value={formData.village_id}
-                  onChange={(e) => setFormData({...formData, village_id: e.target.value})}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                >
-                  <option value="">-- เลือกหมู่บ้าน --</option>
-                  {villages.map(village => (
-                    <option key={village.id} value={village.id}>
-                      หมู่ {village.village_no} {village.village_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <div className="grid grid-cols-3 gap-4">
@@ -1161,7 +1109,7 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
+              👨‍️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
