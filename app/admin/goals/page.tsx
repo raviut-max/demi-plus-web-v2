@@ -1,27 +1,29 @@
 // app/admin/goals/page.tsx
 // ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ลบ useSearchParams ที่ไม่จำเป็น (แก้ข้อผิดพลาด build)
-//    2. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    3. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    4. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-//    5. ✅ แสดงโรงพยาบาลของผู้ป่วยแต่ละราย
+//    1. ✅ ใช้ useSearchParams ตรวจสอบหน้าต้นทาง (จาก= 'dashboard' หรือ 'patient-detail')
+//    2. ✅ เพิ่ม handleBack() ที่นำทางกลับได้ถูกต้องทั้ง 2 กรณี
+//    3. ✅ รับ patientId จาก query params เมื่อมาจากหน้าประวัติเป้าหมาย
+//    4. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    5. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    6. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    7. ✅ แสดงโรงพยาบาลของผู้ป่วยแต่ละราย
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  getPatientList, 
-  getGoalRoundCount, 
-  getLatestGoalRound, 
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  checkSession,
+  logout,
+  getPatientList,
+  getGoalRoundCount,
+  getLatestGoalRound,
   saveGoalsNewRound,
   getAccessibleHospitalIds,
   getUserHospitalInfo
 } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { 
-  ArrowLeft, LogOut, Save, Target, Trophy, Plus, 
+import {
+  ArrowLeft, LogOut, Save, Target, Trophy, Plus,
   CheckCircle2, Circle, Search, User, History, Calendar,
   Hospital, Building2, UserCheck
 } from 'lucide-react';
@@ -29,7 +31,6 @@ import {
 // =====================================================
 // 📋 ค่าคงที่และ Interfaces
 // =====================================================
-
 // ✅ Default days ตาม PAM Level
 const DEFAULT_DAYS_BY_LEVEL: Record<string, number> = {
   L2: 3,
@@ -97,6 +98,8 @@ interface UserHospital {
 
 export default function AdminGoalsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [patients, setPatients] = useState<any[]>([]);
@@ -110,7 +113,7 @@ export default function AdminGoalsPage() {
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState('');
-  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
+  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); 
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
   
@@ -130,7 +133,6 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🔄 Effects
   // =====================================================
-  
   useEffect(() => {
     if (typeof window === 'undefined') return;
     
@@ -139,13 +141,13 @@ export default function AdminGoalsPage() {
       router.push('/admin/login');
       return;
     }
-    
+
     if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-    
+
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
@@ -161,7 +163,6 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 📥 Data Loading Functions
   // =====================================================
-
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -194,7 +195,7 @@ export default function AdminGoalsPage() {
         .select(`*, hospitals ( id, name, type )`)
         .eq('is_active', true)
         .order('first_name', { ascending: true });
-      
+
       // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้
       if (hospitalIds && hospitalIds.length > 0) {
         query = query.in('hospital_id', hospitalIds);
@@ -374,6 +375,24 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🎯 Handler Functions
   // =====================================================
+  // ✅ ฟังก์ชันจัดการการกลับหน้า (แก้ไขแล้ว - รองรับทั้ง 2 กรณี)
+  const handleBack = () => {
+    const from = searchParams?.get('from');
+    const patientId = searchParams?.get('patient_id');
+    
+    console.log('🔙 [handleBack] from:', from, 'patient_id:', patientId);
+    
+    if (from === 'patient-detail' && patientId) {
+      // ✅ กลับไปหน้ารายละเอียดผู้ป่วย
+      router.push(`/admin/patients/${patientId}`);
+    } else if (from === 'patient-list') {
+      // ✅ กลับไปหน้ารายการผู้ป่วย
+      router.push('/admin/patients');
+    } else {
+      // ✅ fallback: กลับไป dashboard หรือหน้าก่อนหน้า
+      router.push('/admin/dashboard');
+    }
+  };
 
   const handlePatientSelect = (patientId: string) => {
     setSelectedPatient(patientId);
@@ -730,12 +749,11 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🔧 Helper Functions
   // =====================================================
-
   const foodActivities = activities.filter(a => a.activity_type === 'food');
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
   const restActivities = activities.filter(a => a.activity_type === 'rest');
-
+  
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('th-TH', {
       year: 'numeric',
@@ -747,7 +765,6 @@ export default function AdminGoalsPage() {
   // =====================================================
   // 🎨 Render
   // =====================================================
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -761,12 +778,13 @@ export default function AdminGoalsPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ ปุ่มกลับที่แก้ไขแล้ว */}
           <button
-            onClick={() => router.push('/admin/dashboard')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
+            onClick={handleBack}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ Dashboard
+            กลับ
           </button>
           
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -835,7 +853,7 @@ export default function AdminGoalsPage() {
 
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
               >
                 <LogOut className="w-4 h-4" />
                 ออกจากระบบ
@@ -858,7 +876,7 @@ export default function AdminGoalsPage() {
               <button
                 onClick={handleCreateDefaultGoals}
                 disabled={saving}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50 transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
