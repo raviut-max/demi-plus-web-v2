@@ -1,17 +1,17 @@
 // app/admin/goals/page.tsx
-// ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569 (อัปเดตล่าสุด)
+// ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ลบ useSearchParams() ที่ทำให้ build ล้มเหลว
-//    2. ✅ ใช้ useParams() และ state แทนสำหรับ patient_id
-//    3. ✅ เพิ่มพารามิเตอร์ ?from=patient-detail สำหรับกลับหน้าให้ถูกต้อง
-//    4. ✅ ปรับปรุง handleBack() ให้กลับหน้าเดิมได้ถูกต้อง
-//    5. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
-//    6. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
-//    7. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
-
+//    1. ✅ ลบ useSearchParams ที่ไม่จำเป็น (แก้ข้อผิดพลาด build)
+//    2. ✅ เพิ่ม export const dynamic = 'force-dynamic'
+//    3. ✅ แก้ไขช่องว่างในโค้ดทั้งหมด (ปัดฝุ่นโค้ด)
+//    4. ✅ แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    5. ✅ แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    6. ✅ กรองผู้ป่วยตามสิทธิ์การเข้าถึงโรงพยาบาล
+//    7. ✅ แสดงโรงพยาบาลของผู้ป่วยแต่ละราย
 'use client';
-import { useEffect, useState, Suspense } from 'react';
-import { useRouter, useSearchParams, useParams } from 'next/navigation';
+
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -20,15 +20,18 @@ import {
   getLatestGoalRound,
   saveGoalsNewRound,
   getAccessibleHospitalIds,
-  getUserHospitalInfo,
-  getPatientDetail
+  getUserHospitalInfo
 } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   ArrowLeft, LogOut, Save, Target, Trophy, Plus,
   CheckCircle2, Circle, Search, User, History, Calendar,
-  Hospital, Building2, UserCheck, AlertTriangle
+  Hospital, Building2, UserCheck
 } from 'lucide-react';
+
+// ✅ ป้องกัน Static Generation Error ใน Next.js App Router
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 // =====================================================
 // 📋 ค่าคงที่และ Interfaces
@@ -98,22 +101,14 @@ interface UserHospital {
   };
 }
 
-// =====================================================
-// 🎯 Main Component (wrapped in Suspense boundary)
-// =====================================================
-function GoalsPageContent() {
+export default function AdminGoalsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const params = useParams();
-  
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
-  // ✅ ใช้ patient_id จาก URL params หรือ query params
-  const [selectedPatient, setSelectedPatient] = useState<string>('');
+  const [selectedPatient, setSelectedPatient] = useState('');
   const [patientPamLevel, setPatientPamLevel] = useState('');
   const [activities, setActivities] = useState<Activity[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -121,7 +116,7 @@ function GoalsPageContent() {
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState('');
-  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false); 
+  const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
   
@@ -159,16 +154,7 @@ function GoalsPageContent() {
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-    
-    // ✅ โหลด patient_id จาก URL (params หรือ query)
-    const patientIdFromParams = params?.id as string;
-    const patientIdFromQuery = searchParams?.get('patient_id');
-    const initialPatientId = patientIdFromParams || patientIdFromQuery;
-    
-    if (initialPatientId) {
-      setSelectedPatient(initialPatientId);
-    }
-  }, [router, params, searchParams]);
+  }, [router]);
 
   // ✅ useEffect แยกสำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
   useEffect(() => {
@@ -180,6 +166,7 @@ function GoalsPageContent() {
   // =====================================================
   // 📥 Data Loading Functions
   // =====================================================
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -189,17 +176,21 @@ function GoalsPageContent() {
     }
   };
 
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 Accessible hospitals for goals:', ids.length, 'hospitals');
+      
+      // ✅ โหลดผู้ป่วยหลังจากได้สิทธิ์แล้ว
       loadPatients(ids);
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
     }
   };
 
+  // ✅ โหลดรายการผู้ป่วย (กรองตามสิทธิ์)
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       let query = supabase
@@ -208,6 +199,7 @@ function GoalsPageContent() {
         .eq('is_active', true)
         .order('first_name', { ascending: true });
 
+      // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้
       if (hospitalIds && hospitalIds.length > 0) {
         query = query.in('hospital_id', hospitalIds);
       }
@@ -235,6 +227,7 @@ function GoalsPageContent() {
     }
   };
 
+  // ✅ โหลดข้อมูลผู้ป่วยเมื่อเลือก
   const loadPatientData = async (patientId: string) => {
     try {
       const patient = patients.find(p => p.id === patientId);
@@ -305,6 +298,7 @@ function GoalsPageContent() {
           .order('round_number', { ascending: false })
           .order('created_at', { ascending: false });
 
+        // จัดกลุ่มประวัติ ตาม round_number
         const roundsMap = new Map<number, Goal[]>();
         (archivedGoals || []).forEach((goal: Goal) => {
           const round = goal.round_number || 1;
@@ -322,6 +316,7 @@ function GoalsPageContent() {
           round_number: round,
         }));
 
+        // เพิ่ม current goals เข้าไปด้วย
         if (uniqueGoals && uniqueGoals.length > 0) {
           const currentRoundNum = uniqueGoals[0].round_number || 1;
           history.unshift({
@@ -366,9 +361,13 @@ function GoalsPageContent() {
         const latestRound = await getLatestGoalRound(patientId);
         if (latestRound) {
           setLastRecordedDate(latestRound.created_at);
+          
+          // ✅ ตรวจสอบว่าบันทึกในวันเดิมหรือไม่
           const today = new Date().toISOString().split('T')[0];
           const lastDate = new Date(latestRound.created_at).toISOString().split('T')[0];
           setIsSameDay(today === lastDate);
+          
+          console.log('📅 Last recorded:', lastDate, '| Today:', today, '| Same day:', today === lastDate);
         }
       }
     } catch (error) {
@@ -379,29 +378,6 @@ function GoalsPageContent() {
   // =====================================================
   // 🎯 Handler Functions
   // =====================================================
-  
-  // ✅ ✅ ✅ ฟังก์ชันกลับหน้า - แก้ไขให้กลับถูกหน้า
-  const handleBack = () => {
-    const fromPage = searchParams?.get('from');
-    const patientId = selectedPatient || params?.id || searchParams?.get('patient_id');
-    
-    console.log('🔙 handleBack - from:', fromPage, 'patientId:', patientId);
-    
-    if (fromPage === 'patient-detail' && patientId) {
-      // ✅ กลับไปหน้ารายละเอียดผู้ป่วย
-      router.push(`/admin/patients/${patientId}`);
-    } else if (fromPage === 'patient-list') {
-      // ✅ กลับไปหน้ารายการผู้ป่วย
-      router.push('/admin/patients');
-    } else if (patientId) {
-      // ✅ fallback: ถ้ามี patient_id ให้กลับไปหน้ารายละเอียด
-      router.push(`/admin/patients/${patientId}`);
-    } else {
-      // ✅ fallback สุดท้าย
-      router.back();
-    }
-  };
-
   const handlePatientSelect = (patientId: string) => {
     setSelectedPatient(patientId);
     if (patientId) {
@@ -421,6 +397,7 @@ function GoalsPageContent() {
     }
   };
 
+  // ✅ ฟังก์ชันค้นหาผู้ป่วยด้วย HN
   const handleSearchHN = (value: string) => {
     setSearchHN(value);
     setSearchType('hn');
@@ -437,6 +414,7 @@ function GoalsPageContent() {
     setShowSearchDropdown(true);
   };
 
+  // ✅ ฟังก์ชันค้นหาผู้ป่วยด้วยชื่อ
   const handleSearchName = (value: string) => {
     setSearchName(value);
     setSearchType('name');
@@ -462,6 +440,7 @@ function GoalsPageContent() {
     loadPatientData(patient.id);
   };
 
+  // ✅ เปลี่ยนเป้าหมายหลัก
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     setSavingPrimaryGoal(true);
@@ -496,6 +475,7 @@ function GoalsPageContent() {
     }
   };
 
+  // ✅ สร้างเป้าหมายเริ่มต้นอัตโนมัติ
   const handleCreateDefaultGoals = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
@@ -559,6 +539,7 @@ function GoalsPageContent() {
     }
   };
 
+  // ✅ อัปเดตค่าเป้าหมาย
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
     console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
@@ -570,6 +551,7 @@ function GoalsPageContent() {
     }));
   };
 
+  // ✅ บันทึกเป้าหมายรอบใหม่
   const handleSaveNewRound = async () => {
     if (!selectedPatient || !patientPamLevel) {
       alert('กรุณาเลือกผู้ป่วย');
@@ -578,6 +560,7 @@ function GoalsPageContent() {
     const today = new Date().toISOString().split('T')[0];
     console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
 
+    // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
     const { data: existingToday, error: fetchError } = await supabase
       .from('goals')
       .select('id, goal_name, round_number, created_at')
@@ -611,8 +594,11 @@ function GoalsPageContent() {
     setSaving(true);
 
     try {
+      // ✅ 2. ลบ goals ของวันนี้ก่อน (ถ้ามี)
       if (existingToday && existingToday.length > 0) {
         console.log('🗑️ [DEBUG] Deleting goals...');
+        console.log('🗑️ [DEBUG] Goal IDs:', existingToday.map(g => g.id));
+        
         const { error: deleteError } = await supabase
           .from('goals')
           .delete()
@@ -629,6 +615,7 @@ function GoalsPageContent() {
         }
       }
 
+      // ✅ 3. Archive goals เดิม (เฉพาะของวันก่อนหน้า)
       if (!existingToday || existingToday.length === 0) {
         console.log('📦 [DEBUG] Archiving old goals...');
         
@@ -661,20 +648,24 @@ function GoalsPageContent() {
         }
       }
 
+      // ✅ 4. นับ round_number ใหม่ (นับจากวันที่ไม่ซ้ำ)
       console.log('🔢 [DEBUG] Calculating new round number...');
       
       let newRoundNumber: number;
 
       if (existingToday && existingToday.length > 0) {
+        // วันนี้บันทึกไปแล้ว → ใช้ round เดิม
         newRoundNumber = existingToday[0].round_number || 1;
         console.log('📅 [DEBUG] Same day - using existing round:', newRoundNumber);
       } else {
+        // วันใหม่ → archive ของเก่า + นับรอบใหม่
         const { data: allGoals } = await supabase
           .from('goals')
           .select('created_at')
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity');
 
+        // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
         const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
         newRoundNumber = uniqueDates.size;
         
@@ -682,6 +673,7 @@ function GoalsPageContent() {
         console.log('🔢 [DEBUG] New round number:', newRoundNumber);
       }
 
+      // ✅ 5. สร้าง goals ใหม่
       const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
 
       const newGoals = activities.map(activity => {
@@ -771,11 +763,11 @@ function GoalsPageContent() {
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
-            onClick={handleBack}
+            onClick={() => router.push('/admin/dashboard')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ
+            กลับ Dashboard
           </button>
           
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -1318,54 +1310,7 @@ function GoalsPageContent() {
             )}
           </>
         )}
-
-        {/* ✅ PAM Level Warning Banner (สำหรับ L0) */}
-        {selectedPatient && (!patientPamLevel || patientPamLevel === 'L0') && (
-          <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg">
-            <div className="flex">
-              <AlertTriangle className="h-5 w-5 text-yellow-400 flex-shrink-0" />
-              <div className="ml-3">
-                <p className="text-sm text-yellow-700">
-                  <strong>⚠️ ยังไม่ได้ประเมิน PAM</strong>
-                </p>
-                <p className="text-sm text-yellow-600 mt-1">
-                  ผู้ป่วยยังอยู่ในระดับ L0 ต้องทำการคัดกรองเพื่อกำหนดระดับ PAM ก่อน
-                  จึงจะกำหนดเป้าหมายได้
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <button 
-                    onClick={() => router.push(`/admin/screening?patient_id=${selectedPatient}`)}
-                    className="bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-yellow-700 transition-colors"
-                  >
-                    → ไปหน้าคัดกรอง
-                  </button>
-                  <button 
-                    onClick={handleBack}
-                    className="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-400 transition-colors"
-                  >
-                    ← กลับ
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
-  );
-}
-
-// =====================================================
-// 🎁 Export with Suspense Boundary (แก้ useSearchParams error)
-// =====================================================
-export default function AdminGoalsPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    }>
-      <GoalsPageContent />
-    </Suspense>
   );
 }
