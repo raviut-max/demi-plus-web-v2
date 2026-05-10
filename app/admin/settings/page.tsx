@@ -1,9 +1,8 @@
 // app/admin/settings/page.tsx
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไขปุ่ม "นำเข้าผู้ป่วยจาก Excel" ให้ไปหน้า import ที่ถูกต้อง
-//    2. ✅ เพิ่มปุ่มในหมวดจัดการข้อมูลผู้ป่วย
-//    3. ✅ แสดงไอคอนและข้อความชัดเจน
+//    1. ✅ แก้ไข route นำเข้าจาก Excel เป็น /admin/patients/import-excel (ป้องกัน conflict)
+//    2. ✅ อัปเดตปุ่มทั้งหมดให้ชี้ไปที่ route ที่ถูกต้อง
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -363,9 +362,9 @@ export default function SettingsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   
-                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel - ✅ แก้ไขแล้ว */}
+                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel - ✅ แก้ไขแล้ว (เปลี่ยน route) */}
                   <button
-                    onClick={() => router.push('/admin/patients/import/validate')}
+                    onClick={() => router.push('/admin/patients/import-excel')}
                     className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
                   >
                     <div className="flex items-center gap-4 mb-4">
