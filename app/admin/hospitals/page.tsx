@@ -1,12 +1,9 @@
 // app/admin/hospitals/page.tsx
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ปุ่มด้านบน "เพิ่มโรงพยาบาลแม่ข่าย" สำหรับ Super Admin เท่านั้น
-//    2. ✅ Hospital Admin ไม่มีปุ่มเพิ่มแม่ข่าย
-//    3. ✅ ปุ่ม "เพิ่มลูกข่าย" อยู่ภายในแต่ละโรงพยาบาลแม่ข่ายที่ผู้ใช้มีสิทธิ์เพิ่มได้
-//    4. ✅ แสดงเฉพาะโรงพยาบาลแม่ข่ายที่ผู้ใช้มีสิทธิ์เข้าถึง
-//    5. ✅ ส่ง parent_id เมื่อเพิ่มลูกข่าย
-//    6. ✅ แก้ไขข้อผิดพลาด Build (Syntax Error)
+//    1. ✅ แก้ไข groupHospitals() ให้กรองแม่ข่ายตาม accessibleIds (สำหรับ non-Super Admin)
+//    2. ✅ Hospital Admin เห็นเฉพาะแม่ข่ายที่ตัวเองมีสิทธิ์
+//    3. ✅ Super Admin เห็นทั้งหมด
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -68,7 +65,7 @@ export default function HospitalsPage() {
       const ids = await getAccessibleHospitalIds(user?.id);
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadHospitals] Accessible hospitals:', ids.length, 'hospitals');
-
+      
       let query = supabase
         .from('hospitals')
         .select('*')
@@ -243,7 +240,7 @@ export default function HospitalsPage() {
                       </p>
                     </div>
                   </div>
-
+                  
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
@@ -251,7 +248,7 @@ export default function HospitalsPage() {
                         {userHospital.name}
                       </span>
                     </div>
-
+                    
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -262,7 +259,7 @@ export default function HospitalsPage() {
                           🏥 ลูกข่าย
                         </span>
                       )}
-
+                      
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -273,7 +270,7 @@ export default function HospitalsPage() {
                   </div>
                 </div>
               )}
-
+              
               {/* ✅ ปุ่มเพิ่มโรงพยาบาลแม่ข่าย - แสดงเฉพาะ Super Admin */}
               {isSuperAdmin(user) && (
                 <button
@@ -284,7 +281,7 @@ export default function HospitalsPage() {
                   เพิ่มโรงพยาบาลแม่ข่าย
                 </button>
               )}
-
+              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
@@ -317,7 +314,7 @@ export default function HospitalsPage() {
               <Hospital className="w-12 h-12 text-blue-200 opacity-50" />
             </div>
           </div>
-
+          
           {/* แม่ข่าย */}
           <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between">
@@ -328,7 +325,7 @@ export default function HospitalsPage() {
               <Building2 className="w-12 h-12 text-green-200 opacity-50" />
             </div>
           </div>
-
+          
           {/* ลูกข่าย */}
           <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between">
@@ -382,7 +379,7 @@ export default function HospitalsPage() {
                     </div>
                   </div>
                 )}
-
+                
                 {/* ✅ รายการลูกข่าย */}
                 <div className="p-6">
                   {group.type === 'orphan' ? (
@@ -500,6 +497,7 @@ function HospitalCard({ hospital, onEdit, onDelete }: {
           </button>
         </div>
       </div>
+      
       {hospital.phone && (
         <div className="text-sm text-gray-600 flex items-center gap-2">
           <span>📞</span>
