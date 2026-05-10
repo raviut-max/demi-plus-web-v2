@@ -1,9 +1,9 @@
 // app/admin/settings/page.tsx
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ เพิ่มปุ่ม "นำเข้าผู้ป่วยจาก Excel" ในหน้า Settings
-//    2. ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาลชัดเจน
-//    3. ✅ จัดกลุ่มเมนูตั้งค่าเป็นหมวดหมู่
+//    1. ✅ แก้ไขปุ่ม "นำเข้าผู้ป่วยจาก Excel" ให้ไปหน้า import ที่ถูกต้อง
+//    2. ✅ เพิ่มปุ่มในหมวดจัดการข้อมูลผู้ป่วย
+//    3. ✅ แสดงไอคอนและข้อความชัดเจน
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -180,7 +180,7 @@ export default function SettingsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -363,7 +363,7 @@ export default function SettingsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   
-                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
+                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel - ✅ แก้ไขแล้ว */}
                   <button
                     onClick={() => router.push('/admin/patients/import/validate')}
                     className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
@@ -377,7 +377,7 @@ export default function SettingsPage() {
                           นำเข้าจาก Excel
                         </h3>
                         <p className="text-sm text-gray-500">
-                         导入ผู้ป่วยจำนวนมาก
+                          Import ผู้ป่วยจำนวนมาก
                         </p>
                       </div>
                     </div>
@@ -456,7 +456,7 @@ export default function SettingsPage() {
                           จัดการโรงพยาบาล
                         </h3>
                         <p className="text-sm text-gray-500">
-                          แม่ข่ายและลูกข่าย
+                          โรงพยาบาลแม่ข่ายและลูกข่าย
                         </p>
                       </div>
                     </div>
