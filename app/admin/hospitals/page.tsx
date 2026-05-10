@@ -1,9 +1,10 @@
 // app/admin/hospitals/page.tsx
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไข groupHospitals() ให้กรองแม่ข่ายตาม accessibleIds (สำหรับ non-Super Admin)
-//    2. ✅ Hospital Admin เห็นเฉพาะแม่ข่ายที่ตัวเองมีสิทธิ์
-//    3. ✅ Super Admin เห็นทั้งหมด
+//    1. ✅ แก้ไขปัญหา user?.id เป็น undefined
+//    2. ✅ กรองโรงพยาบาลแม่ข่ายตามสิทธิ์การเข้าถึง
+//    3. ✅ แสดงเฉพาะโรงพยาบาลที่ผู้ใช้มีสิทธิ์เท่านั้น
+//    4. ✅ เพิ่มการตรวจสอบ user ก่อนใช้งาน
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -41,7 +42,7 @@ export default function HospitalsPage() {
     }
     setUser(userData);
     loadUserHospital(userData.id);
-    loadHospitals();
+    loadHospitals(userData.id); // ✅ ส่ง userId เข้าไปโดยตรง
   }, [router]);
 
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
@@ -57,14 +58,22 @@ export default function HospitalsPage() {
   };
 
   // ✅ โหลดโรงพยาบาลทั้งหมด (กรองตามสิทธิ์)
-  const loadHospitals = async () => {
+  const loadHospitals = async (userId: string) => {
     try {
-      console.log('🏥 [loadHospitals] Fetching hospitals...');
+      console.log('🏥 [loadHospitals] Fetching hospitals for user:', userId);
       
+      // ✅ ตรวจสอบว่า userId มีค่า
+      if (!userId) {
+        console.error('❌ [loadHospitals] User ID is undefined');
+        setLoading(false);
+        return;
+      }
+
       // ✅ ดึงโรงพยาบาลที่เข้าถึงได้
-      const ids = await getAccessibleHospitalIds(user?.id);
+      const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadHospitals] Accessible hospitals:', ids.length, 'hospitals');
+      console.log('🏥 [loadHospitals] Hospital IDs:', ids);
       
       let query = supabase
         .from('hospitals')
@@ -76,6 +85,9 @@ export default function HospitalsPage() {
       // ✅ กรองตามโรงพยาบาลที่เข้าถึงได้ (ถ้าไม่ใช่ Super Admin)
       if (ids.length > 0) {
         query = query.in('id', ids);
+        console.log('🔒 [loadHospitals] Filtering by accessible hospitals');
+      } else {
+        console.log('👑 [loadHospitals] Super Admin - showing all hospitals');
       }
       
       const { data, error } = await query;
@@ -85,7 +97,7 @@ export default function HospitalsPage() {
       console.log('✅ [loadHospitals] Loaded:', data?.length || 0, 'hospitals');
       setHospitals(data || []);
       
-      // ✅ จัดกลุ่มโรงพยาบาลแม่ข่ายกับลูกข่าย (กรองตามสิทธิ์)
+      // ✅ จัดกลุ่มโรงพยาบาลแม่ข่ายกับลูกข่าย (ส่ง ids เข้าไปด้วย)
       const grouped = groupHospitals(data || [], ids);
       setGroupedHospitals(grouped);
     } catch (error) {
@@ -110,7 +122,7 @@ export default function HospitalsPage() {
     
     const subHospitals = allHospitals.filter(h => h.type === 'sub');
     console.log('📊 [groupHospitals] Main:', mainHospitals.length, 'Sub:', subHospitals.length);
-
+    
     // ✅ จัดกลุ่มโดยให้ลูกข่ายอยู่ใต้แม่ข่าย
     const grouped = mainHospitals.map(main => {
       const children = subHospitals.filter(sub => sub.parent_id === main.id);
@@ -120,13 +132,13 @@ export default function HospitalsPage() {
         childrenCount: children.length,
       };
     });
-
+    
     // ✅ เพิ่มลูกข่ายที่ไม่มีแม่ข่าย (ถ้ามี) - แสดงเฉพาะที่เข้าถึงได้
     const orphanSubs = subHospitals.filter(sub => {
       const hasParent = mainHospitals.some(main => main.id === sub.parent_id);
       return !hasParent && accessibleIds.includes(sub.id);
     });
-
+    
     if (orphanSubs.length > 0) {
       grouped.push({
         id: 'orphan',
@@ -136,7 +148,7 @@ export default function HospitalsPage() {
         childrenCount: orphanSubs.length,
       });
     }
-
+    
     console.log('✅ [groupHospitals] Grouped into', grouped.length, 'groups');
     return grouped;
   };
@@ -170,7 +182,9 @@ export default function HospitalsPage() {
       
       if (error) throw error;
       alert('✅ ลบโรงพยาบาลสำเร็จ!');
-      loadHospitals();
+      if (user?.id) {
+        loadHospitals(user.id);
+      }
     } catch (error: any) {
       console.error('❌ [handleDelete] Error:', error);
       alert('❌ เกิดข้อผิดพลาด: ' + error.message);
