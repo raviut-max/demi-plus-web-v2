@@ -1,6 +1,9 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: 7 พฤษภาคม 2569
-// ✅ การแก้ไข: แก้ไขโครงสร้าง JSX และเพิ่มระบบสิทธิ์การเข้าถึง
+// ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. ✅ เพิ่มปุ่ม "นำเข้าผู้ป่วยจาก Excel" ในหน้า Settings
+//    2. ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาลชัดเจน
+//    3. ✅ จัดกลุ่มเมนูตั้งค่าเป็นหมวดหมู่
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,7 +25,13 @@ import {
   UserCheck,
   Hospital,
   LogOut,
-  AlertCircle
+  AlertCircle,
+  FileSpreadsheet,
+  Upload,
+  UserPlus,
+  Database,
+  FileText,
+  Activity
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -67,7 +76,6 @@ export default function SettingsPage() {
       router.push('/admin/login');
       return;
     }
-
     // ✅ ตรวจสอบสิทธิ์: เฉพาะ Super Admin หรือ Hospital Admin เท่านั้น
     if (!isSuperAdmin(userData) && userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบระดับสูงเท่านั้นที่เข้าถึงได้');
@@ -322,7 +330,7 @@ export default function SettingsPage() {
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                    <Shield className="w-6 h-6 text-green-600" />
+                    <UserCheck className="w-6 h-6 text-green-600" />
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">ผู้ป่วย</p>
@@ -344,76 +352,199 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* ✅ เมนูจัดการ */}
+            {/* ✅ เมนูจัดการ - แบ่งเป็นหมวดหมู่ */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* 🏥 ปุ่มจัดการโรงพยาบาล */}
-              <button
-                onClick={() => router.push('/admin/hospitals')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-all">
-                    <Building2 className="w-7 h-7 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      จัดการโรงพยาบาล
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      โรงพยาบาลแม่ข่ายและลูกข่าย
+              
+              {/* 📊 หมวดข้อมูลผู้ป่วย */}
+              <div className="lg:col-span-3">
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-green-600" />
+                  จัดการข้อมูลผู้ป่วย
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  
+                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
+                  <button
+                    onClick={() => router.push('/admin/patients/import/validate')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-green-100 rounded-lg flex items-center justify-center group-hover:bg-green-200 transition-all">
+                        <FileSpreadsheet className="w-7 h-7 text-green-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          นำเข้าจาก Excel
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                         导入ผู้ป่วยจำนวนมาก
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      อัปโหลดไฟล์ Excel เพื่อนำเข้าผู้ป่วยหลายรายพร้อมกัน พร้อมตรวจสอบและแก้ไขก่อนบันทึก
                     </p>
-                  </div>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  เพิ่ม/แก้ไข/ลบ ข้อมูลโรงพยาบาลและกำหนดความสัมพันธ์แม่ข่าย-ลูกข่าย
-                </p>
-              </button>
+                  </button>
 
-              {/* 📚 ปุ่มจัดการความรู้ */}
-              <button
-                onClick={() => router.push('/admin/knowledge')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-all">
-                    <BookOpen className="w-7 h-7 text-purple-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      จัดการความรู้
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      บทความและวิดีโอ
+                  {/* ➕ ปุ่มเพิ่มผู้ป่วยใหม่ */}
+                  <button
+                    onClick={() => router.push('/admin/patients/new')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-all">
+                        <UserPlus className="w-7 h-7 text-blue-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          เพิ่มผู้ป่วยใหม่
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          เพิ่มทีละราย
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      เพิ่มผู้ป่วยใหม่ทีละราย พร้อมกรอกข้อมูลครบถ้วน
                     </p>
-                  </div>
-                </div>
-                <p className="text-gray-600 text-sm">
-                  เพิ่ม/แก้ไข/ลบ บทความและวิดีโอความรู้สำหรับผู้ป่วย
-                </p>
-              </button>
+                  </button>
 
-              {/* 👥 ปุ่มจัดการเจ้าหน้าที่ */}
-              <button
-                onClick={() => router.push('/admin/staff')}
-                className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-              >
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-14 h-14 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 transition-all">
-                    <Users className="w-7 h-7 text-indigo-600" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      จัดการเจ้าหน้าที่
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      หมอ พยาบาล อสม.
+                  {/* 📋 ปุ่มรายการผู้ป่วย */}
+                  <button
+                    onClick={() => router.push('/admin/patients')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-all">
+                        <Users className="w-7 h-7 text-purple-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          รายการผู้ป่วย
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          ดูและแก้ไข
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      ดูรายการผู้ป่วยทั้งหมด ค้นหา และแก้ไขข้อมูล
                     </p>
-                  </div>
+                  </button>
                 </div>
-                <p className="text-gray-600 text-sm">
-                  เพิ่ม/แก้ไข/ลบ ข้อมูลเจ้าหน้าที่และกำหนดสิทธิ์การเข้าถึง
-                </p>
-              </button>
+              </div>
+
+              {/* 🏥 หมวดโรงพยาบาล */}
+              <div className="lg:col-span-3">
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <Hospital className="w-5 h-5 text-blue-600" />
+                  จัดการโรงพยาบาล
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
+                  {/* 🏥 ปุ่มจัดการโรงพยาบาล */}
+                  <button
+                    onClick={() => router.push('/admin/hospitals')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-all">
+                        <Building2 className="w-7 h-7 text-blue-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          จัดการโรงพยาบาล
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          แม่ข่ายและลูกข่าย
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      เพิ่ม/แก้ไข/ลบ ข้อมูลโรงพยาบาลและกำหนดความสัมพันธ์แม่ข่าย-ลูกข่าย
+                    </p>
+                  </button>
+
+                  {/* 📚 ปุ่มจัดการความรู้ */}
+                  <button
+                    onClick={() => router.push('/admin/knowledge')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-all">
+                        <BookOpen className="w-7 h-7 text-purple-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          จัดการความรู้
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          บทความและวิดีโอ
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      เพิ่ม/แก้ไข/ลบ บทความและวิดีโอความรู้สำหรับผู้ป่วย
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* 👥 หมวดเจ้าหน้าที่ */}
+              <div className="lg:col-span-3">
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                  จัดการเจ้าหน้าที่
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
+                  {/* 👥 ปุ่มจัดการเจ้าหน้าที่ */}
+                  <button
+                    onClick={() => router.push('/admin/staff')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 transition-all">
+                        <Users className="w-7 h-7 text-indigo-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          จัดการเจ้าหน้าที่
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          หมอ พยาบาล อสม.
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      เพิ่ม/แก้ไข/ลบ ข้อมูลเจ้าหน้าที่และกำหนดสิทธิ์การเข้าถึง
+                    </p>
+                  </button>
+
+                  {/* 📊 ปุ่มสถิติระบบ */}
+                  <button
+                    onClick={() => router.push('/admin/statistics')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-orange-100 rounded-lg flex items-center justify-center group-hover:bg-orange-200 transition-all">
+                        <Activity className="w-7 h-7 text-orange-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          สถิติระบบ
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          รายงานและกราฟ
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      ดูสถิติการใช้งาน รายงาน และกราฟแสดงข้อมูลต่างๆ
+                    </p>
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* 🔙 ปุ่มออกจากระบบตั้งค่า */}
