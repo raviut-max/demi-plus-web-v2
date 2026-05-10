@@ -1,16 +1,14 @@
 // app/admin/hospitals/new/page.tsx
-// =====================================================
 // ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไข dropdown โรงพยาบาลแม่ข่ายไม่แสดงข้อมูล
-//    2. ✅ เพิ่ม debug logging สำหรับตรวจสอบข้อมูล
-//    3. ✅ เพิ่มการจัดการกรณีไม่มีโรงพยาบาลแม่ข่าย
-//    4. ✅ เพิ่มการ disable option ที่ไม่มีสิทธิ์เลือก
-//    5. ✅ แสดงข้อความแจ้งเตือนที่ชัดเจนกว่า
-// =====================================================
+//    1. ✅ แยกฟอร์มเพิ่มแม่ข่าย/ลูกข่าย ชัดเจนตามพารามิเตอร์ URL (?type=main|sub&parent=xxx)
+//    2. ✅ ถ้าเข้ามาแบบเพิ่มลูกข่าย → แสดงแม่ข่ายที่เลือกให้อัตโนมัติ ไม่ต้องเลือกใหม่
+//    3. ✅ ถ้าเข้ามาแบบเพิ่มแม่ข่าย → แสดงฟอร์มเพิ่มแม่ข่ายโดยตรง
+//    4. ✅ แสดงข้อมูลแม่ข่ายแบบอ่านอย่างเดียวเมื่อเพิ่มลูกข่าย
+
 'use client';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
@@ -19,7 +17,7 @@ import {
   isSuperAdmin,
   isHospitalAdmin
 } from '@/lib/supabase/queries';
-import { ArrowLeft, Building2, Hospital, UserCheck, LogOut, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Building2, Hospital, UserCheck, LogOut, AlertCircle, Info } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -45,13 +43,20 @@ interface Hospital {
 
 export default function NewHospitalPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(false);
   const [mainHospitals, setMainHospitals] = useState<Hospital[]>([]);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  const [parentHospital, setParentHospital] = useState<Hospital | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  
+  // ✅ โหมดการเพิ่ม: 'main' หรือ 'sub'
+  const [formMode, setFormMode] = useState<'main' | 'sub'>('main');
+  
   const [formData, setFormData] = useState({
     name: '',
     code: '',
@@ -70,15 +75,43 @@ export default function NewHospitalPage() {
       router.push('/admin/hospitals');
       return;
     }
-    
+
     console.log('👤 [NewHospital] User:', userData);
-    console.log('👤 [NewHospital] User role:', userData.role);
-    console.log('👤 [NewHospital] User hospital_id:', userData.hospital_id);
-    
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-  }, [router]);
+    
+    // ✅ อ่านพารามิเตอร์จาก URL เพื่อตั้งค่าโหมดฟอร์ม
+    const type = searchParams?.get('type');
+    const parentId = searchParams?.get('parent');
+    
+    if (type === 'sub' && parentId) {
+      setFormMode('sub');
+      setFormData(prev => ({ ...prev, type: 'sub', parent_id: parentId }));
+      loadParentHospital(parentId);
+    } else if (type === 'main') {
+      setFormMode('main');
+      setFormData(prev => ({ ...prev, type: 'main' }));
+    }
+  }, [router, searchParams]);
+
+  // ✅ โหลดข้อมูลแม่ข่ายเมื่อเพิ่มลูกข่าย
+  const loadParentHospital = async (parentId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('hospitals')
+        .select('*')
+        .eq('id', parentId)
+        .single();
+      
+      if (error) throw error;
+      setParentHospital(data);
+      console.log('✅ [loadParentHospital] Parent hospital:', data);
+    } catch (error) {
+      console.error('❌ [loadParentHospital] Error:', error);
+      setError('ไม่สามารถโหลดข้อมูลโรงพยาบาลแม่ข่ายได้');
+    }
+  };
 
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
@@ -92,16 +125,15 @@ export default function NewHospitalPage() {
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้ - แก้ไขแล้ว
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       
-      // ✅ โหลดโรงพยาบาลแม่ข่ายทั้งหมด - แก้ไขแล้ว
+      // ✅ โหลดเฉพาะแม่ข่าย (สำหรับกรณีเพิ่มลูกข่ายแบบเลือกเอง)
       let query = supabase
         .from('hospitals')
         .select('*')
@@ -109,29 +141,14 @@ export default function NewHospitalPage() {
         .eq('is_active', true)
         .order('name');
 
-      // ✅ กรองตามสิทธิ์ (Hospital Admin เห็นเฉพาะที่ตัวเองเข้าถึงได้)
       if (ids.length > 0 && !isSuperAdmin(user)) {
-        console.log('🔒 [loadAccessibleHospitals] Hospital Admin - filtering hospitals');
         query = query.in('id', ids);
-      } else {
-        console.log('👑 [loadAccessibleHospitals] Super Admin - showing all hospitals');
       }
 
       const { data, error } = await query;
-
-      if (error) {
-        console.error('❌ Error loading hospitals:', error);
-        throw error;
-      }
+      if (error) throw error;
       
-      console.log('✅ [loadAccessibleHospitals] Loaded main hospitals:', data?.length || 0);
-      console.log('📋 [loadAccessibleHospitals] Hospitals data:', data);
       setMainHospitals(data || []);
-      
-      // ✅ แสดงคำเตือนถ้าไม่มีโรงพยาบาลแม่ข่าย
-      if (!data || data.length === 0) {
-        console.warn('⚠️ [loadAccessibleHospitals] No main hospitals found!');
-      }
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
       setError('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
@@ -139,7 +156,6 @@ export default function NewHospitalPage() {
   };
 
   const handleLogout = () => {
-    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
@@ -149,7 +165,6 @@ export default function NewHospitalPage() {
     setError('');
     setSuccess('');
     setLoading(true);
-    console.log('📝 [handleSubmit] Form submitted:', formData);
 
     // ✅ Validation
     if (!formData.name.trim()) {
@@ -170,7 +185,7 @@ export default function NewHospitalPage() {
       return;
     }
 
-    // ✅ ตรวจสอบสิทธิ์การสร้างโรงพยาบาลลูกข่าย
+    // ✅ ตรวจสอบสิทธิ์
     if (formData.type === 'sub' && !isSuperAdmin(user)) {
       if (!accessibleHospitalIds.includes(formData.parent_id)) {
         setError('❌ คุณไม่มีสิทธิ์สร้างโรงพยาบาลลูกข่ายภายใต้แม่ข่ายนี้');
@@ -188,8 +203,6 @@ export default function NewHospitalPage() {
         is_active: true,
       };
 
-      console.log('💾 [handleSubmit] Inserting hospital:', insertData);
-
       const { error } = await supabase
         .from('hospitals')
         .insert(insertData);
@@ -203,7 +216,6 @@ export default function NewHospitalPage() {
         return;
       }
 
-      console.log('✅ [handleSubmit] Hospital created successfully');
       setSuccess('✅ เพิ่มโรงพยาบาลสำเร็จ!');
       
       setTimeout(() => {
@@ -241,13 +253,16 @@ export default function NewHospitalPage() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                🏥 เพิ่มโรงพยาบาลใหม่
+                🏥 {formMode === 'main' ? 'เพิ่มโรงพยาบาลแม่ข่ายใหม่' : 'เพิ่มโรงพยาบาลลูกข่ายใหม่'}
               </h1>
-              <p className="text-gray-600">กรอกข้อมูลโรงพยาบาลแม่ข่ายหรือลูกข่าย</p>
+              <p className="text-gray-600">
+                {formMode === 'main' 
+                  ? 'กรอกข้อมูลโรงพยาบาลแม่ข่าย (โรงพยาบาลหลัก)' 
+                  : 'กรอกข้อมูลโรงพยาบาลลูกข่ายภายใต้แม่ข่ายที่เลือก'}
+              </p>
             </div>
 
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -259,42 +274,20 @@ export default function NewHospitalPage() {
                         {user?.full_name_th || 'ผู้ดูแลระบบ'}
                       </p>
                       <p className="text-xs text-gray-500">
-                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                        {user?.role === 'admin' ? (
+                          isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin'
+                        ) : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
-
                   <div className="border-t border-blue-200 pt-2 mt-2">
-                    <div className="flex items-center gap-1 mb-1">
+                    <div className="flex items-center gap-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
-                      <span className="text-xs text-gray-600 font-medium">
-                        {userHospital.name}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {userHospital.type === 'main' ? (
-                        <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                          🏥 แม่ข่าย
-                        </span>
-                      ) : (
-                        <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs font-semibold">
-                          🏥 ลูกข่าย
-                        </span>
-                      )}
-
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                          <Building2 className="w-3 h-3" />
-                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
-                        </div>
-                      )}
+                      <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
                     </div>
                   </div>
                 </div>
               )}
-
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -318,7 +311,6 @@ export default function NewHospitalPage() {
               <span className="text-red-700 text-sm">{error}</span>
             </div>
           )}
-
           {success && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
@@ -326,42 +318,36 @@ export default function NewHospitalPage() {
             </div>
           )}
 
-          {/* ข้อมูลสิทธิ์ */}
+          {/* ✅ แสดงโหมดที่เลือก */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h3 className="text-sm font-semibold text-blue-800 mb-2">สิทธิ์การสร้างโรงพยาบาล</h3>
-            <ul className="text-sm text-blue-700 space-y-1">
-              {isSuperAdmin(user) ? (
-                <>
-                  <li>👑 <strong>Super Admin:</strong> สร้างโรงพยาบาลแม่ข่ายและลูกข่ายได้ทั้งหมด</li>
-                  <li>🔓 สามารถเลือกแม่ข่ายใดก็ได้ในระบบ</li>
-                </>
-              ) : (
-                <>
-                  <li>🏥 <strong>Hospital Admin:</strong> สร้างโรงพยาบาลได้เฉพาะใน hierarchy ของตัวเอง</li>
-                  <li>🔒 สามารถเลือกแม่ข่ายได้เฉพาะที่ตัวเองเข้าถึงได้ ({accessibleHospitalIds.length} แห่ง)</li>
-                </>
-              )}
-            </ul>
+            <div className="flex items-center gap-2">
+              <Info className="w-5 h-5 text-blue-600" />
+              <span className="text-sm text-blue-800 font-medium">
+                {formMode === 'main' 
+                  ? '🏥 โหมด: เพิ่มโรงพยาบาลแม่ข่าย (โรงพยาบาลหลัก)' 
+                  : '🏥 โหมด: เพิ่มโรงพยาบาลลูกข่าย (ภายใต้แม่ข่าย)'}
+              </span>
+            </div>
           </div>
 
-          {/* ประเภทโรงพยาบาล */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              ประเภทโรงพยาบาล <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={formData.type}
-              onChange={(e) => setFormData({...formData, type: e.target.value as 'main' | 'sub'})}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              <option value="main">โรงพยาบาลแม่ข่าย</option>
-              <option value="sub">โรงพยาบาลลูกข่าย</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              💡 แม่ข่าย = โรงพยาบาลหลัก, ลูกข่าย = โรงพยาบาลในสังกัด
-            </p>
-          </div>
+          {/* ✅ กรณีเพิ่มลูกข่าย: แสดงข้อมูลแม่ข่ายที่เลือก */}
+          {formMode === 'sub' && parentHospital && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-green-800 mb-2">
+                🏥 โรงพยาบาลแม่ข่ายที่เลือก
+              </h3>
+              <div className="flex items-center gap-3">
+                <Building2 className="w-6 h-6 text-green-600" />
+                <div>
+                  <p className="font-bold text-green-900">{parentHospital.name}</p>
+                  <p className="text-sm text-green-700">รหัส: {parentHospital.code}</p>
+                </div>
+              </div>
+              <p className="text-xs text-green-600 mt-2">
+                ✅ โรงพยาบาลลูกข่ายที่คุณเพิ่มจะอยู่ภายใต้แม่ข่ายนี้
+              </p>
+            </div>
+          )}
 
           {/* ชื่อโรงพยาบาล */}
           <div>
@@ -374,7 +360,7 @@ export default function NewHospitalPage() {
               onChange={(e) => setFormData({...formData, name: e.target.value})}
               required
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-              placeholder="เช่น โรงพยาบาลเพชรบูรณ์"
+              placeholder={formMode === 'main' ? 'เช่น โรงพยาบาลเพชรบูรณ์' : 'เช่น โรงพยาบาลสาขาเมือง'}
             />
           </div>
 
@@ -397,8 +383,8 @@ export default function NewHospitalPage() {
             </p>
           </div>
 
-          {/* ✅ โรงพยาบาลแม่ข่าย (สำหรับลูกข่าย) - แก้ไขแล้ว */}
-          {formData.type === 'sub' && (
+          {/* ✅ เฉพาะกรณีเพิ่มลูกข่ายแบบเลือกแม่ข่ายเอง (ไม่ใช่จาก URL) */}
+          {formMode === 'sub' && !parentHospital && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 โรงพยาบาลแม่ข่าย <span className="text-red-500">*</span>
@@ -410,52 +396,14 @@ export default function NewHospitalPage() {
                 required
               >
                 <option value="">-- เลือกแม่ข่าย --</option>
-                {mainHospitals.length === 0 ? (
-                  <option disabled value="">
-                    ⚠️ ไม่มีโรงพยาบาลแม่ข่ายในระบบ
+                {mainHospitals.map(h => (
+                  <option key={h.id} value={h.id} disabled={!isSuperAdmin(user) && !accessibleHospitalIds.includes(h.id)}>
+                    {h.name} ({h.code}){!isSuperAdmin(user) && accessibleHospitalIds.includes(h.id) ? ' ✅' : ''}
                   </option>
-                ) : (
-                  mainHospitals.map(h => {
-                    const hasAccess = accessibleHospitalIds.includes(h.id);
-                    const canSelect = isSuperAdmin(user) || hasAccess;
-                    
-                    return (
-                      <option 
-                        key={h.id} 
-                        value={h.id}
-                        disabled={!canSelect}
-                      >
-                        {h.name} ({h.code})
-                        {!isSuperAdmin(user) && hasAccess ? ' ✅' : ''}
-                        {!canSelect ? ' (ไม่มีสิทธิ์)' : ''}
-                      </option>
-                    );
-                  })
-                )}
+                ))}
               </select>
-              
-              {/* ✅ แสดงข้อมูลเพิ่มเติม */}
               {mainHospitals.length === 0 && (
-                <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                  <p className="text-xs text-yellow-800">
-                    <strong>⚠️ ยังไม่มีโรงพยาบาลแม่ข่ายในระบบ</strong>
-                  </p>
-                  <p className="text-xs text-yellow-700 mt-1">
-                    กรุณาสร้างโรงพยาบาลแม่ข่ายก่อน แล้วจึงสร้างโรงพยาบาลลูกข่าย
-                  </p>
-                </div>
-              )}
-              
-              {!isSuperAdmin(user) && mainHospitals.length > 0 && (
-                <p className="text-xs text-blue-600 mt-1">
-                  🔒 แสดงโรงพยาบาลแม่ข่ายที่คุณมีสิทธิ์เข้าถึง ({mainHospitals.filter(h => accessibleHospitalIds.includes(h.id)).length} แห่ง)
-                </p>
-              )}
-              
-              {isSuperAdmin(user) && (
-                <p className="text-xs text-purple-600 mt-1">
-                  👑 Super Admin - แสดงโรงพยาบาลแม่ข่ายทั้งหมด ({mainHospitals.length} แห่ง)
-                </p>
+                <p className="text-xs text-orange-500 mt-1">⚠️ ยังไม่มีโรงพยาบาลแม่ข่ายในระบบ</p>
               )}
             </div>
           )}
@@ -475,7 +423,7 @@ export default function NewHospitalPage() {
               ) : (
                 <>
                   <Building2 className="w-5 h-5" />
-                  สร้างโรงพยาบาล
+                  {formMode === 'main' ? 'สร้างโรงพยาบาลแม่ข่าย' : 'สร้างโรงพยาบาลลูกข่าย'}
                 </>
               )}
             </button>
@@ -493,5 +441,4 @@ export default function NewHospitalPage() {
   );
 }
 
-// ✅ เพิ่มบรรทัดนี้เพื่อปิด Static Generation และใช้ Dynamic Rendering แทน
 export const dynamic = 'force-dynamic';
