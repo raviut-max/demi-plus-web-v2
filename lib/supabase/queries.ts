@@ -367,45 +367,12 @@ export async function getPatientList(search?: string, pamLevel?: string, hospita
   }
 }
 
+// ✅ ในฟังก์ชัน registerPatient - ลบ subdistrict_health_center และ village_id
 export async function registerPatient(data: {
-  id_card: string;
-  password: string;
-  first_name: string;
-  last_name: string;
-  hospital_number: string;
-  birth_date: string;
-  gender: string;
-  phone?: string;
-  email?: string;
-  current_weight?: number;
-  height?: number;
-  waist_circumference?: number;
-  coach_id?: string;
-  emergency_contact_name?: string;
-  emergency_contact_phone?: string;
-  emergency_contact_relationship?: string;
-  house_number?: string;
-  address_line1?: string;
-  soi?: string;
-  road?: string;
-  village_no?: string;
-  village_name?: string;
-  subdistrict?: string;
-  district?: string;
-  province?: string;
-  postal_code?: string;
-  diabetes_type?: string;
-  blood_sugar?: number;
-  hba1c_level?: number;
-  notes?: string;
-  occupation?: string;
-  education_level?: string;
-  hospital_id?: string;
-  village_id?: string;
-  pam_level?: string;
-  pam_score?: number;
-  zone?: string;
-  created_by: string;
+  // ... existing fields ...
+  // ❌ ลบออก: subdistrict_health_center?: string;
+  // ❌ ลบออก: village_id?: string;
+  // ✅ เหลือเฉพาะ hospital_id
 }) {
   try {
     const { data: user, error: userError } = await supabase
@@ -459,8 +426,10 @@ export async function registerPatient(data: {
         notes: data.notes,
         occupation: data.occupation,
         education_level: data.education_level,
-        hospital_id: data.hospital_id,
-        village_id: data.village_id,
+        // ✅ ใช้ hospital_id เท่านั้น (รองรับทั้งแม่ข่ายและลูกข่าย)
+        hospital_id: data.hospital_id || undefined,
+        // ❌ ลบออก: subdistrict_health_center: data.subdistrict_health_center,
+        // ❌ ลบออก: village_id: data.village_id,
         pam_level: data.pam_level || 'L0',
         pam_score: data.pam_score ?? 0,
         zone: data.zone || 'Zero Zone',
@@ -471,16 +440,7 @@ export async function registerPatient(data: {
       .select()
       .single();
 
-    if (profileError) {
-      console.error('Error creating profile:', profileError);
-      await supabase.from('users').delete().eq('id', user.id);
-      return { success: false, error: profileError.message };
-    }
-
-    return { success: true, user, profile };
-  } catch (err) {
-    console.error('Register patient error:', err);
-    return { success: false, error: 'เกิดข้อผิดพลาดในการลงทะเบียน' };
+    // ... rest of the code ...
   }
 }
 

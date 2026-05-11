@@ -1,11 +1,10 @@
 // app/admin/patients/new/page.tsx
-// ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ ลบ dropdown หมู่บ้านออกจากส่วนที่ 4
-//    2. ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้ (แม่ข่าย+ลูกข่ายของผู้จัดทำ)
-//    3. ✅ แสดงโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
-//    4. ✅ แสดงข้อมูลผู้จัดทำพร้อมประเภทโรงพยาบาล
-//    5. ✅ แก้ไข Info Banner ให้แสดงข้อมูลที่ถูกต้อง
+//    1. ✅ แปลงข้อผิดพลาดทั้งหมดเป็นภาษาไทย
+//    2. ✅ ลบฟิลด์ รพ.สต. ออกทั้งหมด
+//    3. ✅ แสดงคำแนะนำที่ชัดเจนเมื่อเกิดข้อผิดพลาด
+//    4. ✅ Validate ก่อนส่งข้อมูล
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -27,7 +26,9 @@ import {
   UserCheck,
   Hospital,
   Building2,
-  LogOut
+  LogOut,
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 import { supabase } from '@/lib/supabase/client';
@@ -100,12 +101,14 @@ export default function NewPatientPage() {
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({});
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
+
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -208,10 +211,10 @@ export default function NewPatientPage() {
   // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และ users)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨‍️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -229,10 +232,19 @@ export default function NewPatientPage() {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
     setFormData({
       ...formData,
-      [e.target.name]: e.target.value,
+      [name]: value,
     });
+    
+    // ✅ ล้าง error เมื่อผู้ใช้เริ่มแก้ไข
+    if (validationErrors[name]) {
+      setValidationErrors({
+        ...validationErrors,
+        [name]: ''
+      });
+    }
   };
 
   useEffect(() => {
@@ -277,47 +289,69 @@ export default function NewPatientPage() {
     return { mainHospitals, hospitalGroups };
   };
 
+  // ✅ Validate ฟอร์มก่อนส่ง
+  const validateForm = (): boolean => {
+    const errors: {[key: string]: string} = {};
+    
+    // ✅ ตรวจสอบเลขบัตรประชาชน
+    if (!formData.id_card) {
+      errors.id_card = 'กรุณากรอกเลขบัตรประชาชน';
+    } else if (formData.id_card.replace(/\D/g, '').length !== 13) {
+      errors.id_card = 'เลขบัตรประชาชนต้อง 13 หลัก';
+    }
+    
+    // ✅ ตรวจสอบชื่อ-นามสกุล
+    if (!formData.first_name) errors.first_name = 'กรุณากรอกชื่อ';
+    if (!formData.last_name) errors.last_name = 'กรุณากรอกนามสกุล';
+    
+    // ✅ ตรวจสอบ HN
+    if (!formData.hospital_number) {
+      errors.hospital_number = 'กรุณากรอกเลขที่ผู้ป่วย (HN)';
+    }
+    
+    // ✅ ตรวจสอบวันเกิด
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+      errors.birth_date = 'กรุณากรอกวันเกิดให้ครบถ้วน';
+    }
+    
+    // ✅ ตรวจสอบที่อยู่
+    if (!addressData.province || !addressData.district || !addressData.subdistrict) {
+      errors.address = 'กรุณาเลือกที่อยู่ให้ครบถ้วน';
+    }
+    
+    // ✅ ตรวจสอบโรงพยาบาล
+    if (!formData.hospital_id) {
+      errors.hospital_id = 'กรุณาเลือกโรงพยาบาลสังกัด';
+    }
+    
+    // ✅ ตรวจสอบรหัสผ่าน
+    if (formData.password !== formData.confirmPassword) {
+      errors.password = 'รหัสผ่านไม่ตรงกัน';
+    }
+    
+    setValidationErrors(errors);
+    
+    if (Object.keys(errors).length > 0) {
+      const firstError = Object.values(errors)[0];
+      setError(`❌ ${firstError}`);
+      return false;
+    }
+    
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setValidationErrors({});
+    
     console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
     console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
-
-    // ✅ ตรวจสอบรหัสผ่าน
-    if (formData.password !== formData.confirmPassword) {
-      setError('❌ รหัสผ่านไม่ตรงกัน');
-      return;
-    }
-
-    // ✅ ตรวจสอบเลขบัตรประชาชน
-    if (formData.id_card.length !== 13) {
-      setError('❌ เลขบัตรประชาชนต้อง 13 หลัก');
-      return;
-    }
-
-    // ✅ ตรวจสอบข้อมูลที่จำเป็น
-    if (!formData.first_name || !formData.last_name || !formData.hospital_number) {
-      setError('❌ กรุณากรอก ชื่อ, นามสกุล และ HN (เลขที่ผู้ป่วย) ให้ครบถ้วน');
-      return;
-    }
-
-    // ✅ ตรวจสอบวันเกิด
-    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      setError('❌ กรุณากรอกวันเกิดให้ครบถ้วน');
-      return;
-    }
-
-    // ✅ ตรวจสอบที่อยู่
-    if (!addressData.province || !addressData.district || !addressData.subdistrict) {
-      setError('❌ กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
-      return;
-    }
-
-    // ✅ ตรวจสอบว่าเลือกโรงพยาบาลแล้ว
-    if (!formData.hospital_id) {
-      setError('❌ กรุณาเลือกโรงพยาบาลสังกัด');
+    
+    // ✅ Validate ฟอร์มก่อน
+    if (!validateForm()) {
       return;
     }
 
@@ -391,11 +425,47 @@ export default function NewPatientPage() {
         }, 2000);
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
-        setError(result.error || 'เกิดข้อผิดพลาด');
+        
+        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
+        let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
+        
+        if (result.error?.includes('23505') || result.error?.includes('duplicate key')) {
+          if (result.error?.includes('id_card')) {
+            thaiError = '❌ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว กรุณาตรวจสอบหรือใช้เลขอื่น';
+          } else if (result.error?.includes('hospital_number')) {
+            thaiError = '❌ เลขที่ผู้ป่วย (HN) นี้มีอยู่ในระบบแล้ว กรุณาใช้เลขใหม่';
+          } else {
+            thaiError = '❌ ข้อมูลนี้ซ้ำกับที่มีอยู่ในระบบ กรุณาตรวจสอบ';
+          }
+        } else if (result.error?.includes('23503')) {
+          thaiError = '❌ ข้อมูลที่อ้างอิงไม่มีในระบบ กรุณาตรวจสอบ';
+        }
+        
+        setError(thaiError);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('❌ [handleSubmit] Registration error:', err);
-      setError('เกิดข้อผิดพลาดในการลงทะเบียน');
+      
+      // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
+      let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
+      
+      if (err.message?.includes('23505') || err.message?.includes('duplicate key')) {
+        if (err.message?.includes('id_card')) {
+          thaiError = '❌ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว';
+        } else if (err.message?.includes('hospital_number')) {
+          thaiError = '❌ เลขที่ผู้ป่วย (HN) นี้มีอยู่ในระบบแล้ว';
+        } else {
+          thaiError = '❌ ข้อมูลซ้ำกับที่มีอยู่ในระบบ';
+        }
+      } else if (err.message?.includes('23503')) {
+        thaiError = '❌ ข้อมูลที่อ้างอิงไม่มีในระบบ';
+      } else if (err.message?.includes('22007')) {
+        thaiError = '❌ รูปแบบวันที่ไม่ถูกต้อง';
+      } else if (err.message?.includes('22001')) {
+        thaiError = '❌ ข้อมูลยาวเกินไป';
+      }
+      
+      setError(thaiError);
       setLoading(false);
     }
   };
@@ -410,9 +480,7 @@ export default function NewPatientPage() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+            <CheckCircle className="w-8 h-8 text-green-500" />
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-2">ลงทะเบียนสำเร็จ!</h2>
           <p className="text-gray-600">กำลังไปยังหน้ารายการผู้ป่วย...</p>
@@ -551,6 +619,24 @@ export default function NewPatientPage() {
 
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6">
         
+        {/* ✅ แสดงข้อผิดพลาด (ถ้ามี) */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold text-red-800 mb-1">เกิดข้อผิดพลาด</p>
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setError('')}
+              className="text-red-600 hover:text-red-800"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
         {/* 1. ข้อมูลบัญชี */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -569,12 +655,17 @@ export default function NewPatientPage() {
                 onChange={handleChange}
                 maxLength={13}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  validationErrors.id_card ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck="false"
               />
+              {validationErrors.id_card && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.id_card}</p>
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 💡 กรอกเลขบัตรประชาชน 13 หลัก (ไม่มีช่องว่าง)
               </p>
@@ -610,9 +701,14 @@ export default function NewPatientPage() {
                 onChange={handleChange}
                 required
                 readOnly
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 cursor-not-allowed"
+                className={`w-full px-4 py-2 border rounded-lg bg-gray-50 cursor-not-allowed ${
+                  validationErrors.password ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="ระบบจะสร้างอัตโนมัติ"
               />
+              {validationErrors.password && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.password}</p>
+              )}
             </div>
           </div>
         </div>
@@ -634,9 +730,14 @@ export default function NewPatientPage() {
                 value={formData.first_name}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                  validationErrors.first_name ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="ชื่อ"
               />
+              {validationErrors.first_name && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.first_name}</p>
+              )}
             </div>
 
             <div>
@@ -649,14 +750,19 @@ export default function NewPatientPage() {
                 value={formData.last_name}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                  validationErrors.last_name ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="นามสกุล"
               />
+              {validationErrors.last_name && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.last_name}</p>
+              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                HN (Hospital Number) <span className="text-red-500">*</span>
+                HN (เลขที่ผู้ป่วย) <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
@@ -664,9 +770,17 @@ export default function NewPatientPage() {
                 value={formData.hospital_number}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                  validationErrors.hospital_number ? 'border-red-500' : 'border-gray-300'
+                }`}
                 placeholder="HN-001"
               />
+              {validationErrors.hospital_number && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.hospital_number}</p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                ⚠️ ต้องไม่ซ้ำกับผู้ป่วยคนอื่นในโรงพยาบาลเดียวกัน
+              </p>
             </div>
 
             <div>
@@ -713,6 +827,9 @@ export default function NewPatientPage() {
                   ))}
                 </select>
               </div>
+              {validationErrors.birth_date && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.birth_date}</p>
+              )}
             </div>
 
             <div>
@@ -892,7 +1009,9 @@ export default function NewPatientPage() {
               value={formData.hospital_id}
               onChange={(e) => handleHospitalChange(e.target.value)}
               required
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent max-h-64 overflow-y-auto"
+              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent max-h-64 overflow-y-auto ${
+                validationErrors.hospital_id ? 'border-red-500' : 'border-gray-300'
+              }`}
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
             
@@ -911,6 +1030,9 @@ export default function NewPatientPage() {
                 </optgroup>
               ))}
             </select>
+            {validationErrors.hospital_id && (
+              <p className="text-xs text-red-600 mt-1">💡 {validationErrors.hospital_id}</p>
+            )}
             <p className="text-xs text-gray-500 mt-1">
               💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
             </p>
@@ -1024,6 +1146,9 @@ export default function NewPatientPage() {
               <ThaiAddressSelector 
                 onAddressChange={handleAddressChange}
               />
+              {validationErrors.address && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.address}</p>
+              )}
             </div>
           </div>
         </div>
@@ -1109,7 +1234,7 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨‍️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
+              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
@@ -1123,13 +1248,6 @@ export default function NewPatientPage() {
             )}
           </div>
         </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-            <span className="text-red-700 text-sm">{error}</span>
-          </div>
-        )}
 
         <div className="flex items-center gap-4">
           <button
