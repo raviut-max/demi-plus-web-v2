@@ -1,10 +1,10 @@
 // app/admin/patients/new/page.tsx
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แปลงข้อผิดพลาดทั้งหมดเป็นภาษาไทย
-//    2. ✅ ลบฟิลด์ รพ.สต. ออกทั้งหมด
-//    3. ✅ แสดงคำแนะนำที่ชัดเจนเมื่อเกิดข้อผิดพลาด
-//    4. ✅ Validate ก่อนส่งข้อมูล
+//    1. ✅ แก้ไข Syntax Errors ทั้งหมด
+//    2. ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
+//    3. ✅ เพิ่ม Validation และคำแนะนำ
+//    4. ✅ ลบฟิลด์ รพ.สต. ออก
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -211,10 +211,10 @@ export default function NewPatientPage() {
   // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และ users)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -1234,7 +1234,7 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
+              👨‍️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
