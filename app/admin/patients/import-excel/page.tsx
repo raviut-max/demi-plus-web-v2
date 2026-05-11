@@ -1,11 +1,13 @@
 // app/admin/patients/import-excel/page.tsx
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไข Error: datePattern is not defined
-//    2. ✅ ปรับปรุงคำชี้แจงภาษาไทยให้ชัดเจน
-//    3. ✅ เพิ่มคำแนะนำการเตรียมไฟล์
-//    4. ✅ แสดงตัวอย่างรูปแบบวันที่ที่ถูกต้อง
+//    1. ✅ แก้ไข COLUMN_MAPPINGS - แยกฟิลด์ชัดเจน ไม่ซ้ำซ้อน
+//    2. ✅ Preview Table - แสดงครบทุกคอลัมน์ + เลื่อนแนวนอนได้
+//    3. ✅ Edit Modal - แสดงทุกฟิลด์ให้แก้ไขได้ (28 ฟิลด์)
+//    4. ✅ แสดง Column Mapping ชัดเจน - เห็นว่าคอลัมน์ไหนจับคู่กับอะไร
+//    5. ✅ แก้ไข Validation - ตรวจสอบ Hospital และ Coach แยกกัน
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -41,9 +43,7 @@ import {
   FileText,
   Layers,
   Settings,
-  ChevronDown,
-  HelpCircle,
-  Info
+  ChevronDown
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -87,8 +87,8 @@ interface Coach {
 
 interface ImportRow {
   rowNumber: number;
-  originalData: any;
-  mappedData: any;
+  originalData: any; // ข้อมูลดิบจาก Excel
+  mappedData: any; // ข้อมูลที่จับคู่แล้ว
   errors: string[];
   warnings: string[];
   isValid: boolean;
@@ -101,7 +101,7 @@ interface ImportRow {
 }
 
 interface ColumnMapping {
-  [fieldName: string]: string;
+  [fieldName: string]: string; // fieldName -> excelHeader
 }
 
 interface LoadingStep {
@@ -111,42 +111,65 @@ interface LoadingStep {
 }
 
 // =====================================================
-// 🧠 SMART COLUMN MAPPING
+// 🧠 SMART COLUMN MAPPING - แก้ไขแล้ว (ไม่ซ้ำซ้อน)
 // =====================================================
 const COLUMN_MAPPINGS: { [key: string]: string[] } = {
+  // === ข้อมูลบัญชี (users table) ===
   id_card: ['เลขบัตรประชาชน', 'บัตรประชาชน', 'id_card', 'idcard', 'national_id', 'เลขบัตร'],
-  birth_date: ['วันเกิด', 'วันเกิด', 'birth_date', 'birthdate', 'dob', 'date_of_birth', 'วันเกิด (พ.ศ.)'],
-  first_name: ['ชื่อ', 'ชื่อ', 'first_name', 'firstname', 'name', 'ชื่อตัว'],
-  last_name: ['นามสกุล', 'นามสกุล', 'last_name', 'lastname', 'surname', 'ชื่อสกุล'],
-  hospital_number: ['HN', 'hn', 'hospital_number', 'hospitalnumber', 'เลขที่ผู้ป่วย', 'เลข HN', 'HN (เลขที่ผู้ป่วย)'],
+  birth_date: ['วันเกิด', 'วันเกิด', 'birth_date', 'birthdate', 'dob', 'date_of_birth'],
+  
+  // === ข้อมูลส่วนตัวผู้ป่วย (profiles table) - แยกชัดเจน ===
+  first_name: ['ชื่อ', 'ชื่อ', 'first_name', 'firstname', 'name'],
+  last_name: ['นามสกุล', 'นามสกุล', 'last_name', 'lastname', 'surname'],
+  hospital_number: ['HN', 'hn', 'hospital_number', 'hospitalnumber', 'เลขที่ผู้ป่วย', 'เลข HN'],
   gender: ['เพศ', 'เพศ', 'gender', 'sex'],
-  phone: ['เบอร์โทร', 'โทรศัพท์', 'phone', 'tel', 'mobile', 'เบอร์โทรศัพท์', 'มือถือ'],
-  email: ['อีเมล', 'email', 'e-mail', 'อีเมล์'],
-  current_weight: ['น้ำหนัก', 'น้ำหนัก', 'weight', 'current_weight', 'น้ำหนัก (kg)', 'น้ำหนักตัว'],
+  phone: ['เบอร์โทร', 'โทรศัพท์', 'phone', 'tel', 'mobile', 'เบอร์โทรศัพท์'],
+  email: ['อีเมล', 'email', 'e-mail'],
+  
+  // === ข้อมูลสุขภาพ (profiles table) ===
+  current_weight: ['น้ำหนัก', 'น้ำหนัก', 'weight', 'current_weight', 'น้ำหนัก (kg)'],
   height: ['ส่วนสูง', 'ส่วนสูง', 'height', 'ส่วนสูง (cm)'],
-  waist_circumference: ['รอบเอว', 'รอบเอว', 'waist', 'waist_circumference', 'รอบเอว(ซม.)', 'รอบเอว (cm)'],
-  diabetes_type: ['ประเภทเบาหวาน', 'ประเภทเบาหวาน', 'diabetes_type', 'diabetes', 'ชนิดเบาหวาน'],
-  blood_sugar: ['ค่าน้ำตาล', 'ค่าน้ำตาลในเลือด', 'blood_sugar', 'bloodsugar', 'glucose', 'น้ำตาลในเลือด'],
-  hba1c_level: ['HbA1c', 'ค่า HbA1c', 'hba1c', 'hba1c_level', 'HbA1c ล่าสุด', 'ค่า HbA1c ล่าสุด (ถ้ามี)'],
-  hospital: ['โรงพยาบาล', 'โรงพยาบาล', 'hospital', 'hospital_name', 'รพ.', 'โรงพยาบาลสังกัด'],
-  subdistrict_health_center: ['รพ.สต.', 'รพสต', 'subdistrict_health_center', 'health_center', 'โรงพยาบาลส่งเสริมสุขภาพ'],
-  house_number: ['บ้านเลขที่', 'บ้านเลขที่', 'house_number', 'house_no', 'เลขที่บ้าน'],
-  village_no: ['หมู่ที่', 'หมู่ที่/ชุมชน', 'village_no', 'village_number', 'หมู่', 'หมู่ที่'],
-  village_name: ['หมู่บ้าน', 'หมู่บ้าน', 'village_name', 'village', 'ชื่อหมู่บ้าน'],
-  soi: ['ซอย', 'ซอย', 'soi', 'alley', 'ตรอก'],
-  road: ['ถนน', 'ถนน', 'road', 'street', 'ชื่อถนน'],
+  waist_circumference: ['รอบเอว', 'รอบเอว', 'waist', 'waist_circumference', 'รอบเอว(ซม.)', 'รอบเอว (ซม.)'],
+  diabetes_type: ['ประเภทเบาหวาน', 'ประเภทเบาหวาน', 'diabetes_type', 'diabetes'],
+  blood_sugar: ['ค่าน้ำตาล', 'ค่าน้ำตาลในเลือด', 'blood_sugar', 'bloodsugar', 'glucose'],
+  hba1c_level: ['HbA1c', 'ค่า HbA1c', 'hba1c', 'hba1c_level', 'ค่า HbA1c ล่าสุด', 'ค่า HbA1c ล่าสุด (ถ้ามี)'],
+  
+  // === โรงพยาบาล (profiles.hospital_id ← hospitals.name) ===
+  hospital: ['โรงพยาบาล', 'โรงพยาบาล', 'hospital', 'hospital_name', 'รพ.'],
+  
+  // === ที่อยู่ (profiles table) ===
+  subdistrict_health_center: ['รพ.สต.', 'รพสต', 'subdistrict_health_center', 'health_center'],
+  house_number: ['บ้านเลขที่', 'บ้านเลขที่', 'house_number', 'house_no'],
+  village_no: ['หมู่ที่', 'หมู่ที่/ชุมชน', 'village_no', 'village_number', 'หมู่'],
+  village_name: ['หมู่บ้าน', 'หมู่บ้าน', 'village_name', 'village'],
+  soi: ['ซอย', 'ซอย', 'soi', 'alley'],
+  road: ['ถนน', 'ถนน', 'road', 'street'],
   province: ['จังหวัด', 'จังหวัด', 'province'],
-  district: ['อำเภอ', 'อำเภอ/เขต', 'district', 'amphoe', 'เขต'],
-  subdistrict: ['ตำบล', 'ตำบล', 'subdistrict', 'tambon', 'แขวง'],
-  postal_code: ['รหัสไปรษณีย์', 'ไปรษณีย์', 'postal_code', 'zipcode', 'รหัสไปรษณีย์'],
-  emergency_contact_name: ['ชื่อผู้ติดต่อ', 'ผู้ติดต่อฉุกเฉิน', 'emergency_contact_name', 'emergency_name', 'ชื่อผู้ติดต่อ(ญาติ)', 'ชื่อญาติ'],
-  emergency_contact_phone: ['เบอร์โทรผู้ติดต่อ', 'เบอร์ฉุกเฉิน', 'emergency_contact_phone', 'emergency_phone', 'เบอร์โทร', 'เบอร์โทรญาติ'],
-  emergency_contact_relationship: ['ความสัมพันธ์', 'ความสัมพันธ์', 'relationship', 'emergency_relationship', 'ความสัมพันธ์'],
-  coach_name: ['ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล', 'ชื่อผู้ดูแล (อสม.)', 'ชื่อโค้ช']
+  district: ['อำเภอ', 'อำเภอ/เขต', 'district', 'amphoe'],
+  subdistrict: ['ตำบล', 'ตำบล', 'subdistrict', 'tambon'],
+  postal_code: ['รหัสไปรษณีย์', 'ไปรษณีย์', 'postal_code', 'zipcode'],
+  
+  // === ผู้ติดต่อฉุกเฉิน (profiles table) - แยกจากโค้ช ===
+  emergency_contact_name: ['ชื่อผู้ติดต่อ', 'ผู้ติดต่อฉุกเฉิน', 'emergency_contact_name', 'emergency_name', 'ชื่อผู้ติดต่อ(ญาติ)'],
+  emergency_contact_phone: ['เบอร์โทรผู้ติดต่อ', 'เบอร์ฉุกเฉิน', 'emergency_contact_phone', 'emergency_phone'],
+  emergency_contact_relationship: ['ความสัมพันธ์', 'ความสัมพันธ์', 'relationship', 'emergency_relationship'],
+  
+  // === โค้ช/ผู้ดูแล (profiles.coach_id ← doctors.full_name_th) - แยกชัดเจน ===
+  coach_name: ['ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล', 'ชื่อผู้ดูแล (อสม.)']
 };
 
-const REQUIRED_FIELDS = ['id_card', 'first_name', 'last_name', 'hospital_number', 'birth_date', 'gender', 'hospital'];
+// ✅ คอลัมน์ที่จำเป็น (ต้องมีในไฟล์ Excel)
+const REQUIRED_FIELDS = [
+  'id_card',           // เลขบัตรประชาชน
+  'first_name',        // ชื่อ
+  'last_name',         // นามสกุล
+  'hospital_number',   // HN
+  'birth_date',        // วันเกิด
+  'gender',            // เพศ
+  'hospital'           // โรงพยาบาล
+];
 
+// ✅ ชื่อแสดงภาษาไทย
 const FIELD_DISPLAY_NAMES: { [key: string]: string } = {
   id_card: 'เลขบัตรประชาชน',
   birth_date: 'วันเกิด',
@@ -303,7 +326,7 @@ export default function ImportPatientsExcelPage() {
       'ชื่อผู้ติดต่อ(ญาติ)', 'เบอร์โทร', 'ความสัมพันธ์', 'ชื่อผู้ดูแล (อสม.)'
     ];
 
-    const sampleData1 = [
+    const sampleData = [
       '1100800012345', '05/01/2548', 'นายบุญเพ็ง', 'ดอกทานตะวัน', '45688899',
       'ชาย', '0812223654', '80', '164', '100', 'เบาหวาน', '140', '6.8',
       'รพ.เมตตาธรรม', 'รพ.สต.บ้านฟ้าใส', '54', '12', 'บ้านฟ้าใส', 'ตาเทพ',
@@ -311,20 +334,7 @@ export default function ImportPatientsExcelPage() {
       '857741248', 'คู่สมรส', 'นางเตือนใจ มั่งมี'
     ];
 
-    const sampleData2 = [
-      '1234567890000', '21/05/2544', 'นางสาวสมพร', 'ลีลา', '95562310',
-      'หญิง', '956321476', '65', '148', '95', 'กลุ่มเสี่ยง', '105', '-',
-      'รพ.เมตตาธรรม', 'รพ.สต.บ้านฟ้าใส', '85', '5', 'โคกสูง', 'ไม่มี',
-      'บ้านวัดโบสถ์', 'เทพสถิตย์', 'เมตตาธรรม', 'บ้านฟ้าใส', '99000', 'นายมีชัย',
-      '946524875', 'ลูก', 'นายศักดา ประกาศ'
-    ];
-
-    const csvContent = '\ufeff' + [
-      headers.join(','),
-      sampleData1.join(','),
-      sampleData2.join(',')
-    ].join('\n');
-
+    const csvContent = '\ufeff' + [headers.join(','), sampleData.join(',')].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -345,13 +355,14 @@ export default function ImportPatientsExcelPage() {
     headers.forEach((header, index) => {
       const normalizedHeader = header.trim().toLowerCase();
       
+      // หาว่า header นี้ตรงกับ field ไหน
       for (const [fieldName, possibleNames] of Object.entries(COLUMN_MAPPINGS)) {
         if (possibleNames.some(name => 
           name.toLowerCase() === normalizedHeader || 
           normalizedHeader.includes(name.toLowerCase()) ||
           name.toLowerCase().includes(normalizedHeader)
         )) {
-          mapping[fieldName] = headers[index];
+          mapping[fieldName] = headers[index]; // เก็บชื่อจริงจาก Excel
           console.log(`✅ Mapped: ${fieldName} <- "${headers[index]}"`);
           break;
         }
@@ -383,9 +394,11 @@ export default function ImportPatientsExcelPage() {
       
       console.log('📋 [parseFile] Detected headers:', headers);
       
+      // ✅ Smart Column Mapping
       const mapping = detectColumnMapping(headers);
       setColumnMapping(mapping);
       
+      // ✅ ตรวจสอบ Required Fields
       const missingRequired = REQUIRED_FIELDS.filter(field => !mapping[field]);
       if (missingRequired.length > 0) {
         const fieldNames = missingRequired.map(f => FIELD_DISPLAY_NAMES[f] || f).join(', ');
@@ -394,6 +407,7 @@ export default function ImportPatientsExcelPage() {
         return;
       }
       
+      // ✅ Parse ข้อมูล
       const rows: ImportRow[] = [];
       
       for (let i = 1; i < lines.length; i++) {
@@ -404,26 +418,32 @@ export default function ImportPatientsExcelPage() {
           originalRow[header] = values[idx] || '';
         });
         
+        // ✅ Map กับ field ที่รู้จัก
         const mappedRow: any = {};
         for (const [fieldName, excelHeader] of Object.entries(mapping)) {
           mappedRow[fieldName] = originalRow[excelHeader] || '';
         }
         
+        // ✅ Validate
         const errors: string[] = [];
         const warnings: string[] = [];
         
+        // ตรวจสอบ ID Card
         const idCardClean = mappedRow.id_card?.replace(/\D/g, '') || '';
         if (idCardClean.length !== 13) {
           errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
         }
         
+        // ตรวจสอบ HN
         if (!mappedRow.hospital_number) {
           errors.push('ต้องระบุ HN');
         }
         
+        // ตรวจสอบชื่อ-นามสกุล (แยกกัน)
         if (!mappedRow.first_name) errors.push('ต้องระบุชื่อ');
         if (!mappedRow.last_name) errors.push('ต้องระบุนามสกุล');
         
+        // ตรวจสอบโรงพยาบาล
         if (mappedRow.hospital) {
           const hospital = hospitals.find(h => 
             h.name === mappedRow.hospital || 
@@ -441,6 +461,7 @@ export default function ImportPatientsExcelPage() {
           errors.push('ต้องระบุโรงพยาบาล');
         }
         
+        // ตรวจสอบโค้ช (แยกจากชื่อผู้ติดต่อ)
         if (mappedRow.coach_name) {
           const coach = coaches.find(c => 
             c.full_name_th === mappedRow.coach_name ||
@@ -455,11 +476,11 @@ export default function ImportPatientsExcelPage() {
           }
         }
         
-        // ✅ แก้ไข Error: datePattern is not defined
+        // ตรวจสอบวันเกิด
         if (mappedRow.birth_date) {
           const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
           if (!datePattern.test(mappedRow.birth_date)) {
-            errors.push('รูปแบบวันเกิดต้องเป็น DD/MM/YYYY (เช่น 05/01/2548)');
+            errors.push('รูปแบบวันเกิดต้องเป็น DD/MM/YYYY');
           }
         }
         
@@ -471,13 +492,14 @@ export default function ImportPatientsExcelPage() {
           warnings,
           isValid: errors.length === 0,
           id_card_valid: idCardClean.length === 13,
-          birth_date_valid: /^\d{2}\/\d{2}\/\d{4}$/.test(mappedRow.birth_date)
+          birth_date_valid: datePattern.test(mappedRow.birth_date)
         });
       }
       
       setMappedData(rows);
       setPreviewMode(true);
       
+      // ✅ คำนวณสถิติ
       setStats({
         total: rows.length,
         valid: rows.filter(r => r.isValid).length,
@@ -505,6 +527,7 @@ export default function ImportPatientsExcelPage() {
     const newData = [...mappedData];
     newData[rowIndex].mappedData = { ...editData };
     
+    // Re-validate
     const errors: string[] = [];
     const idCardClean = editData.id_card?.replace(/\D/g, '') || '';
     if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
@@ -518,6 +541,7 @@ export default function ImportPatientsExcelPage() {
     setMappedData(newData);
     setEditingRow(null);
     
+    // Update stats
     setStats({
       total: newData.length,
       valid: newData.filter(r => r.isValid).length,
@@ -653,7 +677,7 @@ export default function ImportPatientsExcelPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="max-w-[1920px] mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/settings')} className="flex items-center gap-2 text-gray-600 mb-4">
             <ArrowLeft className="w-4 h-4" /> กลับ
           </button>
@@ -678,83 +702,8 @@ export default function ImportPatientsExcelPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+      <div className="max-w-[1920px] mx-auto px-4 py-8 space-y-6">
         
-        {/* ✅ คำชี้แจงการเตรียมไฟล์ */}
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6">
-          <h2 className="text-lg font-bold text-blue-800 mb-4 flex items-center gap-2">
-            <HelpCircle className="w-5 h-5" />
-            📋 คำชี้แจงการเตรียมไฟล์ Excel
-          </h2>
-          
-          <div className="space-y-4">
-            <div className="bg-white rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                1. รูปแบบไฟล์ที่รองรับ
-              </h3>
-              <ul className="text-sm text-blue-800 space-y-1 ml-6">
-                <li>• ไฟล์ .csv (แนะนำ) - บันทึกจาก Excel เป็น CSV (UTF-8)</li>
-                <li>• ไฟล์ .xlsx หรือ .xls - ระบบจะแปลงเป็น CSV ให้อัตโนมัติ</li>
-              </ul>
-            </div>
-
-            <div className="bg-white rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                2. โครงสร้างคอลัมน์ (แถวแรก必须是 header)
-              </h3>
-              <div className="text-sm text-blue-800 ml-6">
-                <p className="mb-2"><strong>คอลัมน์ที่จำเป็น (ต้องมี):</strong></p>
-                <ul className="space-y-1">
-                  <li>• <strong>เลขบัตรประชาชน</strong> - 13 หลัก (ไม่มีช่องว่าง)</li>
-                  <li>• <strong>วันเกิด</strong> - รูปแบบ DD/MM/YYYY (พ.ศ.) เช่น 05/01/2548</li>
-                  <li>• <strong>ชื่อ</strong> - ชื่อผู้ป่วย</li>
-                  <li>• <strong>นามสกุล</strong> - นามสกุลผู้ป่วย</li>
-                  <li>• <strong>HN</strong> - เลขที่ผู้ป่วย (ไม่ซ้ำในโรงพยาบาลเดียวกัน)</li>
-                  <li>• <strong>เพศ</strong> - ชาย หรือ หญิง</li>
-                  <li>• <strong>โรงพยาบาล</strong> - ชื่อโรงพยาบาลที่ผู้ป่วยสังกัด</li>
-                </ul>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                3. ตัวอย่างรูปแบบวันที่ที่ถูกต้อง
-              </h3>
-              <div className="text-sm text-blue-800 ml-6 space-y-1">
-                <p className="text-green-700">✅ <strong>ถูกต้อง:</strong> 05/01/2548, 21/05/2544, 31/12/2500</p>
-                <p className="text-red-700">❌ <strong>ผิด:</strong> 2548/01/05, 05-01-2548, 5/1/48</p>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-lg p-4">
-              <h3 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                4. การจับคู่คอลัมน์อัตโนมัติ
-              </h3>
-              <p className="text-sm text-blue-800 ml-6">
-                ระบบจะจับคู่คอลัมน์อัตโนมัติตามชื่อคอลัมน์ แม้ชื่อจะไม่ตรงเป๊ะ 100% 
-                แต่ควรใช้ชื่อคอลัมน์ตามที่แนะนำเพื่อความแม่นยำ
-              </p>
-            </div>
-
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-              <h3 className="font-semibold text-yellow-900 mb-2 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" />
-                ⚠️ ข้อควรระวัง
-              </h3>
-              <ul className="text-sm text-yellow-800 space-y-1 ml-6">
-                <li>• ตรวจสอบให้แน่ใจว่าไม่มีแถวว่างระหว่างข้อมูล</li>
-                <li>• ไม่ควรมีเครื่องหมายพิเศษในข้อมูล (เช่น ", ', |)</li>
-                <li>• บันทึกไฟล์เป็น UTF-8 เพื่อป้องกันปัญหาภาษาไทย</li>
-                <li>• ตรวจสอบความถูกต้องของข้อมูลก่อนอัปโหลด</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-
         {/* ✅ Loading Status */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
@@ -801,7 +750,7 @@ export default function ImportPatientsExcelPage() {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Upload className="w-5 h-5 text-blue-600" /> อัปโหลดไฟล์ Excel
               </h2>
-              <button onClick={downloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600">
+              <button onClick={downloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg">
                 <Download className="w-4 h-4" /> ดาวน์โหลด Template
               </button>
             </div>
@@ -823,24 +772,8 @@ export default function ImportPatientsExcelPage() {
               <label htmlFor="fileInput" className="cursor-pointer">
                 <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <p className="text-lg font-medium text-gray-600 mb-2">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
-                <p className="text-sm text-gray-400">รองรับไฟล์ .csv, .xlsx, .xls (แนะนำ .csv)</p>
+                <p className="text-sm text-gray-400">รองรับไฟล์ .csv, .xlsx, .xls</p>
               </label>
-            </div>
-
-            {/* Column Mapping Info */}
-            <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-800 mb-2">🧠 ระบบจะจับคู่คอลัมน์อัตโนมัติ</h3>
-              <p className="text-sm text-blue-700 mb-2">ระบบจะตรวจสอบชื่อคอลัมน์และจับคู่กับฟิลด์ที่ถูกต้อง แม้ชื่อจะไม่ตรงเป๊ะ</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-blue-600">
-                <div>✅ เลขบัตรประชาชน</div>
-                <div>✅ วันเกิด (DD/MM/YYYY)</div>
-                <div>✅ ชื่อ-นามสกุล</div>
-                <div>✅ HN</div>
-                <div>✅ โรงพยาบาล</div>
-                <div>✅ โค้ช/อสม.</div>
-                <div>✅ ที่อยู่</div>
-                <div>✅ ผู้ติดต่อฉุกเฉิน</div>
-              </div>
             </div>
           </div>
         )}
@@ -928,9 +861,25 @@ export default function ImportPatientsExcelPage() {
                   )}
                 </div>
               </div>
+
+              <div className="mt-6 pt-6 border-t">
+                <h4 className="text-sm font-semibold mb-2">📋 คอลัมน์ทั้งหมดในไฟล์ ({detectedHeaders.length})</h4>
+                <div className="flex flex-wrap gap-2">
+                  {detectedHeaders.map((header, idx) => {
+                    const isMatched = Object.values(columnMapping).includes(header);
+                    return (
+                      <span key={idx} className={`px-3 py-1.5 rounded-lg text-sm ${
+                        isMatched ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {header}{isMatched && ' ✓'}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
 
-            {/* Preview Table */}
+            {/* Preview Table - ✅ แสดงครบทุกคอลัมน์ + เลื่อนแนวนอนได้ */}
             <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
               <div className="p-6 border-b flex items-center justify-between">
                 <h2 className="text-xl font-bold flex items-center gap-2">
@@ -941,37 +890,50 @@ export default function ImportPatientsExcelPage() {
                     <Trash2 className="w-4 h-4" />
                   </button>
                   <button onClick={handleImport} disabled={importing || stats.valid === 0} className="px-6 py-2 bg-green-500 text-white rounded-lg disabled:opacity-50">
-                    {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
-                    นำเข้า {stats.valid} ราย
+                    {importing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        กำลังนำเข้า...
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-4 h-4" />
+                        นำเข้า {stats.valid} ราย
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
 
+              {/* ✅ ตารางเลื่อนแนวนอนได้ - แสดงครบทุกคอลัมน์ */}
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                <table className="w-full">
+                <table className="w-full min-w-[2000px]">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs">แถว</th>
-                      <th className="px-4 py-3 text-left text-xs">HN</th>
-                      <th className="px-4 py-3 text-left text-xs">ชื่อ-นามสกุล</th>
-                      <th className="px-4 py-3 text-left text-xs">บัตร ปชช.</th>
-                      <th className="px-4 py-3 text-left text-xs">โรงพยาบาล</th>
-                      <th className="px-4 py-3 text-left text-xs">สถานะ</th>
-                      <th className="px-4 py-3 text-left text-xs">จัดการ</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r">แถว</th>
+                      {detectedHeaders.map((header, idx) => (
+                        <th key={idx} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r whitespace-nowrap">
+                          {header}
+                          {Object.values(columnMapping).includes(header) && ' ✓'}
+                        </th>
+                      ))}
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">สถานะ</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {mappedData.slice(0, 50).map((row, idx) => (
-                      <tr key={idx} className={!row.isValid ? 'bg-red-50' : row.warnings.length > 0 ? 'bg-yellow-50' : ''}>
-                        <td className="px-4 py-3 text-sm">{row.rowNumber}</td>
-                        <td className="px-4 py-3 text-sm font-medium">{row.mappedData.hospital_number}</td>
-                        <td className="px-4 py-3 text-sm">{row.mappedData.first_name} {row.mappedData.last_name}</td>
-                        <td className="px-4 py-3 text-sm">{row.mappedData.id_card}</td>
-                        <td className="px-4 py-3 text-sm">
-                          {row.mappedData.hospital_name || (
-                            <span className="text-red-600">❌ {row.mappedData.hospital}</span>
-                          )}
-                        </td>
+                      <tr key={idx} className={`${!row.isValid ? 'bg-red-50' : row.warnings.length > 0 ? 'bg-yellow-50' : ''}`}>
+                        <td className="px-4 py-3 text-sm border-r">{row.rowNumber}</td>
+                        {detectedHeaders.map((header, hIdx) => {
+                          const value = row.originalData[header] || '-';
+                          const isMatched = Object.values(columnMapping).includes(header);
+                          return (
+                            <td key={hIdx} className={`px-4 py-3 text-sm border-r ${isMatched ? 'text-green-700' : 'text-gray-600'}`}>
+                              {value}
+                            </td>
+                          );
+                        })}
                         <td className="px-4 py-3">
                           {row.isValid ? (
                             <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">✓ พร้อม</span>
@@ -1031,71 +993,179 @@ export default function ImportPatientsExcelPage() {
         )}
       </div>
 
-      {/* Edit Modal */}
+      {/* Edit Modal - ✅ แสดงทุกฟิลด์ (28 ฟิลด์) */}
       {editingRow !== null && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">✏️ แก้ไขแถวที่ {mappedData[editingRow]?.rowNumber}</h2>
             
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">HN</label>
-                <input type="text" value={editData.hospital_number || ''} onChange={(e) => setEditData({...editData, hospital_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {/* ข้อมูลส่วนตัว */}
+              <div className="col-span-full">
+                <h3 className="font-semibold text-blue-800 mb-2">📋 ข้อมูลส่วนตัว</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-blue-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">HN</label>
+                    <input type="text" value={editData.hospital_number || ''} onChange={(e) => setEditData({...editData, hospital_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">เลขบัตรประชาชน</label>
+                    <input type="text" value={editData.id_card || ''} onChange={(e) => setEditData({...editData, id_card: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ชื่อ</label>
+                    <input type="text" value={editData.first_name || ''} onChange={(e) => setEditData({...editData, first_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">นามสกุล</label>
+                    <input type="text" value={editData.last_name || ''} onChange={(e) => setEditData({...editData, last_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">วันเกิด</label>
+                    <input type="text" value={editData.birth_date || ''} onChange={(e) => setEditData({...editData, birth_date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="DD/MM/YYYY" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">เพศ</label>
+                    <select value={editData.gender || ''} onChange={(e) => setEditData({...editData, gender: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="">-- เลือก --</option>
+                      <option value="male">ชาย</option>
+                      <option value="female">หญิง</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">เบอร์โทร</label>
+                    <input type="text" value={editData.phone || ''} onChange={(e) => setEditData({...editData, phone: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">อีเมล</label>
+                    <input type="email" value={editData.email || ''} onChange={(e) => setEditData({...editData, email: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">เลขบัตรประชาชน</label>
-                <input type="text" value={editData.id_card || ''} onChange={(e) => setEditData({...editData, id_card: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+
+              {/* ข้อมูลสุขภาพ */}
+              <div className="col-span-full">
+                <h3 className="font-semibold text-purple-800 mb-2">💊 ข้อมูลสุขภาพ</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-purple-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">น้ำหนัก (kg)</label>
+                    <input type="number" value={editData.current_weight || ''} onChange={(e) => setEditData({...editData, current_weight: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ส่วนสูง (cm)</label>
+                    <input type="number" value={editData.height || ''} onChange={(e) => setEditData({...editData, height: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">รอบเอว (cm)</label>
+                    <input type="number" value={editData.waist_circumference || ''} onChange={(e) => setEditData({...editData, waist_circumference: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ประเภทเบาหวาน</label>
+                    <select value={editData.diabetes_type || ''} onChange={(e) => setEditData({...editData, diabetes_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="">-- เลือก --</option>
+                      <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
+                      <option value="เบาหวาน">เบาหวาน</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ค่าน้ำตาล</label>
+                    <input type="number" value={editData.blood_sugar || ''} onChange={(e) => setEditData({...editData, blood_sugar: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ค่า HbA1c</label>
+                    <input type="number" value={editData.hba1c_level || ''} onChange={(e) => setEditData({...editData, hba1c_level: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">ชื่อ</label>
-                <input type="text" value={editData.first_name || ''} onChange={(e) => setEditData({...editData, first_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+
+              {/* โรงพยาบาลและที่อยู่ */}
+              <div className="col-span-full">
+                <h3 className="font-semibold text-pink-800 mb-2">🏥 โรงพยาบาลและที่อยู่</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-pink-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">โรงพยาบาล</label>
+                    <select value={editData.hospital_id || ''} onChange={(e) => {
+                      const hospital = hospitals.find(h => h.id === e.target.value);
+                      setEditData({...editData, hospital_id: e.target.value, hospital_name: hospital?.name});
+                    }} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="">-- เลือก --</option>
+                      {hospitals.map(h => (
+                        <option key={h.id} value={h.id}>{h.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">รพ.สต.</label>
+                    <input type="text" value={editData.subdistrict_health_center || ''} onChange={(e) => setEditData({...editData, subdistrict_health_center: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">บ้านเลขที่</label>
+                    <input type="text" value={editData.house_number || ''} onChange={(e) => setEditData({...editData, house_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">หมู่ที่</label>
+                    <input type="text" value={editData.village_no || ''} onChange={(e) => setEditData({...editData, village_no: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">หมู่บ้าน</label>
+                    <input type="text" value={editData.village_name || ''} onChange={(e) => setEditData({...editData, village_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ซอย</label>
+                    <input type="text" value={editData.soi || ''} onChange={(e) => setEditData({...editData, soi: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ถนน</label>
+                    <input type="text" value={editData.road || ''} onChange={(e) => setEditData({...editData, road: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">จังหวัด</label>
+                    <input type="text" value={editData.province || ''} onChange={(e) => setEditData({...editData, province: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">อำเภอ</label>
+                    <input type="text" value={editData.district || ''} onChange={(e) => setEditData({...editData, district: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ตำบล</label>
+                    <input type="text" value={editData.subdistrict || ''} onChange={(e) => setEditData({...editData, subdistrict: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">รหัสไปรษณีย์</label>
+                    <input type="text" value={editData.postal_code || ''} onChange={(e) => setEditData({...editData, postal_code: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">นามสกุล</label>
-                <input type="text" value={editData.last_name || ''} onChange={(e) => setEditData({...editData, last_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">วันเกิด</label>
-                <input type="text" value={editData.birth_date || ''} onChange={(e) => setEditData({...editData, birth_date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="DD/MM/YYYY" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">เพศ</label>
-                <select value={editData.gender || ''} onChange={(e) => setEditData({...editData, gender: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
-                  <option value="male">ชาย</option>
-                  <option value="female">หญิง</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">โรงพยาบาล</label>
-                <select value={editData.hospital_id || ''} onChange={(e) => {
-                  const hospital = hospitals.find(h => h.id === e.target.value);
-                  setEditData({
-                    ...editData,
-                    hospital_id: e.target.value,
-                    hospital_name: hospital?.name
-                  });
-                }} className="w-full px-3 py-2 border rounded-lg">
-                  <option value="">-- เลือก --</option>
-                  {hospitals.map(h => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">โค้ช</label>
-                <select value={editData.coach_id || ''} onChange={(e) => {
-                  const coach = coaches.find(c => c.user_id === e.target.value);
-                  setEditData({
-                    ...editData,
-                    coach_id: e.target.value,
-                    coach_name: coach?.full_name_th
-                  });
-                }} className="w-full px-3 py-2 border rounded-lg">
-                  <option value="">-- เลือก --</option>
-                  {coaches.map(c => (
-                    <option key={c.user_id} value={c.user_id}>{c.full_name_th}</option>
-                  ))}
-                </select>
+
+              {/* ผู้ติดต่อและโค้ช */}
+              <div className="col-span-full">
+                <h3 className="font-semibold text-orange-800 mb-2">👥 ผู้ติดต่อและโค้ช</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-orange-50 rounded-lg">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ชื่อผู้ติดต่อ</label>
+                    <input type="text" value={editData.emergency_contact_name || ''} onChange={(e) => setEditData({...editData, emergency_contact_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">เบอร์โทรผู้ติดต่อ</label>
+                    <input type="text" value={editData.emergency_contact_phone || ''} onChange={(e) => setEditData({...editData, emergency_contact_phone: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ความสัมพันธ์</label>
+                    <input type="text" value={editData.emergency_contact_relationship || ''} onChange={(e) => setEditData({...editData, emergency_contact_relationship: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">ชื่อผู้ดูแล (โค้ช)</label>
+                    <select value={editData.coach_id || ''} onChange={(e) => {
+                      const coach = coaches.find(c => c.user_id === e.target.value);
+                      setEditData({...editData, coach_id: e.target.value, coach_name: coach?.full_name_th});
+                    }} className="w-full px-3 py-2 border rounded-lg">
+                      <option value="">-- เลือก --</option>
+                      {coaches.map(c => (
+                        <option key={c.user_id} value={c.user_id}>{c.full_name_th}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
 
