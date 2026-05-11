@@ -1,13 +1,11 @@
 // app/admin/patients/import-excel/page.tsx
-// ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
-// ✅ ฟีเจอร์ใหม่:
-//    1. ✅ แสดง Loading State ชัดเจน
-//    2. ✅ แสดง Error/Success Messages
-//    3. ✅ Preview ข้อมูลก่อนนำเข้า
-//    4. ✅ Validation แบบ Real-time
-//    5. ✅ แสดงสถิติ (สำเร็จ/ผิดพลาด/คำเตือน)
-//    6. ✅ แก้ไขข้อมูลใน Preview ได้
-//    7. ✅ Drag & Drop พร้อม Feedback
+// ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
+// ✅ การแก้ไข:
+//    1. ✅ แสดงรายละเอียด Column Mapping แบบละเอียด
+//    2. ✅ แสดงคอลัมน์ที่จับได้ และจับไม่ได้
+//    3. ✅ แสดงตัวอย่างชื่อคอลัมน์ที่ระบบรองรับ
+//    4. ✅ แสดงตัวอย่างข้อมูลจากไฟล์ Excel
+//    5. ✅ แสดง Error Messages ที่ชัดเจน
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -39,7 +37,9 @@ import {
   Eye,
   Database,
   Download,
-  RefreshCw
+  RefreshCw,
+  Info,
+  Table
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -96,7 +96,17 @@ interface ImportRow {
 }
 
 interface ColumnMapping {
-  [key: string]: string;
+  [key: string]: string; // mapped_name -> excel_header
+}
+
+interface ColumnInfo {
+  fieldName: string;
+  displayName: string;
+  required: boolean;
+  example: string;
+  possibleNames: string[];
+  matchedColumn?: string;
+  isMatched: boolean;
 }
 
 // =====================================================
@@ -134,6 +144,50 @@ const COLUMN_MAPPINGS: { [key: string]: string[] } = {
   coach_name: ['ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล']
 };
 
+// ✅ คอลัมน์ที่จำเป็น (Required Fields)
+const REQUIRED_FIELDS = [
+  'id_card',
+  'first_name',
+  'last_name',
+  'hospital_number',
+  'birth_date',
+  'gender',
+  'hospital'
+];
+
+// ✅ ชื่อภาษาไทยสำหรับแสดงผล
+const FIELD_DISPLAY_NAMES: { [key: string]: string } = {
+  id_card: 'เลขบัตรประชาชน',
+  birth_date: 'วันเกิด',
+  first_name: 'ชื่อ',
+  last_name: 'นามสกุล',
+  hospital_number: 'HN (เลขที่ผู้ป่วย)',
+  gender: 'เพศ',
+  phone: 'เบอร์โทรศัพท์',
+  email: 'อีเมล',
+  current_weight: 'น้ำหนัก (kg)',
+  height: 'ส่วนสูง (cm)',
+  waist_circumference: 'รอบเอว (cm)',
+  diabetes_type: 'ประเภทเบาหวาน',
+  blood_sugar: 'ค่าน้ำตาลในเลือด',
+  hba1c_level: 'ค่า HbA1c',
+  hospital: 'โรงพยาบาล',
+  subdistrict_health_center: 'รพ.สต.',
+  house_number: 'บ้านเลขที่',
+  village_no: 'หมู่ที่',
+  village_name: 'หมู่บ้าน',
+  soi: 'ซอย',
+  road: 'ถนน',
+  province: 'จังหวัด',
+  district: 'อำเภอ',
+  subdistrict: 'ตำบล',
+  postal_code: 'รหัสไปรษณีย์',
+  emergency_contact_name: 'ชื่อผู้ติดต่อฉุกเฉิน',
+  emergency_contact_phone: 'เบอร์โทรผู้ติดต่อ',
+  emergency_contact_relationship: 'ความสัมพันธ์',
+  coach_name: 'ชื่อผู้ดูแล (อสม.)'
+};
+
 // =====================================================
 // 🎯 MAIN COMPONENT
 // =====================================================
@@ -148,6 +202,7 @@ export default function ImportPatientsExcelPage() {
   const [rawData, setRawData] = useState<any[]>([]);
   const [mappedData, setMappedData] = useState<ImportRow[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
+  const [columnInfos, setColumnInfos] = useState<ColumnInfo[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
@@ -157,6 +212,8 @@ export default function ImportPatientsExcelPage() {
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
   const [dragActive, setDragActive] = useState(false);
+  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
+  const [excelSampleData, setExcelSampleData] = useState<any[]>([]);
 
   // ✅ สรุปสถิติ
   const [stats, setStats] = useState({
@@ -209,7 +266,6 @@ export default function ImportPatientsExcelPage() {
       await loadCoaches(ids);
     } catch (error) {
       console.error('Error loading accessible hospitals:', error);
-      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
     }
   };
 
@@ -296,25 +352,43 @@ export default function ImportPatientsExcelPage() {
   // =====================================================
   // 🧠 SMART COLUMN DETECTION
   // =====================================================
-  const detectColumnMapping = (headers: string[]): ColumnMapping => {
+  const detectColumnMapping = (headers: string[]): { mapping: ColumnMapping, infos: ColumnInfo[] } => {
     const mapping: ColumnMapping = {};
+    const infos: ColumnInfo[] = [];
     
-    headers.forEach((header, index) => {
-      const normalizedHeader = header.trim().toLowerCase();
+    // ✅ ตรวจสอบทุก field ที่ระบบรองรับ
+    Object.entries(COLUMN_MAPPINGS).forEach(([fieldName, possibleNames]) => {
+      let matchedColumn: string | undefined = undefined;
+      let isMatched = false;
       
-      for (const [fieldName, possibleNames] of Object.entries(COLUMN_MAPPINGS)) {
+      // หาว่า header นี้ตรงกับ field ไหน
+      for (const header of headers) {
+        const normalizedHeader = header.trim().toLowerCase();
+        
         if (possibleNames.some(name => 
           name.toLowerCase() === normalizedHeader || 
           normalizedHeader.includes(name.toLowerCase()) ||
           name.toLowerCase().includes(normalizedHeader)
         )) {
-          mapping[fieldName] = headers[index];
+          mapping[fieldName] = header;
+          matchedColumn = header;
+          isMatched = true;
           break;
         }
       }
+      
+      infos.push({
+        fieldName,
+        displayName: FIELD_DISPLAY_NAMES[fieldName] || fieldName,
+        required: REQUIRED_FIELDS.includes(fieldName),
+        example: possibleNames[0],
+        possibleNames,
+        matchedColumn,
+        isMatched
+      });
     });
     
-    return mapping;
+    return { mapping, infos };
   };
 
   // =====================================================
@@ -336,18 +410,39 @@ export default function ImportPatientsExcelPage() {
       }
 
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+      setExcelHeaders(headers);
       
-      const mapping = detectColumnMapping(headers);
+      // ✅ แสดงตัวอย่างข้อมูล 3 แถวแรก
+      const sampleData = [];
+      for (let i = 1; i < Math.min(4, lines.length); i++) {
+        const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+        const row: any = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+        sampleData.push(row);
+      }
+      setExcelSampleData(sampleData);
+      
+      // ✅ Detect Column Mapping
+      const { mapping, infos } = detectColumnMapping(headers);
       setColumnMapping(mapping);
+      setColumnInfos(infos);
       
       console.log('🧠 Column Mapping:', mapping);
+      console.log('📋 Column Infos:', infos);
       
-      if (Object.keys(mapping).length === 0) {
-        setError('⚠️ ไม่สามารถจับคู่คอลัมน์ได้ กรุณาตรวจสอบชื่อคอลัมน์ในไฟล์ Excel');
+      // ✅ ตรวจสอบ Required Fields
+      const missingRequired = infos.filter(info => info.required && !info.isMatched);
+      
+      if (missingRequired.length > 0) {
+        const fieldNames = missingRequired.map(info => info.displayName).join(', ');
+        setError(`❌ ไม่พบคอลัมน์ที่จำเป็น: ${fieldNames}\n\nกรุณาตรวจสอบชื่อคอลัมน์ในไฟล์ Excel`);
         setUploading(false);
         return;
       }
       
+      // ✅ Parse ข้อมูล
       const rows: ImportRow[] = [];
       
       for (let i = 1; i < lines.length; i++) {
@@ -366,18 +461,22 @@ export default function ImportPatientsExcelPage() {
         const errors: string[] = [];
         const warnings: string[] = [];
         
+        // ตรวจสอบ ID Card
         const idCardClean = mappedRow.id_card?.replace(/\D/g, '') || '';
         if (idCardClean.length !== 13) {
           errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
         }
         
+        // ตรวจสอบ HN
         if (!mappedRow.hospital_number) {
           errors.push('ต้องระบุ HN');
         }
         
+        // ตรวจสอบชื่อ-นามสกุล
         if (!mappedRow.first_name) errors.push('ต้องระบุชื่อ');
         if (!mappedRow.last_name) errors.push('ต้องระบุนามสกุล');
         
+        // ตรวจสอบโรงพยาบาล
         if (mappedRow.hospital) {
           const hospital = hospitals.find(h => 
             h.name === mappedRow.hospital || 
@@ -395,6 +494,7 @@ export default function ImportPatientsExcelPage() {
           errors.push('ต้องระบุโรงพยาบาล');
         }
         
+        // ตรวจสอบโค้ช
         if (mappedRow.coach_name) {
           const coach = coaches.find(c => 
             c.full_name_th === mappedRow.coach_name ||
@@ -409,6 +509,7 @@ export default function ImportPatientsExcelPage() {
           }
         }
         
+        // ตรวจสอบวันเกิด
         if (mappedRow.birth_date) {
           const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
           if (!datePattern.test(mappedRow.birth_date)) {
@@ -651,6 +752,9 @@ export default function ImportPatientsExcelPage() {
     setError('');
     setSuccess('');
     setStats({ total: 0, valid: 0, warnings: 0, errors: 0 });
+    setExcelHeaders([]);
+    setExcelSampleData([]);
+    setColumnInfos([]);
   };
 
   const downloadTemplate = () => {
@@ -994,6 +1098,147 @@ export default function ImportPatientsExcelPage() {
               </div>
             </div>
 
+            {/* ✅ Column Mapping Details - แสดงรายละเอียดการจับคู่ */}
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="p-6 border-b border-gray-200">
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                  <Table className="w-5 h-5 text-blue-600" />
+                  รายละเอียดการจับคู่คอลัมน์
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  แสดงคอลัมน์ที่พบในไฟล์ Excel และการจับคู่กับฟิลด์ในระบบ
+                </p>
+              </div>
+
+              <div className="p-6">
+                {/* ✅ คอลัมน์ที่จับได้ (Matched) */}
+                <div className="mb-6">
+                  <h3 className="font-semibold text-green-800 mb-3 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-green-600" />
+                    คอลัมน์ที่จับคู่สำเร็จ ({columnInfos.filter(c => c.isMatched).length} คอลัมน์)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {columnInfos.filter(c => c.isMatched).map((info) => (
+                      <div key={info.fieldName} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-green-900">{info.displayName}</span>
+                          {info.required && (
+                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">จำเป็น</span>
+                          )}
+                        </div>
+                        <div className="text-sm text-green-700">
+                          <span className="font-medium">พบคอลัมน์:</span> "{info.matchedColumn}"
+                        </div>
+                        <div className="text-xs text-green-600 mt-1">
+                          ตัวอย่าง: {info.example}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ✅ คอลัมน์ที่จับไม่ได้ (Unmatched) */}
+                {columnInfos.filter(c => !c.isMatched).length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="font-semibold text-red-800 mb-3 flex items-center gap-2">
+                      <XCircle className="w-5 h-5 text-red-600" />
+                      คอลัมน์ที่ไม่พบในไฟล์ ({columnInfos.filter(c => !c.isMatched).length} คอลัมน์)
+                    </h3>
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {columnInfos.filter(c => !c.isMatched).map((info) => (
+                          <div key={info.fieldName} className="bg-white border border-red-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-red-900">{info.displayName}</span>
+                              {info.required && (
+                                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">จำเป็น ⚠️</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-red-700">
+                              <span className="font-medium">ชื่อที่ระบบรองรับ:</span>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {info.possibleNames.slice(0, 5).map((name, idx) => (
+                                  <span key={idx} className="bg-red-100 px-2 py-0.5 rounded">
+                                    {name}
+                                  </span>
+                                ))}
+                                {info.possibleNames.length > 5 && (
+                                  <span className="text-red-600">+{info.possibleNames.length - 5} อื่นๆ</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ✅ คอลัมน์ที่พบในไฟล์ แต่ระบบไม่รู้จัก */}
+                {excelHeaders.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                      <Info className="w-5 h-5 text-blue-600" />
+                      คอลัมน์ทั้งหมดที่พบในไฟล์ ({excelHeaders.length} คอลัมน์)
+                    </h3>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex flex-wrap gap-2">
+                        {excelHeaders.map((header, idx) => {
+                          const isMatched = columnInfos.some(c => c.matchedColumn === header);
+                          return (
+                            <span 
+                              key={idx}
+                              className={`px-3 py-1 rounded-full text-sm ${
+                                isMatched 
+                                  ? 'bg-green-100 text-green-700' 
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}
+                            >
+                              {header} {isMatched ? '✓' : '✗'}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ✅ ตัวอย่างข้อมูลจากไฟล์ */}
+                {excelSampleData.length > 0 && (
+                  <div>
+                    <h3 className="font-semibold text-purple-800 mb-3 flex items-center gap-2">
+                      <Eye className="w-5 h-5 text-purple-600" />
+                      ตัวอย่างข้อมูลจากไฟล์ (3 แถวแรก)
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm border border-gray-200 rounded-lg">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            {excelHeaders.map((header, idx) => (
+                              <th key={idx} className="px-3 py-2 text-left border border-gray-200">
+                                {header}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {excelSampleData.map((row, rowIdx) => (
+                            <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                              {excelHeaders.map((header, colIdx) => (
+                                <td key={colIdx} className="px-3 py-2 border border-gray-200">
+                                  {row[header] || '-'}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Preview Table */}
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="p-6 border-b border-gray-200 flex items-center justify-between">
@@ -1079,20 +1324,6 @@ export default function ImportPatientsExcelPage() {
                     ...และอีก {mappedData.length - 50} ราย (แสดง 50 รายแรก)
                   </div>
                 )}
-              </div>
-            </div>
-
-            {/* Column Mapping Display */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-              <h3 className="font-bold text-gray-800 mb-4">📋 การจับคู่คอลัมน์</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {Object.entries(columnMapping).map(([field, header]) => (
-                  <div key={field} className="flex items-center gap-2 text-sm">
-                    <CheckCircle className="w-4 h-4 text-green-600" />
-                    <span className="text-gray-600">{field}:</span>
-                    <span className="font-medium text-blue-600">{header}</span>
-                  </div>
-                ))}
               </div>
             </div>
           </>
