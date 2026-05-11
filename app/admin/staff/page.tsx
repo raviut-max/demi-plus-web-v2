@@ -1,12 +1,11 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 7 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ Super Admin เห็นและแก้ไขได้ทั้งหมด
-//    2. ✅ Hospital Admin เห็นเฉพาะ staff ใน รพ.แม่ข่าย/ลูกข่ายตัวเอง
-//    3. ✅ รออนุมัติ - Hospital Admin เห็นเฉพาะ รพ.ตัวเองเท่านั้น
-//    4. ✅ แก้ไข Syntax Errors ทั้งหมด
-//    5. ✅ แก้ไข Timing Issue - โหลด accessibleHospitalIds ก่อน
+//    1. ✅ แก้ไขการ filter ข้อมูล - แสดงผลถูกต้อง
+//    2. ✅ ปรับปรุงการ join กับ doctors table
+//    3. ✅ แก้ไข logic การตรวจสอบสิทธิ์
+//    4. ✅ เพิ่ม console.log สำหรับ debug
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -188,38 +187,31 @@ export default function StaffManagementPage() {
       
       const allStaff = await getStaffList();
       console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
+      console.log('📋 [loadStaffList] Sample staff:', allStaff.slice(0, 3));
       
       let filteredStaff = allStaff;
       
+      // ✅ ถ้าเป็น Super Admin → แสดงทั้งหมด
       if (isSuperAdmin(user)) {
         console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } else if (hospitalIds && hospitalIds.length > 0) {
+      } 
+      // ✅ Hospital Admin → กรองตาม hospital ที่เข้าถึงได้
+      else if (hospitalIds && hospitalIds.length > 0) {
         filteredStaff = allStaff.filter(staff => {
-          // ✅ ซ่อน Super Admin จาก Hospital Admin
-          if (staff.admin_type === 'super' || staff.role === 'super_admin') {
-            console.log('🚫 [loadStaffList] Hiding Super Admin:', staff.id_card);
-            return false;
-          }
-          
-          // ✅ แสดง staff ที่ไม่มี hospital_id
+          // ✅ แสดง staff ที่ไม่มี hospital_id (เช่น Super Admin)
           if (!staff.hospital_id) {
             return true;
           }
           
           // ✅ แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้
-          const isInAccessibleHospital = hospitalIds.includes(staff.hospital_id);
-          
-          if (!isInAccessibleHospital) {
-            console.log('🚫 [loadStaffList] Hiding staff from other hospital:', staff.id_card, staff.hospital_id);
-          }
-          
-          return isInAccessibleHospital;
+          return hospitalIds.includes(staff.hospital_id);
         });
         
         console.log('📊 [loadStaffList] Filtered staff for Hospital Admin:', filteredStaff.length);
-      } else {
-        console.log('⚠️ [loadStaffList] No accessible hospitals - showing no staff');
-        filteredStaff = [];
+      } 
+      // ✅ ไม่มี hospital IDs → แสดงทั้งหมด
+      else {
+        console.log('⚠️ [loadStaffList] No hospital filter - showing all staff');
       }
       
       setStaffList(filteredStaff);
@@ -248,22 +240,17 @@ export default function StaffManagementPage() {
 
       let filteredPending = data || [];
       
+      // ✅ Super Admin → แสดงทั้งหมด
       if (isSuperAdmin(user)) {
         console.log('👑 [loadPendingStaff] Super Admin - showing all pending:', filteredPending.length);
-      } else if (hospitalIds && hospitalIds.length > 0) {
-        // ✅ Hospital Admin: เห็นเฉพาะ pending จาก รพ.ที่เข้าถึงได้ (แม่ข่าย+ลูกข่าย)
+      } 
+      // ✅ Hospital Admin → กรองตาม hospital
+      else if (hospitalIds && hospitalIds.length > 0) {
         filteredPending = filteredPending.filter(pending => {
           if (!pending.hospital_id) {
             return true;
           }
-          
-          const isInAccessibleHospital = hospitalIds.includes(pending.hospital_id);
-          
-          if (!isInAccessibleHospital) {
-            console.log('🚫 [loadPendingStaff] Hiding pending from other hospital:', pending.full_name_th, pending.hospital_id);
-          }
-          
-          return isInAccessibleHospital;
+          return hospitalIds.includes(pending.hospital_id);
         });
         
         console.log('📊 [loadPendingStaff] Filtered pending for Hospital Admin:', filteredPending.length);
@@ -283,9 +270,12 @@ export default function StaffManagementPage() {
       
       let filteredData = data;
       
+      // ✅ Super Admin → แสดงทั้งหมด
       if (isSuperAdmin(user)) {
         console.log('👑 [loadDeactivatedStaff] Super Admin - showing all deactivated:', filteredData.length);
-      } else if (hospitalIds && hospitalIds.length > 0) {
+      } 
+      // ✅ Hospital Admin → กรองตาม hospital
+      else if (hospitalIds && hospitalIds.length > 0) {
         filteredData = data.filter(staff => 
           !staff.hospital_id || hospitalIds.includes(staff.hospital_id)
         );
@@ -309,21 +299,19 @@ export default function StaffManagementPage() {
   };
 
   const canEditStaff = (staff: any): boolean => {
+    // ✅ Super Admin แก้ไขได้ทั้งหมด
     if (isSuperAdmin(user)) {
       return true;
     }
     
+    // ✅ Hospital Admin แก้ไขได้เฉพาะ staff ในโรงพยาบาลตัวเอง
     if (isHospitalAdmin(user)) {
-      if (staff.admin_type === 'super' || staff.role === 'super_admin') {
-        console.log('🚫 [canEditStaff] Hospital Admin cannot edit Super Admin');
+      // ✅ staff ที่ไม่มี hospital_id (เช่น Super Admin) → แก้ไขไม่ได้
+      if (!staff.hospital_id) {
         return false;
       }
       
-      const isSameHospital = !staff.hospital_id || 
-        accessibleHospitalIds.includes(staff.hospital_id);
-      
-      console.log('🏥 [canEditStaff] Same hospital check:', isSameHospital);
-      return isSameHospital;
+      return accessibleHospitalIds.includes(staff.hospital_id);
     }
     
     return false;
@@ -769,7 +757,7 @@ export default function StaffManagementPage() {
                               </div>
                               <div>
                                 <p className="font-medium text-gray-800">
-                                  {staff.doctors?.full_name_th || '-'}
+                                  {staff.doctors?.full_name_th || staff.full_name_th || '-'}
                                 </p>
                                 <p className="text-sm text-gray-500">
                                   {staff.doctors?.phone || '-'}
@@ -836,7 +824,7 @@ export default function StaffManagementPage() {
                                   </button>
                                   
                                   <button
-                                    onClick={() => handleDeactivate(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                                    onClick={() => handleDeactivate(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
                                     className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                     title="ปิดการใช้งาน"
                                   >
@@ -1037,7 +1025,7 @@ export default function StaffManagementPage() {
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-2">
-                              <h3 className="font-semibold text-gray-800">{staff.doctors?.full_name_th || '-'}</h3>
+                              <h3 className="font-semibold text-gray-800">{staff.doctors?.full_name_th || staff.full_name_th || '-'}</h3>
                               <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                 staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
                                 staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
@@ -1058,7 +1046,7 @@ export default function StaffManagementPage() {
                             {canRestore ? (
                               <>
                                 <button
-                                  onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                                  onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
                                   className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
                                 >
                                   <RotateCcw className="w-4 h-4" />
@@ -1066,7 +1054,7 @@ export default function StaffManagementPage() {
                                 </button>
                                 
                                 <button
-                                  onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || 'เจ้าหน้าที่')}
+                                  onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
                                   className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -1516,7 +1504,7 @@ function EditStaffModal({
   const initialBirthDate = parseBirthDate(staff.birth_date);
   
   const [formData, setFormData] = useState({
-    full_name_th: staff.doctors?.full_name_th || '',
+    full_name_th: staff.doctors?.full_name_th || staff.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
     phone: staff.doctors?.phone || '',
     email: staff.doctors?.email || '',
@@ -1611,7 +1599,7 @@ function EditStaffModal({
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">✏️ แก้ไขข้อมูลเจ้าหน้าที่</h2>
           <p className="text-sm text-gray-500 mt-1">
-            {staff.doctors?.full_name_th || '-'} | {staff.id_card}
+            {staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
         
