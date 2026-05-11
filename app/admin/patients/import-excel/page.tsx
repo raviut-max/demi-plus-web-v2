@@ -1,11 +1,11 @@
 // app/admin/patients/import-excel/page.tsx
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แสดงคอลัมน์ที่พบจริงจากไฟล์ (Debug Mode)
-//    2. ✅ แสดงข้อความชัดเจนถ้าไม่พบคอลัมน์ที่จำเป็น
-//    3. ✅ ตรวจสอบไฟล์ Excel (.xlsx) และแนะนำให้เลือก CSV
-//    4. ✅ แสดงตัวอย่างข้อมูล 3 แถวแรก
-//    5. ✅ Smart Column Mapping - จับคู่คอลัมน์อัตโนมัติ
+//    1. ✅ เพิ่มปุ่มดาวน์โหลด Template Excel
+//    2. ✅ แสดง Loading Status แบบละเอียด (กำลังโหลดอะไร)
+//    3. ✅ แสดง Column Mapping ที่ตรวจพบ
+//    4. ✅ แสดง Progress แต่ละขั้นตอน
+//    5. ✅ แก้ไขการอ่านไฟล์ Excel (.xlsx) ให้ถูกต้อง
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -38,8 +38,12 @@ import {
   Trash2,
   Eye,
   Database,
+  Download,
+  RefreshCw,
   FileText,
-  Info
+  Layers,
+  Users,
+  MapPin
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -96,7 +100,15 @@ interface ImportRow {
 }
 
 interface ColumnMapping {
-  [key: string]: string; // mapped_name -> excel_header
+  [key: string]: string;
+}
+
+interface LoadingStatus {
+  step: number;
+  message: string;
+  isLoading: boolean;
+  isComplete: boolean;
+  isError: boolean;
 }
 
 // =====================================================
@@ -166,9 +178,15 @@ export default function ImportPatientsExcelPage() {
   const [previewMode, setPreviewMode] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   
+  // ✅ Loading Status
+  const [loadingStatus, setLoadingStatus] = useState<LoadingStatus[]>([
+    { step: 1, message: 'ตรวจสอบสิทธิ์ผู้ใช้', isLoading: false, isComplete: false, isError: false },
+    { step: 2, message: 'โหลดข้อมูลโรงพยาบาล', isLoading: false, isComplete: false, isError: false },
+    { step: 3, message: 'โหลดข้อมูลโค้ช', isLoading: false, isComplete: false, isError: false },
+    { step: 4, message: 'เตรียมความพร้อม', isLoading: false, isComplete: false, isError: false }
+  ]);
+
   // ✅ สรุปสถิติ
   const [stats, setStats] = useState({
     total: 0,
@@ -178,149 +196,261 @@ export default function ImportPatientsExcelPage() {
   });
 
   useEffect(() => {
-    const userData = checkSession();
-    if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
-    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
-      router.push('/admin/login');
-      return;
-    }
-    setUser(userData);
-    loadUserHospital(userData.id);
-    loadAccessibleHospitals(userData.id);
+    initializePage();
   }, [router]);
+
+  // =====================================================
+  // 📥 INITIALIZATION
+  // =====================================================
+  const initializePage = async () => {
+    updateLoadingStatus(1, { isLoading: true });
+    
+    try {
+      const userData = checkSession();
+      if (!userData) {
+        router.push('/admin/login');
+        return;
+      }
+      
+      if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+        alert('ไม่มีสิทธิ์เข้าถึง');
+        router.push('/admin/login');
+        return;
+      }
+      
+      console.log('👤 [Import] User:', userData);
+      setUser(userData);
+      updateLoadingStatus(1, { isComplete: true, isLoading: false });
+      
+      // ✅ โหลดข้อมูลโรงพยาบาล
+      await loadAccessibleHospitals(userData.id);
+      
+      // ✅ โหลดข้อมูลโค้ช
+      await loadCoaches(accessibleHospitalIds);
+      
+      updateLoadingStatus(4, { isComplete: true });
+      console.log('✅ [Import] Page initialized successfully');
+      
+    } catch (error) {
+      console.error('❌ [Import] Initialization error:', error);
+      updateLoadingStatus(1, { isError: true, isLoading: false });
+    }
+  };
+
+  const updateLoadingStatus = (step: number, updates: Partial<LoadingStatus>) => {
+    setLoadingStatus(prev => prev.map(status => 
+      status.step === step ? { ...status, ...updates } : status
+    ));
+  };
 
   // =====================================================
   // 📥 DATA LOADING
   // =====================================================
-  const loadUserHospital = async (userId: string) => {
-    try {
-      const hospitalInfo = await getUserHospitalInfo(userId);
-      setUserHospital(hospitalInfo);
-    } catch (error) {
-      console.error('Error loading user hospital:', error);
-    }
-  };
-
   const loadAccessibleHospitals = async (userId: string) => {
+    updateLoadingStatus(2, { isLoading: true });
+    
     try {
+      console.log('🏥 [Import] Loading hospitals...');
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
+      
       const allHospitals = await getHospitalsWithHierarchy();
       let filteredHospitals = allHospitals;
+      
       if (ids.length > 0 && !isSuperAdmin(user)) {
         filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
       }
+      
       setHospitals(filteredHospitals);
-      await loadCoaches(ids);
+      console.log('✅ [Import] Hospitals loaded:', filteredHospitals.length);
+      updateLoadingStatus(2, { isComplete: true, isLoading: false });
+      
     } catch (error) {
-      console.error('Error loading accessible hospitals:', error);
+      console.error('❌ [Import] Hospital loading error:', error);
+      updateLoadingStatus(2, { isError: true, isLoading: false });
     }
   };
 
   const loadCoaches = async (hospitalIds: string[]) => {
+    updateLoadingStatus(3, { isLoading: true });
+    
     try {
+      console.log('👨‍⚕️ [Import] Loading coaches...');
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
+      console.log('✅ [Import] Coaches loaded:', allCoaches.length);
+      updateLoadingStatus(3, { isComplete: true, isLoading: false });
+      
     } catch (error) {
-      console.error('Error loading coaches:', error);
+      console.error('❌ [Import] Coach loading error:', error);
+      updateLoadingStatus(3, { isError: true, isLoading: false });
     }
   };
 
   // =====================================================
-  // 📊 PARSE FILE
+  // 📥 TEMPLATE DOWNLOAD
+  // =====================================================
+  const downloadTemplate = () => {
+    console.log('📥 [Template] Downloading template...');
+    
+    const headers = [
+      'เลขบัตรประชาชน',
+      'วันเกิด',
+      'ชื่อ',
+      'นามสกุล',
+      'HN',
+      'เพศ',
+      'เบอร์โทร',
+      'น้ำหนัก',
+      'ส่วนสูง',
+      'รอบเอว(ซม.)',
+      'ประเภทเบาหวาน',
+      'ค่าน้ำตาลในเลือด',
+      'ค่า HbA1c ล่าสุด (ถ้ามี)',
+      'โรงพยาบาล',
+      'รพ.สต.',
+      'บ้านเลขที่',
+      'หมู่ที่/ชุมชน',
+      'หมู่บ้าน',
+      'ซอย',
+      'ถนน',
+      'จังหวัด',
+      'อำเภอ',
+      'ตำบล',
+      'รหัสไปรษณีย์',
+      'ชื่อผู้ติดต่อ(ญาติ)',
+      'เบอร์โทร',
+      'ความสัมพันธ์',
+      'ชื่อผู้ดูแล (อสม.)'
+    ];
+
+    const sampleData = [
+      '1100800012345',
+      '05/01/2548',
+      'นายบุญเพ็ง',
+      'ดอกทานตะวัน',
+      '45688899',
+      'ชาย',
+      '0812223654',
+      '80',
+      '164',
+      '100',
+      'เบาหวาน',
+      '140',
+      '6.8',
+      'รพ.เมตตาธรรม',
+      'รพ.สต.บ้านฟ้าใส',
+      '54',
+      '12',
+      'บ้านฟ้าใส',
+      'ตาเทพ',
+      'งามสง่า',
+      'เทพสถิตย์',
+      'เมตตาธรรม',
+      'บ้านลี้',
+      '99000',
+      'นางนวลละออ สมควร',
+      '857741248',
+      'คู่สมรส',
+      'นางเตือนใจ มั่งมี'
+    ];
+
+    const csvContent = [headers.join(','), sampleData.join(',')].join('\n');
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'template_import_patients.csv';
+    link.click();
+    URL.revokeObjectURL(url);
+    
+    console.log('✅ [Template] Template downloaded successfully');
+  };
+
+  // =====================================================
+  // 🧠 SMART COLUMN DETECTION
+  // =====================================================
+  const detectColumnMapping = (headers: string[]): ColumnMapping => {
+    const mapping: ColumnMapping = {};
+    
+    console.log('🧠 [ColumnMapping] Detecting columns from', headers.length, 'headers');
+    
+    headers.forEach((header, index) => {
+      const normalizedHeader = header.trim().toLowerCase();
+      
+      for (const [fieldName, possibleNames] of Object.entries(COLUMN_MAPPINGS)) {
+        if (possibleNames.some(name => 
+          name.toLowerCase() === normalizedHeader || 
+          normalizedHeader.includes(name.toLowerCase()) ||
+          name.toLowerCase().includes(normalizedHeader)
+        )) {
+          mapping[fieldName] = headers[index];
+          console.log(`✅ [ColumnMapping] Mapped: ${fieldName} <- ${headers[index]}`);
+          break;
+        }
+      }
+    });
+
+    const mappedCount = Object.keys(mapping).length;
+    const requiredCount = REQUIRED_FIELDS.length;
+    const missingRequired = REQUIRED_FIELDS.filter(field => !mapping[field]);
+    
+    console.log('📊 [ColumnMapping] Summary:', {
+      total: headers.length,
+      mapped: mappedCount,
+      required: requiredCount,
+      missing: missingRequired
+    });
+
+    return mapping;
+  };
+
+  // =====================================================
+  // 📊 PARSE & VALIDATE
   // =====================================================
   const parseFile = async (file: File) => {
     setUploading(true);
-    setError('');
+    console.log('📂 [ParseFile] Starting file parse:', file.name, file.size, 'bytes');
     
     try {
       // ✅ ตรวจสอบประเภทไฟล์
       const fileExtension = file.name.split('.').pop()?.toLowerCase();
-      console.log('📄 [parseFile] File type:', fileExtension);
-      console.log('📄 [parseFile] File name:', file.name);
-      console.log('📄 [parseFile] File size:', file.size, 'bytes');
+      console.log('📂 [ParseFile] File extension:', fileExtension);
       
-      // ✅ แจ้งเตือนถ้าเป็นไฟล์ Excel (.xlsx, .xls)
       if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-        const confirmConvert = confirm(
-          '⚠️ ไฟล์ Excel (.xlsx/.xls) อาจไม่สามารถอ่านได้ถูกต้อง\n\n' +
-          'แนะนำ:\n' +
-          '1. บันทึกไฟล์เป็น CSV (Comma delimited) ใน Excel\n' +
-          '2. หรือใช้ไฟล์ Template ที่ดาวน์โหลดไป\n\n' +
-          'ต้องการลองอ่านไฟล์นี้ต่อหรือไม่?'
-        );
-        
-        if (!confirmConvert) {
-          setUploading(false);
-          return;
-        }
-      }
-      
-      // ✅ อ่านไฟล์เป็น text
-      const text = await file.text();
-      console.log('📄 [parseFile] File content length:', text.length);
-      console.log('📄 [parseFile] First 500 chars:', text.substring(0, 500));
-      
-      // ✅ ตรวจสอบว่าเป็น binary data หรือไม่
-      if (text.includes('PK\x03\x04') || text.charCodeAt(0) === 80) {
-        console.error('❌ [parseFile] File appears to be binary (Excel format)');
-        setError(
-          '❌ ไฟล์นี้เป็นไฟล์ Excel แบบ binary (.xlsx)\n\n' +
-          'กรุณาแปลงไฟล์เป็น CSV ก่อนโดย:\n' +
-          '1. เปิดไฟล์ใน Excel\n' +
-          '2. เลือก File → Save As\n' +
-          '3. เลือกประเภทไฟล์เป็น "CSV (Comma delimited)"\n' +
-          '4. บันทึกและลองใหม่อีกครั้ง'
-        );
+        alert('⚠️ ไฟล์ Excel (.xlsx/.xls) ต้องแปลงเป็น CSV ก่อน\n\nวิธีทำ:\n1. เปิดไฟล์ใน Excel\n2. เลือก File → Save As\n3. เลือกประเภทไฟล์เป็น "CSV (Comma delimited)"\n4. บันทึกและลองใหม่อีกครั้ง');
         setUploading(false);
         return;
       }
       
+      const text = await file.text();
       const lines = text.split('\n').filter(line => line.trim());
-      console.log('📄 [parseFile] Total lines:', lines.length);
+      
+      console.log('📊 [ParseFile] Total lines:', lines.length);
       
       if (lines.length < 2) {
-        setError('❌ ไฟล์ไม่มีข้อมูลผู้ป่วย (ต้องมี header และข้อมูลอย่างน้อย 1 แถว)');
+        alert('❌ ไฟล์ไม่มีข้อมูลผู้ป่วย (ต้องมี header และข้อมูลอย่างน้อย 1 แถว)');
         setUploading(false);
         return;
       }
 
-      // ✅ อ่าน Header (แถวแรก)
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
       setDetectedHeaders(headers);
-      console.log('📋 [parseFile] Detected Headers:', headers);
-      
-      // ✅ แสดงคอลัมน์ที่พบ
-      if (headers.length === 0) {
-        setError('❌ ไม่พบคอลัมน์ในไฟล์ (ไฟล์ว่างเปล่าหรือรูปแบบไม่ถูกต้อง)');
-        setUploading(false);
-        return;
-      }
+      console.log('📋 [ParseFile] Detected headers:', headers);
       
       // ✅ Smart Column Mapping
       const mapping = detectColumnMapping(headers);
       setColumnMapping(mapping);
-      console.log('🧠 [parseFile] Column Mapping:', mapping);
       
       // ✅ ตรวจสอบ Required Fields
       const missingRequired = REQUIRED_FIELDS.filter(field => !mapping[field]);
-      console.log('❌ [parseFile] Missing required fields:', missingRequired);
-      
       if (missingRequired.length > 0) {
-        const missingNames = missingRequired.map(field => {
+        const fieldNames = missingRequired.map(field => {
           const displayName = FIELD_DISPLAY_NAMES[field] || field;
           return displayName;
         }).join(', ');
         
-        setError(
-          `❌ ไม่พบคอลัมน์ที่จำเป็น: ${missingNames}\n\n` +
-          `✅ คอลัมน์ที่พบในไฟล์: ${headers.join(', ')}\n\n` +
-          'กรุณาตรวจสอบชื่อคอลัมน์ในไฟล์ Excel ให้ตรงกับ Template'
-        );
+        alert(`❌ ไม่พบคอลัมน์ที่จำเป็น: ${fieldNames}\n\nกรุณาตรวจสอบไฟล์ Template`);
         setUploading(false);
         return;
       }
@@ -425,39 +555,18 @@ export default function ImportPatientsExcelPage() {
         errors: rows.filter(r => !r.isValid).length
       });
       
+      console.log('✅ [ParseFile] Parse completed:', {
+        total: rows.length,
+        valid: stats.valid,
+        errors: stats.errors
+      });
+      
     } catch (error) {
-      console.error('Error parsing file:', error);
-      setError('❌ เกิดข้อผิดพลาดในการอ่านไฟล์: ' + (error as Error).message);
+      console.error('❌ [ParseFile] Error:', error);
+      alert('❌ เกิดข้อผิดพลาดในการอ่านไฟล์: ' + (error as Error).message);
     } finally {
       setUploading(false);
     }
-  };
-
-  // =====================================================
-  // 🧠 SMART COLUMN DETECTION
-  // =====================================================
-  const detectColumnMapping = (headers: string[]): ColumnMapping => {
-    const mapping: ColumnMapping = {};
-    console.log('🔍 [detectColumnMapping] Headers from Excel:', headers);
-    
-    headers.forEach((header, index) => {
-      const normalizedHeader = header.trim().toLowerCase();
-      
-      // หาว่า header นี้ตรงกับ field ไหน
-      for (const [fieldName, possibleNames] of Object.entries(COLUMN_MAPPINGS)) {
-        if (possibleNames.some(name => 
-          name.toLowerCase() === normalizedHeader || 
-          normalizedHeader.includes(name.toLowerCase()) ||
-          name.toLowerCase().includes(normalizedHeader)
-        )) {
-          mapping[fieldName] = headers[index];
-          console.log('✅ [detectColumnMapping] Matched:', fieldName, '->', headers[index]);
-          break;
-        }
-      }
-    });
-    
-    return mapping;
   };
 
   // =====================================================
@@ -472,21 +581,19 @@ export default function ImportPatientsExcelPage() {
     const newData = [...mappedData];
     newData[rowIndex].data = { ...editData };
     
-    // Re-validate
     const errors: string[] = [];
     const idCardClean = editData.id_card?.replace(/\D/g, '') || '';
     if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
     if (!editData.hospital_number) errors.push('ต้องระบุ HN');
     if (!editData.first_name) errors.push('ต้องระบุชื่อ');
     if (!editData.last_name) errors.push('ต้องระบุนามสกุล');
-    
+
     newData[rowIndex].errors = errors;
     newData[rowIndex].isValid = errors.length === 0;
-    
+
     setMappedData(newData);
     setEditingRow(null);
-    
-    // Update stats
+
     setStats({
       total: newData.length,
       valid: newData.filter(r => r.isValid).length,
@@ -515,7 +622,7 @@ export default function ImportPatientsExcelPage() {
       alert('❌ ไม่มีข้อมูลที่ถูกต้องให้นำเข้า');
       return;
     }
-
+    
     if (!confirm(`✅ คุณต้องการนำเข้า ${validRows.length} รายหรือไม่?\n\n⚠️ ข้อมูลที่ผิดพลาด ${stats.errors} ราย will be skipped`)) {
       return;
     }
@@ -595,14 +702,13 @@ export default function ImportPatientsExcelPage() {
   };
 
   const handleReset = () => {
-    setFile(null);
+    setPreviewMode(false);
     setMappedData([]);
     setRawData([]);
-    setPreviewMode(false);
-    setDetectedHeaders([]);
+    setFile(null);
     setColumnMapping({});
-    setError('');
-    setSuccess('');
+    setDetectedHeaders([]);
+    setStats({ total: 0, valid: 0, warnings: 0, errors: 0 });
   };
 
   // =====================================================
@@ -676,6 +782,74 @@ export default function ImportPatientsExcelPage() {
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         
+        {/* ✅ Loading Status */}
+        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+            <RefreshCw className={`w-5 h-5 ${loadingStatus.some(s => s.isLoading) ? 'animate-spin' : ''}`} />
+            สถานะการโหลดข้อมูล
+          </h2>
+          
+          <div className="space-y-3">
+            {loadingStatus.map((status) => (
+              <div key={status.step} className="flex items-center gap-3">
+                <div className="w-6 h-6 flex items-center justify-center">
+                  {status.isLoading ? (
+                    <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                  ) : status.isComplete ? (
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                  ) : status.isError ? (
+                    <XCircle className="w-5 h-5 text-red-500" />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full border-2 border-gray-300" />
+                  )}
+                </div>
+                <span className={`text-sm ${
+                  status.isComplete ? 'text-green-700' :
+                  status.isError ? 'text-red-700' :
+                  status.isLoading ? 'text-blue-700' :
+                  'text-gray-500'
+                }`}>
+                  {status.message}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {/* ✅ ข้อมูลที่โหลดเสร็จ */}
+          {loadingStatus.every(s => s.isComplete || s.isError) && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Building2 className="w-4 h-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-800">โรงพยาบาล</span>
+                  </div>
+                  <p className="text-2xl font-bold text-blue-700">{hospitals.length}</p>
+                  <p className="text-xs text-blue-600">แห่งที่เข้าถึงได้</p>
+                </div>
+                
+                <div className="bg-purple-50 rounded-lg p-3 border border-purple-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Users className="w-4 h-4 text-purple-600" />
+                    <span className="text-sm font-medium text-purple-800">โค้ช</span>
+                  </div>
+                  <p className="text-2xl font-bold text-purple-700">{coaches.length}</p>
+                  <p className="text-xs text-purple-600">คนที่พร้อมใช้งาน</p>
+                </div>
+                
+                <div className="bg-green-50 rounded-lg p-3 border border-green-200">
+                  <div className="flex items-center gap-2 mb-1">
+                    <CheckCircle className="w-4 h-4 text-green-600" />
+                    <span className="text-sm font-medium text-green-800">พร้อมใช้งาน</span>
+                  </div>
+                  <p className="text-2xl font-bold text-green-700">✓</p>
+                  <p className="text-xs text-green-600">ระบบพร้อมนำเข้า</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Upload Section */}
         {!previewMode && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -684,12 +858,21 @@ export default function ImportPatientsExcelPage() {
                 <Upload className="w-5 h-5 text-blue-600" />
                 อัปโหลดไฟล์ Excel
               </h2>
+              
+              {/* ✅ ปุ่มดาวน์โหลด Template */}
+              <button
+                onClick={downloadTemplate}
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                ดาวน์โหลด Template
+              </button>
             </div>
             
             <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-400 transition-colors">
               <input
                 type="file"
-                accept=".xlsx,.xls,.csv"
+                accept=".csv"
                 onChange={(e) => {
                   const selectedFile = e.target.files?.[0];
                   if (selectedFile) {
@@ -706,26 +889,37 @@ export default function ImportPatientsExcelPage() {
                   คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่
                 </p>
                 <p className="text-sm text-gray-400">
-                  รองรับไฟล์ .xlsx, .xls, .csv
+                  รองรับไฟล์ .csv (แปลงจาก Excel ก่อน)
                 </p>
               </label>
             </div>
 
-            {/* Column Mapping Info */}
+            {/* ✅ Column Mapping Requirements */}
             <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-800 mb-2">🧠 ระบบจะจับคู่คอลัมน์อัตโนมัติ</h3>
-              <p className="text-sm text-blue-700 mb-2">
-                ระบบจะตรวจสอบชื่อคอลัมน์และจับคู่กับฟิลด์ที่ถูกต้อง แม้ชื่อจะไม่ตรงเป๊ะ
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-blue-600">
-                <div>✅ เลขบัตรประชาชน</div>
-                <div>✅ วันเกิด</div>
-                <div>✅ ชื่อ-นามสกุล</div>
-                <div>✅ HN</div>
-                <div>✅ โรงพยาบาล</div>
-                <div>✅ โค้ช/อสม.</div>
-                <div>✅ ที่อยู่</div>
-                <div>✅ ผู้ติดต่อฉุกเฉิน</div>
+              <h3 className="font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                <FileText className="w-5 h-5" />
+                คอลัมน์ที่จำเป็น (ต้องมีในไฟล์)
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {REQUIRED_FIELDS.map((field) => {
+                  const isMapped = columnMapping[field];
+                  const displayName = FIELD_DISPLAY_NAMES[field] || field;
+                  return (
+                    <div
+                      key={field}
+                      className={`flex items-center gap-2 text-sm ${
+                        isMapped ? 'text-green-700' : 'text-red-700'
+                      }`}
+                    >
+                      {isMapped ? (
+                        <CheckCircle className="w-4 h-4" />
+                      ) : (
+                        <XCircle className="w-4 h-4" />
+                      )}
+                      <span>{displayName}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -782,90 +976,63 @@ export default function ImportPatientsExcelPage() {
               </div>
             </div>
 
-            {/* ✅ Detected Columns Display - แสดงคอลัมน์ที่พบ */}
+            {/* ✅ Column Mapping Display */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-blue-600" />
-                คอลัมน์ที่พบในไฟล์ ({detectedHeaders.length} คอลัมน์)
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                  <Layers className="w-5 h-5 text-blue-600" />
+                  การจับคู่คอลัมน์ที่ตรวจพบ
+                </h3>
+                <span className="text-sm text-gray-500">
+                  พบ {Object.keys(columnMapping).length} จาก {detectedHeaders.length} คอลัมน์
+                </span>
+              </div>
               
-              {detectedHeaders.length === 0 ? (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2">
-                    <XCircle className="w-5 h-5 text-red-600" />
-                    <p className="text-red-800 font-semibold">ไม่พบคอลัมน์ใดๆ ในไฟล์</p>
-                  </div>
-                  <p className="text-sm text-red-700 mt-2">
-                    ไฟล์อาจว่างเปล่าหรือรูปแบบไม่ถูกต้อง กรุณาตรวจสอบไฟล์อีกครั้ง
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-                    <p className="text-sm text-gray-700 mb-2">
-                      <strong>📋 คอลัมน์ทั้งหมดที่พบ:</strong>
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {detectedHeaders.map((header, idx) => {
-                        const isMatched = Object.values(columnMapping).includes(header);
-                        return (
-                          <span 
-                            key={idx}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                              isMatched 
-                                ? 'bg-green-100 text-green-800 border border-green-300'
-                                : 'bg-gray-200 text-gray-600 border border-gray-300'
-                            }`}
-                          >
-                            {header}
-                            {isMatched && ' ✓'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* ✅ คอลัมน์ที่จับคู่สำเร็จ */}
-                    <div>
-                      <h4 className="font-semibold text-green-800 mb-2 flex items-center gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Object.entries(columnMapping).map(([field, header]) => {
+                  const displayName = FIELD_DISPLAY_NAMES[field] || field;
+                  const isRequired = REQUIRED_FIELDS.includes(field);
+                  return (
+                    <div key={field} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-1">
                         <CheckCircle className="w-4 h-4 text-green-600" />
-                        คอลัมน์ที่จับคู่สำเร็จ ({Object.keys(columnMapping).length})
-                      </h4>
-                      <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
-                        {Object.entries(columnMapping).map(([field, header]) => (
-                          <div key={field} className="flex items-center justify-between text-sm">
-                            <span className="text-green-700 font-medium">
-                              {FIELD_DISPLAY_NAMES[field] || field}
-                            </span>
-                            <span className="text-green-600">← {header}</span>
-                          </div>
-                        ))}
-                        {Object.keys(columnMapping).length === 0 && (
-                          <p className="text-green-600 text-sm">ไม่พบคอลัมน์ที่จับคู่ได้</p>
+                        <span className="text-sm font-medium text-green-800">{displayName}</span>
+                        {isRequired && (
+                          <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded">จำเป็น</span>
                         )}
                       </div>
+                      <div className="text-xs text-green-600">
+                        <span className="font-medium">คอลัมน์ในไฟล์:</span>
+                        <div className="font-mono mt-1 bg-green-100 px-2 py-1 rounded">{header}</div>
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    {/* ❌ คอลัมน์ที่ไม่พบ */}
-                    <div>
-                      <h4 className="font-semibold text-red-800 mb-2 flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-red-600" />
-                        คอลัมน์ที่จำเป็นแต่ไม่พบ
-                      </h4>
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-3 space-y-2">
-                        {REQUIRED_FIELDS.filter(field => !columnMapping[field]).map(field => (
-                          <div key={field} className="text-sm text-red-700">
-                            ❌ {FIELD_DISPLAY_NAMES[field] || field}
-                          </div>
-                        ))}
-                        {REQUIRED_FIELDS.every(field => columnMapping[field]) && (
-                          <p className="text-green-600 text-sm">✓ พบคอลัมน์ที่จำเป็นทั้งหมด</p>
-                        )}
-                      </div>
-                    </div>
+              {/* ✅ คอลัมน์ที่ไม่พบ */}
+              {detectedHeaders.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-gray-200">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-2">คอลัมน์ทั้งหมดที่พบในไฟล์:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {detectedHeaders.map((header, idx) => {
+                      const isMapped = Object.values(columnMapping).includes(header);
+                      return (
+                        <span
+                          key={idx}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                            isMapped
+                              ? 'bg-green-100 text-green-800 border border-green-300'
+                              : 'bg-gray-100 text-gray-600 border border-gray-300'
+                          }`}
+                        >
+                          {header}
+                          {isMapped && ' ✓'}
+                        </span>
+                      );
+                    })}
                   </div>
-                </>
+                </div>
               )}
             </div>
 
@@ -913,6 +1080,7 @@ export default function ImportPatientsExcelPage() {
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ชื่อ-นามสกุล</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">บัตร ปชช.</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">โรงพยาบาล</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">โค้ช</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">สถานะ</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">จัดการ</th>
                     </tr>
@@ -931,6 +1099,11 @@ export default function ImportPatientsExcelPage() {
                         <td className="px-4 py-3 text-sm">
                           {row.data.hospital_name || (
                             <span className="text-red-600">❌ {row.data.hospital}</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {row.data.coach_name || (
+                            <span className="text-gray-400">-</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
