@@ -1,11 +1,11 @@
 // app/admin/patients/import-excel/page.tsx
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แสดงรายละเอียด Column Mapping แบบละเอียด
-//    2. ✅ แสดงคอลัมน์ที่จับได้ และจับไม่ได้
-//    3. ✅ แสดงตัวอย่างชื่อคอลัมน์ที่ระบบรองรับ
-//    4. ✅ แสดงตัวอย่างข้อมูลจากไฟล์ Excel
-//    5. ✅ แสดง Error Messages ที่ชัดเจน
+//    1. ✅ แสดงรายละเอียดคอลัมน์ที่พบในไฟล์ Excel
+//    2. ✅ แสดงการจับคู่กับฟิลด์ในระบบ
+//    3. ✅ แสดงคอลัมน์ที่จับคู่สำเร็จ/ไม่สำเร็จ
+//    4. ✅ แสดงคอลัมน์ที่จำเป็นแต่ไม่พบ
+//    5. ✅ แสดงตัวอย่างข้อมูล 3 แถวแรก
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -39,7 +39,8 @@ import {
   Download,
   RefreshCw,
   Info,
-  Table
+  Table,
+  Columns
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -96,7 +97,7 @@ interface ImportRow {
 }
 
 interface ColumnMapping {
-  [key: string]: string; // mapped_name -> excel_header
+  [key: string]: string;
 }
 
 interface ColumnInfo {
@@ -1102,17 +1103,47 @@ export default function ImportPatientsExcelPage() {
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="p-6 border-b border-gray-200">
                 <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Table className="w-5 h-5 text-blue-600" />
-                  รายละเอียดการจับคู่คอลัมน์
+                  <Columns className="w-5 h-5 text-blue-600" />
+                  รายละเอียดคอลัมน์ที่พบในไฟล์ Excel
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  แสดงคอลัมน์ที่พบในไฟล์ Excel และการจับคู่กับฟิลด์ในระบบ
+                  แสดงคอลัมน์ทั้งหมดที่พบ การจับคู่กับฟิลด์ในระบบ และสถานะการตรวจสอบ
                 </p>
               </div>
 
-              <div className="p-6">
-                {/* ✅ คอลัมน์ที่จับได้ (Matched) */}
-                <div className="mb-6">
+              <div className="p-6 space-y-6">
+                {/* ✅ คอลัมน์ทั้งหมดที่พบในไฟล์ */}
+                <div>
+                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                    <Table className="w-5 h-5 text-gray-600" />
+                    คอลัมน์ทั้งหมดที่พบในไฟล์ ({excelHeaders.length} คอลัมน์)
+                  </h3>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <div className="flex flex-wrap gap-2">
+                      {excelHeaders.map((header, idx) => {
+                        const matchedInfo = columnInfos.find(info => info.matchedColumn === header);
+                        return (
+                          <span 
+                            key={idx}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                              matchedInfo 
+                                ? matchedInfo.required
+                                  ? 'bg-green-100 text-green-800 border border-green-300'
+                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
+                                : 'bg-gray-200 text-gray-600 border border-gray-300'
+                            }`}
+                          >
+                            {header}
+                            {matchedInfo && ' ✓'}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ✅ คอลัมน์ที่จับคู่สำเร็จ */}
+                <div>
                   <h3 className="font-semibold text-green-800 mb-3 flex items-center gap-2">
                     <CheckCircle className="w-5 h-5 text-green-600" />
                     คอลัมน์ที่จับคู่สำเร็จ ({columnInfos.filter(c => c.isMatched).length} คอลัมน์)
@@ -1123,23 +1154,36 @@ export default function ImportPatientsExcelPage() {
                         <div className="flex items-center justify-between mb-2">
                           <span className="font-medium text-green-900">{info.displayName}</span>
                           {info.required && (
-                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">จำเป็น</span>
+                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
+                              จำเป็น
+                            </span>
                           )}
                         </div>
-                        <div className="text-sm text-green-700">
-                          <span className="font-medium">พบคอลัมน์:</span> "{info.matchedColumn}"
+                        <div className="text-sm text-green-700 mb-1">
+                          <span className="font-medium">พบคอลัมน์:</span> 
+                          <span className="ml-1 font-mono bg-green-100 px-2 py-0.5 rounded">"{info.matchedColumn}"</span>
                         </div>
-                        <div className="text-xs text-green-600 mt-1">
-                          ตัวอย่าง: {info.example}
+                        <div className="text-xs text-green-600">
+                          <span className="font-medium">ตัวอย่างชื่อที่รองรับ:</span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {info.possibleNames.slice(0, 3).map((name, idx) => (
+                              <span key={idx} className="bg-green-100 px-1.5 py-0.5 rounded text-xs">
+                                {name}
+                              </span>
+                            ))}
+                            {info.possibleNames.length > 3 && (
+                              <span className="text-green-600 text-xs">+{info.possibleNames.length - 3} อื่นๆ</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* ✅ คอลัมน์ที่จับไม่ได้ (Unmatched) */}
+                {/* ✅ คอลัมน์ที่จับไม่ได้ */}
                 {columnInfos.filter(c => !c.isMatched).length > 0 && (
-                  <div className="mb-6">
+                  <div>
                     <h3 className="font-semibold text-red-800 mb-3 flex items-center gap-2">
                       <XCircle className="w-5 h-5 text-red-600" />
                       คอลัมน์ที่ไม่พบในไฟล์ ({columnInfos.filter(c => !c.isMatched).length} คอลัมน์)
@@ -1151,53 +1195,26 @@ export default function ImportPatientsExcelPage() {
                             <div className="flex items-center justify-between mb-2">
                               <span className="font-medium text-red-900">{info.displayName}</span>
                               {info.required && (
-                                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">จำเป็น ⚠️</span>
+                                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
+                                  จำเป็น ⚠️
+                                </span>
                               )}
                             </div>
                             <div className="text-xs text-red-700">
                               <span className="font-medium">ชื่อที่ระบบรองรับ:</span>
                               <div className="mt-1 flex flex-wrap gap-1">
                                 {info.possibleNames.slice(0, 5).map((name, idx) => (
-                                  <span key={idx} className="bg-red-100 px-2 py-0.5 rounded">
+                                  <span key={idx} className="bg-red-100 px-2 py-0.5 rounded text-xs">
                                     {name}
                                   </span>
                                 ))}
                                 {info.possibleNames.length > 5 && (
-                                  <span className="text-red-600">+{info.possibleNames.length - 5} อื่นๆ</span>
+                                  <span className="text-red-600 text-xs">+{info.possibleNames.length - 5} อื่นๆ</span>
                                 )}
                               </div>
                             </div>
                           </div>
                         ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ✅ คอลัมน์ที่พบในไฟล์ แต่ระบบไม่รู้จัก */}
-                {excelHeaders.length > 0 && (
-                  <div className="mb-6">
-                    <h3 className="font-semibold text-blue-800 mb-3 flex items-center gap-2">
-                      <Info className="w-5 h-5 text-blue-600" />
-                      คอลัมน์ทั้งหมดที่พบในไฟล์ ({excelHeaders.length} คอลัมน์)
-                    </h3>
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <div className="flex flex-wrap gap-2">
-                        {excelHeaders.map((header, idx) => {
-                          const isMatched = columnInfos.some(c => c.matchedColumn === header);
-                          return (
-                            <span 
-                              key={idx}
-                              className={`px-3 py-1 rounded-full text-sm ${
-                                isMatched 
-                                  ? 'bg-green-100 text-green-700' 
-                                  : 'bg-gray-100 text-gray-600'
-                              }`}
-                            >
-                              {header} {isMatched ? '✓' : '✗'}
-                            </span>
-                          );
-                        })}
                       </div>
                     </div>
                   </div>
@@ -1215,7 +1232,7 @@ export default function ImportPatientsExcelPage() {
                         <thead className="bg-gray-50">
                           <tr>
                             {excelHeaders.map((header, idx) => (
-                              <th key={idx} className="px-3 py-2 text-left border border-gray-200">
+                              <th key={idx} className="px-3 py-2 text-left border border-gray-200 font-medium text-gray-700">
                                 {header}
                               </th>
                             ))}
@@ -1225,7 +1242,7 @@ export default function ImportPatientsExcelPage() {
                           {excelSampleData.map((row, rowIdx) => (
                             <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
                               {excelHeaders.map((header, colIdx) => (
-                                <td key={colIdx} className="px-3 py-2 border border-gray-200">
+                                <td key={colIdx} className="px-3 py-2 border border-gray-200 text-gray-600">
                                   {row[header] || '-'}
                                 </td>
                               ))}
@@ -1288,11 +1305,11 @@ export default function ImportPatientsExcelPage() {
                         </td>
                         <td className="px-4 py-3">
                           {row.isValid ? (
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
                               ✓ พร้อม
                             </span>
                           ) : (
-                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs">
+                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
                               ✗ ผิดพลาด
                             </span>
                           )}
