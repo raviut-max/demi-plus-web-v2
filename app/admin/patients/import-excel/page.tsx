@@ -2,30 +2,32 @@
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. ✅ แสดงรายละเอียดคอลัมน์ที่พบในไฟล์ Excel
-//    2. ✅ แสดงการจับคู่กับฟิลด์ในระบบ
-//    3. ✅ แสดงคอลัมน์ที่จับคู่สำเร็จ/ไม่สำเร็จ
-//    4. ✅ แสดงคอลัมน์ที่จำเป็นแต่ไม่พบ
-//    5. ✅ แสดงตัวอย่างข้อมูล 3 แถวแรก
+//    2. ✅ แสดงการจับคู่คอลัมน์ (Column Mapping) แบบละเอียด
+//    3. ✅ แสดงคอลัมน์ที่จำเป็นและขาดหาย
+//    4. ✅ แสดงตัวอย่างข้อมูล 3 แถวแรก
+//    5. ✅ แสดง Error Messages ที่ชัดเจนกว่า
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   checkSession,
   logout,
-  getAccessibleHospitalIds,
+  registerPatient,
+  getCoachesWithHospitals,
+  getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  isSuperAdmin,
-  registerPatient
+  getAccessibleHospitalIds,
+  isSuperAdmin
 } from '@/lib/supabase/queries';
 import {
   Upload,
-  FileSpreadsheet,
   CheckCircle,
   AlertCircle,
   XCircle,
   Loader2,
   ArrowLeft,
+  FileSpreadsheet,
   UserPlus,
   LogOut,
   UserCheck,
@@ -36,11 +38,8 @@ import {
   Trash2,
   Eye,
   Database,
-  Download,
-  RefreshCw,
-  Info,
   Table,
-  Columns
+  Info
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -97,7 +96,7 @@ interface ImportRow {
 }
 
 interface ColumnMapping {
-  [key: string]: string;
+  [key: string]: string; // mapped_name -> excel_header
 }
 
 interface ColumnInfo {
@@ -204,18 +203,17 @@ export default function ImportPatientsExcelPage() {
   const [mappedData, setMappedData] = useState<ImportRow[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
   const [columnInfos, setColumnInfos] = useState<ColumnInfo[]>([]);
+  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
+  const [excelSampleData, setExcelSampleData] = useState<any[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [previewMode, setPreviewMode] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
-  const [error, setError] = useState<string>('');
-  const [success, setSuccess] = useState<string>('');
-  const [dragActive, setDragActive] = useState(false);
-  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
-  const [excelSampleData, setExcelSampleData] = useState<any[]>([]);
-
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  
   // ✅ สรุปสถิติ
   const [stats, setStats] = useState({
     total: 0,
@@ -279,83 +277,14 @@ export default function ImportPatientsExcelPage() {
     }
   };
 
-  const getHospitalsWithHierarchy = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('hospitals')
-        .select(`
-          *,
-          parent_hospital:hospitals!parent_id (
-            id,
-            name,
-            code
-          )
-        `)
-        .eq('is_active', true)
-        .order('type', { ascending: true })
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.error('Error fetching hospitals:', error);
-      return [];
-    }
-  };
-
-  const getCoachesWithHospitals = async (hospitalIds: string[]) => {
-    try {
-      let query = supabase
-        .from('doctors')
-        .select(`
-          id,
-          user_id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          is_verified,
-          users (
-            hospital_id,
-            role,
-            admin_type,
-            is_active,
-            hospitals (
-              id,
-              name,
-              code,
-              type,
-              parent_id
-            )
-          )
-        `)
-        .eq('is_active', true)
-        .eq('users.is_active', true);
-
-      if (hospitalIds && hospitalIds.length > 0) {
-        query = query.in('users.hospital_id', hospitalIds);
-      }
-
-      const { data, error } = await query.order('full_name_th', { ascending: true });
-
-      if (error) throw error;
-
-      const coachesWithHospitals = (data || []).filter(coach => 
-        coach.users?.hospital_id && coach.users?.hospitals?.name
-      );
-
-      return coachesWithHospitals;
-    } catch (error) {
-      console.error('Error loading coaches:', error);
-      return [];
-    }
-  };
-
   // =====================================================
   // 🧠 SMART COLUMN DETECTION
   // =====================================================
   const detectColumnMapping = (headers: string[]): { mapping: ColumnMapping, infos: ColumnInfo[] } => {
     const mapping: ColumnMapping = {};
     const infos: ColumnInfo[] = [];
+    
+    console.log('🔍 [detectColumnMapping] Headers from Excel:', headers);
     
     // ✅ ตรวจสอบทุก field ที่ระบบรองรับ
     Object.entries(COLUMN_MAPPINGS).forEach(([fieldName, possibleNames]) => {
@@ -371,9 +300,10 @@ export default function ImportPatientsExcelPage() {
           normalizedHeader.includes(name.toLowerCase()) ||
           name.toLowerCase().includes(normalizedHeader)
         )) {
-          mapping[fieldName] = header;
+          mapping[fieldName] = header; // เก็บชื่อจริงจาก Excel
           matchedColumn = header;
           isMatched = true;
+          console.log('✅ [detectColumnMapping] Matched:', fieldName, '->', header);
           break;
         }
       }
@@ -388,6 +318,9 @@ export default function ImportPatientsExcelPage() {
         isMatched
       });
     });
+    
+    console.log('📊 [detectColumnMapping] Column Mapping:', mapping);
+    console.log('📊 [detectColumnMapping] Column Infos:', infos);
     
     return { mapping, infos };
   };
@@ -413,6 +346,9 @@ export default function ImportPatientsExcelPage() {
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
       setExcelHeaders(headers);
       
+      console.log('📋 [parseFile] Excel Headers:', headers);
+      console.log('📋 [parseFile] Total lines:', lines.length);
+      
       // ✅ แสดงตัวอย่างข้อมูล 3 แถวแรก
       const sampleData = [];
       for (let i = 1; i < Math.min(4, lines.length); i++) {
@@ -425,13 +361,10 @@ export default function ImportPatientsExcelPage() {
       }
       setExcelSampleData(sampleData);
       
-      // ✅ Detect Column Mapping
+      // ✅ Smart Column Mapping
       const { mapping, infos } = detectColumnMapping(headers);
       setColumnMapping(mapping);
       setColumnInfos(infos);
-      
-      console.log('🧠 Column Mapping:', mapping);
-      console.log('📋 Column Infos:', infos);
       
       // ✅ ตรวจสอบ Required Fields
       const missingRequired = infos.filter(info => info.required && !info.isMatched);
@@ -454,11 +387,13 @@ export default function ImportPatientsExcelPage() {
           row[header] = values[idx] || '';
         });
         
+        // ✅ Map กับ field ที่รู้จัก
         const mappedRow: any = {};
         for (const [fieldName, excelHeader] of Object.entries(mapping)) {
           mappedRow[fieldName] = row[excelHeader] || '';
         }
         
+        // ✅ Validate
         const errors: string[] = [];
         const warnings: string[] = [];
         
@@ -533,6 +468,7 @@ export default function ImportPatientsExcelPage() {
       setRawData(rows);
       setPreviewMode(true);
       
+      // ✅ คำนวณสถิติ
       setStats({
         total: rows.length,
         valid: rows.filter(r => r.isValid).length,
@@ -551,63 +487,6 @@ export default function ImportPatientsExcelPage() {
   };
 
   // =====================================================
-  // 🖱️ DRAG & DROP HANDLERS
-  // =====================================================
-  const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const droppedFile = e.dataTransfer.files[0];
-      handleFile(droppedFile);
-    }
-  }, []);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
-    }
-  };
-
-  const handleFile = (file: File) => {
-    const validTypes = [
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/csv',
-      'application/csv',
-      'application/vnd.ms-excel.sheet.macroEnabled.12'
-    ];
-    
-    const validExtensions = ['.xlsx', '.xls', '.csv'];
-    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-    
-    if (!validTypes.includes(file.type) && !validExtensions.includes(fileExtension)) {
-      setError('❌ กรุณาเลือกไฟล์ Excel (.xlsx, .xls) หรือ CSV เท่านั้น');
-      return;
-    }
-    
-    if (file.size > 10 * 1024 * 1024) {
-      setError('❌ ไฟล์มีขนาดใหญ่เกินไป (สูงสุด 10MB)');
-      return;
-    }
-    
-    setFile(file);
-    parseFile(file);
-  };
-
-  // =====================================================
   // ✏️ EDIT ROW
   // =====================================================
   const handleEditRow = (rowIndex: number) => {
@@ -619,6 +498,7 @@ export default function ImportPatientsExcelPage() {
     const newData = [...mappedData];
     newData[rowIndex].data = { ...editData };
     
+    // Re-validate
     const errors: string[] = [];
     const idCardClean = editData.id_card?.replace(/\D/g, '') || '';
     if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
@@ -632,6 +512,7 @@ export default function ImportPatientsExcelPage() {
     setMappedData(newData);
     setEditingRow(null);
     
+    // Update stats
     setStats({
       total: newData.length,
       valid: newData.filter(r => r.isValid).length,
@@ -657,7 +538,7 @@ export default function ImportPatientsExcelPage() {
   const handleImport = async () => {
     const validRows = mappedData.filter(r => r.isValid);
     if (validRows.length === 0) {
-      setError('❌ ไม่มีข้อมูลที่ถูกต้องให้นำเข้า');
+      alert('❌ ไม่มีข้อมูลที่ถูกต้องให้นำเข้า');
       return;
     }
 
@@ -666,10 +547,8 @@ export default function ImportPatientsExcelPage() {
     }
 
     setImporting(true);
-    setError('');
     let successCount = 0;
     let errorCount = 0;
-    const errors: string[] = [];
 
     for (const row of validRows) {
       try {
@@ -720,115 +599,25 @@ export default function ImportPatientsExcelPage() {
           successCount++;
         } else {
           errorCount++;
-          errors.push(`แถว ${row.rowNumber}: ${result.error}`);
         }
       } catch (err) {
         errorCount++;
-        errors.push(`แถว ${row.rowNumber}: ${(err as Error).message}`);
       }
     }
 
     setImporting(false);
-    
+    alert(`✅ นำเข้าสำเร็จ ${successCount} ราย\n❌ ล้มเหลว ${errorCount} ราย`);
+
     if (successCount > 0) {
-      setSuccess(`✅ นำเข้าสำเร็จ ${successCount} ราย\n❌ ล้มเหลว ${errorCount} ราย`);
       setTimeout(() => {
         router.push('/admin/patients');
-      }, 3000);
-    } else {
-      setError(`❌ นำเข้าล้มเหลวทั้งหมด\n${errors.slice(0, 5).join('\n')}`);
+      }, 2000);
     }
   };
 
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
-  };
-
-  const handleReset = () => {
-    setFile(null);
-    setMappedData([]);
-    setRawData([]);
-    setPreviewMode(false);
-    setError('');
-    setSuccess('');
-    setStats({ total: 0, valid: 0, warnings: 0, errors: 0 });
-    setExcelHeaders([]);
-    setExcelSampleData([]);
-    setColumnInfos([]);
-  };
-
-  const downloadTemplate = () => {
-    const headers = [
-      'เลขบัตรประชาชน',
-      'วันเกิด',
-      'ชื่อ',
-      'นามสกุล',
-      'HN',
-      'เพศ',
-      'เบอร์โทร',
-      'น้ำหนัก',
-      'ส่วนสูง',
-      'รอบเอว(ซม.)',
-      'ประเภทเบาหวาน',
-      'ค่าน้ำตาลในเลือด',
-      'ค่า HbA1c ล่าสุด (ถ้ามี)',
-      'โรงพยาบาล',
-      'รพ.สต.',
-      'บ้านเลขที่',
-      'หมู่ที่/ชุมชน',
-      'หมู่บ้าน',
-      'ซอย',
-      'ถนน',
-      'จังหวัด',
-      'อำเภอ',
-      'ตำบล',
-      'รหัสไปรษณีย์',
-      'ชื่อผู้ติดต่อ(ญาติ)',
-      'เบอร์โทร',
-      'ความสัมพันธ์',
-      'ชื่อผู้ดูแล (อสม.)'
-    ];
-
-    const sampleData = [
-      '1100800012345',
-      '05/01/2548',
-      'นายบุญเพ็ง',
-      'ดอกทานตะวัน',
-      '45688899',
-      'ชาย',
-      '0812223654',
-      '80',
-      '164',
-      '100',
-      'เบาหวาน',
-      '140',
-      '6.8',
-      'รพ.เมตตาธรรม',
-      'รพ.สต.บ้านฟ้าใส',
-      '54',
-      '12',
-      'บ้านฟ้าใส',
-      'ตาเทพ',
-      'งามสง่า',
-      'เทพสถิตย์',
-      'เมตตาธรรม',
-      'บ้านลี้',
-      '99000',
-      'นางนวลละออ สมควร',
-      '857741248',
-      'คู่สมรส',
-      'นางเตือนใจ มั่งมี'
-    ];
-
-    const csvContent = [headers.join(','), sampleData.join(',')].join('\n');
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'template_import_patients.csv';
-    link.click();
-    URL.revokeObjectURL(url);
   };
 
   // =====================================================
@@ -937,74 +726,31 @@ export default function ImportPatientsExcelPage() {
                 <Upload className="w-5 h-5 text-blue-600" />
                 อัปโหลดไฟล์ Excel
               </h2>
-              <button
-                onClick={downloadTemplate}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm"
-              >
-                <Download className="w-4 h-4" />
-                ดาวน์โหลด Template
-              </button>
             </div>
             
-            <div 
-              className={`border-2 border-dashed rounded-xl p-12 text-center transition-all ${
-                dragActive 
-                  ? 'border-blue-500 bg-blue-50' 
-                  : 'border-gray-300 hover:border-blue-400'
-              }`}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-            >
+            <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-400 transition-colors">
               <input
                 type="file"
                 accept=".xlsx,.xls,.csv"
-                onChange={handleFileChange}
+                onChange={(e) => {
+                  const selectedFile = e.target.files?.[0];
+                  if (selectedFile) {
+                    setFile(selectedFile);
+                    parseFile(selectedFile);
+                  }
+                }}
                 className="hidden"
                 id="fileInput"
               />
               <label htmlFor="fileInput" className="cursor-pointer">
-                {uploading ? (
-                  <div className="flex flex-col items-center">
-                    <Loader2 className="w-16 h-16 text-blue-500 animate-spin mx-auto mb-4" />
-                    <p className="text-lg font-medium text-gray-600 mb-2">
-                      กำลังประมวลผลไฟล์...
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      กรุณารอสักครู่
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                    <p className="text-lg font-medium text-gray-600 mb-2">
-                      คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      รองรับไฟล์ .xlsx, .xls, .csv (สูงสุด 10MB)
-                    </p>
-                  </>
-                )}
+                <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <p className="text-lg font-medium text-gray-600 mb-2">
+                  คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่
+                </p>
+                <p className="text-sm text-gray-400">
+                  รองรับไฟล์ .xlsx, .xls, .csv
+                </p>
               </label>
-            </div>
-
-            {/* Column Mapping Info */}
-            <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-semibold text-blue-800 mb-2">🧠 ระบบจะจับคู่คอลัมน์อัตโนมัติ</h3>
-              <p className="text-sm text-blue-700 mb-2">
-                ระบบจะตรวจสอบชื่อคอลัมน์และจับคู่กับฟิลด์ที่ถูกต้อง แม้ชื่อจะไม่ตรงเป๊ะ
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-blue-600">
-                <div>✅ เลขบัตรประชาชน</div>
-                <div>✅ วันเกิด</div>
-                <div>✅ ชื่อ-นามสกุล</div>
-                <div>✅ HN</div>
-                <div>✅ โรงพยาบาล</div>
-                <div>✅ โค้ช/อสม.</div>
-                <div>✅ ที่อยู่</div>
-                <div>✅ ผู้ติดต่อฉุกเฉิน</div>
-              </div>
             </div>
           </div>
         )}
@@ -1060,200 +806,138 @@ export default function ImportPatientsExcelPage() {
               </div>
             </div>
 
-            {/* Action Buttons */}
-            <div className="bg-white rounded-xl shadow-sm p-4 border border-gray-200 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  เริ่มต้นใหม่
-                </button>
-                <button
-                  onClick={downloadTemplate}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
-                >
-                  <Download className="w-4 h-4" />
-                  ดาวน์โหลด Template
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleImport}
-                  disabled={importing || stats.valid === 0}
-                  className="flex items-center gap-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-                >
-                  {importing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      กำลังนำเข้า...
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="w-4 h-4" />
-                      นำเข้า {stats.valid} ราย
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* ✅ Column Mapping Details - แสดงรายละเอียดการจับคู่ */}
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Columns className="w-5 h-5 text-blue-600" />
-                  รายละเอียดคอลัมน์ที่พบในไฟล์ Excel
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  แสดงคอลัมน์ทั้งหมดที่พบ การจับคู่กับฟิลด์ในระบบ และสถานะการตรวจสอบ
-                </p>
-              </div>
-
-              <div className="p-6 space-y-6">
-                {/* ✅ คอลัมน์ทั้งหมดที่พบในไฟล์ */}
-                <div>
-                  <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                    <Table className="w-5 h-5 text-gray-600" />
-                    คอลัมน์ทั้งหมดที่พบในไฟล์ ({excelHeaders.length} คอลัมน์)
-                  </h3>
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                    <div className="flex flex-wrap gap-2">
-                      {excelHeaders.map((header, idx) => {
-                        const matchedInfo = columnInfos.find(info => info.matchedColumn === header);
-                        return (
-                          <span 
-                            key={idx}
-                            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                              matchedInfo 
-                                ? matchedInfo.required
-                                  ? 'bg-green-100 text-green-800 border border-green-300'
-                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
-                                : 'bg-gray-200 text-gray-600 border border-gray-300'
-                            }`}
-                          >
-                            {header}
-                            {matchedInfo && ' ✓'}
-                          </span>
-                        );
-                      })}
-                    </div>
+            {/* ✅ Column Mapping Display - แสดงรายละเอียดคอลัมน์ */}
+            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <Table className="w-5 h-5 text-blue-600" />
+                รายละเอียดคอลัมน์ที่พบในไฟล์ Excel
+              </h3>
+              
+              {/* ✅ คอลัมน์ทั้งหมดที่พบ */}
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">📋 คอลัมน์ทั้งหมดที่พบ ({excelHeaders.length} คอลัมน์)</h4>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <div className="flex flex-wrap gap-2">
+                    {excelHeaders.map((header, idx) => {
+                      const matchedInfo = columnInfos.find(info => info.matchedColumn === header);
+                      return (
+                        <span 
+                          key={idx}
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                            matchedInfo 
+                              ? matchedInfo.required
+                                ? 'bg-green-100 text-green-800 border border-green-300'
+                                : 'bg-blue-100 text-blue-800 border border-blue-300'
+                              : 'bg-gray-200 text-gray-600 border border-gray-300'
+                          }`}
+                        >
+                          {header}
+                          {matchedInfo && ' ✓'}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
+              </div>
 
-                {/* ✅ คอลัมน์ที่จับคู่สำเร็จ */}
-                <div>
-                  <h3 className="font-semibold text-green-800 mb-3 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    คอลัมน์ที่จับคู่สำเร็จ ({columnInfos.filter(c => c.isMatched).length} คอลัมน์)
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {columnInfos.filter(c => c.isMatched).map((info) => (
-                      <div key={info.fieldName} className="bg-green-50 border border-green-200 rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-medium text-green-900">{info.displayName}</span>
-                          {info.required && (
-                            <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
-                              จำเป็น
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-sm text-green-700 mb-1">
-                          <span className="font-medium">พบคอลัมน์:</span> 
-                          <span className="ml-1 font-mono bg-green-100 px-2 py-0.5 rounded">"{info.matchedColumn}"</span>
-                        </div>
-                        <div className="text-xs text-green-600">
-                          <span className="font-medium">ตัวอย่างชื่อที่รองรับ:</span>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {info.possibleNames.slice(0, 3).map((name, idx) => (
-                              <span key={idx} className="bg-green-100 px-1.5 py-0.5 rounded text-xs">
-                                {name}
+              {/* ✅ คอลัมน์ที่จับคู่สำเร็จ */}
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-green-600" />
+                  คอลัมน์ที่จับคู่สำเร็จ ({columnInfos.filter(c => c.isMatched).length} คอลัมน์)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {columnInfos.filter(c => c.isMatched).map((info) => (
+                    <div key={info.fieldName} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium text-green-900">{info.displayName}</span>
+                        {info.required && (
+                          <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
+                            จำเป็น
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm text-green-700 mb-1">
+                        <span className="font-medium">พบคอลัมน์:</span> 
+                        <span className="ml-1 font-mono bg-green-100 px-2 py-0.5 rounded">"{info.matchedColumn}"</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ✅ คอลัมน์ที่จับไม่ได้ */}
+              {columnInfos.filter(c => !c.isMatched).length > 0 && (
+                <div className="mb-6">
+                  <h4 className="text-sm font-semibold text-red-800 mb-2 flex items-center gap-2">
+                    <XCircle className="w-4 h-4 text-red-600" />
+                    คอลัมน์ที่ไม่พบในไฟล์ ({columnInfos.filter(c => !c.isMatched).length} คอลัมน์)
+                  </h4>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {columnInfos.filter(c => !c.isMatched).map((info) => (
+                        <div key={info.fieldName} className="bg-white border border-red-200 rounded-lg p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="font-medium text-red-900">{info.displayName}</span>
+                            {info.required && (
+                              <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
+                                จำเป็น ⚠️
                               </span>
-                            ))}
-                            {info.possibleNames.length > 3 && (
-                              <span className="text-green-600 text-xs">+{info.possibleNames.length - 3} อื่นๆ</span>
                             )}
                           </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* ✅ คอลัมน์ที่จับไม่ได้ */}
-                {columnInfos.filter(c => !c.isMatched).length > 0 && (
-                  <div>
-                    <h3 className="font-semibold text-red-800 mb-3 flex items-center gap-2">
-                      <XCircle className="w-5 h-5 text-red-600" />
-                      คอลัมน์ที่ไม่พบในไฟล์ ({columnInfos.filter(c => !c.isMatched).length} คอลัมน์)
-                    </h3>
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {columnInfos.filter(c => !c.isMatched).map((info) => (
-                          <div key={info.fieldName} className="bg-white border border-red-200 rounded-lg p-3">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="font-medium text-red-900">{info.displayName}</span>
-                              {info.required && (
-                                <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded font-medium">
-                                  จำเป็น ⚠️
+                          <div className="text-xs text-red-700">
+                            <span className="font-medium">ชื่อที่ระบบรองรับ:</span>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {info.possibleNames.slice(0, 5).map((name, idx) => (
+                                <span key={idx} className="bg-red-100 px-2 py-0.5 rounded text-xs">
+                                  {name}
                                 </span>
+                              ))}
+                              {info.possibleNames.length > 5 && (
+                                <span className="text-red-600 text-xs">+{info.possibleNames.length - 5} อื่นๆ</span>
                               )}
                             </div>
-                            <div className="text-xs text-red-700">
-                              <span className="font-medium">ชื่อที่ระบบรองรับ:</span>
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {info.possibleNames.slice(0, 5).map((name, idx) => (
-                                  <span key={idx} className="bg-red-100 px-2 py-0.5 rounded text-xs">
-                                    {name}
-                                  </span>
-                                ))}
-                                {info.possibleNames.length > 5 && (
-                                  <span className="text-red-600 text-xs">+{info.possibleNames.length - 5} อื่นๆ</span>
-                                )}
-                              </div>
-                            </div>
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* ✅ ตัวอย่างข้อมูลจากไฟล์ */}
-                {excelSampleData.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold text-purple-800 mb-3 flex items-center gap-2">
-                      <Eye className="w-5 h-5 text-purple-600" />
-                      ตัวอย่างข้อมูลจากไฟล์ (3 แถวแรก)
-                    </h3>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm border border-gray-200 rounded-lg">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            {excelHeaders.map((header, idx) => (
-                              <th key={idx} className="px-3 py-2 text-left border border-gray-200 font-medium text-gray-700">
-                                {header}
-                              </th>
+              {/* ✅ ตัวอย่างข้อมูลจากไฟล์ */}
+              {excelSampleData.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-purple-800 mb-2 flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-purple-600" />
+                    ตัวอย่างข้อมูลจากไฟล์ (3 แถวแรก)
+                  </h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border border-gray-200 rounded-lg">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          {excelHeaders.map((header, idx) => (
+                            <th key={idx} className="px-3 py-2 text-left border border-gray-200">
+                              {header}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {excelSampleData.map((row, rowIdx) => (
+                          <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                            {excelHeaders.map((header, colIdx) => (
+                              <td key={colIdx} className="px-3 py-2 border border-gray-200 text-gray-600">
+                                {row[header] || '-'}
+                              </td>
                             ))}
                           </tr>
-                        </thead>
-                        <tbody>
-                          {excelSampleData.map((row, rowIdx) => (
-                            <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                              {excelHeaders.map((header, colIdx) => (
-                                <td key={colIdx} className="px-3 py-2 border border-gray-200 text-gray-600">
-                                  {row[header] || '-'}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Preview Table */}
@@ -1263,9 +947,36 @@ export default function ImportPatientsExcelPage() {
                   <Eye className="w-5 h-5 text-blue-600" />
                   Preview ข้อมูล ({stats.total} ราย)
                 </h2>
-                <p className="text-sm text-gray-500">
-                  แสดง 50 รายแรกจากทั้งหมด {stats.total} ราย
-                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setPreviewMode(false);
+                      setMappedData([]);
+                      setFile(null);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    ยกเลิก
+                  </button>
+                  <button
+                    onClick={handleImport}
+                    disabled={importing || stats.valid === 0}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50"
+                  >
+                    {importing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        กำลังนำเข้า...
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-4 h-4" />
+                        นำเข้า {stats.valid} ราย
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
@@ -1305,11 +1016,11 @@ export default function ImportPatientsExcelPage() {
                         </td>
                         <td className="px-4 py-3">
                           {row.isValid ? (
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">
                               ✓ พร้อม
                             </span>
                           ) : (
-                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs">
                               ✗ ผิดพลาด
                             </span>
                           )}
@@ -1346,110 +1057,6 @@ export default function ImportPatientsExcelPage() {
           </>
         )}
       </div>
-
-      {/* Edit Modal */}
-      {editingRow !== null && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4">✏️ แก้ไขแถวที่ {mappedData[editingRow]?.rowNumber}</h2>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">HN</label>
-                <input
-                  type="text"
-                  value={editData.hospital_number || ''}
-                  onChange={(e) => setEditData({...editData, hospital_number: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">เลขบัตรประชาชน</label>
-                <input
-                  type="text"
-                  value={editData.id_card || ''}
-                  onChange={(e) => setEditData({...editData, id_card: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">ชื่อ</label>
-                <input
-                  type="text"
-                  value={editData.first_name || ''}
-                  onChange={(e) => setEditData({...editData, first_name: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">นามสกุล</label>
-                <input
-                  type="text"
-                  value={editData.last_name || ''}
-                  onChange={(e) => setEditData({...editData, last_name: e.target.value})}
-                  className="w-full px-3 py-2 border rounded-lg"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">โรงพยาบาล</label>
-                <select
-                  value={editData.hospital_id || ''}
-                  onChange={(e) => {
-                    const hospital = hospitals.find(h => h.id === e.target.value);
-                    setEditData({
-                      ...editData,
-                      hospital_id: e.target.value,
-                      hospital_name: hospital?.name
-                    });
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg"
-                >
-                  <option value="">-- เลือก --</option>
-                  {hospitals.map(h => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">โค้ช</label>
-                <select
-                  value={editData.coach_id || ''}
-                  onChange={(e) => {
-                    const coach = coaches.find(c => c.user_id === e.target.value);
-                    setEditData({
-                      ...editData,
-                      coach_id: e.target.value,
-                      coach_name: coach?.full_name_th
-                    });
-                  }}
-                  className="w-full px-3 py-2 border rounded-lg"
-                >
-                  <option value="">-- เลือก --</option>
-                  {coaches.map(c => (
-                    <option key={c.user_id} value={c.user_id}>{c.full_name_th}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex gap-4 mt-6">
-              <button
-                onClick={() => handleSaveEdit(editingRow)}
-                className="flex-1 bg-green-500 text-white py-3 rounded-lg hover:bg-green-600 flex items-center justify-center gap-2"
-              >
-                <Save className="w-4 h-4" />
-                บันทึก
-              </button>
-              <button
-                onClick={() => setEditingRow(null)}
-                className="flex-1 bg-gray-500 text-white py-3 rounded-lg hover:bg-gray-600"
-              >
-                ยกเลิก
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
