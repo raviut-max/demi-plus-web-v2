@@ -2,11 +2,10 @@
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
 // ✅ ฟีเจอร์:
 //    1. ✅ ปุ่มดาวน์โหลด Template
-//    2. ✅ แสดง Loading Status แบบละเอียด (4 ขั้นตอน)
+//    2. ✅ แสดง Loading Status แบบละเอียด
 //    3. ✅ แสดงคอลัมน์ที่โหลดได้/ไม่ได้
 //    4. ✅ Preview Table ที่แก้ไขได้
 //    5. ✅ Validation และ Error Messages
-//    6. ✅ แก้ไขข้อมูลรายแถวได้
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -49,6 +48,7 @@ import { supabase } from '@/lib/supabase/client';
 // =====================================================
 // 📋 INTERFACES
 // =====================================================
+
 interface UserHospital {
   id: string;
   name: string;
@@ -109,8 +109,9 @@ interface LoadingStep {
 }
 
 // =====================================================
-// 🧠 SMART COLUMN MAPPING (ตรงกับ Template 28 คอลัมน์)
+// 🧠 SMART COLUMN MAPPING
 // =====================================================
+
 const COLUMN_MAPPINGS: { [key: string]: string[] } = {
   id_card: ['เลขบัตรประชาชน', 'บัตรประชาชน', 'id_card', 'idcard', 'national_id', 'เลขบัตร'],
   birth_date: ['วันเกิด', 'วันเกิด', 'birth_date', 'birthdate', 'dob', 'date_of_birth'],
@@ -120,16 +121,16 @@ const COLUMN_MAPPINGS: { [key: string]: string[] } = {
   gender: ['เพศ', 'เพศ', 'gender', 'sex'],
   phone: ['เบอร์โทร', 'โทรศัพท์', 'phone', 'tel', 'mobile', 'เบอร์โทรศัพท์'],
   email: ['อีเมล', 'email', 'e-mail'],
-  current_weight: ['น้ำหนัก', 'น้ำหนัก', 'weight', 'current_weight', 'น้ำหนัก (kg)'],
-  height: ['ส่วนสูง', 'ส่วนสูง', 'height', 'ส่วนสูง (cm)'],
-  waist_circumference: ['รอบเอว(ซม.)', 'รอบเอว', 'waist', 'waist_circumference', 'รอบเอว (cm)'],
+  current_weight: ['น้ำหนัก', 'น้ำหนัก', 'weight', 'current_weight'],
+  height: ['ส่วนสูง', 'ส่วนสูง', 'height'],
+  waist_circumference: ['รอบเอว', 'รอบเอว', 'waist', 'waist_circumference'],
   diabetes_type: ['ประเภทเบาหวาน', 'ประเภทเบาหวาน', 'diabetes_type', 'diabetes'],
-  blood_sugar: ['ค่าน้ำตาลในเลือด', 'ค่าน้ำตาล', 'blood_sugar', 'bloodsugar', 'glucose'],
-  hba1c_level: ['ค่า HbA1c ล่าสุด (ถ้ามี)', 'HbA1c', 'ค่า HbA1c', 'hba1c', 'hba1c_level'],
+  blood_sugar: ['ค่าน้ำตาล', 'ค่าน้ำตาลในเลือด', 'blood_sugar', 'bloodsugar', 'glucose'],
+  hba1c_level: ['HbA1c', 'ค่า HbA1c', 'hba1c', 'hba1c_level'],
   hospital: ['โรงพยาบาล', 'โรงพยาบาล', 'hospital', 'hospital_name', 'รพ.'],
   subdistrict_health_center: ['รพ.สต.', 'รพสต', 'subdistrict_health_center', 'health_center'],
   house_number: ['บ้านเลขที่', 'บ้านเลขที่', 'house_number', 'house_no'],
-  village_no: ['หมู่ที่/ชุมชน', 'หมู่ที่', 'village_no', 'village_number', 'หมู่'],
+  village_no: ['หมู่ที่', 'หมู่ที่/ชุมชน', 'village_no', 'village_number', 'หมู่'],
   village_name: ['หมู่บ้าน', 'หมู่บ้าน', 'village_name', 'village'],
   soi: ['ซอย', 'ซอย', 'soi', 'alley'],
   road: ['ถนน', 'ถนน', 'road', 'street'],
@@ -137,10 +138,10 @@ const COLUMN_MAPPINGS: { [key: string]: string[] } = {
   district: ['อำเภอ', 'อำเภอ/เขต', 'district', 'amphoe'],
   subdistrict: ['ตำบล', 'ตำบล', 'subdistrict', 'tambon'],
   postal_code: ['รหัสไปรษณีย์', 'ไปรษณีย์', 'postal_code', 'zipcode'],
-  emergency_contact_name: ['ชื่อผู้ติดต่อ(ญาติ)', 'ชื่อผู้ติดต่อ', 'emergency_contact_name', 'emergency_name'],
-  emergency_contact_phone: ['เบอร์โทร', 'เบอร์โทรผู้ติดต่อ', 'emergency_contact_phone', 'emergency_phone'],
+  emergency_contact_name: ['ชื่อผู้ติดต่อ', 'ผู้ติดต่อฉุกเฉิน', 'emergency_contact_name', 'emergency_name'],
+  emergency_contact_phone: ['เบอร์โทรผู้ติดต่อ', 'เบอร์ฉุกเฉิน', 'emergency_contact_phone', 'emergency_phone'],
   emergency_contact_relationship: ['ความสัมพันธ์', 'ความสัมพันธ์', 'relationship', 'emergency_relationship'],
-  coach_name: ['ชื่อผู้ดูแล (อสม.)', 'ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล']
+  coach_name: ['ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล']
 };
 
 const REQUIRED_FIELDS = ['id_card', 'first_name', 'last_name', 'hospital_number', 'birth_date', 'gender', 'hospital'];
@@ -154,58 +155,58 @@ const FIELD_DISPLAY_NAMES: { [key: string]: string } = {
   gender: 'เพศ',
   phone: 'เบอร์โทร',
   email: 'อีเมล',
-  current_weight: 'น้ำหนัก (kg)',
-  height: 'ส่วนสูง (cm)',
-  waist_circumference: 'รอบเอว (cm)',
+  current_weight: 'น้ำหนัก',
+  height: 'ส่วนสูง',
+  waist_circumference: 'รอบเอว',
   diabetes_type: 'ประเภทเบาหวาน',
-  blood_sugar: 'ค่าน้ำตาลในเลือด',
-  hba1c_level: 'ค่า HbA1c',
+  blood_sugar: 'ค่าน้ำตาล',
+  hba1c_level: 'HbA1c',
   hospital: 'โรงพยาบาล',
-  subdistrict_health_center: 'รพ.สต.',
-  house_number: 'บ้านเลขที่',
-  village_no: 'หมู่ที่',
-  village_name: 'หมู่บ้าน',
-  soi: 'ซอย',
-  road: 'ถนน',
-  province: 'จังหวัด',
-  district: 'อำเภอ',
-  subdistrict: 'ตำบล',
-  postal_code: 'รหัสไปรษณีย์',
-  emergency_contact_name: 'ชื่อผู้ติดต่อ',
-  emergency_contact_phone: 'เบอร์โทรผู้ติดต่อ',
-  emergency_contact_relationship: 'ความสัมพันธ์',
-  coach_name: 'ชื่อผู้ดูแล'
+  coach_name: 'โค้ช'
 };
 
 // =====================================================
 // 🎯 MAIN COMPONENT
 // =====================================================
+
 export default function ImportPatientsExcelPage() {
   const router = useRouter();
+  
+  // ✅ State สำหรับข้อมูลผู้ใช้
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
+  
+  // ✅ State สำหรับ Loading
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
+  
+  // ✅ State สำหรับไฟล์และข้อมูล
   const [file, setFile] = useState<File | null>(null);
   const [mappedData, setMappedData] = useState<ImportRow[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
+  
+  // ✅ State สำหรับข้อมูลอ้างอิง
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [coaches, setCoaches] = useState<Coach[]>([]);
+  
+  // ✅ State สำหรับ UI
   const [previewMode, setPreviewMode] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
+  // ✅ State สำหรับ Loading Steps
   const [loadingSteps, setLoadingSteps] = useState<LoadingStep[]>([
     { id: 1, message: 'ตรวจสอบสิทธิ์ผู้ใช้', status: 'pending' },
     { id: 2, message: 'โหลดข้อมูลโรงพยาบาล', status: 'pending' },
     { id: 3, message: 'โหลดข้อมูลโค้ช', status: 'pending' },
     { id: 4, message: 'เตรียมความพร้อม', status: 'pending' }
   ]);
-
+  
+  // ✅ State สำหรับสถิติ
   const [stats, setStats] = useState({
     total: 0,
     valid: 0,
@@ -213,76 +214,112 @@ export default function ImportPatientsExcelPage() {
     errors: 0
   });
 
+  // =====================================================
+  // 🔄 INITIALIZATION
+  // =====================================================
+
   useEffect(() => {
     initializePage();
   }, [router]);
 
   const updateLoadingStep = (id: number, status: LoadingStep['status']) => {
-    setLoadingSteps(prev => prev.map(step =>
+    setLoadingSteps(prev => prev.map(step => 
       step.id === id ? { ...step, status } : step
     ));
   };
 
   const initializePage = async () => {
+    // ✅ Step 1: ตรวจสอบสิทธิ์
     updateLoadingStep(1, 'loading');
+    console.log('🔍 [Initialize] Checking user session...');
+    
     try {
       const userData = checkSession();
+      
       if (!userData) {
+        console.error('❌ [Initialize] No session found');
         router.push('/admin/login');
         return;
       }
+      
       if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+        console.error('❌ [Initialize] Unauthorized role:', userData.role);
         alert('ไม่มีสิทธิ์เข้าถึง');
         router.push('/admin/login');
         return;
       }
+      
+      console.log('✅ [Initialize] User authenticated:', userData.full_name_th);
       setUser(userData);
       updateLoadingStep(1, 'success');
-
+      
+      // ✅ Step 2-4: โหลดข้อมูล
       await loadUserHospital(userData.id);
       await loadAccessibleHospitals(userData.id);
       updateLoadingStep(4, 'success');
+      
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ [Initialize] Error:', error);
       updateLoadingStep(1, 'error');
     }
   };
 
+  // =====================================================
+  // 📥 DATA LOADING
+  // =====================================================
+
   const loadUserHospital = async (userId: string) => {
+    console.log('🏥 [loadUserHospital] Loading for user:', userId);
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo?.name);
     } catch (error) {
-      console.error('Error loading user hospital:', error);
+      console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
   const loadAccessibleHospitals = async (userId: string) => {
+    // ✅ Step 2: โหลดโรงพยาบาล
     updateLoadingStep(2, 'loading');
+    console.log('🏥 [loadAccessibleHospitals] Starting...');
+    
     try {
       const ids = await getAccessibleHospitalIds(userId);
       const allHospitals = await getHospitalsWithHierarchy();
+      
       let filteredHospitals = allHospitals;
       if (ids.length > 0 && !isSuperAdmin(user)) {
+        console.log('🔒 [loadAccessibleHospitals] Filtering hospitals for Hospital Admin');
         filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
+      } else {
+        console.log('👑 [loadAccessibleHospitals] Super Admin - showing all');
       }
+      
       setHospitals(filteredHospitals);
+      console.log('✅ [loadAccessibleHospitals] Loaded:', filteredHospitals.length, 'hospitals');
+      
       await loadCoaches(ids);
       updateLoadingStep(2, 'success');
+      
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
       updateLoadingStep(2, 'error');
     }
   };
 
   const loadCoaches = async (hospitalIds: string[]) => {
+    // ✅ Step 3: โหลดโค้ช
     updateLoadingStep(3, 'loading');
+    console.log('👨‍️ [loadCoaches] Loading for hospitals:', hospitalIds.length);
+    
     try {
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
+      console.log('✅ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
       updateLoadingStep(3, 'success');
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ [loadCoaches] Error:', error);
       updateLoadingStep(3, 'error');
     }
   };
@@ -290,24 +327,27 @@ export default function ImportPatientsExcelPage() {
   // =====================================================
   // 📥 TEMPLATE DOWNLOAD
   // =====================================================
+
   const downloadTemplate = () => {
+    console.log('📥 [downloadTemplate] Generating CSV template...');
+    
     const headers = [
       'เลขบัตรประชาชน', 'วันเกิด', 'ชื่อ', 'นามสกุล', 'HN', 'เพศ', 'เบอร์โทร',
       'น้ำหนัก', 'ส่วนสูง', 'รอบเอว(ซม.)', 'ประเภทเบาหวาน', 'ค่าน้ำตาลในเลือด',
-      'ค่า HbA1c ล่าสุด (ถ้ามี)', 'โรงพยาบาล', 'รพ.สต.', 'บ้านเลขที่', 'หมู่ที่/ชุมชน',
-      'หมู่บ้าน', 'ซอย', 'ถนน', 'จังหวัด', 'อำเภอ', 'ตำบล', 'รหัสไปรษณีย์',
-      'ชื่อผู้ติดต่อ(ญาติ)', 'เบอร์โทร', 'ความสัมพันธ์', 'ชื่อผู้ดูแล (อสม.)'
+      'ค่า HbA1c', 'โรงพยาบาล', 'รพ.สต.', 'บ้านเลขที่', 'หมู่ที่', 'หมู่บ้าน',
+      'ซอย', 'ถนน', 'จังหวัด', 'อำเภอ', 'ตำบล', 'รหัสไปรษณีย์',
+      'ชื่อผู้ติดต่อ', 'เบอร์โทรผู้ติดต่อ', 'ความสัมพันธ์', 'ชื่อผู้ดูแล'
     ];
-
-    const sampleData1 = [
+    
+    const sampleData = [
       '1100800012345', '05/01/2548', 'นายบุญเพ็ง', 'ดอกทานตะวัน', '45688899',
       'ชาย', '0812223654', '80', '164', '100', 'เบาหวาน', '140', '6.8',
       'รพ.เมตตาธรรม', 'รพ.สต.บ้านฟ้าใส', '54', '12', 'บ้านฟ้าใส', 'ตาเทพ',
       'งามสง่า', 'เทพสถิตย์', 'เมตตาธรรม', 'บ้านลี้', '99000', 'นางนวลละออ',
-      '857741248', 'คู่สมรส', 'นางเตือนใจ มั่งมี'
+      '857741248', 'คู่สมรส', 'นางเตือนใจ'
     ];
-
-    const csvContent = '\ufeff' + [headers.join(','), sampleData1.join(',')].join('\n');
+    
+    const csvContent = '\ufeff' + [headers.join(','), sampleData.join(',')].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -315,54 +355,68 @@ export default function ImportPatientsExcelPage() {
     link.download = 'template_import_patients.csv';
     link.click();
     URL.revokeObjectURL(url);
+    
+    console.log('✅ [downloadTemplate] Template downloaded');
   };
 
   // =====================================================
   // 🧠 COLUMN DETECTION
   // =====================================================
+
   const detectColumnMapping = (headers: string[]): ColumnMapping => {
+    console.log('🧠 [detectColumnMapping] Detecting columns:', headers);
     const mapping: ColumnMapping = {};
+    
     headers.forEach((header, index) => {
       const normalizedHeader = header.trim().toLowerCase();
+      
+      // 🔍 ค้นหาว่า header นี้ตรงกับ field ไหน
       for (const [fieldName, possibleNames] of Object.entries(COLUMN_MAPPINGS)) {
-        if (possibleNames.some(name =>
-          name.toLowerCase() === normalizedHeader ||
+        if (possibleNames.some(name => 
+          name.toLowerCase() === normalizedHeader || 
           normalizedHeader.includes(name.toLowerCase()) ||
           name.toLowerCase().includes(normalizedHeader)
         )) {
           mapping[fieldName] = headers[index];
+          console.log(`  ✅ Mapped: "${header}" → ${fieldName}`);
           break;
         }
       }
     });
+    
+    console.log('✅ [detectColumnMapping] Mapping result:', mapping);
     return mapping;
   };
 
   // =====================================================
   // 📊 PARSE & VALIDATE
   // =====================================================
+
   const parseFile = async (file: File) => {
+    console.log('📊 [parseFile] Parsing file:', file.name);
     setUploading(true);
     setError('');
+    
     try {
       const text = await file.text();
       const lines = text.split('\n').filter(line => line.trim());
-
+      
       if (lines.length < 2) {
         setError('❌ ไฟล์ไม่มีข้อมูลผู้ป่วย (ต้องมี header และข้อมูลอย่างน้อย 1 แถว)');
         setUploading(false);
         return;
       }
-
+      
+      // ✅ Parse Header
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
       setDetectedHeaders(headers);
-
+      console.log('📋 [parseFile] Headers found:', headers);
+      
+      // ✅ Detect Column Mapping
       const mapping = detectColumnMapping(headers);
       setColumnMapping(mapping);
-
-      console.log('📊 Column Mapping:', mapping);
-      console.log('📊 Detected Headers:', headers);
-
+      
+      // ✅ ตรวจสอบ Required Fields
       const missingRequired = REQUIRED_FIELDS.filter(field => !mapping[field]);
       if (missingRequired.length > 0) {
         const fieldNames = missingRequired.map(f => FIELD_DISPLAY_NAMES[f] || f).join(', ');
@@ -370,87 +424,94 @@ export default function ImportPatientsExcelPage() {
         setUploading(false);
         return;
       }
-
+      
+      // ✅ Parse Data Rows
       const rows: ImportRow[] = [];
+      
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
         const row: any = {};
+        
         headers.forEach((header, idx) => {
           row[header] = values[idx] || '';
         });
-
+        
+        // ✅ Map กับ field ที่รู้จัก
         const mappedRow: any = {};
         for (const [fieldName, excelHeader] of Object.entries(mapping)) {
           mappedRow[fieldName] = row[excelHeader] || '';
         }
-
+        
+        // ✅ Validation
         const errors: string[] = [];
         const warnings: string[] = [];
-
+        
+        // ตรวจสอบ ID Card
         const idCardClean = mappedRow.id_card?.replace(/\D/g, '') || '';
-        if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
-        if (!mappedRow.hospital_number) errors.push('ต้องระบุ HN');
+        if (idCardClean.length !== 13) {
+          errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
+        }
+        
+        // ตรวจสอบ HN
+        if (!mappedRow.hospital_number) {
+          errors.push('ต้องระบุ HN');
+        }
+        
+        // ตรวจสอบชื่อ-นามสกุล
         if (!mappedRow.first_name) errors.push('ต้องระบุชื่อ');
         if (!mappedRow.last_name) errors.push('ต้องระบุนามสกุล');
-
+        
+        // ตรวจสอบโรงพยาบาล
         if (mappedRow.hospital) {
-          const hospital = hospitals.find(h =>
-            h.name === mappedRow.hospital ||
-            h.code === mappedRow.hospital ||
-            h.name.includes(mappedRow.hospital)
+          const hospital = hospitals.find(h => 
+            h.name === mappedRow.hospital || 
+            h.code === mappedRow.hospital
           );
+          
           if (hospital) {
             mappedRow.hospital_id = hospital.id;
             mappedRow.hospital_name = hospital.name;
           } else {
             errors.push(`ไม่พบโรงพยาบาล "${mappedRow.hospital}"`);
           }
-        } else {
-          errors.push('ต้องระบุโรงพยาบาล');
         }
-
+        
+        // ตรวจสอบโค้ช (ถ้ามี)
         if (mappedRow.coach_name) {
-          const coach = coaches.find(c =>
-            c.full_name_th === mappedRow.coach_name ||
-            c.full_name_th.includes(mappedRow.coach_name)
-          );
+          const coach = coaches.find(c => c.full_name_th === mappedRow.coach_name);
           if (coach) {
             mappedRow.coach_id = coach.user_id;
             mappedRow.coach_name = coach.full_name_th;
           } else {
-            warnings.push(`ไม่พบโค้ช "${mappedRow.coach_name}" - จะไม่กำหนดโค้ช`);
+            warnings.push(`ไม่พบโค้ช "${mappedRow.coach_name}"`);
           }
         }
-
-        if (mappedRow.birth_date) {
-          const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
-          if (!datePattern.test(mappedRow.birth_date)) {
-            errors.push('รูปแบบวันเกิดต้องเป็น DD/MM/YYYY');
-          }
-        }
-
+        
         rows.push({
           rowNumber: i + 1,
           data: mappedRow,
           errors,
           warnings,
           isValid: errors.length === 0,
-          id_card_valid: idCardClean.length === 13,
-          birth_date_valid: /^\d{2}\/\d{2}\/\d{4}$/.test(mappedRow.birth_date)
+          id_card_valid: idCardClean.length === 13
         });
       }
-
+      
       setMappedData(rows);
       setPreviewMode(true);
+      
+      // ✅ คำนวณสถิติ
       setStats({
         total: rows.length,
         valid: rows.filter(r => r.isValid).length,
         warnings: rows.filter(r => r.warnings.length > 0).length,
         errors: rows.filter(r => !r.isValid).length
       });
-
+      
+      console.log('✅ [parseFile] Parsed successfully:', rows.length, 'rows');
+      
     } catch (error) {
-      console.error('Error parsing file:', error);
+      console.error('❌ [parseFile] Error:', error);
       setError('❌ เกิดข้อผิดพลาดในการอ่านไฟล์: ' + (error as Error).message);
     } finally {
       setUploading(false);
@@ -460,60 +521,71 @@ export default function ImportPatientsExcelPage() {
   // =====================================================
   // ✏️ EDIT & IMPORT
   // =====================================================
+
   const handleEditRow = (rowIndex: number) => {
+    console.log('✏️ [handleEditRow] Editing row:', rowIndex);
     setEditingRow(rowIndex);
     setEditData({ ...mappedData[rowIndex].data });
   };
 
   const handleSaveEdit = (rowIndex: number) => {
+    console.log('💾 [handleSaveEdit] Saving row:', rowIndex);
     const newData = [...mappedData];
     newData[rowIndex].data = { ...editData };
-
+    
+    // Re-validate
     const errors: string[] = [];
-    const idCardClean = editData.id_card?.replace(/\D/g, '') || '';
-    if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
-    if (!editData.hospital_number) errors.push('ต้องระบุ HN');
-    if (!editData.first_name) errors.push('ต้องระบุชื่อ');
-    if (!editData.last_name) errors.push('ต้องระบุนามสกุล');
-
+    if (editData.id_card?.replace(/\D/g, '').length !== 13) {
+      errors.push('เลขบัตรต้อง 13 หลัก');
+    }
+    if (!editData.hospital_number) {
+      errors.push('ต้องระบุ HN');
+    }
+    
     newData[rowIndex].errors = errors;
     newData[rowIndex].isValid = errors.length === 0;
-
+    
     setMappedData(newData);
     setEditingRow(null);
-
+    
+    // Update stats
     setStats({
       total: newData.length,
       valid: newData.filter(r => r.isValid).length,
       warnings: newData.filter(r => r.warnings.length > 0).length,
       errors: newData.filter(r => !r.isValid).length
     });
+    
+    console.log('✅ [handleSaveEdit] Saved successfully');
   };
 
   const handleImport = async () => {
     const validRows = mappedData.filter(r => r.isValid);
+    
     if (validRows.length === 0) {
       alert('❌ ไม่มีข้อมูลที่ถูกต้องให้นำเข้า');
       return;
     }
-
+    
     if (!confirm(`✅ คุณต้องการนำเข้า ${validRows.length} รายหรือไม่?\n\n⚠️ ข้อมูลที่ผิดพลาด ${stats.errors} ราย will be skipped`)) {
       return;
     }
-
+    
+    console.log('💾 [handleImport] Starting import of', validRows.length, 'rows');
     setImporting(true);
     let successCount = 0;
-    let errorCount = 0;
-    const errorMessages: string[] = [];
-
+    
     for (const row of validRows) {
       try {
+        // ✅ แปลงวันเกิดจาก พ.ศ. เป็น ค.ศ.
         const birthYearAD = parseInt(row.data.birth_date.split('/')[2]) - 543;
         const birthDate = `${birthYearAD}-${row.data.birth_date.split('/')[1]}-${row.data.birth_date.split('/')[0]}`;
-
+        
+        console.log(`📝 [handleImport] Registering patient ${row.rowNumber}:`, row.data.first_name, row.data.last_name);
+        
         const result = await registerPatient({
           id_card: row.data.id_card.replace(/\D/g, ''),
-          password: row.data.birth_date,
+          password: row.data.birth_date, // ใช้วันเกิดเป็นรหัสผ่าน
           first_name: row.data.first_name,
           last_name: row.data.last_name,
           hospital_number: row.data.hospital_number,
@@ -550,50 +622,50 @@ export default function ImportPatientsExcelPage() {
           zone: 'Zero Zone',
           created_by: user?.id
         });
-
+        
         if (result.success) {
           successCount++;
+          console.log(`✅ [handleImport] Patient ${row.rowNumber} registered successfully`);
         } else {
-          errorCount++;
-          errorMessages.push(`แถว ${row.rowNumber}: ${result.error}`);
+          console.error(`❌ [handleImport] Patient ${row.rowNumber} failed:`, result.error);
         }
+        
       } catch (err) {
-        errorCount++;
-        errorMessages.push(`แถว ${row.rowNumber}: ${(err as Error).message}`);
+        console.error(`❌ [handleImport] Error importing row ${row.rowNumber}:`, err);
       }
     }
-
+    
     setImporting(false);
-
+    alert(`✅ นำเข้าสำเร็จ ${successCount} ราย\n❌ ล้มเหลว ${validRows.length - successCount} ราย`);
+    
     if (successCount > 0) {
-      setSuccess(`✅ นำเข้าสำเร็จ ${successCount} ราย\n❌ ล้มเหลว ${errorCount} ราย`);
       setTimeout(() => {
         router.push('/admin/patients');
-      }, 3000);
-    } else {
-      setError(`❌ นำเข้าล้มเหลวทั้งหมด\n${errorMessages.slice(0, 5).join('\n')}`);
+      }, 2000);
     }
   };
 
   const handleLogout = () => {
+    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
 
   const handleReset = () => {
+    console.log('🔄 [handleReset] Resetting form...');
     setPreviewMode(false);
     setMappedData([]);
     setFile(null);
     setColumnMapping({});
     setDetectedHeaders([]);
     setError('');
-    setSuccess('');
     setStats({ total: 0, valid: 0, warnings: 0, errors: 0 });
   };
 
   // =====================================================
   // 🎨 RENDER
   // =====================================================
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -607,23 +679,34 @@ export default function ImportPatientsExcelPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/settings')} className="flex items-center gap-2 text-gray-600 mb-4">
+          <button 
+            onClick={() => router.push('/admin/settings')} 
+            className="flex items-center gap-2 text-gray-600 mb-4"
+          >
             <ArrowLeft className="w-4 h-4" /> กลับ
           </button>
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800">📥 นำเข้าผู้ป่วยจาก Excel</h1>
               <p className="text-gray-600">อัปโหลดไฟล์และตรวจสอบข้อมูลก่อนนำเข้า</p>
             </div>
+            
             <div className="flex items-center gap-4">
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <p className="font-semibold text-sm">{user?.full_name_th}</p>
-                  <p className="text-xs text-gray-500">{isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin'}</p>
+                  <p className="text-xs text-gray-500">
+                    {isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin'}
+                  </p>
                   <p className="text-xs text-blue-600">{userHospital.name}</p>
                 </div>
               )}
-              <button onClick={handleLogout} className="px-4 py-2 bg-red-500 text-white rounded-lg">
+              
+              <button 
+                onClick={handleLogout} 
+                className="px-4 py-2 bg-red-500 text-white rounded-lg"
+              >
                 <LogOut className="w-4 h-4" />
               </button>
             </div>
@@ -632,12 +715,14 @@ export default function ImportPatientsExcelPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+        
         {/* ✅ Loading Status */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
             <RefreshCw className={`w-5 h-5 ${loadingSteps.some(s => s.status === 'loading') ? 'animate-spin' : ''}`} />
             สถานะการโหลดข้อมูล
           </h2>
+          
           <div className="space-y-3">
             {loadingSteps.map(step => (
               <div key={step.id} className="flex items-center gap-3">
@@ -645,14 +730,18 @@ export default function ImportPatientsExcelPage() {
                 {step.status === 'success' && <CheckCircle className="w-5 h-5 text-green-500" />}
                 {step.status === 'error' && <XCircle className="w-5 h-5 text-red-500" />}
                 {step.status === 'pending' && <div className="w-5 h-5 rounded-full border-2 border-gray-300" />}
+                
                 <span className={`text-sm ${
                   step.status === 'success' ? 'text-green-700' :
                   step.status === 'error' ? 'text-red-700' :
                   step.status === 'loading' ? 'text-blue-700' : 'text-gray-500'
-                }`}>{step.message}</span>
+                }`}>
+                  {step.message}
+                </span>
               </div>
             ))}
           </div>
+          
           {loadingSteps.every(s => s.status === 'success') && (
             <div className="mt-4 pt-4 border-t grid grid-cols-3 gap-4">
               <div className="bg-blue-50 rounded-lg p-3">
@@ -678,15 +767,18 @@ export default function ImportPatientsExcelPage() {
               <h2 className="text-xl font-bold flex items-center gap-2">
                 <Upload className="w-5 h-5 text-blue-600" /> อัปโหลดไฟล์ Excel
               </h2>
-              <button onClick={downloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg">
+              <button 
+                onClick={downloadTemplate} 
+                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg"
+              >
                 <Download className="w-4 h-4" /> ดาวน์โหลด Template
               </button>
             </div>
-
-            <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-400 transition-colors">
+            
+            <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center">
               <input
                 type="file"
-                accept=".csv,.xlsx,.xls"
+                accept=".csv"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) {
@@ -699,8 +791,8 @@ export default function ImportPatientsExcelPage() {
               />
               <label htmlFor="fileInput" className="cursor-pointer">
                 <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <p className="text-lg font-medium text-gray-600 mb-2">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
-                <p className="text-sm text-gray-400">รองรับไฟล์ .csv, .xlsx, .xls (แนะนำ .csv)</p>
+                <p className="text-lg font-medium">คลิกเพื่อเลือกไฟล์ CSV</p>
+                <p className="text-sm text-gray-400">แปลงไฟล์ Excel เป็น CSV ก่อนอัปโหลด</p>
               </label>
             </div>
           </div>
@@ -734,13 +826,17 @@ export default function ImportPatientsExcelPage() {
               <h3 className="font-bold mb-4 flex items-center gap-2">
                 <Layers className="w-5 h-5 text-blue-600" /> การจับคู่คอลัมน์
               </h3>
-
+              
               <div className="mb-6">
-                <h4 className="text-sm font-semibold text-green-800 mb-2">✅ คอลัมน์ที่พบ ({Object.keys(columnMapping).length})</h4>
+                <h4 className="text-sm font-semibold text-green-800 mb-2">
+                  ✅ คอลัมน์ที่พบ ({Object.keys(columnMapping).length})
+                </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {Object.entries(columnMapping).map(([field, header]) => (
                     <div key={field} className="bg-green-50 border border-green-200 rounded-lg p-3">
-                      <p className="text-sm font-medium text-green-900">{FIELD_DISPLAY_NAMES[field] || field}</p>
+                      <p className="text-sm font-medium text-green-900">
+                        {FIELD_DISPLAY_NAMES[field] || field}
+                      </p>
                       <p className="text-xs text-green-600">← "{header}"</p>
                     </div>
                   ))}
@@ -748,11 +844,15 @@ export default function ImportPatientsExcelPage() {
               </div>
 
               <div>
-                <h4 className="text-sm font-semibold text-red-800 mb-2">❌ คอลัมน์ที่ไม่พบ</h4>
+                <h4 className="text-sm font-semibold text-red-800 mb-2">
+                  ❌ คอลัมน์ที่ไม่พบ
+                </h4>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {REQUIRED_FIELDS.filter(f => !columnMapping[f]).map(field => (
                     <div key={field} className="bg-red-50 border border-red-200 rounded-lg p-3">
-                      <p className="text-sm font-medium text-red-900">{FIELD_DISPLAY_NAMES[field] || field}</p>
+                      <p className="text-sm font-medium text-red-900">
+                        {FIELD_DISPLAY_NAMES[field] || field}
+                      </p>
                       <p className="text-xs text-red-600">จำเป็น</p>
                     </div>
                   ))}
@@ -763,14 +863,19 @@ export default function ImportPatientsExcelPage() {
               </div>
 
               <div className="mt-6 pt-6 border-t">
-                <h4 className="text-sm font-semibold mb-2">📋 คอลัมน์ทั้งหมดในไฟล์ ({detectedHeaders.length})</h4>
+                <h4 className="text-sm font-semibold mb-2">
+                  📋 คอลัมน์ทั้งหมดในไฟล์ ({detectedHeaders.length})
+                </h4>
                 <div className="flex flex-wrap gap-2">
                   {detectedHeaders.map((header, idx) => {
                     const isMatched = Object.values(columnMapping).includes(header);
                     return (
-                      <span key={idx} className={`px-3 py-1.5 rounded-lg text-sm ${
-                        isMatched ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                      }`}>
+                      <span 
+                        key={idx} 
+                        className={`px-3 py-1.5 rounded-lg text-sm ${
+                          isMatched ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
                         {header}{isMatched && ' ✓'}
                       </span>
                     );
@@ -786,11 +891,22 @@ export default function ImportPatientsExcelPage() {
                   <Eye className="w-5 h-5 text-blue-600" /> Preview ({stats.total} ราย)
                 </h2>
                 <div className="flex gap-2">
-                  <button onClick={handleReset} className="px-4 py-2 bg-gray-500 text-white rounded-lg">
+                  <button 
+                    onClick={handleReset} 
+                    className="px-4 py-2 bg-gray-500 text-white rounded-lg"
+                  >
                     <Trash2 className="w-4 h-4" />
                   </button>
-                  <button onClick={handleImport} disabled={importing || stats.valid === 0} className="px-6 py-2 bg-green-500 text-white rounded-lg disabled:opacity-50">
-                    {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                  <button 
+                    onClick={handleImport} 
+                    disabled={importing || stats.valid === 0}
+                    className="px-6 py-2 bg-green-500 text-white rounded-lg disabled:opacity-50"
+                  >
+                    {importing ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <UserPlus className="w-4 h-4" />
+                    )}
                     นำเข้า {stats.valid} ราย
                   </button>
                 </div>
@@ -811,21 +927,40 @@ export default function ImportPatientsExcelPage() {
                   </thead>
                   <tbody className="divide-y">
                     {mappedData.slice(0, 50).map((row, idx) => (
-                      <tr key={idx} className={!row.isValid ? 'bg-red-50' : row.warnings.length > 0 ? 'bg-yellow-50' : ''}>
+                      <tr 
+                        key={idx} 
+                        className={
+                          !row.isValid ? 'bg-red-50' : 
+                          row.warnings.length > 0 ? 'bg-yellow-50' : ''
+                        }
+                      >
                         <td className="px-4 py-3 text-sm">{row.rowNumber}</td>
                         <td className="px-4 py-3 text-sm font-medium">{row.data.hospital_number}</td>
-                        <td className="px-4 py-3 text-sm">{row.data.first_name} {row.data.last_name}</td>
+                        <td className="px-4 py-3 text-sm">
+                          {row.data.first_name} {row.data.last_name}
+                        </td>
                         <td className="px-4 py-3 text-sm">{row.data.id_card}</td>
-                        <td className="px-4 py-3 text-sm">{row.data.hospital_name || <span className="text-red-600">❌ {row.data.hospital}</span>}</td>
-                        <td className="px-4 py-3">
-                          {row.isValid ? (
-                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">✓ พร้อม</span>
-                          ) : (
-                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs">✗ ผิดพลาด</span>
+                        <td className="px-4 py-3 text-sm">
+                          {row.data.hospital_name || (
+                            <span className="text-red-600">❌ {row.data.hospital}</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <button onClick={() => handleEditRow(idx)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
+                          {row.isValid ? (
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs">
+                              ✓ พร้อม
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs">
+                              ✗ ผิดพลาด
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button 
+                            onClick={() => handleEditRow(idx)} 
+                            className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                          >
                             <Edit2 className="w-4 h-4" />
                           </button>
                         </td>
@@ -833,11 +968,6 @@ export default function ImportPatientsExcelPage() {
                     ))}
                   </tbody>
                 </table>
-                {mappedData.length > 50 && (
-                  <div className="p-4 text-center text-sm text-gray-500">
-                    ...และอีก {mappedData.length - 50} ราย (แสดง 50 รายแรก)
-                  </div>
-                )}
               </div>
             </div>
           </>
@@ -848,59 +978,64 @@ export default function ImportPatientsExcelPage() {
       {editingRow !== null && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4">✏️ แก้ไขแถวที่ {mappedData[editingRow]?.rowNumber}</h2>
+            <h2 className="text-xl font-bold mb-4">
+              ✏️ แก้ไขแถวที่ {mappedData[editingRow]?.rowNumber}
+            </h2>
+            
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">HN</label>
-                <input type="text" value={editData.hospital_number || ''} onChange={(e) => setEditData({...editData, hospital_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                <input 
+                  type="text" 
+                  value={editData.hospital_number || ''} 
+                  onChange={(e) => setEditData({...editData, hospital_number: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">เลขบัตรประชาชน</label>
-                <input type="text" value={editData.id_card || ''} onChange={(e) => setEditData({...editData, id_card: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                <input 
+                  type="text" 
+                  value={editData.id_card || ''} 
+                  onChange={(e) => setEditData({...editData, id_card: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">ชื่อ</label>
-                <input type="text" value={editData.first_name || ''} onChange={(e) => setEditData({...editData, first_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                <input 
+                  type="text" 
+                  value={editData.first_name || ''} 
+                  onChange={(e) => setEditData({...editData, first_name: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">นามสกุล</label>
-                <input type="text" value={editData.last_name || ''} onChange={(e) => setEditData({...editData, last_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+                <input 
+                  type="text" 
+                  value={editData.last_name || ''} 
+                  onChange={(e) => setEditData({...editData, last_name: e.target.value})}
+                  className="w-full px-3 py-2 border rounded-lg"
+                />
               </div>
             </div>
+            
             <div className="flex gap-4 mt-6">
-              <button onClick={() => handleSaveEdit(editingRow)} className="flex-1 bg-green-500 text-white py-3 rounded-lg flex items-center justify-center gap-2">
+              <button 
+                onClick={() => handleSaveEdit(editingRow)} 
+                className="flex-1 bg-green-500 text-white py-3 rounded-lg flex items-center justify-center gap-2"
+              >
                 <Save className="w-4 h-4" /> บันทึก
               </button>
-              <button onClick={() => setEditingRow(null)} className="flex-1 bg-gray-500 text-white py-3 rounded-lg">ยกเลิก</button>
+              <button 
+                onClick={() => setEditingRow(null)} 
+                className="flex-1 bg-gray-500 text-white py-3 rounded-lg"
+              >
+                ยกเลิก
+              </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Error/Success Messages */}
-      {error && (
-        <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 max-w-md">
-          <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="font-semibold text-red-800 mb-1">เกิดข้อผิดพลาด</p>
-            <p className="text-sm text-red-700 whitespace-pre-line">{error}</p>
-          </div>
-          <button onClick={() => setError('')} className="text-red-600 hover:text-red-800">
-            <XCircle className="w-5 h-5" />
-          </button>
-        </div>
-      )}
-
-      {success && (
-        <div className="fixed bottom-4 right-4 bg-green-50 border border-green-200 rounded-xl p-4 flex items-start gap-3 max-w-md">
-          <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="font-semibold text-green-800 mb-1">สำเร็จ</p>
-            <p className="text-sm text-green-700 whitespace-pre-line">{success}</p>
-          </div>
-          <button onClick={() => setSuccess('')} className="text-green-600 hover:text-green-800">
-            <XCircle className="w-5 h-5" />
-          </button>
         </div>
       )}
     </div>
