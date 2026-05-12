@@ -26,20 +26,16 @@ export default function AdminLoginPage() {
     setError('');
     setLoading(true);
 
-    // เรียกฟังก์ชัน Login จาก Supabase
     const result = await login(formData.id_card, formData.password);
 
     setLoading(false);
 
     if (result) {
-      // ตรวจสอบว่าเป็น Staff หรือไม่
-      if (['admin', 'doctor', 'helper'].includes(result.role)) {
-        // บันทึกข้อมูล user ลง localStorage
+      // ✅ เพิ่ม 'osm' เข้าไปในรายการบทบาทที่อนุญาตให้เข้าระบบ Admin
+      if (['admin', 'doctor', 'helper', 'osm'].includes(result.role)) {
         localStorage.setItem('user_id', result.id);
         localStorage.setItem('user_data', JSON.stringify(result));
         localStorage.setItem('login_time', new Date().toISOString());
-
-        // Redirect ไป Admin Dashboard
         router.push('/admin/dashboard');
       } else {
         setError('บัญชีนี้ไม่มีสิทธิ์เข้าถึงระบบ Admin');
@@ -124,7 +120,7 @@ export default function AdminLoginPage() {
             </button>
           </form>
 
-          {/* ✅ ลิงก์ไปหน้าลงทะเบียนบุคลากร */}
+          {/* ลิงก์ไปหน้าลงทะเบียนบุคลากร */}
           <div className="mt-6 pt-6 border-t border-gray-200">
             <button
               onClick={() => router.push('/admin/staff/register')}

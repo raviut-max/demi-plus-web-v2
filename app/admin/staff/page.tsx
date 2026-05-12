@@ -1,11 +1,6 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. ✅ แก้ไขการ filter ข้อมูล - แสดงผลถูกต้อง
-//    2. ✅ ปรับปรุงการ join กับ doctors table
-//    3. ✅ แก้ไข logic การตรวจสอบสิทธิ์
-//    4. ✅ เพิ่ม console.log สำหรับ debug
+// ✅ แก้ไขล่าสุด: เพิ่มบทบาท "อสม." (OSM) เข้าระบบจัดการเจ้าหน้าที่
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -59,11 +54,12 @@ interface UserHospital {
   parent_hospital?: { id: string; name: string; code: string };
 }
 
+// ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
 interface PendingStaff {
   id: string;
   id_card: string;
   full_name_th: string;
-  role: 'doctor' | 'helper' | 'admin';
+  role: 'doctor' | 'helper' | 'admin' | 'osm';
   specialization_th?: string;
   phone?: string;
   email?: string;
@@ -110,21 +106,20 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
-    
     if (userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
       router.push('/admin/login');
       return;
     }
-    
+
     console.log('👤 [StaffManagement] User:', userData);
     console.log('👑 [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
     console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
-    
+
     setUser(userData);
     loadUserHospital(userData.id);
     loadHospitals();
-    
+
     // ✅ โหลด accessibleHospitalIds ก่อน แล้วค่อยโหลด staff
     loadAccessibleHospitals(userData.id);
   }, [router]);
@@ -134,10 +129,8 @@ export default function StaffManagementPage() {
   // =====================================================
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
       console.error('❌ [loadUserHospital] Error:', error);
     }
@@ -145,19 +138,14 @@ export default function StaffManagementPage() {
 
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-      
       setAccessibleHospitalIds(ids);
       
-      // ✅ โหลด staff และ pending หลังจากได้ hospitalIds แล้ว
       await loadStaffList(ids);
       await loadPendingStaff(ids);
       await loadDeactivatedStaff(ids);
     } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      console.error(' [loadAccessibleHospitals] Error:', error);
       setAccessibleHospitalIds([]);
       await loadStaffList([]);
       await loadPendingStaff([]);
@@ -169,9 +157,7 @@ export default function StaffManagementPage() {
 
   const loadHospitals = async () => {
     try {
-      console.log('🏥 [loadHospitals] Fetching hospitals with hierarchy...');
       const data = await getHospitalsWithHierarchy();
-      console.log(`✅ [loadHospitals] Loaded ${data.length} hospitals`);
       setHospitals(data);
     } catch (error) {
       console.error('❌ [loadHospitals] Error:', error);
@@ -181,37 +167,16 @@ export default function StaffManagementPage() {
 
   const loadStaffList = async (hospitalIds?: string[]) => {
     try {
-      console.log('👥 [loadStaffList] Fetching staff list...');
-      console.log('👑 [loadStaffList] Is Super Admin:', isSuperAdmin(user));
-      console.log('🏥 [loadStaffList] Hospital IDs:', hospitalIds);
-      
       const allStaff = await getStaffList();
-      console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
-      console.log('📋 [loadStaffList] Sample staff:', allStaff.slice(0, 3));
-      
       let filteredStaff = allStaff;
       
-      // ✅ ถ้าเป็น Super Admin → แสดงทั้งหมด
       if (isSuperAdmin(user)) {
-        console.log('👑 [loadStaffList] Super Admin - showing all staff:', filteredStaff.length);
-      } 
-      // ✅ Hospital Admin → กรองตาม hospital ที่เข้าถึงได้
-      else if (hospitalIds && hospitalIds.length > 0) {
+        // Super Admin → แสดงทั้งหมด
+      } else if (hospitalIds && hospitalIds.length > 0) {
         filteredStaff = allStaff.filter(staff => {
-          // ✅ แสดง staff ที่ไม่มี hospital_id (เช่น Super Admin)
-          if (!staff.hospital_id) {
-            return true;
-          }
-          
-          // ✅ แสดงเฉพาะ staff ใน รพ.ที่เข้าถึงได้
+          if (!staff.hospital_id) return true;
           return hospitalIds.includes(staff.hospital_id);
         });
-        
-        console.log('📊 [loadStaffList] Filtered staff for Hospital Admin:', filteredStaff.length);
-      } 
-      // ✅ ไม่มี hospital IDs → แสดงทั้งหมด
-      else {
-        console.log('⚠️ [loadStaffList] No hospital filter - showing all staff');
       }
       
       setStaffList(filteredStaff);
@@ -223,9 +188,6 @@ export default function StaffManagementPage() {
 
   const loadPendingStaff = async (hospitalIds?: string[]) => {
     try {
-      console.log('⏳ [loadPendingStaff] Fetching pending staff...');
-      console.log('🏥 [loadPendingStaff] Hospital IDs:', hospitalIds);
-      
       const { data, error } = await supabase
         .from('pending_staff')
         .select(`*, hospitals (name, code)`)
@@ -240,20 +202,13 @@ export default function StaffManagementPage() {
 
       let filteredPending = data || [];
       
-      // ✅ Super Admin → แสดงทั้งหมด
       if (isSuperAdmin(user)) {
-        console.log('👑 [loadPendingStaff] Super Admin - showing all pending:', filteredPending.length);
-      } 
-      // ✅ Hospital Admin → กรองตาม hospital
-      else if (hospitalIds && hospitalIds.length > 0) {
+        // Super Admin → แสดงทั้งหมด
+      } else if (hospitalIds && hospitalIds.length > 0) {
         filteredPending = filteredPending.filter(pending => {
-          if (!pending.hospital_id) {
-            return true;
-          }
+          if (!pending.hospital_id) return true;
           return hospitalIds.includes(pending.hospital_id);
         });
-        
-        console.log('📊 [loadPendingStaff] Filtered pending for Hospital Admin:', filteredPending.length);
       }
       
       setPendingStaff(filteredPending);
@@ -265,21 +220,15 @@ export default function StaffManagementPage() {
 
   const loadDeactivatedStaff = async (hospitalIds?: string[]) => {
     try {
-      console.log('🗑️ [loadDeactivatedStaff] Fetching deactivated staff...');
       const data = await getDeactivatedStaff();
-      
       let filteredData = data;
       
-      // ✅ Super Admin → แสดงทั้งหมด
       if (isSuperAdmin(user)) {
-        console.log('👑 [loadDeactivatedStaff] Super Admin - showing all deactivated:', filteredData.length);
-      } 
-      // ✅ Hospital Admin → กรองตาม hospital
-      else if (hospitalIds && hospitalIds.length > 0) {
+        // Super Admin → แสดงทั้งหมด
+      } else if (hospitalIds && hospitalIds.length > 0) {
         filteredData = data.filter(staff => 
           !staff.hospital_id || hospitalIds.includes(staff.hospital_id)
         );
-        console.log('📊 [loadDeactivatedStaff] Filtered deactivated for Hospital Admin:', filteredData.length);
       }
       
       setDeactivatedStaff(filteredData);
@@ -293,37 +242,23 @@ export default function StaffManagementPage() {
   // 🎬 ACTION HANDLERS
   // =====================================================
   const handleLogout = () => {
-    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
 
   const canEditStaff = (staff: any): boolean => {
-    // ✅ Super Admin แก้ไขได้ทั้งหมด
-    if (isSuperAdmin(user)) {
-      return true;
-    }
-    
-    // ✅ Hospital Admin แก้ไขได้เฉพาะ staff ในโรงพยาบาลตัวเอง
+    if (isSuperAdmin(user)) return true;
     if (isHospitalAdmin(user)) {
-      // ✅ staff ที่ไม่มี hospital_id (เช่น Super Admin) → แก้ไขไม่ได้
-      if (!staff.hospital_id) {
-        return false;
-      }
-      
+      if (!staff.hospital_id) return false;
       return accessibleHospitalIds.includes(staff.hospital_id);
     }
-    
     return false;
   };
 
-  const canDeleteStaff = (staff: any): boolean => {
-    return canEditStaff(staff);
-  };
+  const canDeleteStaff = (staff: any): boolean => canEditStaff(staff);
 
   const handleApprove = async (pendingId: string, staffName: string) => {
     if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
-    
     try {
       const { data: pendingData, error: fetchError } = await supabase
         .from('pending_staff')
@@ -333,7 +268,6 @@ export default function StaffManagementPage() {
       
       if (fetchError) throw fetchError;
 
-      // ✅ ตรวจสอบสิทธิ์การอนุมัติ
       if (!isSuperAdmin(user) && pendingData.hospital_id && 
           !accessibleHospitalIds.includes(pendingData.hospital_id)) {
         alert('❌ คุณไม่มีสิทธิ์อนุมัติเจ้าหน้าที่โรงพยาบาลนี้');
@@ -357,7 +291,7 @@ export default function StaffManagementPage() {
       
       if (userError) throw userError;
       
-      if (pendingData.role === 'doctor' || pendingData.role === 'helper') {
+      if (['doctor', 'helper', 'osm'].includes(pendingData.role)) {
         await supabase
           .from('doctors')
           .insert({
@@ -380,7 +314,7 @@ export default function StaffManagementPage() {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-      
+       
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       loadPendingStaff(accessibleHospitalIds);
       loadStaffList(accessibleHospitalIds);
@@ -393,7 +327,6 @@ export default function StaffManagementPage() {
   const handleReject = async (pendingId: string, staffName: string) => {
     const reason = prompt('เหตุผลในการปฏิเสธ:', '');
     if (!reason) return;
-    
     try {
       await supabase
         .from('pending_staff')
@@ -419,9 +352,8 @@ export default function StaffManagementPage() {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
     }
-    
     if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
-    
+
     try {
       const result = await deactivateStaff(staffId);
       if (result.success) {
@@ -442,9 +374,8 @@ export default function StaffManagementPage() {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
     }
-    
     if (!confirm(`กู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) return;
-    
+
     try {
       const result = await restoreStaff(staffId);
       if (result.success) {
@@ -466,10 +397,9 @@ export default function StaffManagementPage() {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
     }
-    
     if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
     if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
-    
+
     try {
       const result = await permanentlyDeleteStaff(staffId);
       if (result.success) {
@@ -506,8 +436,8 @@ export default function StaffManagementPage() {
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
-    
     const hospitalGroups = new Map<string, Hospital[]>();
+
     subHospitals.forEach(sub => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -516,7 +446,7 @@ export default function StaffManagementPage() {
         hospitalGroups.get(sub.parent_id)!.push(sub);
       }
     });
-    
+
     return { mainHospitals, hospitalGroups };
   };
 
@@ -549,13 +479,11 @@ export default function StaffManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
-              <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ และเจ้าหน้าที่</p>
+              <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
               
-              {/* ✅ แสดงข้อมูลสิทธิ์ */}
               <div className="flex items-center gap-2 mt-2">
                 {isSuperAdmin(user) ? (
                   <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1">
@@ -651,7 +579,7 @@ export default function StaffManagementPage() {
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Summary Cards */}
         {activeTab === 'active' && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
             <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -701,6 +629,21 @@ export default function StaffManagementPage() {
                   <p className="text-sm text-gray-500">เจ้าหน้าที่</p>
                   <p className="text-2xl font-bold text-gray-800">
                     {staffList.filter(s => s.role === 'helper').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ เพิ่มการ์ดสรุป อสม. */}
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                  <Users className="w-5 h-5 text-orange-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">อสม.</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {staffList.filter(s => s.role === 'osm').length}
                   </p>
                 </div>
               </div>
@@ -766,16 +709,19 @@ export default function StaffManagementPage() {
                             </div>
                           </td>
                           
+                          {/* ✅ อัปเดต Badge บทบาทให้รองรับ อสม. */}
                           <td className="px-6 py-4">
                             <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                               isSuper ? 'bg-purple-100 text-purple-700' :
                               staff.role === 'admin' ? 'bg-indigo-100 text-indigo-700' :
                               staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                              staff.role === 'osm' ? 'bg-orange-100 text-orange-700' :
                               'bg-yellow-100 text-yellow-700'
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
+                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
+                               staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
                           
@@ -899,14 +845,17 @@ export default function StaffManagementPage() {
                           </div>
                         </td>
                         
+                        {/* ✅ อัปเดต Badge บทบาท Pending ให้รองรับ อสม. */}
                         <td className="px-6 py-4">
                           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                             pending.role === 'admin' ? 'bg-purple-100 text-purple-700' :
                             pending.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                            pending.role === 'osm' ? 'bg-orange-100 text-orange-700' :
                             'bg-yellow-100 text-yellow-700'
                           }`}>
                             {pending.role === 'admin' ? 'ผู้ดูแลระบบ' :
-                             pending.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
+                             pending.role === 'doctor' ? 'แพทย์' :
+                             pending.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
                           </span>
                         </td>
                         
@@ -1029,10 +978,12 @@ export default function StaffManagementPage() {
                               <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                 staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
                                 staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                                staff.role === 'osm' ? 'bg-orange-100 text-orange-700' :
                                 'bg-yellow-100 text-yellow-700'
                               }`}>
                                 {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
-                                 staff.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
+                                 staff.role === 'doctor' ? 'แพทย์' :
+                                 staff.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
                               </span>
                             </div>
                             <div className="text-sm text-gray-600 space-y-1">
@@ -1111,13 +1062,14 @@ function AddStaffModal({
   onSuccess: () => void;
   userId: string;
 }) {
+  // ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
   const [formData, setFormData] = useState({
     id_card: '',
     birth_day: '',
     birth_month: '',
     birth_year: '',
     full_name_th: '',
-    role: 'doctor' as 'admin' | 'doctor' | 'helper',
+    role: 'doctor' as 'admin' | 'doctor' | 'helper' | 'osm',
     specialization_th: '',
     phone: '',
     email: '',
@@ -1134,35 +1086,31 @@ function AddStaffModal({
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
     }
-    
-    // ✅ Hospital Admin ไม่สามารถสร้าง admin ได้
+
     if (!isSuper && formData.role === 'admin') {
       alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
       return;
     }
-    
-    // ✅ ต้องเลือกโรงพยาบาลถ้าเป็นบทบาทที่ต้องสังกัด
-    if ((formData.role === 'admin' || formData.role === 'doctor' || formData.role === 'helper') && !formData.hospital_id) {
+
+    if ((formData.role === 'admin' || formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
       alert('กรุณาเลือกโรงพยาบาลสังกัด');
       return;
     }
-    
-    // ✅ Hospital Admin ต้องเลือกโรงพยาบาลในขอบเขตตัวเอง
+
     if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const password = generatePassword();
       const birthYearAD = parseInt(formData.birth_year) - 543;
@@ -1189,23 +1137,20 @@ function AddStaffModal({
       setLoading(false);
     }
   };
-  
+
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
-  
   const getAvailableHospitals = () => {
     if (isSuper) return hospitals;
     return hospitals.filter(h => accessibleHospitalIds.includes(h.id));
   };
-  
   const availableHospitals = getAvailableHospitals();
-  
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* ✅ Box แสดงสิทธิ์ */}
           <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -1216,12 +1161,12 @@ function AddStaffModal({
             <ul className="text-sm text-gray-700 space-y-1">
               {isSuper ? (
                 <>
-                  <li>👑 <strong>Super Admin:</strong> สร้างได้ทุกระดับ (Admin/Doctor/Helper)</li>
+                  <li> <strong>Super Admin:</strong> สร้างได้ทุกระดับ (Admin/Doctor/Helper/อสม.)</li>
                   <li>🏥 สามารถกำหนดโรงพยาบาลและประเภท Admin ได้</li>
                 </>
               ) : (
                 <>
-                  <li>🏥 <strong>Hospital Admin:</strong> สร้างได้เฉพาะ แพทย์/เจ้าหน้าที่</li>
+                  <li>🏥 <strong>Hospital Admin:</strong> สร้างได้เฉพาะ แพทย์/เจ้าหน้าที่/อสม.</li>
                   <li>🔒 สร้างได้เฉพาะในโรงพยาบาลที่ตัวเองดูแล ({accessibleHospitalIds.length} แห่ง)</li>
                   <li>❌ ไม่สามารถสร้างผู้ดูแลระบบใหม่ได้</li>
                 </>
@@ -1312,13 +1257,13 @@ function AddStaffModal({
             />
           </div>
           
-          {/* Role Selection */}
+          {/* ✅ Role Selection อัปเดตเพิ่ม อสม. */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">บทบาท *</label>
             <select
               value={formData.role}
               onChange={(e) => {
-                const newRole = e.target.value as 'admin' | 'doctor' | 'helper';
+                const newRole = e.target.value as 'admin' | 'doctor' | 'helper' | 'osm';
                 setFormData({ ...formData, role: newRole });
                 setShowAdminTypeField(newRole === 'admin' && isSuper);
                 if (newRole !== 'admin') {
@@ -1329,11 +1274,13 @@ function AddStaffModal({
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
               <option value="doctor">👨‍⚕️ แพทย์</option>
-              <option value="helper">👩‍ เจ้าหน้าที่</option>
+              <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
+              {/* ✅ เพิ่มตัวเลือก อสม. */}
+              <option value="osm">️ อสม. (อาสาสมัครสาธารณสุข)</option>
             </select>
             {!isSuper && (
               <p className="text-xs text-blue-600 mt-1">
-                ℹ️ Hospital Admin สามารถสร้างได้เฉพาะ แพทย์ และ เจ้าหน้าที่
+                ℹ️ Hospital Admin สามารถสร้างได้เฉพาะ แพทย์, เจ้าหน้าที่ และ อสม.
               </p>
             )}
           </div>
@@ -1349,24 +1296,24 @@ function AddStaffModal({
                 value={formData.admin_type || ''}
                 onChange={(e) => setFormData({ 
                   ...formData, 
-                  admin_type: e.target.value as 'super' | 'hospital' || null 
+                  admin_type: (e.target.value as 'super' | 'hospital') || null 
                 })}
                 required
                 className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500"
               >
                 <option value="">-- เลือกประเภท --</option>
                 <option value="super">👑 Super Admin (เข้าถึงทั้งหมด)</option>
-                <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
+                <option value="hospital"> Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
               </select>
               <p className="text-xs text-purple-600 mt-1">
-                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
+                 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ <br/>
                 💡 Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
               </p>
             </div>
           )}
           
           {/* Specialization */}
-          {(formData.role === 'doctor' || formData.role === 'helper') && (
+          {(formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
               <input
@@ -1374,7 +1321,7 @@ function AddStaffModal({
                 value={formData.specialization_th}
                 onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder={formData.role === 'helper' ? 'เช่น เจ้าหน้าที่สาธารณสุข, พยาบาล' : 'เช่น อายุรกรรม, ศัลยกรรม'}
+                placeholder={formData.role === 'osm' ? 'เช่น อาสาสมัครสาธารณสุขประจำหมู่บ้าน' : formData.role === 'helper' ? 'เช่น เจ้าหน้าที่สาธารณสุข, พยาบาล' : 'เช่น อายุรกรรม, ศัลยกรรม'}
               />
             </div>
           )}
@@ -1472,7 +1419,7 @@ function AddStaffModal({
 }
 
 // =====================================================
-// ✏️ EDIT STAFF MODAL COMPONENT
+// ️ EDIT STAFF MODAL COMPONENT
 // =====================================================
 function EditStaffModal({
   staff,
@@ -1500,9 +1447,8 @@ function EditStaffModal({
       year: (date.getFullYear() + 543).toString(),
     };
   };
-  
+
   const initialBirthDate = parseBirthDate(staff.birth_date);
-  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || staff.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
@@ -1514,7 +1460,6 @@ function EditStaffModal({
     birth_year: initialBirthDate.year,
     admin_type: staff.admin_type || null,
   });
-  
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false);
   
@@ -1526,25 +1471,23 @@ function EditStaffModal({
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // ✅ Hospital Admin ไม่สามารถแก้ไขสิทธิ์ของ admin อื่น
     if (!isSuper && staff.role === 'admin' && formData.admin_type !== staff.admin_type) {
       alert('❌ คุณไม่มีสิทธิ์แก้ไขประเภทผู้ดูแลระบบ');
       return;
     }
-    
-    // ✅ Hospital Admin ไม่สามารถย้ายเจ้าหน้าที่ออกนอกขอบเขต
+
     if (!isSuper && formData.hospital_id !== staff.hospital_id && 
         formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์ย้ายเจ้าหน้าที่ไปโรงพยาบาลนี้');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
@@ -1589,10 +1532,10 @@ function EditStaffModal({
       setLoading(false);
     }
   };
-  
+
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
   const availableHospitals = isSuper ? hospitals : hospitals.filter(h => accessibleHospitalIds.includes(h.id));
-  
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1602,7 +1545,6 @@ function EditStaffModal({
             {staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
@@ -1676,7 +1618,7 @@ function EditStaffModal({
           </div>
           
           {/* Specialization */}
-          {(staff.role === 'doctor' || staff.role === 'helper') && (
+          {(staff.role === 'doctor' || staff.role === 'helper' || staff.role === 'osm') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
               <input
@@ -1684,7 +1626,7 @@ function EditStaffModal({
                 value={formData.specialization_th}
                 onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                placeholder="เช่น อายุรกรรม, ศัลยกรรม, เจ้าหน้าที่สาธารณสุข"
+                placeholder="เช่น อายุรกรรม, ศัลยกรรม, เจ้าหน้าที่สาธารณสุข, อสม."
               />
             </div>
           )}
@@ -1732,7 +1674,7 @@ function EditStaffModal({
                 value={formData.admin_type || ''}
                 onChange={(e) => setFormData({ 
                   ...formData, 
-                  admin_type: e.target.value as 'super' | 'hospital' || null 
+                  admin_type: (e.target.value as 'super' | 'hospital') || null 
                 })}
                 className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500"
               >

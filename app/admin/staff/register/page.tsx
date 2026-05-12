@@ -1,17 +1,14 @@
 // app/admin/staff/register/page.tsx
-// ✅ หน้าลงทะเบียนบุคลากรแบบ Public (ไม่ต้องล็อกอิน)
-// ✅ ใครก็เข้าได้ - รออนุมัติจาก Admin
-
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { getHospitalsWithHierarchy } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { 
-  UserPlus, 
-  Calendar, 
-  Key, 
-  Save, 
+import {
+  UserPlus,
+  Calendar,
+  Key,
+  Save,
   ArrowLeft,
   User,
   Phone,
@@ -43,20 +40,21 @@ export default function PublicRegisterPage() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-
+  
+  // ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
   const [formData, setFormData] = useState({
     id_card: '',
     birth_day: '',
     birth_month: '',
     birth_year: '',
     full_name_th: '',
-    role: 'doctor' as 'doctor' | 'helper',
+    role: 'doctor' as 'doctor' | 'helper' | 'osm',
     specialization_th: '',
     phone: '',
     email: '',
     hospital_id: '',
   });
-
+  
   const [generatedPassword, setGeneratedPassword] = useState('');
 
   useEffect(() => {
@@ -83,7 +81,6 @@ export default function PublicRegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // ✅ ตรวจสอบว่ากรอกวันเกิดครบหรือไม่
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
@@ -92,15 +89,12 @@ export default function PublicRegisterPage() {
     setLoading(true);
 
     try {
-      // ✅ สร้างรหัสผ่านจากวันเกิด
       const password = generatePassword();
       setGeneratedPassword(password);
 
-      // ✅ แปลงวันเกิดเป็น ค.ศ.
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
-      // ✅ บันทึกไปยังตาราง pending_staff
       const { error } = await supabase
         .from('pending_staff')
         .insert({
@@ -118,8 +112,7 @@ export default function PublicRegisterPage() {
 
       if (error) {
         console.error('Error submitting registration:', error);
-        
-        if (error.code === '23505') { // Unique violation
+        if (error.code === '23505') {
           alert('ID Card นี้ได้ลงทะเบียนไว้แล้ว กรุณารอการอนุมัติ');
         } else {
           alert('เกิดข้อผิดพลาด: ' + error.message);
@@ -127,9 +120,7 @@ export default function PublicRegisterPage() {
         return;
       }
 
-      // ✅ แสดงหน้าสำเร็จ
       setSubmitted(true);
-      
     } catch (error) {
       console.error('Error:', error);
       alert('เกิดข้อผิดพลาดในการลงทะเบียน');
@@ -138,13 +129,11 @@ export default function PublicRegisterPage() {
     }
   };
 
-  // ✅ จัดกลุ่มโรงพยาบาลแบบ Hierarchical
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
-    
     const hospitalGroups = new Map<string, Hospital[]>();
-    
+
     subHospitals.forEach(sub => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -159,7 +148,7 @@ export default function PublicRegisterPage() {
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
 
-  // ✅ หน้าสำเร็จ - แสดงรหัสผ่าน
+  // ✅ หน้าสำเร็จ
   if (submitted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 via-sky-100 to-cyan-50 flex items-center justify-center p-4">
@@ -167,23 +156,18 @@ export default function PublicRegisterPage() {
           <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle className="w-10 h-10 text-green-600" />
           </div>
-          
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">
-            ลงทะเบียนสำเร็จ!
-          </h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">ลงทะเบียนสำเร็จ!</h2>
           
           <div className="bg-blue-50 border-2 border-blue-400 rounded-xl p-4 mb-6 text-left">
             <div className="flex items-start gap-2">
               <Key className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold text-blue-800 mb-2">
-                  รหัสผ่านชั่วคราวของคุณ
-                </p>
+                <p className="font-bold text-blue-800 mb-2">รหัสผ่านชั่วคราวของคุณ</p>
                 <p className="text-2xl font-mono font-bold text-blue-700 text-center py-2 bg-white rounded-lg">
                   {generatedPassword}
                 </p>
                 <p className="text-xs text-blue-700 mt-2">
-                  💡 รหัสผ่านนี้สร้างจากวันเกิด (วัน-เดือน-ปี พ.ศ.)<br/>
+                  💡 รหัสผ่านนี้สร้างจากวันเกิด (วัน-เดือน-ปี พ.ศ.) <br/>
                   <span className="font-semibold">กรุณาจำรหัสผ่านนี้ไว้สำหรับเข้าสู่ระบบ</span>
                 </p>
               </div>
@@ -212,7 +196,6 @@ export default function PublicRegisterPage() {
               <LogIn className="w-5 h-5" />
               กลับหน้าเข้าสู่ระบบ
             </button>
-            
             <button
               onClick={() => {
                 setSubmitted(false);
@@ -253,16 +236,11 @@ export default function PublicRegisterPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับหน้าเข้าสู่ระบบ
           </button>
-          
           <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <UserPlus className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            ลงทะเบียนบุคลากรใหม่
-          </h1>
-          <p className="text-gray-600">
-            กรอกข้อมูลเพื่อรอการอนุมัติจากผู้ดูแลระบบ
-          </p>
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">ลงทะเบียนบุคลากรใหม่</h1>
+          <p className="text-gray-600">กรอกข้อมูลเพื่อรอการอนุมัติจากผู้ดูแลระบบ</p>
         </div>
 
         {/* Form */}
@@ -285,7 +263,6 @@ export default function PublicRegisterPage() {
                   placeholder="13 หลัก"
                 />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <Key className="w-4 h-4 inline mr-1" />
@@ -362,7 +339,7 @@ export default function PublicRegisterPage() {
               />
             </div>
 
-            {/* Role & Specialization */}
+            {/* ✅ Role & Specialization */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -371,11 +348,13 @@ export default function PublicRegisterPage() {
                 </label>
                 <select
                   value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value as 'doctor' | 'helper' })}
+                  onChange={(e) => setFormData({ ...formData, role: e.target.value as 'doctor' | 'helper' | 'osm' })}
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="doctor">👨‍⚕️ แพทย์</option>
                   <option value="helper">👩‍ เจ้าหน้าที่</option>
+                  {/* ✅ เพิ่มตัวเลือก อสม. */}
+                  <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
                 </select>
               </div>
               
@@ -406,7 +385,6 @@ export default function PublicRegisterPage() {
                 className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
               >
                 <option value="">-- เลือกโรงพยาบาล --</option>
-                
                 {mainHospitals.map((hospital) => (
                   <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
                     <option value={hospital.id}>
@@ -437,7 +415,6 @@ export default function PublicRegisterPage() {
                   placeholder="0812345678"
                 />
               </div>
-              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   <Mail className="w-4 h-4 inline mr-1" />
