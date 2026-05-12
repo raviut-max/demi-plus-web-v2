@@ -1,11 +1,11 @@
 // app/admin/patients/import-excel/page.tsx
 // ✅ แก้ไขล่าสุด: 12 พฤษภาคม 2569
-// ✅ การปรับปรุง:
-//    1. ✅ เพิ่ม checkbox สำหรับนำเข้าทีละแถว
-//    2. ✅ เพิ่มระบบเปลี่ยน/สลับคอลัมน์แบบ manual
-//    3. ✅ แก้ไขการจับคู่ ชื่อผู้ดูแล (อสม.) = โค้ช
-//    4. ✅ เพิ่มการจับคู่ ชื่อผู้ติดต่อ(ญาติ) = emergency_contact
-//    5. ✅ UI สำหรับจัดการ column mapping แบบ interactive
+// ✅ ฟีเจอร์ใหม่:
+//    1. ✅ แสดงการจับคู่คอลัมน์แบบเห็นภาพ
+//    2. ✅ แก้ไขการจับคู่คอลัมน์ได้ด้วยตนเอง (Column Mapping Editor)
+//    3. ✅ แสดงคอลัมน์ที่ยังไม่ได้จับคู่ (Unmapped)
+//    4. ✅ Re-validate ทันทีเมื่อเปลี่ยนการจับคู่
+//    5. ✅ UI ชัดเจน: สีเขียว=จับคู่แล้ว, สีเทา=ยังไม่ได้จับคู่
 
 'use client';
 import { useState, useEffect } from 'react';
@@ -21,37 +21,10 @@ import {
   isSuperAdmin
 } from '@/lib/supabase/queries';
 import {
-  Upload,
-  CheckCircle,
-  AlertCircle,
-  XCircle,
-  Loader2,
-  ArrowLeft,
-  FileSpreadsheet,
-  UserPlus,
-  LogOut,
-  UserCheck,
-  Hospital,
-  Building2,
-  Edit2,
-  Save,
-  Trash2,
-  Eye,
-  Database,
-  Download,
-  RefreshCw,
-  FileText,
-  Layers,
-  Settings,
-  ChevronDown,
-  SwapHorizontal,
-  MapPin,
-  User,
-  Phone,
-  Activity,
-  Home,
-  Heart,
-  Shield
+  Upload, CheckCircle, AlertCircle, XCircle, Loader2, ArrowLeft,
+  FileSpreadsheet, UserPlus, LogOut, UserCheck, Hospital, Building2,
+  Edit2, Save, Trash2, Eye, Download, RefreshCw, Layers, Settings,
+  ChevronDown, Link2, Link2Off
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -64,11 +37,7 @@ interface UserHospital {
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
+  parent_hospital?: { id: string; name: string; code: string };
 }
 
 interface Hospital {
@@ -85,12 +54,7 @@ interface Coach {
   full_name_th: string;
   specialization_th?: string;
   is_active: boolean;
-  users?: {
-    hospital_id?: string;
-    hospitals?: {
-      name?: string;
-    };
-  };
+  users?: { hospital_id?: string; hospitals?: { name?: string } };
 }
 
 interface ImportRow {
@@ -119,14 +83,14 @@ interface LoadingStep {
 }
 
 // =====================================================
-// 🧠 SMART COLUMN MAPPING - ปรับปรุงแล้ว
+// 🧠 SMART COLUMN MAPPING CONFIG
 // =====================================================
 const COLUMN_MAPPINGS: { [key: string]: string[] } = {
-  // === ข้อมูลบัญชี (users table) ===
+  // ข้อมูลบัญชี
   id_card: ['เลขบัตรประชาชน', 'บัตรประชาชน', 'id_card', 'idcard', 'national_id', 'เลขบัตร'],
   birth_date: ['วันเกิด', 'วันเกิด', 'birth_date', 'birthdate', 'dob', 'date_of_birth'],
   
-  // === ข้อมูลส่วนตัวผู้ป่วย (profiles table) ===
+  // ข้อมูลส่วนตัวผู้ป่วย
   first_name: ['ชื่อ', 'ชื่อ', 'first_name', 'firstname', 'name'],
   last_name: ['นามสกุล', 'นามสกุล', 'last_name', 'lastname', 'surname'],
   hospital_number: ['HN', 'hn', 'hospital_number', 'hospitalnumber', 'เลขที่ผู้ป่วย', 'เลข HN'],
@@ -134,19 +98,18 @@ const COLUMN_MAPPINGS: { [key: string]: string[] } = {
   phone: ['เบอร์โทร', 'โทรศัพท์', 'phone', 'tel', 'mobile', 'เบอร์โทรศัพท์'],
   email: ['อีเมล', 'email', 'e-mail'],
   
-  // === ข้อมูลสุขภาพ (profiles table) ===
+  // ข้อมูลสุขภาพ
   current_weight: ['น้ำหนัก', 'น้ำหนัก', 'weight', 'current_weight', 'น้ำหนัก (kg)'],
   height: ['ส่วนสูง', 'ส่วนสูง', 'height', 'ส่วนสูง (cm)'],
-  waist_circumference: ['รอบเอว', 'รอบเอว', 'waist', 'waist_circumference', 'รอบเอว(ซม.)', 'รอบเอว (ซม.)'],
+  waist_circumference: ['รอบเอว', 'รอบเอว', 'waist', 'waist_circumference', 'รอบเอว(ซม.)'],
   diabetes_type: ['ประเภทเบาหวาน', 'ประเภทเบาหวาน', 'diabetes_type', 'diabetes'],
   blood_sugar: ['ค่าน้ำตาล', 'ค่าน้ำตาลในเลือด', 'blood_sugar', 'bloodsugar', 'glucose'],
-  hba1c_level: ['HbA1c', 'ค่า HbA1c', 'hba1c', 'hba1c_level', 'ค่า HbA1c ล่าสุด', 'ค่า HbA1c ล่าสุด (ถ้ามี)'],
+  hba1c_level: ['HbA1c', 'ค่า HbA1c', 'hba1c', 'hba1c_level', 'ค่า HbA1c ล่าสุด'],
   
-  // === โรงพยาบาล (profiles.hospital_id ← hospitals.name) ===
+  // โรงพยาบาล
   hospital: ['โรงพยาบาล', 'โรงพยาบาล', 'hospital', 'hospital_name', 'รพ.'],
   
-  // === ที่อยู่ (profiles table) ===
-  subdistrict_health_center: ['รพ.สต.', 'รพสต', 'subdistrict_health_center', 'health_center'],
+  // ที่อยู่
   house_number: ['บ้านเลขที่', 'บ้านเลขที่', 'house_number', 'house_no'],
   village_no: ['หมู่ที่', 'หมู่ที่/ชุมชน', 'village_no', 'village_number', 'หมู่'],
   village_name: ['หมู่บ้าน', 'หมู่บ้าน', 'village_name', 'village'],
@@ -157,97 +120,37 @@ const COLUMN_MAPPINGS: { [key: string]: string[] } = {
   subdistrict: ['ตำบล', 'ตำบล', 'subdistrict', 'tambon'],
   postal_code: ['รหัสไปรษณีย์', 'ไปรษณีย์', 'postal_code', 'zipcode'],
   
-  // === ผู้ติดต่อฉุกเฉิน (profiles table) ===
-  emergency_contact_name: ['ชื่อผู้ติดต่อ', 'ผู้ติดต่อฉุกเฉิน', 'emergency_contact_name', 'emergency_name', 'ชื่อผู้ติดต่อ(ญาติ)', 'ญาติ'],
-  emergency_contact_phone: ['เบอร์โทรผู้ติดต่อ', 'เบอร์ฉุกเฉิน', 'emergency_contact_phone', 'emergency_phone', 'เบอร์โทรญาติ'],
+  // ผู้ติดต่อฉุกเฉิน
+  emergency_contact_name: ['ชื่อผู้ติดต่อ', 'ผู้ติดต่อฉุกเฉิน', 'emergency_contact_name', 'emergency_name'],
+  emergency_contact_phone: ['เบอร์โทรผู้ติดต่อ', 'เบอร์ฉุกเฉิน', 'emergency_contact_phone', 'emergency_phone'],
   emergency_contact_relationship: ['ความสัมพันธ์', 'ความสัมพันธ์', 'relationship', 'emergency_relationship'],
   
-  // === โค้ช/ผู้ดูแล (profiles.coach_id ← doctors.full_name_th) ===
-  coach_name: ['ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล', 'ชื่อผู้ดูแล (อสม.)', 'ชื่อโค้ช']
+  // โค้ช/ผู้ดูแล
+  coach_name: ['ชื่อผู้ดูแล', 'โค้ช', 'coach', 'coach_name', 'อสม.', 'ผู้ดูแล', 'ชื่อผู้ดูแล (อสม.)']
 };
 
 const REQUIRED_FIELDS = [
-  'id_card',
-  'first_name',
-  'last_name',
-  'hospital_number',
-  'birth_date',
-  'gender',
-  'hospital'
+  'id_card', 'first_name', 'last_name', 'hospital_number', 
+  'birth_date', 'gender', 'hospital'
 ];
 
 const FIELD_DISPLAY_NAMES: { [key: string]: string } = {
-  id_card: 'เลขบัตรประชาชน',
-  birth_date: 'วันเกิด',
-  first_name: 'ชื่อ',
-  last_name: 'นามสกุล',
-  hospital_number: 'HN',
-  gender: 'เพศ',
-  phone: 'เบอร์โทร',
-  email: 'อีเมล',
-  current_weight: 'น้ำหนัก (kg)',
-  height: 'ส่วนสูง (cm)',
-  waist_circumference: 'รอบเอว (cm)',
-  diabetes_type: 'ประเภทเบาหวาน',
-  blood_sugar: 'ค่าน้ำตาลในเลือด',
-  hba1c_level: 'ค่า HbA1c',
-  hospital: 'โรงพยาบาล',
-  subdistrict_health_center: 'รพ.สต.',
-  house_number: 'บ้านเลขที่',
-  village_no: 'หมู่ที่',
-  village_name: 'หมู่บ้าน',
-  soi: 'ซอย',
-  road: 'ถนน',
-  province: 'จังหวัด',
-  district: 'อำเภอ',
-  subdistrict: 'ตำบล',
-  postal_code: 'รหัสไปรษณีย์',
+  id_card: 'เลขบัตรประชาชน', birth_date: 'วันเกิด',
+  first_name: 'ชื่อ', last_name: 'นามสกุล',
+  hospital_number: 'HN', gender: 'เพศ',
+  phone: 'เบอร์โทร', email: 'อีเมล',
+  current_weight: 'น้ำหนัก (kg)', height: 'ส่วนสูง (cm)',
+  waist_circumference: 'รอบเอว (cm)', diabetes_type: 'ประเภทเบาหวาน',
+  blood_sugar: 'ค่าน้ำตาลในเลือด', hba1c_level: 'ค่า HbA1c',
+  hospital: 'โรงพยาบาล', house_number: 'บ้านเลขที่',
+  village_no: 'หมู่ที่', village_name: 'หมู่บ้าน',
+  soi: 'ซอย', road: 'ถนน',
+  province: 'จังหวัด', district: 'อำเภอ',
+  subdistrict: 'ตำบล', postal_code: 'รหัสไปรษณีย์',
   emergency_contact_name: 'ชื่อผู้ติดต่อ',
   emergency_contact_phone: 'เบอร์โทรผู้ติดต่อ',
   emergency_contact_relationship: 'ความสัมพันธ์',
-  coach_name: 'ชื่อผู้ดูแล (โค้ช)'
-};
-
-const FIELD_CATEGORIES = {
-  personal: ['first_name', 'last_name', 'birth_date', 'gender', 'id_card'],
-  contact: ['phone', 'email', 'hospital_number'],
-  health: ['current_weight', 'height', 'waist_circumference', 'diabetes_type', 'blood_sugar', 'hba1c_level'],
-  address: ['house_number', 'village_no', 'village_name', 'soi', 'road', 'province', 'district', 'subdistrict', 'postal_code'],
-  hospital: ['hospital', 'subdistrict_health_center'],
-  emergency: ['emergency_contact_name', 'emergency_contact_phone', 'emergency_contact_relationship'],
-  coach: ['coach_name']
-};
-
-const FIELD_ICONS: { [key: string]: any } = {
-  first_name: User,
-  last_name: User,
-  birth_date: User,
-  gender: User,
-  id_card: Shield,
-  phone: Phone,
-  email: Phone,
-  hospital_number: Hospital,
-  current_weight: Activity,
-  height: Activity,
-  waist_circumference: Activity,
-  diabetes_type: Activity,
-  blood_sugar: Activity,
-  hba1c_level: Activity,
-  hospital: Hospital,
-  subdistrict_health_center: Hospital,
-  house_number: Home,
-  village_no: Home,
-  village_name: Home,
-  soi: Home,
-  road: Home,
-  province: MapPin,
-  district: MapPin,
-  subdistrict: MapPin,
-  postal_code: MapPin,
-  emergency_contact_name: Heart,
-  emergency_contact_phone: Heart,
-  emergency_contact_relationship: Heart,
-  coach_name: UserCheck
+  coach_name: 'ชื่อผู้ดูแล'
 };
 
 // =====================================================
@@ -272,9 +175,7 @@ export default function ImportPatientsExcelPage() {
   const [editData, setEditData] = useState<any>({});
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [showColumnMapping, setShowColumnMapping] = useState(false);
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  const [mappingEditMode, setMappingEditMode] = useState<string | null>(null);
+  const [showColumnMapping, setShowColumnMapping] = useState(true);
   
   const [loadingSteps, setLoadingSteps] = useState<LoadingStep[]>([
     { id: 1, message: 'ตรวจสอบสิทธิ์ผู้ใช้', status: 'pending' },
@@ -283,19 +184,12 @@ export default function ImportPatientsExcelPage() {
     { id: 4, message: 'เตรียมความพร้อม', status: 'pending' }
   ]);
   
-  const [stats, setStats] = useState({
-    total: 0,
-    valid: 0,
-    warnings: 0,
-    errors: 0
-  });
+  const [stats, setStats] = useState({ total: 0, valid: 0, warnings: 0, errors: 0 });
 
-  useEffect(() => {
-    initializePage();
-  }, [router]);
+  useEffect(() => { initializePage(); }, [router]);
 
   const updateLoadingStep = (id: number, status: LoadingStep['status']) => {
-    setLoadingSteps(prev => prev.map(step =>
+    setLoadingSteps(prev => prev.map(step => 
       step.id === id ? { ...step, status } : step
     ));
   };
@@ -304,14 +198,9 @@ export default function ImportPatientsExcelPage() {
     updateLoadingStep(1, 'loading');
     try {
       const userData = checkSession();
-      if (!userData) {
-        router.push('/admin/login');
-        return;
-      }
+      if (!userData) { router.push('/admin/login'); return; }
       if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-        alert('ไม่มีสิทธิ์เข้าถึง');
-        router.push('/admin/login');
-        return;
+        alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
       }
       setUser(userData);
       updateLoadingStep(1, 'success');
@@ -328,9 +217,7 @@ export default function ImportPatientsExcelPage() {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-    } catch (error) {
-      console.error('Error loading user hospital:', error);
-    }
+    } catch (error) { console.error('Error loading user hospital:', error); }
   };
 
   const loadAccessibleHospitals = async (userId: string) => {
@@ -338,10 +225,9 @@ export default function ImportPatientsExcelPage() {
     try {
       const ids = await getAccessibleHospitalIds(userId);
       const allHospitals = await getHospitalsWithHierarchy();
-      let filteredHospitals = allHospitals;
-      if (ids.length > 0 && !isSuperAdmin(user)) {
-        filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
-      }
+      const filteredHospitals = (ids.length > 0 && !isSuperAdmin(user)) 
+        ? allHospitals.filter(h => ids.includes(h.id)) 
+        : allHospitals;
       setHospitals(filteredHospitals);
       await loadCoaches(ids);
       updateLoadingStep(2, 'success');
@@ -363,123 +249,102 @@ export default function ImportPatientsExcelPage() {
     }
   };
 
+  // =====================================================
+  // 📥 TEMPLATE DOWNLOAD
+  // =====================================================
   const downloadTemplate = () => {
     const headers = [
       'เลขบัตรประชาชน', 'วันเกิด', 'ชื่อ', 'นามสกุล', 'HN', 'เพศ', 'เบอร์โทร',
       'น้ำหนัก', 'ส่วนสูง', 'รอบเอว(ซม.)', 'ประเภทเบาหวาน', 'ค่าน้ำตาลในเลือด',
-      'ค่า HbA1c ล่าสุด (ถ้ามี)', 'โรงพยาบาล', 'รพ.สต.', 'บ้านเลขที่', 'หมู่ที่/ชุมชน',
+      'ค่า HbA1c ล่าสุด (ถ้ามี)', 'โรงพยาบาล', 'บ้านเลขที่', 'หมู่ที่/ชุมชน',
       'หมู่บ้าน', 'ซอย', 'ถนน', 'จังหวัด', 'อำเภอ', 'ตำบล', 'รหัสไปรษณีย์',
-      'ชื่อผู้ติดต่อ(ญาติ)', 'เบอร์โทรผู้ติดต่อ', 'ความสัมพันธ์', 'ชื่อผู้ดูแล (อสม.)'
+      'ชื่อผู้ติดต่อ(ญาติ)', 'เบอร์โทร', 'ความสัมพันธ์', 'ชื่อผู้ดูแล (อสม.)'
     ];
     const sampleData = [
       '1100800012345', '05/01/2548', 'นายบุญเพ็ง', 'ดอกทานตะวัน', '45688899',
       'ชาย', '0812223654', '80', '164', '100', 'เบาหวาน', '140', '6.8',
-      'รพ.เมตตาธรรม', 'รพ.สต.บ้านฟ้าใส', '54', '12', 'บ้านฟ้าใส', 'ตาเทพ',
-      'งามสง่า', 'เทพสถิตย์', 'เมตตาธรรม', 'บ้านลี้', '99000', 'นางนวลละออ',
-      '857741248', 'คู่สมรส', 'นางเตือนใจ มั่งมี'
+      'รพ.เมตตาธรรม', '54', '12', 'บ้านฟ้าใส', 'ตาเทพ', 'งามสง่า', 'เทพสถิตย์',
+      'เมตตาธรรม', 'บ้านลี้', '99000', 'นางนวลละออ', '857741248', 'คู่สมรส', 'นางเตือนใจ มั่งมี'
     ];
-
     const csvContent = '\ufeff' + [headers.join(','), sampleData.join(',')].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url;
-    link.download = 'template_import_patients.csv';
-    link.click();
+    link.href = url; link.download = 'template_import_patients.csv'; link.click();
     URL.revokeObjectURL(url);
   };
 
+  // =====================================================
+  // 🧠 COLUMN DETECTION & MAPPING
+  // =====================================================
   const detectColumnMapping = (headers: string[]): ColumnMapping => {
     const mapping: ColumnMapping = {};
-    console.log('🔍 [detectColumnMapping] Headers from Excel:', headers);
-
     headers.forEach((header, index) => {
       const normalizedHeader = header.trim().toLowerCase();
-      
       for (const [fieldName, possibleNames] of Object.entries(COLUMN_MAPPINGS)) {
-        if (possibleNames.some(name =>
-          name.toLowerCase() === normalizedHeader ||
+        if (possibleNames.some(name => 
+          name.toLowerCase() === normalizedHeader || 
           normalizedHeader.includes(name.toLowerCase()) ||
           name.toLowerCase().includes(normalizedHeader)
         )) {
           mapping[fieldName] = headers[index];
-          console.log(`✅ Mapped: ${fieldName} <- "${headers[index]}"`);
           break;
         }
       }
     });
-
-    console.log('📊 [detectColumnMapping] Final mapping:', mapping);
     return mapping;
   };
 
-  // ✅ ฟังก์ชันสำหรับเปลี่ยน/สลับคอลัมน์
+  // ✅ ฟังก์ชันแก้ไขการจับคู่คอลัมน์ (ใหม่)
   const handleColumnRemap = (fieldName: string, newHeader: string) => {
-    setColumnMapping(prev => ({
-      ...prev,
-      [fieldName]: newHeader
-    }));
-    
+    setColumnMapping(prev => {
+      const newMapping = { ...prev };
+      if (newHeader) {
+        newMapping[fieldName] = newHeader;
+      } else {
+        delete newMapping[fieldName];
+      }
+      return newMapping;
+    });
     // Re-validate data with new mapping
     if (mappedData.length > 0) {
-      revalidateDataWithNewMapping({ ...columnMapping, [fieldName]: newHeader });
+      validateDataWithMapping(mappedData, { ...columnMapping, [fieldName]: newHeader });
     }
-    
-    setMappingEditMode(null);
   };
 
-  const revalidateDataWithNewMapping = (newMapping: ColumnMapping) => {
-    const validatedRows = mappedData.map(row => {
-      const mappedRow: any = {};
-      for (const [fieldName, excelHeader] of Object.entries(newMapping)) {
-        mappedRow[fieldName] = row.originalData[excelHeader] || '';
-      }
-
+  // ✅ ฟังก์ชัน Re-validate เมื่อเปลี่ยน mapping
+  const validateDataWithMapping = (rows: ImportRow[], mapping: ColumnMapping) => {
+    const validatedRows = rows.map(row => {
       const errors: string[] = [];
       const warnings: string[] = [];
-
-      const idCardClean = mappedRow.id_card?.replace(/\D/g, '') || '';
+      const idCardClean = row.mappedData.id_card?.replace(/\D/g, '') || '';
       if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
-      if (!mappedRow.hospital_number) errors.push('ต้องระบุ HN');
-      if (!mappedRow.first_name) errors.push('ต้องระบุชื่อ');
-      if (!mappedRow.last_name) errors.push('ต้องระบุนามสกุล');
-
-      if (mappedRow.hospital) {
-        const hospital = hospitals.find(h =>
-          h.name === mappedRow.hospital ||
-          h.code === mappedRow.hospital ||
-          h.name.includes(mappedRow.hospital)
+      if (!row.mappedData.hospital_number) errors.push('ต้องระบุ HN');
+      if (!row.mappedData.first_name) errors.push('ต้องระบุชื่อ');
+      if (!row.mappedData.last_name) errors.push('ต้องระบุนามสกุล');
+      
+      // Re-match hospital
+      if (row.mappedData.hospital && mapping.hospital) {
+        const hospital = hospitals.find(h => 
+          h.name === row.mappedData.hospital || h.code === row.mappedData.hospital
         );
         if (hospital) {
-          mappedRow.hospital_id = hospital.id;
-          mappedRow.hospital_name = hospital.name;
-        } else {
-          errors.push(`ไม่พบโรงพยาบาล "${mappedRow.hospital}"`);
+          row.mappedData.hospital_id = hospital.id;
+          row.mappedData.hospital_name = hospital.name;
         }
       }
-
-      if (mappedRow.coach_name) {
-        const coach = coaches.find(c =>
-          c.full_name_th === mappedRow.coach_name ||
-          c.full_name_th.includes(mappedRow.coach_name)
-        );
+      
+      // Re-match coach
+      if (row.mappedData.coach_name && mapping.coach_name) {
+        const coach = coaches.find(c => c.full_name_th === row.mappedData.coach_name);
         if (coach) {
-          mappedRow.coach_id = coach.user_id;
-          mappedRow.coach_name = coach.full_name_th;
-        } else {
-          warnings.push(`ไม่พบโค้ช "${mappedRow.coach_name}"`);
+          row.mappedData.coach_id = coach.user_id;
         }
       }
-
-      return {
-        ...row,
-        mappedData: mappedRow,
-        errors,
-        warnings,
-        isValid: errors.length === 0
-      };
+      
+      return { ...row, errors, warnings, isValid: errors.length === 0 };
     });
-
+    
     setMappedData(validatedRows);
     setStats({
       total: validatedRows.length,
@@ -489,86 +354,66 @@ export default function ImportPatientsExcelPage() {
     });
   };
 
+  // =====================================================
+  // 📊 PARSE & VALIDATE
+  // =====================================================
   const parseFile = async (file: File) => {
-    setUploading(true);
-    setError('');
+    setUploading(true); setError('');
     try {
       const text = await file.text();
       const lines = text.split('\n').filter(line => line.trim());
-
       if (lines.length < 2) {
         setError('❌ ไฟล์ไม่มีข้อมูลผู้ป่วย (ต้องมี header และข้อมูลอย่างน้อย 1 แถว)');
-        setUploading(false);
-        return;
+        setUploading(false); return;
       }
 
       const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
       setDetectedHeaders(headers);
-
+      
       const mapping = detectColumnMapping(headers);
       setColumnMapping(mapping);
-
+      
       const missingRequired = REQUIRED_FIELDS.filter(field => !mapping[field]);
       if (missingRequired.length > 0) {
         const fieldNames = missingRequired.map(f => FIELD_DISPLAY_NAMES[f] || f).join(', ');
-        setError(`❌ ไม่พบคอลัมน์ที่จำเป็น: ${fieldNames}\n\nกรุณาตรวจสอบชื่อคอลัมน์ในไฟล์ Excel หรือใช้ระบบจับคู่มือ`);
-        setUploading(false);
-        return;
+        setError(`❌ ไม่พบคอลัมน์ที่จำเป็น: ${fieldNames}\n\nกรุณาตรวจสอบชื่อคอลัมน์ในไฟล์ หรือใช้ฟังก์ชัน "ปรับแก้" เพื่อจับคู่ใหม่`);
+        setUploading(false); return;
       }
-
+       
       const rows: ImportRow[] = [];
-
       for (let i = 1; i < lines.length; i++) {
         const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
         const originalRow: any = {};
-
-        headers.forEach((header, idx) => {
-          originalRow[header] = values[idx] || '';
-        });
-
+        headers.forEach((header, idx) => { originalRow[header] = values[idx] || ''; });
+        
         const mappedRow: any = {};
         for (const [fieldName, excelHeader] of Object.entries(mapping)) {
           mappedRow[fieldName] = originalRow[excelHeader] || '';
         }
-
+        
         const errors: string[] = [];
         const warnings: string[] = [];
-
+        
         const idCardClean = mappedRow.id_card?.replace(/\D/g, '') || '';
-        if (idCardClean.length !== 13) {
-          errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
-        }
-
-        if (!mappedRow.hospital_number) {
-          errors.push('ต้องระบุ HN');
-        }
-
+        if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
+        if (!mappedRow.hospital_number) errors.push('ต้องระบุ HN');
         if (!mappedRow.first_name) errors.push('ต้องระบุชื่อ');
         if (!mappedRow.last_name) errors.push('ต้องระบุนามสกุล');
-
+        
         if (mappedRow.hospital) {
-          const hospital = hospitals.find(h =>
-            h.name === mappedRow.hospital ||
-            h.code === mappedRow.hospital ||
-            h.name.includes(mappedRow.hospital)
+          const hospital = hospitals.find(h => 
+            h.name === mappedRow.hospital || h.code === mappedRow.hospital || h.name.includes(mappedRow.hospital)
           );
-
           if (hospital) {
             mappedRow.hospital_id = hospital.id;
             mappedRow.hospital_name = hospital.name;
           } else {
             errors.push(`ไม่พบโรงพยาบาล "${mappedRow.hospital}"`);
           }
-        } else {
-          errors.push('ต้องระบุโรงพยาบาล');
-        }
-
+        } else { errors.push('ต้องระบุโรงพยาบาล'); }
+        
         if (mappedRow.coach_name) {
-          const coach = coaches.find(c =>
-            c.full_name_th === mappedRow.coach_name ||
-            c.full_name_th.includes(mappedRow.coach_name)
-          );
-
+          const coach = coaches.find(c => c.full_name_th === mappedRow.coach_name);
           if (coach) {
             mappedRow.coach_id = coach.user_id;
             mappedRow.coach_name = coach.full_name_th;
@@ -576,61 +421,37 @@ export default function ImportPatientsExcelPage() {
             warnings.push(`ไม่พบโค้ช "${mappedRow.coach_name}" - จะไม่กำหนดโค้ช`);
           }
         }
-
+        
         const datePattern = /^\d{2}\/\d{2}\/\d{4}$/;
         if (mappedRow.birth_date && !datePattern.test(mappedRow.birth_date)) {
           errors.push('รูปแบบวันเกิดต้องเป็น DD/MM/YYYY');
         }
-
+        
         rows.push({
-          rowNumber: i + 1,
-          originalData: originalRow,
-          mappedData: mappedRow,
-          errors,
-          warnings,
-          isValid: errors.length === 0,
+          rowNumber: i + 1, originalData: originalRow, mappedData: mappedRow,
+          errors, warnings, isValid: errors.length === 0,
           id_card_valid: idCardClean.length === 13,
           birth_date_valid: datePattern.test(mappedRow.birth_date)
         });
       }
-
-      setMappedData(rows);
-      setSelectedRows(new Set(rows.filter(r => r.isValid).map(r => r.rowNumber)));
-      setPreviewMode(true);
-
+      
+      setMappedData(rows); setPreviewMode(true);
       setStats({
         total: rows.length,
         valid: rows.filter(r => r.isValid).length,
         warnings: rows.filter(r => r.warnings.length > 0).length,
         errors: rows.filter(r => !r.isValid).length
       });
-
+      
     } catch (error) {
       console.error('Error parsing file:', error);
       setError('❌ เกิดข้อผิดพลาดในการอ่านไฟล์: ' + (error as Error).message);
-    } finally {
-      setUploading(false);
-    }
+    } finally { setUploading(false); }
   };
 
-  const handleSelectRow = (rowNumber: number) => {
-    const newSelected = new Set(selectedRows);
-    if (newSelected.has(rowNumber)) {
-      newSelected.delete(rowNumber);
-    } else {
-      newSelected.add(rowNumber);
-    }
-    setSelectedRows(newSelected);
-  };
-
-  const handleSelectAll = () => {
-    if (selectedRows.size === mappedData.filter(r => r.isValid).length) {
-      setSelectedRows(new Set());
-    } else {
-      setSelectedRows(new Set(mappedData.filter(r => r.isValid).map(r => r.rowNumber)));
-    }
-  };
-
+  // =====================================================
+  // ✏️ EDIT & IMPORT
+  // =====================================================
   const handleEditRow = (rowIndex: number) => {
     setEditingRow(rowIndex);
     setEditData({ ...mappedData[rowIndex].mappedData });
@@ -639,20 +460,15 @@ export default function ImportPatientsExcelPage() {
   const handleSaveEdit = (rowIndex: number) => {
     const newData = [...mappedData];
     newData[rowIndex].mappedData = { ...editData };
-
     const errors: string[] = [];
     const idCardClean = editData.id_card?.replace(/\D/g, '') || '';
     if (idCardClean.length !== 13) errors.push('เลขบัตรประชาชนต้อง 13 หลัก');
     if (!editData.hospital_number) errors.push('ต้องระบุ HN');
     if (!editData.first_name) errors.push('ต้องระบุชื่อ');
     if (!editData.last_name) errors.push('ต้องระบุนามสกุล');
-
     newData[rowIndex].errors = errors;
     newData[rowIndex].isValid = errors.length === 0;
-
-    setMappedData(newData);
-    setEditingRow(null);
-
+    setMappedData(newData); setEditingRow(null);
     setStats({
       total: newData.length,
       valid: newData.filter(r => r.isValid).length,
@@ -673,23 +489,14 @@ export default function ImportPatientsExcelPage() {
   };
 
   const handleImport = async () => {
-    const rowsToImport = mappedData.filter(row => selectedRows.has(row.rowNumber) && row.isValid);
+    const validRows = mappedData.filter(r => r.isValid);
+    if (validRows.length === 0) { alert('❌ ไม่มีข้อมูลที่ถูกต้องให้นำเข้า'); return; }
+    if (!confirm(`✅ คุณต้องการนำเข้า ${validRows.length} รายหรือไม่?\n\n⚠️ ข้อมูลที่ผิดพลาด ${stats.errors} รายจะถูกข้าม`)) { return; }
     
-    if (rowsToImport.length === 0) {
-      alert('❌ ไม่มีข้อมูลที่ถูกต้องที่เลือกให้นำเข้า');
-      return;
-    }
-
-    if (!confirm(`✅ คุณต้องการนำเข้า ${rowsToImport.length} รายหรือไม่?`)) {
-      return;
-    }
-
     setImporting(true);
-    let successCount = 0;
-    let errorCount = 0;
-    const errorMessages: string[] = [];
+    let successCount = 0; let errorCount = 0; const errorMessages: string[] = [];
 
-    for (const row of rowsToImport) {
+    for (const row of validRows) {
       try {
         const birthYearAD = parseInt(row.mappedData.birth_date.split('/')[2]) - 543;
         const birthDate = `${birthYearAD}-${row.mappedData.birth_date.split('/')[1]}-${row.mappedData.birth_date.split('/')[0]}`;
@@ -728,18 +535,12 @@ export default function ImportPatientsExcelPage() {
           emergency_contact_relationship: row.mappedData.emergency_contact_relationship || undefined,
           occupation: row.mappedData.occupation || undefined,
           education_level: row.mappedData.education_level || undefined,
-          pam_level: 'L0',
-          pam_score: 0,
-          zone: 'Zero Zone',
+          pam_level: 'L0', pam_score: 0, zone: 'Zero Zone',
           created_by: user?.id
         });
 
-        if (result.success) {
-          successCount++;
-        } else {
-          errorCount++;
-          errorMessages.push(`แถว ${row.rowNumber}: ${result.error}`);
-        }
+        if (result.success) { successCount++; } 
+        else { errorCount++; errorMessages.push(`แถว ${row.rowNumber}: ${result.error}`); }
       } catch (err) {
         errorCount++;
         errorMessages.push(`แถว ${row.rowNumber}: ${(err as Error).message}`);
@@ -747,34 +548,25 @@ export default function ImportPatientsExcelPage() {
     }
 
     setImporting(false);
-
     if (successCount > 0) {
       setSuccess(`✅ นำเข้าสำเร็จ ${successCount} ราย\n❌ ล้มเหลว ${errorCount} ราย`);
-      setTimeout(() => {
-        router.push('/admin/patients');
-      }, 3000);
+      setTimeout(() => { router.push('/admin/patients'); }, 3000);
     } else {
       setError(`❌ นำเข้าล้มเหลวทั้งหมด\n${errorMessages.slice(0, 5).join('\n')}`);
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
-  };
-
+  const handleLogout = () => { logout(); router.push('/admin/login'); };
   const handleReset = () => {
-    setPreviewMode(false);
-    setMappedData([]);
-    setFile(null);
-    setColumnMapping({});
-    setDetectedHeaders([]);
-    setError('');
-    setSuccess('');
-    setSelectedRows(new Set());
+    setPreviewMode(false); setMappedData([]); setFile(null);
+    setColumnMapping({}); setDetectedHeaders([]);
+    setError(''); setSuccess('');
     setStats({ total: 0, valid: 0, warnings: 0, errors: 0 });
   };
 
+  // =====================================================
+  // 🎨 RENDER
+  // =====================================================
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -813,6 +605,7 @@ export default function ImportPatientsExcelPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+        
         {/* ✅ Loading Status */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
@@ -863,25 +656,15 @@ export default function ImportPatientsExcelPage() {
                 <Download className="w-4 h-4" /> ดาวน์โหลด Template
               </button>
             </div>
-            
             <div className="border-2 border-dashed border-gray-300 rounded-xl p-12 text-center hover:border-blue-400 transition-colors">
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setFile(file);
-                    parseFile(file);
-                  }
-                }}
-                className="hidden"
-                id="fileInput"
-              />
+              <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) { setFile(file); parseFile(file); }
+              }} className="hidden" id="fileInput" />
               <label htmlFor="fileInput" className="cursor-pointer">
                 <FileSpreadsheet className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <p className="text-lg font-medium text-gray-600 mb-2">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์มาวางที่นี่</p>
-                <p className="text-sm text-gray-400">รองรับไฟล์ .csv, .xlsx, .xls</p>
+                <p className="text-sm text-gray-400">รองรับไฟล์ .csv, .xlsx, .xls (แนะนำ .csv)</p>
               </label>
             </div>
           </div>
@@ -897,8 +680,8 @@ export default function ImportPatientsExcelPage() {
                 <p className="text-2xl font-bold">{stats.total}</p>
               </div>
               <div className="bg-white rounded-xl p-4 border">
-                <p className="text-sm text-gray-500">เลือกนำเข้า</p>
-                <p className="text-2xl font-bold text-blue-600">{selectedRows.size}</p>
+                <p className="text-sm text-gray-500">พร้อมนำเข้า</p>
+                <p className="text-2xl font-bold text-green-600">{stats.valid}</p>
               </div>
               <div className="bg-white rounded-xl p-4 border">
                 <p className="text-sm text-gray-500">คำเตือน</p>
@@ -910,16 +693,13 @@ export default function ImportPatientsExcelPage() {
               </div>
             </div>
 
-            {/* Column Mapping Display & Edit */}
+            {/* ✅ Column Mapping Display & Editor */}
             <div className="bg-white rounded-xl shadow-lg p-6 border">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold flex items-center gap-2">
                   <Layers className="w-5 h-5 text-blue-600" /> การจับคู่คอลัมน์
                 </h3>
-                <button
-                  onClick={() => setShowColumnMapping(!showColumnMapping)}
-                  className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800"
-                >
+                <button onClick={() => setShowColumnMapping(!showColumnMapping)} className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800">
                   <Settings className="w-4 h-4" />
                   {showColumnMapping ? 'ซ่อน' : 'ปรับแก้'}
                   <ChevronDown className={`w-4 h-4 transition-transform ${showColumnMapping ? 'rotate-180' : ''}`} />
@@ -927,115 +707,106 @@ export default function ImportPatientsExcelPage() {
               </div>
               
               {showColumnMapping && (
-                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                  <h4 className="text-sm font-semibold mb-3">📋 คอลัมน์ในไฟล์ ({detectedHeaders.length})</h4>
-                  <div className="flex flex-wrap gap-2 mb-4">
-                    {detectedHeaders.map((header, idx) => {
-                      const isMatched = Object.values(columnMapping).includes(header);
-                      return (
-                        <span key={idx} className={`px-3 py-1.5 rounded-lg text-sm ${
-                          isMatched ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
-                        }`}>
-                          {header}{isMatched && ' ✓'}
-                        </span>
-                      );
-                    })}
+                <div className="space-y-6">
+                  {/* 📋 คอลัมน์ในไฟล์ */}
+                  <div className="p-4 bg-gray-50 rounded-lg">
+                    <h4 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <FileText className="w-4 h-4" /> คอลัมน์ในไฟล์ ({detectedHeaders.length})
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {detectedHeaders.map((header, idx) => {
+                        const isMatched = Object.values(columnMapping).includes(header);
+                        return (
+                          <span key={idx} className={`px-3 py-1.5 rounded-lg text-sm flex items-center gap-1 ${
+                            isMatched ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {header} {isMatched && <CheckCircle className="w-3 h-3" />}
+                          </span>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <h4 className="text-sm font-semibold mb-3">🔧 จัดการการจับคู่คอลัมน์</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {Object.keys(COLUMN_MAPPINGS).map(fieldName => {
-                      const Icon = FIELD_ICONS[fieldName] || Database;
-                      return (
-                        <div key={fieldName} className="bg-white border border-gray-200 rounded-lg p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <Icon className="w-4 h-4 text-blue-600" />
-                              <span className="text-sm font-medium text-gray-700">
+                  {/* 🔧 ปรับจับคู่คอลัมน์ใหม่ */}
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h4 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                      <Settings className="w-4 h-4" /> 🔧 ปรับจับคู่คอลัมน์ใหม่
+                    </h4>
+                    <p className="text-xs text-blue-700 mb-4">
+                      เลือกฟิลด์ที่ต้องการจับคู่กับคอลัมน์จากไฟล์ของคุณ
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {Object.keys(COLUMN_MAPPINGS).map(fieldName => {
+                        const currentHeader = columnMapping[fieldName];
+                        const isRequired = REQUIRED_FIELDS.includes(fieldName);
+                        return (
+                          <div key={fieldName} className="flex items-center gap-2 bg-white p-3 rounded-lg border">
+                            <div className="flex-1 min-w-0">
+                              <label className="text-sm font-medium text-gray-700 truncate block" title={FIELD_DISPLAY_NAMES[fieldName] || fieldName}>
                                 {FIELD_DISPLAY_NAMES[fieldName] || fieldName}
-                              </span>
+                                {isRequired && <span className="text-red-500 ml-1">*</span>}
+                              </label>
+                              <p className="text-xs text-gray-500 truncate">
+                                {currentHeader ? `← "${currentHeader}"` : 'ยังไม่ได้จับคู่'}
+                              </p>
                             </div>
-                            {columnMapping[fieldName] && (
-                              <span className="text-xs text-green-600">✓</span>
-                            )}
+                            <select
+                              value={currentHeader || ''}
+                              onChange={(e) => handleColumnRemap(fieldName, e.target.value)}
+                              className="flex-shrink-0 px-2 py-1.5 border rounded text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            >
+                              <option value="">-- ไม่จับคู่ --</option>
+                              {detectedHeaders.map((header, idx) => (
+                                <option key={idx} value={header}>{header}</option>
+                              ))}
+                            </select>
                           </div>
-                          
-                          {mappingEditMode === fieldName ? (
-                            <div className="space-y-2">
-                              <select
-                                value={columnMapping[fieldName] || ''}
-                                onChange={(e) => handleColumnRemap(fieldName, e.target.value)}
-                                className="w-full px-2 py-1 border rounded text-sm"
-                                autoFocus
-                              >
-                                <option value="">-- ไม่จับคู่ --</option>
-                                {detectedHeaders.map((header, idx) => (
-                                  <option key={idx} value={header}>{header}</option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={() => setMappingEditMode(null)}
-                                className="text-xs text-gray-500 hover:text-gray-700"
-                              >
-                                ยกเลิก
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-gray-500">
-                                {columnMapping[fieldName] ? `← "${columnMapping[fieldName]}"` : 'ไม่มีการจับคู่'}
-                              </span>
-                              <button
-                                onClick={() => setMappingEditMode(fieldName)}
-                                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                title="เปลี่ยนคอลัมน์"
-                              >
-                                <SwapHorizontal className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )}
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ✅ คอลัมน์ที่จับคู่สำเร็จ */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-green-800 mb-2 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4" /> ✅ คอลัมน์ที่จับคู่แล้ว ({Object.keys(columnMapping).length})
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                      {Object.entries(columnMapping).map(([field, header]) => (
+                        <div key={field} className="bg-green-50 border border-green-200 rounded-lg p-3">
+                          <p className="text-sm font-medium text-green-900 truncate" title={FIELD_DISPLAY_NAMES[field] || field}>
+                            {FIELD_DISPLAY_NAMES[field] || field}
+                          </p>
+                          <p className="text-xs text-green-600 truncate" title={header}>← "{header}"</p>
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ❌ คอลัมน์ที่จำเป็นแต่ยังไม่ได้จับคู่ */}
+                  <div>
+                    <h4 className="text-sm font-semibold text-red-800 mb-2 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4" /> ❌ คอลัมน์ที่จำเป็นแต่ยังไม่ได้จับคู่
+                    </h4>
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                      {REQUIRED_FIELDS.filter(f => !columnMapping[f]).map(field => (
+                        <div key={field} className="bg-red-50 border border-red-200 rounded-lg p-3">
+                          <p className="text-sm font-medium text-red-900">{FIELD_DISPLAY_NAMES[field] || field}</p>
+                          <p className="text-xs text-red-600">จำเป็น *</p>
+                        </div>
+                      ))}
+                      {REQUIRED_FIELDS.every(f => columnMapping[f]) && (
+                        <p className="text-green-600 text-sm flex items-center gap-1">
+                          <CheckCircle className="w-4 h-4" /> พบคอลัมน์จำเป็นทั้งหมด ✓
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
-
-              <div className="mb-6">
-                <h4 className="text-sm font-semibold text-green-800 mb-2">✅ คอลัมน์ที่พบ ({Object.keys(columnMapping).length})</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {Object.entries(columnMapping).map(([field, header]) => {
-                    const Icon = FIELD_ICONS[field] || Database;
-                    return (
-                      <div key={field} className="bg-green-50 border border-green-200 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Icon className="w-4 h-4 text-green-600" />
-                          <p className="text-sm font-medium text-green-900">{FIELD_DISPLAY_NAMES[field] || field}</p>
-                        </div>
-                        <p className="text-xs text-green-600 ml-6">← "{header}"</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-semibold text-red-800 mb-2">❌ คอลัมน์ที่ไม่พบ</h4>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {REQUIRED_FIELDS.filter(f => !columnMapping[f]).map(field => (
-                    <div key={field} className="bg-red-50 border border-red-200 rounded-lg p-3">
-                      <p className="text-sm font-medium text-red-900">{FIELD_DISPLAY_NAMES[field] || field}</p>
-                      <p className="text-xs text-red-600">จำเป็น</p>
-                    </div>
-                  ))}
-                  {REQUIRED_FIELDS.every(f => columnMapping[f]) && (
-                    <p className="text-green-600 text-sm">✓ พบคอลัมน์จำเป็นทั้งหมด</p>
-                  )}
-                </div>
-              </div>
             </div>
 
-            {/* Preview Table with Checkboxes */}
+            {/* Preview Table */}
             <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
               <div className="p-6 border-b flex items-center justify-between">
                 <h2 className="text-xl font-bold flex items-center gap-2">
@@ -1045,40 +816,27 @@ export default function ImportPatientsExcelPage() {
                   <button onClick={handleReset} className="px-4 py-2 bg-gray-500 text-white rounded-lg">
                     <Trash2 className="w-4 h-4" />
                   </button>
-                  <button 
-                    onClick={handleImport} 
-                    disabled={importing || selectedRows.size === 0} 
-                    className="px-6 py-2 bg-green-500 text-white rounded-lg disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {importing ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <UserPlus className="w-4 h-4" />
-                    )}
-                    นำเข้า {selectedRows.size} ราย
+                  <button onClick={handleImport} disabled={importing || stats.valid === 0} className="px-6 py-2 bg-green-500 text-white rounded-lg disabled:opacity-50">
+                    {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                    นำเข้า {stats.valid} ราย
                   </button>
                 </div>
               </div>
-
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table className="w-full min-w-[2000px]">
                   <thead className="bg-gray-50 sticky top-0">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r">
-                        <input
-                          type="checkbox"
-                          checked={selectedRows.size === mappedData.filter(r => r.isValid).length}
-                          onChange={handleSelectAll}
-                          className="rounded border-gray-300 text-blue-600"
-                        />
-                      </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r">แถว</th>
-                      {detectedHeaders.map((header, idx) => (
-                        <th key={idx} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase border-r whitespace-nowrap">
-                          {header}
-                          {Object.values(columnMapping).includes(header) && ' ✓'}
-                        </th>
-                      ))}
+                      {detectedHeaders.map((header, idx) => {
+                        const isMatched = Object.values(columnMapping).includes(header);
+                        return (
+                          <th key={idx} className={`px-4 py-3 text-left text-xs font-medium uppercase border-r whitespace-nowrap ${
+                            isMatched ? 'text-green-700' : 'text-gray-500'
+                          }`}>
+                            {header} {isMatched && '✓'}
+                          </th>
+                        );
+                      })}
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">สถานะ</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">จัดการ</th>
                     </tr>
@@ -1086,15 +844,6 @@ export default function ImportPatientsExcelPage() {
                   <tbody className="divide-y">
                     {mappedData.slice(0, 50).map((row, idx) => (
                       <tr key={idx} className={`${!row.isValid ? 'bg-red-50' : row.warnings.length > 0 ? 'bg-yellow-50' : ''}`}>
-                        <td className="px-4 py-3 border-r">
-                          <input
-                            type="checkbox"
-                            checked={selectedRows.has(row.rowNumber)}
-                            onChange={() => handleSelectRow(row.rowNumber)}
-                            disabled={!row.isValid}
-                            className="rounded border-gray-300 text-blue-600 disabled:opacity-50"
-                          />
-                        </td>
                         <td className="px-4 py-3 text-sm border-r">{row.rowNumber}</td>
                         {detectedHeaders.map((header, hIdx) => {
                           const value = row.originalData[header] || '-';
@@ -1167,179 +916,57 @@ export default function ImportPatientsExcelPage() {
       {/* Edit Modal */}
       {editingRow !== null && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">✏️ แก้ไขแถวที่ {mappedData[editingRow]?.rowNumber}</h2>
-            
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {/* ข้อมูลส่วนตัว */}
-              <div className="col-span-full">
-                <h3 className="font-semibold text-blue-800 mb-2">📋 ข้อมูลส่วนตัว</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-blue-50 rounded-lg">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">HN</label>
-                    <input type="text" value={editData.hospital_number || ''} onChange={(e) => setEditData({...editData, hospital_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">เลขบัตรประชาชน</label>
-                    <input type="text" value={editData.id_card || ''} onChange={(e) => setEditData({...editData, id_card: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ชื่อ</label>
-                    <input type="text" value={editData.first_name || ''} onChange={(e) => setEditData({...editData, first_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">นามสกุล</label>
-                    <input type="text" value={editData.last_name || ''} onChange={(e) => setEditData({...editData, last_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">วันเกิด</label>
-                    <input type="text" value={editData.birth_date || ''} onChange={(e) => setEditData({...editData, birth_date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="DD/MM/YYYY" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">เพศ</label>
-                    <select value={editData.gender || ''} onChange={(e) => setEditData({...editData, gender: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
-                      <option value="">-- เลือก --</option>
-                      <option value="male">ชาย</option>
-                      <option value="female">หญิง</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">เบอร์โทร</label>
-                    <input type="text" value={editData.phone || ''} onChange={(e) => setEditData({...editData, phone: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">อีเมล</label>
-                    <input type="email" value={editData.email || ''} onChange={(e) => setEditData({...editData, email: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">HN</label>
+                <input type="text" value={editData.hospital_number || ''} onChange={(e) => setEditData({...editData, hospital_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
               </div>
-
-              {/* ข้อมูลสุขภาพ */}
-              <div className="col-span-full">
-                <h3 className="font-semibold text-purple-800 mb-2">💊 ข้อมูลสุขภาพ</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-purple-50 rounded-lg">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">น้ำหนัก (kg)</label>
-                    <input type="number" value={editData.current_weight || ''} onChange={(e) => setEditData({...editData, current_weight: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ส่วนสูง (cm)</label>
-                    <input type="number" value={editData.height || ''} onChange={(e) => setEditData({...editData, height: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">รอบเอว (cm)</label>
-                    <input type="number" value={editData.waist_circumference || ''} onChange={(e) => setEditData({...editData, waist_circumference: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ประเภทเบาหวาน</label>
-                    <select value={editData.diabetes_type || ''} onChange={(e) => setEditData({...editData, diabetes_type: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
-                      <option value="">-- เลือก --</option>
-                      <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
-                      <option value="เบาหวาน">เบาหวาน</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ค่าน้ำตาล</label>
-                    <input type="number" value={editData.blood_sugar || ''} onChange={(e) => setEditData({...editData, blood_sugar: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ค่า HbA1c</label>
-                    <input type="number" value={editData.hba1c_level || ''} onChange={(e) => setEditData({...editData, hba1c_level: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">เลขบัตรประชาชน</label>
+                <input type="text" value={editData.id_card || ''} onChange={(e) => setEditData({...editData, id_card: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
               </div>
-
-              {/* โรงพยาบาลและที่อยู่ */}
-              <div className="col-span-full">
-                <h3 className="font-semibold text-pink-800 mb-2">🏥 โรงพยาบาลและที่อยู่</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-pink-50 rounded-lg">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">โรงพยาบาล</label>
-                    <select value={editData.hospital_id || ''} onChange={(e) => {
-                      const hospital = hospitals.find(h => h.id === e.target.value);
-                      setEditData({...editData, hospital_id: e.target.value, hospital_name: hospital?.name});
-                    }} className="w-full px-3 py-2 border rounded-lg">
-                      <option value="">-- เลือก --</option>
-                      {hospitals.map(h => (
-                        <option key={h.id} value={h.id}>{h.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">รพ.สต.</label>
-                    <input type="text" value={editData.subdistrict_health_center || ''} onChange={(e) => setEditData({...editData, subdistrict_health_center: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">บ้านเลขที่</label>
-                    <input type="text" value={editData.house_number || ''} onChange={(e) => setEditData({...editData, house_number: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">หมู่ที่</label>
-                    <input type="text" value={editData.village_no || ''} onChange={(e) => setEditData({...editData, village_no: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">หมู่บ้าน</label>
-                    <input type="text" value={editData.village_name || ''} onChange={(e) => setEditData({...editData, village_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ซอย</label>
-                    <input type="text" value={editData.soi || ''} onChange={(e) => setEditData({...editData, soi: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ถนน</label>
-                    <input type="text" value={editData.road || ''} onChange={(e) => setEditData({...editData, road: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">จังหวัด</label>
-                    <input type="text" value={editData.province || ''} onChange={(e) => setEditData({...editData, province: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">อำเภอ</label>
-                    <input type="text" value={editData.district || ''} onChange={(e) => setEditData({...editData, district: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ตำบล</label>
-                    <input type="text" value={editData.subdistrict || ''} onChange={(e) => setEditData({...editData, subdistrict: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">รหัสไปรษณีย์</label>
-                    <input type="text" value={editData.postal_code || ''} onChange={(e) => setEditData({...editData, postal_code: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">ชื่อ</label>
+                <input type="text" value={editData.first_name || ''} onChange={(e) => setEditData({...editData, first_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
               </div>
-
-              {/* ผู้ติดต่อและโค้ช */}
-              <div className="col-span-full">
-                <h3 className="font-semibold text-orange-800 mb-2">👥 ผู้ติดต่อและโค้ช</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 p-4 bg-orange-50 rounded-lg">
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ชื่อผู้ติดต่อ</label>
-                    <input type="text" value={editData.emergency_contact_name || ''} onChange={(e) => setEditData({...editData, emergency_contact_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">เบอร์โทรผู้ติดต่อ</label>
-                    <input type="text" value={editData.emergency_contact_phone || ''} onChange={(e) => setEditData({...editData, emergency_contact_phone: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ความสัมพันธ์</label>
-                    <input type="text" value={editData.emergency_contact_relationship || ''} onChange={(e) => setEditData({...editData, emergency_contact_relationship: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-1">ชื่อผู้ดูแล (โค้ช)</label>
-                    <select value={editData.coach_id || ''} onChange={(e) => {
-                      const coach = coaches.find(c => c.user_id === e.target.value);
-                      setEditData({...editData, coach_id: e.target.value, coach_name: coach?.full_name_th});
-                    }} className="w-full px-3 py-2 border rounded-lg">
-                      <option value="">-- เลือก --</option>
-                      {coaches.map(c => (
-                        <option key={c.user_id} value={c.user_id}>{c.full_name_th}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">นามสกุล</label>
+                <input type="text" value={editData.last_name || ''} onChange={(e) => setEditData({...editData, last_name: e.target.value})} className="w-full px-3 py-2 border rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">วันเกิด</label>
+                <input type="text" value={editData.birth_date || ''} onChange={(e) => setEditData({...editData, birth_date: e.target.value})} className="w-full px-3 py-2 border rounded-lg" placeholder="DD/MM/YYYY" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">เพศ</label>
+                <select value={editData.gender || ''} onChange={(e) => setEditData({...editData, gender: e.target.value})} className="w-full px-3 py-2 border rounded-lg">
+                  <option value="male">ชาย</option>
+                  <option value="female">หญิง</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">โรงพยาบาล</label>
+                <select value={editData.hospital_id || ''} onChange={(e) => {
+                  const hospital = hospitals.find(h => h.id === e.target.value);
+                  setEditData({...editData, hospital_id: e.target.value, hospital_name: hospital?.name});
+                }} className="w-full px-3 py-2 border rounded-lg">
+                  <option value="">-- เลือก --</option>
+                  {hospitals.map(h => (<option key={h.id} value={h.id}>{h.name}</option>))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">โค้ช</label>
+                <select value={editData.coach_id || ''} onChange={(e) => {
+                  const coach = coaches.find(c => c.user_id === e.target.value);
+                  setEditData({...editData, coach_id: e.target.value, coach_name: coach?.full_name_th});
+                }} className="w-full px-3 py-2 border rounded-lg">
+                  <option value="">-- เลือก --</option>
+                  {coaches.map(c => (<option key={c.user_id} value={c.user_id}>{c.full_name_th}</option>))}
+                </select>
               </div>
             </div>
-
             <div className="flex gap-4 mt-6">
               <button onClick={() => handleSaveEdit(editingRow)} className="flex-1 bg-green-500 text-white py-3 rounded-lg flex items-center justify-center gap-2">
                 <Save className="w-4 h-4" /> บันทึก
