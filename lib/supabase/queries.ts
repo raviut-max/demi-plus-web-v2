@@ -729,30 +729,16 @@ export async function getDeletedPatients() {
 // =====================================================
 // 👨‍⚕️ Staff Management Functions
 // =====================================================
-
+// แก้ไขฟังก์ชัน getStaffList
 export async function getStaffList(role?: string) {
   try {
     let query = supabase
       .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          is_verified
-        ),
-        hospitals (
-          id,
-          name,
-          code
-        )
-      `)
-      .in('role', ['admin', 'doctor', 'helper'])
+      .select(`*, doctors ( id, full_name_th, specialization_th, is_active, is_verified ), hospitals ( id, name, code )`)
+      .in('role', ['admin', 'doctor', 'helper', 'osm']) // ✅ เพิ่ม 'osm'
       .eq('is_active', true)
       .order('created_at', { ascending: false });
-
+    
     if (role) {
       query = query.eq('role', role);
     }
@@ -767,6 +753,28 @@ export async function getStaffList(role?: string) {
     return data || [];
   } catch (err) {
     console.error('Get staff list error:', err);
+    return [];
+  }
+}
+
+// แก้ไขฟังก์ชัน getDeactivatedStaff
+export async function getDeactivatedStaff() {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email )`)
+      .in('role', ['admin', 'doctor', 'helper', 'osm']) // ✅ เพิ่ม 'osm'
+      .eq('is_active', false)
+      .order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Error fetching deactivated staff:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (err) {
+    console.error('Get deactivated staff error:', err);
     return [];
   }
 }
@@ -1001,36 +1009,6 @@ export async function permanentlyDeleteStaff(staffId: string) {
   } catch (err) {
     console.error('Permanent delete staff error:', err);
     return { success: false, error: 'เกิดข้อผิดพลาดในการลบเจ้าหน้าที่ถาวร' };
-  }
-}
-
-export async function getDeactivatedStaff() {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          phone,
-          email
-        )
-      `)
-      .in('role', ['admin', 'doctor', 'helper'])
-      .eq('is_active', false)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Error fetching deactivated staff:', error);
-      return [];
-    }
-
-    return data || [];
-  } catch (err) {
-    console.error('Get deactivated staff error:', err);
-    return [];
   }
 }
 

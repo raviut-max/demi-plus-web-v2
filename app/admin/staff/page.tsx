@@ -1,6 +1,6 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: เพิ่มบทบาท "อสม." (OSM) เข้าระบบจัดการเจ้าหน้าที่
+// ✅ แก้ไขล่าสุด: เพิ่ม User Card ด้านบน และแสดง อสม.
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -89,6 +89,7 @@ export default function StaffManagementPage() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  const [userName, setUserName] = useState<string>('');
   
   // ✅ States สำหรับ Modal และ Tabs
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
@@ -117,6 +118,7 @@ export default function StaffManagementPage() {
     console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
 
     setUser(userData);
+    loadUserName(userData.id);
     loadUserHospital(userData.id);
     loadHospitals();
 
@@ -124,9 +126,24 @@ export default function StaffManagementPage() {
     loadAccessibleHospitals(userData.id);
   }, [router]);
 
-  // =====================================================
-  // 📥 DATA LOADING FUNCTIONS
-  // =====================================================
+  const loadUserName = async (userId: string) => {
+    try {
+      const { data } = await supabase
+        .from('doctors')
+        .select('full_name_th')
+        .eq('user_id', userId)
+        .single();
+      
+      if (data?.full_name_th) {
+        setUserName(data.full_name_th);
+      } else {
+        setUserName('ผู้ดูแลระบบ');
+      }
+    } catch (error) {
+      setUserName('ผู้ใช้งาน');
+    }
+  };
+
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -145,7 +162,7 @@ export default function StaffManagementPage() {
       await loadPendingStaff(ids);
       await loadDeactivatedStaff(ids);
     } catch (error) {
-      console.error(' [loadAccessibleHospitals] Error:', error);
+      console.error('❌ [loadAccessibleHospitals] Error:', error);
       setAccessibleHospitalIds([]);
       await loadStaffList([]);
       await loadPendingStaff([]);
@@ -479,24 +496,11 @@ export default function StaffManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
               <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
-              
-              <div className="flex items-center gap-2 mt-2">
-                {isSuperAdmin(user) ? (
-                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1">
-                    <Shield className="w-3 h-3" />
-                    Super Admin - เห็นทั้งหมด
-                  </span>
-                ) : (
-                  <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold flex items-center gap-1">
-                    <Hospital className="w-3 h-3" />
-                    Hospital Admin - เห็นเฉพาะ {userHospital?.name || 'โรงพยาบาลตัวเอง'}
-                  </span>
-                )}
-              </div>
             </div>
             
             <div className="flex gap-2">
@@ -534,8 +538,55 @@ export default function StaffManagementPage() {
             </div>
           </div>
           
+          {/* ✅ User Card - แสดงด้านบนตรงกลาง */}
+          <div className="mt-6 flex justify-center">
+            <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl shadow-xl p-6 max-w-2xl w-full">
+              <div className="flex items-center gap-4">
+                {/* User Icon */}
+                <div className="w-16 h-16 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                  <Users className="w-8 h-8 text-white" />
+                </div>
+                
+                {/* User Info */}
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="text-xl font-bold text-white">{userName}</h3>
+                    {/* Role Badge */}
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
+                      'bg-blue-200 text-blue-800'
+                    }`}>
+                      {isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin'}
+                    </span>
+                  </div>
+                  
+                  {/* Hospital Info */}
+                  {userHospital && (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-white text-sm">
+                        <Hospital className="w-4 h-4" />
+                        <span className="font-medium">{userHospital.name}</span>
+                        <span className="text-xs opacity-75">
+                          ({userHospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})
+                        </span>
+                      </div>
+                      
+                      {/* Parent Hospital (ถ้าเป็นลูกข่าย) */}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-2 text-white text-xs opacity-75 ml-6">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          
           {/* Tabs */}
-          <div className="flex gap-2 mt-4 border-b border-gray-200">
+          <div className="flex gap-2 mt-6 border-b border-gray-200">
             <button
               onClick={() => setActiveTab('active')}
               className={`px-4 py-2 font-semibold transition-colors ${
@@ -720,7 +771,7 @@ export default function StaffManagementPage() {
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
+                               staff.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                                staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
@@ -1161,7 +1212,7 @@ function AddStaffModal({
             <ul className="text-sm text-gray-700 space-y-1">
               {isSuper ? (
                 <>
-                  <li> <strong>Super Admin:</strong> สร้างได้ทุกระดับ (Admin/Doctor/Helper/อสม.)</li>
+                  <li>👑 <strong>Super Admin:</strong> สร้างได้ทุกระดับ (Admin/Doctor/Helper/อสม.)</li>
                   <li>🏥 สามารถกำหนดโรงพยาบาลและประเภท Admin ได้</li>
                 </>
               ) : (
@@ -1276,7 +1327,7 @@ function AddStaffModal({
               <option value="doctor">👨‍⚕️ แพทย์</option>
               <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
               {/* ✅ เพิ่มตัวเลือก อสม. */}
-              <option value="osm">️ อสม. (อาสาสมัครสาธารณสุข)</option>
+              <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
             </select>
             {!isSuper && (
               <p className="text-xs text-blue-600 mt-1">
@@ -1303,10 +1354,10 @@ function AddStaffModal({
               >
                 <option value="">-- เลือกประเภท --</option>
                 <option value="super">👑 Super Admin (เข้าถึงทั้งหมด)</option>
-                <option value="hospital"> Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
+                <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
               </select>
               <p className="text-xs text-purple-600 mt-1">
-                 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ <br/>
+                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ <br/>
                 💡 Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
               </p>
             </div>
@@ -1419,7 +1470,7 @@ function AddStaffModal({
 }
 
 // =====================================================
-// ️ EDIT STAFF MODAL COMPONENT
+// ✏️ EDIT STAFF MODAL COMPONENT
 // =====================================================
 function EditStaffModal({
   staff,
