@@ -18,7 +18,7 @@ import {
 import {
   Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
-  Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock
+  Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -36,6 +36,7 @@ export default function PatientManagementPage() {
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [userHospital, setUserHospital] = useState<any>(null);
+  const [userName, setUserName] = useState<string>('');
 
   useEffect(() => {
     const userData = checkSession();
@@ -55,8 +56,27 @@ export default function PatientManagementPage() {
     console.log('🏥 [PatientManagement] Role:', userData.role);
     setUser(userData);
     loadUserHospital(userData.id);
+    loadUserName(userData.id);
     loadAccessibleHospitals(userData.id);
   }, [router]);
+
+  const loadUserName = async (userId: string) => {
+    try {
+      const { data } = await supabase
+        .from('doctors')
+        .select('full_name_th')
+        .eq('user_id', userId)
+        .single();
+      
+      if (data?.full_name_th) {
+        setUserName(data.full_name_th);
+      } else {
+        setUserName('ผู้ดูแลระบบ');
+      }
+    } catch (error) {
+      setUserName('ผู้ใช้งาน');
+    }
+  };
 
   const loadUserHospital = async (userId: string) => {
     try {
@@ -220,6 +240,52 @@ export default function PatientManagementPage() {
     return hospitalsData?.name || '-';
   };
 
+  // ✅ ฟังก์ชันแสดง Badge บทบาท
+  const getRoleBadge = () => {
+    if (!user) return null;
+    
+    const roleConfig: any = {
+      'osm': { 
+        text: '🏘️ อสม.', 
+        bg: 'bg-orange-100', 
+        textCol: 'text-orange-700',
+        border: 'border-orange-200'
+      },
+      'admin': { 
+        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', 
+        bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100',
+        textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700',
+        border: isSuperAdmin(user) ? 'border-purple-200' : 'border-blue-200'
+      },
+      'doctor': { 
+        text: '👨‍⚕️ แพทย์', 
+        bg: 'bg-green-100', 
+        textCol: 'text-green-700',
+        border: 'border-green-200'
+      },
+      'helper': { 
+        text: '👩‍️ เจ้าหน้าที่', 
+        bg: 'bg-yellow-100', 
+        textCol: 'text-yellow-700',
+        border: 'border-yellow-200'
+      }
+    };
+
+    const config = roleConfig[user.role] || { 
+      text: user.role, 
+      bg: 'bg-gray-100', 
+      textCol: 'text-gray-700',
+      border: 'border-gray-200'
+    };
+
+    return (
+      <span className={`px-3 py-1.5 ${config.bg} ${config.textCol} border ${config.border} rounded-full text-sm font-semibold flex items-center gap-1.5`}>
+        <Shield className="w-4 h-4" />
+        {config.text}
+      </span>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -249,22 +315,38 @@ export default function PatientManagementPage() {
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการผู้ป่วย</h1>
               <p className="text-gray-600">จัดการข้อมูลผู้ป่วยและติดตามผลการรักษา</p>
               
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
-              <div className="flex items-center gap-2 mt-3 flex-wrap">
-                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
-                  👤 {user?.role === 'osm' ? 'อสม.' : user?.role === 'admin' ? 'ผู้ดูแลระบบ' : user?.role === 'doctor' ? 'แพทย์' : 'เจ้าหน้าที่'}
-                </span>
-                
+              {/* ✅ แสดงข้อมูลผู้ใช้งานปัจจุบัน */}
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                {/* ชื่อผู้ใช้งาน */}
+                <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 rounded-xl">
+                  <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                    <Users className="w-4 h-4 text-white" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">ผู้ใช้งาน</p>
+                    <p className="text-sm font-semibold text-gray-800">{userName}</p>
+                  </div>
+                </div>
+
+                {/* บทบาท */}
+                {getRoleBadge()}
+
+                {/* โรงพยาบาล */}
                 {userHospital && (
-                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-semibold flex items-center gap-1">
-                    <Hospital className="w-3 h-3" />
-                    {userHospital.name}
-                  </span>
+                  <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl">
+                    <Hospital className="w-5 h-5 text-green-600" />
+                    <div>
+                      <p className="text-xs text-gray-500">สังกัด</p>
+                      <p className="text-sm font-semibold text-gray-800">{userHospital.name}</p>
+                    </div>
+                  </div>
                 )}
-                
+
+                {/* Badge เพิ่มเติมสำหรับ Super Admin */}
                 {isSuperAdmin(user) && (
-                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
-                    👑 Super Admin
+                  <span className="px-3 py-1.5 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-full text-sm font-semibold shadow-lg flex items-center gap-1.5">
+                    <Shield className="w-4 h-4" />
+                    เข้าถึงทั้งหมด
                   </span>
                 )}
               </div>
