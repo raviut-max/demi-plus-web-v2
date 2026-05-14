@@ -3522,3 +3522,111 @@ export function formatIdCard(idCard: string): string {
 }
 
 
+/**
+ * ดึงรายการ ID Card ที่ยังไม่ได้บรรจุ (Pending)
+ * รวมข้อมูลจากทั้ง pending_staff และ approved users ที่ยังไม่มี assignment
+ */
+export async function getPendingIdCards(hospitalIds?: string[]) {
+  try {
+    console.log('⏳ [getPendingIdCards] Fetching pending ID cards...');
+    
+    // ✅ 1. ดึงจาก pending_staff (รออนุมัติ)
+    let pendingQuery = supabase
+      .from('pending_staff')
+      .select(`*, hospitals ( id, name, code )`)
+      .eq('status', 'pending');
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
+    }
+    
+    const { data: pendingData, error: pendingError } = await pendingQuery;
+    
+    if (pendingError) {
+      console.error('❌ [getPendingIdCards] Error fetching pending:', pendingError);
+    }
+    
+    // ✅ 2. ดึงจาก users ที่ approved แล้ว แต่ยังไม่มี ID Card assignment
+    let staffQuery = supabase
+      .from('users')
+      .select(`
+        id,
+        id_card,
+        role,
+        hospital_id,
+        created_at,
+        doctors (
+          full_name_th,
+          specialization_th
+        ),
+        hospitals (
+          id,
+          name,
+          code
+        )
+      `)
+      .in('role', ['admin', 'doctor', 'helper', 'osm'])
+      .eq('is_active', true)
+      .not('id_card', 'is', null);
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      staffQuery = staffQuery.in('hospital_id', hospitalIds);
+    }
+    
+    const { data: staffData, error: staffError } = await staffQuery;
+    
+    if (staffError) {
+      console.error('❌ [getPendingIdCards] Error fetching staff:', staffError);
+    }
+    
+    // ✅ 3. ดึง ID Card ที่มีการบรรจุแล้ว
+    const { data: assignments } = await supabase
+      .from('id_card_assignments')
+      .select('id_card')
+      .eq('status', 'active');
+    
+    const assignedCards = new Set(assignments?.map(a => a.id_card) || []);
+    
+    // ✅ 4. รวมข้อมูลจากทั้ง 2 แหล่ง และกรองเอาเฉพาะที่ยังไม่มีการบรรจุ
+    const pendingCards: any[] = [];
+    
+    // จาก pending_staff
+    if (pendingData) {
+      pendingData.forEach(item => {
+        if (!assignedCards.has(item.id_card)) {
+          pendingCards.push({
+            ...item,
+            source: 'pending',
+            full_name_th: item.full_name_th,
+            hospitals: item.hospitals
+          });
+        }
+      });
+    }
+    
+    // จาก approved staff
+    if (staffData) {
+      staffData.forEach(staff => {
+        if (staff.id_card && !assignedCards.has(staff.id_card)) {
+          pendingCards.push({
+            id: staff.id,
+            id_card: staff.id_card,
+            full_name_th: staff.doctors?.full_name_th || '-',
+            role: staff.role,
+            hospital_id: staff.hospital_id,
+            hospitals: staff.hospitals,
+            created_at: staff.created_at,
+            specialization_th: staff.doctors?.specialization_th,
+            source: 'approved'
+          });
+        }
+      });
+    }
+    
+    console.log('✅ [getPendingIdCards] Found:', pendingCards.length, 'pending ID cards');
+    return pendingCards;
+  } catch (err) {
+    console.error('❌ [getPendingIdCards] Exception:', err);
+    return [];
+  }
+}
