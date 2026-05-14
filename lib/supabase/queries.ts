@@ -3296,3 +3296,227 @@ export async function getIdCardAssignmentStats(hospitalIds?: string[]) {
   }
 }
 
+// =====================================================
+// 🎫 ID Card Sequence & Generator Functions (ใหม่)
+// =====================================================
+
+/**
+ * ✅ ดึงข้อมูลลำดับปัจจุบันจากฐานข้อมูล
+ */
+export async function getIdSequence(
+  sequenceType: 'patient' | 'staff' | 'osm',
+  prefix: string = '1',
+  provinceCode: string = '1000'
+) {
+  try {
+    console.log(`🔍 [getIdSequence] Fetching for ${sequenceType}...`);
+    
+    const { data, error } = await supabase
+      .from('id_sequences')
+      .select('*')
+      .eq('sequence_type', sequenceType)
+      .eq('prefix', prefix)
+      .eq('province_code', provinceCode)
+      .single();
+    
+    if (error) {
+      console.error('❌ [getIdSequence] Error:', error);
+      return null;
+    }
+    
+    return data;
+  } catch (err) {
+    console.error('❌ [getIdSequence] Exception:', err);
+    return null;
+  }
+}
+
+/**
+ * ✅ อัปเดตและเพิ่มลำดับ (Atomic increment)
+ */
+export async function incrementIdSequence(
+  sequenceType: 'patient' | 'staff' | 'osm',
+  prefix: string = '1',
+  provinceCode: string = '1000',
+  incrementBy: number = 1
+) {
+  try {
+    console.log(`🔄 [incrementIdSequence] Incrementing ${sequenceType} by ${incrementBy}...`);
+    
+    const { data, error } = await supabase
+      .from('id_sequences')
+      .update({ 
+        current_sequence: supabase.rpc('increment_sequence', { 
+          current_val: incrementBy 
+        }), // ใช้ RPC สำหรับ atomic update หรือใช้วิธีด้านล่าง
+        updated_at: new Date().toISOString()
+      })
+      .eq('sequence_type', sequenceType)
+      .eq('prefix', prefix)
+      .eq('province_code', provinceCode)
+      .select()
+      .single();
+    
+    // ✅ Fallback ถ้าไม่มี RPC: ใช้วิธีธรรมดา (อาจมี race condition)
+    if (error) {
+      // ดึงค่าปัจจุบัน
+      const { data: current } = await supabase
+        .from('id_sequences')
+        .select('current_sequence')
+        .eq('sequence_type', sequenceType)
+        .eq('prefix', prefix)
+        .eq('province_code', provinceCode)
+        .single();
+      
+      if (current) {
+        const newValue = (current.current_sequence || 1) + incrementBy;
+        
+        const { data: updated, error: updateError } = await supabase
+          .from('id_sequences')
+          .update({ 
+            current_sequence: newValue,
+            updated_at: new Date().toISOString()
+          })
+          .eq('sequence_type', sequenceType)
+          .eq('prefix', prefix)
+          .eq('province_code', provinceCode)
+          .select()
+          .single();
+        
+        if (updateError) throw updateError;
+        return updated;
+      }
+      throw error;
+    }
+    
+    return data;
+  } catch (err) {
+    console.error('❌ [incrementIdSequence] Error:', err);
+    return null;
+  }
+}
+
+/**
+ * ✅ คำนวณ Check Digit สำหรับบัตรประชาชนไทย (13 หลัก)
+ * สูตร: (11 - (sum % 11)) % 10
+ */
+function calculateCheckDigit(first12Digits: string): string {
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(first12Digits[i]) * (13 - i);
+  }
+  const checkDigit = (11 - (sum % 11)) % 10;
+  return checkDigit.toString();
+}
+
+/**
+ * ✅ สร้างเลขบัตรประชาชนจำลอง 13 หลัก พร้อม Check Digit ที่ถูกต้อง
+ * @param prefix - หลักแรก (1-8) สำหรับประเภทการลงทะเบียน
+ * @param provinceCode - รหัสจังหวัด 4 หลัก (เช่น 1000 = กรุงเทพฯ)
+ * @param sequenceNum - ลำดับที่ (5-6 หลัก)
+ * @returns string - บัตรประชาชน 13 หลัก
+ */
+export function generateDummyIdCard(
+  prefix: string = '1',
+  provinceCode: string = '1000',
+  sequenceNum: number
+): string {
+  // ✅ Validate input
+  if (!/^[1-8]$/.test(prefix)) {
+    console.warn('⚠️ Invalid prefix, using default "1"');
+    prefix = '1';
+  }
+  
+  // ✅ Format sequence number to 5 digits (pad with zeros)
+  const sequenceStr = sequenceNum.toString().padStart(5, '0');
+  
+  // ✅ Build first 12 digits: Prefix(1) + Province(4) + Sequence(5) + Group(2)
+  // Group code: ใช้ 00-99 สุ่มหรือใช้จาก sequence
+  const groupCode = Math.floor(sequenceNum / 100000).toString().padStart(2, '0').slice(-2);
+  
+  const first12 = `${prefix}${provinceCode}${sequenceStr}${groupCode}`;
+  
+  // ✅ Calculate check digit (หลักที่ 13)
+  const checkDigit = calculateCheckDigit(first12);
+  
+  // ✅ Return full 13-digit ID
+  return `${first12}${checkDigit}`;
+}
+
+/**
+ * ✅ ฟังก์ชันรวม: สร้างบัตรประชาชนใหม่พร้อมอัปเดตลำดับในฐานข้อมูล
+ * @param sequenceType - ประเภท: 'patient' | 'staff' | 'osm'
+ * @param prefix - หลักแรก (1-8)
+ * @param provinceCode - รหัสจังหวัด 4 หลัก
+ * @returns { success: boolean, idCard?: string, error?: string }
+ */
+export async function generateAndReserveIdCard(
+  sequenceType: 'patient' | 'staff' | 'osm',
+  prefix: string = '1',
+  provinceCode: string = '1000'
+) {
+  try {
+    // ✅ 1. ดึงลำดับปัจจุบัน
+    const sequence = await getIdSequence(sequenceType, prefix, provinceCode);
+    if (!sequence) {
+      return { 
+        success: false, 
+        error: 'ไม่พบข้อมูลลำดับในฐานข้อมูล' 
+      };
+    }
+    
+    const currentSeq = sequence.current_sequence || 1;
+    
+    // ✅ 2. สร้างบัตรประชาชน
+    const idCard = generateDummyIdCard(prefix, provinceCode, currentSeq);
+    
+    // ✅ 3. อัปเดตลำดับสำหรับครั้งต่อไป
+    await incrementIdSequence(sequenceType, prefix, provinceCode, 1);
+    
+    console.log(`✅ [generateAndReserveIdCard] Generated: ${idCard} (seq: ${currentSeq})`);
+    
+    return { 
+      success: true, 
+      idCard,
+      sequenceNumber: currentSeq
+    };
+    
+  } catch (err: any) {
+    console.error('❌ [generateAndReserveIdCard] Error:', err);
+    return { 
+      success: false, 
+      error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน' 
+    };
+  }
+}
+
+/**
+ * ✅ ตรวจสอบความถูกต้องของบัตรประชาชนไทย (13 หลัก)
+ * @param idCard - เลขบัตร 13 หลัก
+ * @returns boolean - ถูกต้องหรือไม่
+ */
+export function validateThaiIdCard(idCard: string): boolean {
+  // ✅ ลบช่องว่างและขีดกลาง
+  const cleaned = idCard.replace(/[\s-]/g, '');
+  
+  // ✅ ต้องมี 13 หลักและเป็นตัวเลขทั้งหมด
+  if (!/^\d{13}$/.test(cleaned)) {
+    return false;
+  }
+  
+  // ✅ คำนวณและตรวจสอบ Check Digit
+  const providedCheck = parseInt(cleaned[12]);
+  const calculatedCheck = parseInt(calculateCheckDigit(cleaned.slice(0, 12)));
+  
+  return providedCheck === calculatedCheck;
+}
+
+/**
+ * ✅ Format บัตรประชาชนให้อ่านง่าย: 1-1234-56789-01-2
+ */
+export function formatIdCard(idCard: string): string {
+  const cleaned = idCard.replace(/[\s-]/g, '');
+  if (cleaned.length !== 13) return idCard;
+  
+  return `${cleaned[0]}-${cleaned.slice(1,5)}-${cleaned.slice(5,10)}-${cleaned.slice(10,12)}-${cleaned[12]}`;
+}

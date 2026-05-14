@@ -1,8 +1,6 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. ✅ แก้ไข route นำเข้าจาก Excel เป็น /admin/patients/import-excel (ป้องกัน conflict)
-//    2. ✅ อัปเดตปุ่มทั้งหมดให้ชี้ไปที่ route ที่ถูกต้อง
+// ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
+// ✅ การแก้ไข: เพิ่มปุ่ม "จัดการเลขบัตร/เพิ่มด่วน" ในหมวดเจ้าหน้าที่
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -30,7 +28,8 @@ import {
   UserPlus,
   Database,
   FileText,
-  Activity
+  Activity,
+  CreditCard
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -110,7 +109,7 @@ export default function SettingsPage() {
       const { count: staffCount } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
-        .in('role', ['admin', 'doctor', 'helper'])
+        .in('role', ['admin', 'doctor', 'helper', 'osm'])
         .eq('is_active', true);
 
       // ✅ นับผู้ป่วย
@@ -360,7 +359,7 @@ export default function SettingsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   
-                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel - ✅ แก้ไขแล้ว (เปลี่ยน route) */}
+                  {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
                   <button
                     onClick={() => router.push('/admin/patients/import-excel')}
                     className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
@@ -493,7 +492,7 @@ export default function SettingsPage() {
                   <Users className="w-5 h-5 text-indigo-600" />
                   จัดการเจ้าหน้าที่
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   
                   {/* 👥 ปุ่มจัดการเจ้าหน้าที่ */}
                   <button
@@ -515,6 +514,30 @@ export default function SettingsPage() {
                     </div>
                     <p className="text-gray-600 text-sm">
                       เพิ่ม/แก้ไข/ลบ ข้อมูลเจ้าหน้าที่และกำหนดสิทธิ์การเข้าถึง
+                    </p>
+                  </button>
+
+                  {/* ✅ ปุ่มใหม่: จัดการเลขบัตร/เพิ่มด่วน */}
+                  <button
+                    onClick={() => router.push('/admin/staff/assignments')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group relative overflow-hidden"
+                  >
+                    <div className="absolute top-0 right-0 bg-green-500 text-white text-[10px] px-2 py-1 rounded-bl-lg font-bold">NEW</div>
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-emerald-100 rounded-lg flex items-center justify-center group-hover:bg-emerald-200 transition-all">
+                        <CreditCard className="w-7 h-7 text-emerald-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          จัดการเลขบัตร / เพิ่มด่วน
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          สร้าง ID จำลอง
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      เพิ่มบุคลากรแบบรวดเร็ว (Gen ID + Fix Date 01-01-2511)
                     </p>
                   </button>
 
