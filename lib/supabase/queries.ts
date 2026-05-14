@@ -32,7 +32,8 @@ export async function login(idCard: string, password: string) {
     let zone = 'Green Zone';
     let current_step = 'Starter';
 
-    if (['admin', 'doctor', 'helper'].includes(data.role)) {
+    // ✅ เพิ่ม 'osm' ในการตรวจสอบ
+    if (['admin', 'doctor', 'helper', 'osm'].includes(data.role)) {
       const { data: doctor } = await supabase
         .from('doctors')
         .select('full_name_th, specialization_th')
@@ -729,16 +730,16 @@ export async function getDeletedPatients() {
 // =====================================================
 // 👨‍⚕️ Staff Management Functions
 // =====================================================
-// แก้ไขฟังก์ชัน getStaffList
 export async function getStaffList(role?: string) {
   try {
     let query = supabase
       .from('users')
       .select(`*, doctors ( id, full_name_th, specialization_th, is_active, is_verified ), hospitals ( id, name, code )`)
-      .in('role', ['admin', 'doctor', 'helper', 'osm']) // ✅ เพิ่ม 'osm'
+      // ✅ เพิ่ม 'osm'
+      .in('role', ['admin', 'doctor', 'helper', 'osm'])
       .eq('is_active', true)
       .order('created_at', { ascending: false });
-    
+
     if (role) {
       query = query.eq('role', role);
     }
@@ -757,16 +758,16 @@ export async function getStaffList(role?: string) {
   }
 }
 
-// แก้ไขฟังก์ชัน getDeactivatedStaff
 export async function getDeactivatedStaff() {
   try {
     const { data, error } = await supabase
       .from('users')
       .select(`*, doctors ( id, full_name_th, specialization_th, phone, email )`)
-      .in('role', ['admin', 'doctor', 'helper', 'osm']) // ✅ เพิ่ม 'osm'
+      // ✅ เพิ่ม 'osm'
+      .in('role', ['admin', 'doctor', 'helper', 'osm'])
       .eq('is_active', false)
       .order('created_at', { ascending: false });
-    
+
     if (error) {
       console.error('Error fetching deactivated staff:', error);
       return [];
@@ -783,7 +784,8 @@ export async function addStaff(data: {
   id_card: string;
   password: string;
   full_name_th: string;
-  role: 'doctor' | 'helper';
+  // ✅ เพิ่ม 'osm' ใน type
+  role: 'doctor' | 'helper' | 'osm';
   specialization_th?: string;
   phone?: string;
   email?: string;
@@ -819,7 +821,8 @@ export async function addStaff(data: {
     // ✅ 2. ประกาศ doctorData ก่อน if block
     let doctorData: any = null;
 
-    if (data.role === 'doctor' || data.role === 'helper') {
+    // ✅ เพิ่ม 'osm' ในการสร้าง record ในตาราง doctors
+    if (data.role === 'doctor' || data.role === 'helper' || data.role === 'osm') {
       console.log('💾 [addStaff] Creating doctor record...');
       
       const { data: doctorDataResult, error: doctorError } = await supabase
@@ -828,7 +831,11 @@ export async function addStaff(data: {
           user_id: user.id,
           full_name: data.full_name_th,
           full_name_th: data.full_name_th,
-          specialization_th: data.specialization_th || (data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
+          specialization_th: data.specialization_th || (
+            data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
+            data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
+            'แพทย์'
+          ),
           phone: data.phone || null,
           email: data.email || null,
           is_active: true,
