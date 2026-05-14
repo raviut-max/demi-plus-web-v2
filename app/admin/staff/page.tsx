@@ -2,8 +2,8 @@
 // =====================================================
 // ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
 // ✅ การแก้ไขรอบนี้:
-//    1. ✅ ปรับ User Card ให้กระทัดรัด สวยงาม ตามแบบที่ต้องการ
-//    2. ✅ แสดงข้อมูลผู้ใช้งานแบบ Card แนวนอน
+//    1. ✅ ปรับ User Card ให้เล็กกระทัดรัด อยู่ตรงกลาง Header
+//    2. ✅ แสดงข้อมูลผู้ใช้งานแบบ Compact Card
 //    3. ✅ เพิ่มการรองรับ role 'osm' (อสม.) ครบทุกจุด
 // =====================================================
 'use client';
@@ -533,16 +533,48 @@ export default function StaffManagementPage() {
             กลับ Dashboard
           </button>
           
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
-              <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
+          {/* ✅ Header Layout: Title | User Card | Buttons */}
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+            
+            {/* Left: Title */}
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold text-gray-800 mb-1">👥 จัดการเจ้าหน้าที่</h1>
+              <p className="text-gray-600 text-sm">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
             </div>
             
-            <div className="flex gap-2">
+            {/* Center: Compact User Card */}
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 shadow-sm">
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <Users className="w-5 h-5 text-blue-600" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h3 className="font-bold text-gray-800 text-sm truncate max-w-[150px]">{userName}</h3>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide flex-shrink-0 ${
+                    isSuperAdmin(user) ? 'bg-purple-200 text-purple-700' :
+                    isHospitalAdmin(user) ? 'bg-blue-200 text-blue-700' :
+                    'bg-yellow-100 text-yellow-700'
+                  }`}>
+                    {isSuperAdmin(user) ? 'Super' : isHospitalAdmin(user) ? 'Admin' : 'เจ้าหน้าที่'}
+                  </span>
+                </div>
+                {userHospital && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500">
+                    <Hospital className="w-3 h-3" />
+                    <span className="truncate max-w-[150px]">{userHospital.name}</span>
+                    {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                      <span className="text-[10px] text-gray-400">({userHospital.parent_hospital.name})</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Right: Action Buttons */}
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setActiveTab('pending')}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all text-sm font-medium"
               >
                 <Clock className="w-4 h-4" />
                 รออนุมัติ ({pendingStaff.length})
@@ -550,7 +582,7 @@ export default function StaffManagementPage() {
               
               <button
                 onClick={handleOpenDeactivatedModal}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all text-sm font-medium"
               >
                 <Archive className="w-4 h-4" />
                 ที่ปิดการใช้งาน ({deactivatedStaff.length})
@@ -558,7 +590,7 @@ export default function StaffManagementPage() {
               
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all text-sm font-medium"
               >
                 <Plus className="w-4 h-4" />
                 เพิ่มเจ้าหน้าที่
@@ -566,55 +598,11 @@ export default function StaffManagementPage() {
               
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all text-sm font-medium"
               >
                 <LogOut className="w-4 h-4" />
                 ออกจากระบบ
               </button>
-            </div>
-          </div>
-          
-          {/* ✅ User Card - แบบกระทัดรัด */}
-          <div className="mt-6">
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 max-w-3xl">
-              <div className="flex items-center gap-4 flex-wrap">
-                {/* User Icon & Name */}
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
-                    <Users className="w-6 h-6 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-gray-800">{userName}</h3>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
-                      'bg-blue-200 text-blue-800'
-                    }`}>
-                      {isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Hospital Info */}
-                {userHospital && (
-                  <div className="flex items-center gap-4 text-sm">
-                    <div className="flex items-center gap-1.5 text-gray-700">
-                      <Hospital className="w-4 h-4 text-blue-600" />
-                      <span className="font-medium">{userHospital.name}</span>
-                      <span className="text-gray-500 text-xs">
-                        ({userHospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})
-                      </span>
-                    </div>
-                    
-                    {/* Parent Hospital (ถ้าเป็นลูกข่าย) */}
-                    {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                      <div className="flex items-center gap-1.5 text-gray-600">
-                        <Building2 className="w-4 h-4 text-gray-500" />
-                        <span className="text-xs">{userHospital.parent_hospital.name}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
           
@@ -939,7 +927,7 @@ export default function StaffManagementPage() {
                           }`}>
                             {pending.role === 'admin' ? 'ผู้ดูแลระบบ' :
                              pending.role === 'doctor' ? 'แพทย์' :
-                             pending.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
+                             pending.role === 'osm'  ? 'อสม.' : 'เจ้าหน้าที่'}
                           </span>
                         </td>
                         
