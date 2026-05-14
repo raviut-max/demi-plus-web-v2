@@ -1,11 +1,3 @@
-// app/admin/staff/page.tsx
-// =====================================================
-// ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
-// ✅ การแก้ไขรอบนี้:
-//    1. ✅ ปรับ User Card ให้เล็กกระทัดรัด อยู่ตรงกลาง Header
-//    2. ✅ แสดงข้อมูลผู้ใช้งานแบบ Compact Card
-//    3. ✅ เพิ่มการรองรับ role 'osm' (อสม.) ครบทุกจุด
-// =====================================================
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -28,7 +20,7 @@ import {
 import {
   Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX,
   Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key,
-  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle
+  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle, User
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -292,7 +284,6 @@ export default function StaffManagementPage() {
 
   const handleApprove = async (pendingId: string, staffName: string) => {
     if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
-    
     try {
       console.log('✅ [handleApprove] Approving pending staff:', pendingId);
       
@@ -331,7 +322,6 @@ export default function StaffManagementPage() {
       console.log('✅ [handleApprove] User created in users table:', userData.id);
       
       // ✅ 2. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm)
-      // ✅ เพิ่ม 'osm' ในการสร้าง record ในตาราง doctors
       if (['doctor', 'helper', 'osm'].includes(pendingData.role)) {
         console.log('💾 [handleApprove] Creating doctor record for role:', pendingData.role);
         
@@ -533,7 +523,7 @@ export default function StaffManagementPage() {
             กลับ Dashboard
           </button>
           
-          {/* ✅ Header Layout: Title | User Card | Buttons */}
+          {/* ✅ Header Layout: Title | User Info Card | Buttons */}
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             
             {/* Left: Title */}
@@ -542,31 +532,43 @@ export default function StaffManagementPage() {
               <p className="text-gray-600 text-sm">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
             </div>
             
-            {/* Center: Compact User Card */}
-            <div className="flex items-center gap-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 shadow-sm">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <Users className="w-5 h-5 text-blue-600" />
+            {/* Center: Enhanced User Info Card */}
+            <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl px-4 py-3 shadow-sm">
+              <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <User className="w-6 h-6 text-white" />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
+                <div className="flex items-center gap-2 mb-1">
                   <h3 className="font-bold text-gray-800 text-sm truncate max-w-[150px]">{userName}</h3>
+                  {/* ✅ Badge ระดับแอดมิน */}
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide flex-shrink-0 ${
                     isSuperAdmin(user) ? 'bg-purple-200 text-purple-700' :
                     isHospitalAdmin(user) ? 'bg-blue-200 text-blue-700' :
                     'bg-yellow-100 text-yellow-700'
                   }`}>
-                    {isSuperAdmin(user) ? 'Super' : isHospitalAdmin(user) ? 'Admin' : 'เจ้าหน้าที่'}
+                    {isSuperAdmin(user) ? '👑 Super Admin' : isHospitalAdmin(user) ? '🏥 Hospital Admin' : 'เจ้าหน้าที่'}
                   </span>
                 </div>
-                {userHospital && (
-                  <div className="flex items-center gap-1 text-xs text-gray-500">
-                    <Hospital className="w-3 h-3" />
-                    <span className="truncate max-w-[150px]">{userHospital.name}</span>
-                    {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                      <span className="text-[10px] text-gray-400">({userHospital.parent_hospital.name})</span>
-                    )}
-                  </div>
-                )}
+                
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {/* ✅ Badge ประเภทบุคลากร */}
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
+                    {user?.role === 'osm' ? '🏘️ อสม.' : 
+                     user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
+                     user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : '️ ผู้ดูแล'}
+                  </span>
+                  
+                  {/* ✅ ข้อมูลโรงพยาบาล */}
+                  {userHospital && (
+                    <span className="flex items-center gap-1 text-gray-500">
+                      <Hospital className="w-3 h-3" />
+                      <span className="truncate max-w-[120px]">{userHospital.name}</span>
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <span className="text-[10px] text-gray-400">({userHospital.parent_hospital.name})</span>
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -792,7 +794,7 @@ export default function StaffManagementPage() {
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
                                staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
@@ -927,7 +929,7 @@ export default function StaffManagementPage() {
                           }`}>
                             {pending.role === 'admin' ? 'ผู้ดูแลระบบ' :
                              pending.role === 'doctor' ? 'แพทย์' :
-                             pending.role === 'osm'  ? 'อสม.' : 'เจ้าหน้าที่'}
+                             pending.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
                           </span>
                         </td>
                         
@@ -1347,7 +1349,7 @@ function AddStaffModal({
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
               <option value="doctor">👨‍⚕️ แพทย์</option>
-              <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
+              <option value="helper">👩‍️ เจ้าหน้าที่</option>
               {/* ✅ เพิ่มตัวเลือก อสม. */}
               <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
             </select>
