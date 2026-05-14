@@ -1,13 +1,10 @@
 // app/admin/staff/page.tsx
 // =====================================================
 // ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. ✅ แก้ไขปัญหา Trash2 is not defined
-//    2. ✅ เพิ่มการรองรับ role 'osm' (อสม.) ครบทุกจุด
-//    3. ✅ แก้ไข handleApprove - สร้าง doctors record สำหรับ 'osm'
-//    4. ✅ เพิ่ม console.log สำหรับติดตามการทำงาน (ดีบัก)
-//    5. ✅ เพิ่มคอมเมนต์อธิบายการทำงานแต่ละส่วน
-//    6. ✅ แก้ไข TypeScript types ให้รองรับ 'osm'
+// ✅ การแก้ไขรอบนี้:
+//    1. ✅ เพิ่ม console.log สำหรับ debug
+//    2. ✅ แก้ไขการแสดงผลใน tab "ปิดการใช้งาน"
+//    3. ✅ แก้ไข modal ให้แสดงข้อมูลถูกต้อง
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -61,12 +58,11 @@ interface UserHospital {
   parent_hospital?: { id: string; name: string; code: string };
 }
 
-// ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
 interface PendingStaff {
   id: string;
   id_card: string;
   full_name_th: string;
-  role: 'doctor' | 'helper' | 'admin' | 'osm'; // ✅ เพิ่ม 'osm'
+  role: 'doctor' | 'helper' | 'admin' | 'osm';
   specialization_th?: string;
   phone?: string;
   email?: string;
@@ -126,7 +122,7 @@ export default function StaffManagementPage() {
     setUser(userData);
     loadUserHospital(userData.id);
     loadHospitals();
-
+    
     // ✅ โหลด accessibleHospitalIds ก่อน แล้วค่อยโหลด staff
     loadAccessibleHospitals(userData.id);
   }, [router]);
@@ -245,6 +241,7 @@ export default function StaffManagementPage() {
         console.log('📊 [loadDeactivatedStaff] Filtered deactivated for Hospital Admin:', filteredData.length);
       }
       
+      console.log('✅ [loadDeactivatedStaff] Total deactivated staff:', filteredData.length);
       setDeactivatedStaff(filteredData);
     } catch (error) {
       console.error('❌ [loadDeactivatedStaff] Error:', error);
@@ -313,7 +310,6 @@ export default function StaffManagementPage() {
       console.log('✅ [handleApprove] User created in users table:', userData.id);
       
       // ✅ 2. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm)
-      // ✅ เพิ่ม 'osm' ในการสร้าง record ในตาราง doctors
       if (['doctor', 'helper', 'osm'].includes(pendingData.role)) {
         console.log('💾 [handleApprove] Creating doctor record for role:', pendingData.role);
         
@@ -756,7 +752,7 @@ export default function StaffManagementPage() {
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
                                staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
@@ -977,6 +973,7 @@ export default function StaffManagementPage() {
         />
       )}
 
+      {/* ✅ Deactivated Staff Modal - แก้ไขแล้ว */}
       {showDeactivatedModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -1005,12 +1002,16 @@ export default function StaffManagementPage() {
                 <div className="space-y-4">
                   {deactivatedStaff.map((staff) => {
                     const canRestore = canEditStaff(staff);
+                    console.log('📋 Rendering deactivated staff:', staff.id, staff.doctors?.full_name_th);
+                    
                     return (
                       <div key={staff.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
                         <div className="flex items-center justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-3 mb-2">
-                              <h3 className="font-semibold text-gray-800">{staff.doctors?.full_name_th || staff.full_name_th || '-'}</h3>
+                              <h3 className="font-semibold text-gray-800">
+                                {staff.doctors?.full_name_th || staff.full_name_th || '-'}
+                              </h3>
                               <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                 staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
                                 staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
@@ -1098,14 +1099,13 @@ function AddStaffModal({
   onSuccess: () => void;
   userId: string;
 }) {
-  // ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
   const [formData, setFormData] = useState({
     id_card: '',
     birth_day: '',
     birth_month: '',
     birth_year: '',
     full_name_th: '',
-    role: 'doctor' as 'admin' | 'doctor' | 'helper' | 'osm', // ✅ เพิ่ม 'osm'
+    role: 'doctor' as 'admin' | 'doctor' | 'helper' | 'osm',
     specialization_th: '',
     phone: '',
     email: '',
@@ -1135,20 +1135,19 @@ function AddStaffModal({
       alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
       return;
     }
-
-    // ✅ รวม 'osm' ในการตรวจสอบว่าต้องเลือกโรงพยาบาล
+    
     if ((formData.role === 'admin' || formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
       alert('กรุณาเลือกโรงพยาบาลสังกัด');
       return;
     }
-
+    
     if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
       return;
     }
-
+    
     setLoading(true);
-
+    
     try {
       const password = generatePassword();
       const birthYearAD = parseInt(formData.birth_year) - 543;
@@ -1314,7 +1313,7 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
-              <option value="doctor">👨‍⚕️ แพทย์</option>
+              <option value="doctor">👨‍️ แพทย์</option>
               <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
               {/* ✅ เพิ่มตัวเลือก อสม. */}
               <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
@@ -1347,7 +1346,7 @@ function AddStaffModal({
                 <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
               </select>
               <p className="text-xs text-purple-600 mt-1">
-                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br />
+                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
                 💡 Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
               </p>
             </div>
@@ -1502,7 +1501,6 @@ function EditStaffModal({
     birth_year: initialBirthDate.year,
     admin_type: staff.admin_type || null,
   });
-  
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false);
   
@@ -1522,15 +1520,15 @@ function EditStaffModal({
       alert('❌ คุณไม่มีสิทธิ์แก้ไขประเภทผู้ดูแลระบบ');
       return;
     }
-
+    
     if (!isSuper && formData.hospital_id !== staff.hospital_id && 
         formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์ย้ายเจ้าหน้าที่ไปโรงพยาบาลนี้');
       return;
     }
-
+    
     setLoading(true);
-
+    
     try {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
