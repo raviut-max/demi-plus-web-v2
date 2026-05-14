@@ -3008,3 +3008,291 @@ export async function getCoachesWithHospitals(hospitalIds?: string[]) {
   }
 }
 
+// =====================================================
+// 🆔 ID Card Assignment Functions (ใหม่)
+// =====================================================
+
+/**
+ * บันทึกการบรรจุ ID Card
+ */
+export async function assignIdCard(data: {
+  id_card: string;
+  hospital_id: string;
+  assigned_by: string;
+  notes?: string;
+}) {
+  try {
+    console.log('📝 [assignIdCard] Assigning ID Card:', data.id_card);
+    
+    const { data: assignment, error } = await supabase
+      .from('id_card_assignments')
+      .insert({
+        id_card: data.id_card,
+        hospital_id: data.hospital_id,
+        assigned_by: data.assigned_by,
+        notes: data.notes || null,
+        status: 'active',
+      })
+      .select(`
+        *,
+        hospitals (
+          id,
+          name,
+          code
+        ),
+        assigned_by_user:users!assigned_by (
+          id,
+          full_name_th
+        )
+      `)
+      .single();
+
+    if (error) {
+      console.error('❌ [assignIdCard] Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    console.log('✅ [assignIdCard] Assigned successfully');
+    return { success: true, data: assignment };
+  } catch (err: any) {
+    console.error('❌ [assignIdCard] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * ดึงรายการ ID Card ที่บรรจุแล้ว (กรองตามโรงพยาบาล)
+ */
+export async function getIdCardAssignments(hospitalIds?: string[], status?: string) {
+  try {
+    console.log('📋 [getIdCardAssignments] Fetching assignments...');
+    
+    let query = supabase
+      .from('id_card_assignments')
+      .select(`
+        *,
+        hospitals (
+          id,
+          name,
+          code,
+          type
+        ),
+        assigned_by_user:users!assigned_by (
+          id,
+          full_name_th
+        )
+      `)
+      .order('assigned_at', { ascending: false });
+
+    // กรองตามโรงพยาบาล
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    // กรองตามสถานะ
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ [getIdCardAssignments] Error:', error);
+      return [];
+    }
+
+    console.log('✅ [getIdCardAssignments] Fetched:', data?.length || 0, 'assignments');
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getIdCardAssignments] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * ดึงรายการ ID Card ที่ยังไม่ได้บรรจุ (Pending)
+ */
+export async function getPendingIdCards(hospitalIds?: string[]) {
+  try {
+    console.log('⏳ [getPendingIdCards] Fetching pending ID cards...');
+    
+    // ดึง ID Card จาก pending_staff ที่ยังไม่ได้บรรจุ
+    let query = supabase
+      .from('pending_staff')
+      .select(`
+        *,
+        hospitals (
+          id,
+          name,
+          code
+        )
+      `)
+      .eq('status', 'pending');
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('❌ [getPendingIdCards] Error:', error);
+      return [];
+    }
+
+    // กรองเอาเฉพาะที่ยังไม่มีการบรรจุ
+    const { data: assignments } = await supabase
+      .from('id_card_assignments')
+      .select('id_card')
+      .eq('status', 'active');
+
+    const assignedCards = new Set(assignments?.map(a => a.id_card) || []);
+    const pendingCards = data?.filter(item => !assignedCards.has(item.id_card)) || [];
+
+    console.log('✅ [getPendingIdCards] Found:', pendingCards.length, 'pending ID cards');
+    return pendingCards;
+  } catch (err) {
+    console.error('❌ [getPendingIdCards] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * ตรวจสอบว่า ID Card นี้ถูกบรรจุแล้วหรือไม่
+ */
+export async function checkIdCardAssignment(idCard: string) {
+  try {
+    const { data, error } = await supabase
+      .from('id_card_assignments')
+      .select(`
+        *,
+        hospitals (
+          id,
+          name,
+          code
+        )
+      `)
+      .eq('id_card', idCard)
+      .eq('status', 'active')
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('❌ [checkIdCardAssignment] Error:', error);
+      return null;
+    }
+
+    return data;
+  } catch (err) {
+    console.error('❌ [checkIdCardAssignment] Exception:', err);
+    return null;
+  }
+}
+
+/**
+ * อัปเดตสถานะการบรรจุ
+ */
+export async function updateIdCardAssignment(
+  assignmentId: string,
+  data: {
+    status?: string;
+    notes?: string;
+    hospital_id?: string;
+  }
+) {
+  try {
+    const updateData: any = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.status) updateData.status = data.status;
+    if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.hospital_id) updateData.hospital_id = data.hospital_id;
+
+    const { error } = await supabase
+      .from('id_card_assignments')
+      .update(updateData)
+      .eq('id', assignmentId);
+
+    if (error) {
+      console.error('❌ [updateIdCardAssignment] Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ [updateIdCardAssignment] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * ยกเลิกการบรรจุ
+ */
+export async function cancelIdCardAssignment(assignmentId: string) {
+  try {
+    const { error } = await supabase
+      .from('id_card_assignments')
+      .update({
+        status: 'cancelled',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assignmentId);
+
+    if (error) {
+      console.error('❌ [cancelIdCardAssignment] Error:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ [cancelIdCardAssignment] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * ดึงสถิติการบรรจุ ID Card
+ */
+export async function getIdCardAssignmentStats(hospitalIds?: string[]) {
+  try {
+    let query = supabase
+      .from('id_card_assignments')
+      .select('*', { count: 'exact', head: true });
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { count: total } = await query;
+
+    // นับแยกตามสถานะ
+    let activeQuery = supabase
+      .from('id_card_assignments')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'active');
+
+    let completedQuery = supabase
+      .from('id_card_assignments')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'completed');
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      activeQuery = activeQuery.in('hospital_id', hospitalIds);
+      completedQuery = completedQuery.in('hospital_id', hospitalIds);
+    }
+
+    const { count: active } = await activeQuery;
+    const { count: completed } = await completedQuery;
+
+    return {
+      total: total || 0,
+      active: active || 0,
+      completed: completed || 0,
+      pending: (total || 0) - (active || 0) - (completed || 0),
+    };
+  } catch (err) {
+    console.error('❌ [getIdCardAssignmentStats] Error:', err);
+    return { total: 0, active: 0, completed: 0, pending: 0 };
+  }
+}
+
