@@ -2,10 +2,9 @@
 // =====================================================
 // ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
 // ✅ การแก้ไขรอบนี้:
-//    1. ✅ เพิ่ม User Card แบบ Gradient สีฟ้า-ม่วง ด้านบน
-//    2. ✅ แสดงข้อมูลผู้ใช้งานพร้อม Badge บทบาท
-//    3. ✅ แสดงโรงพยาบาลและลูกข่าย/แม่ข่าย
-//    4. ✅ เพิ่มการรองรับ role 'osm' (อสม.) ครบทุกจุด
+//    1. ✅ ปรับ User Card ให้กระทัดรัด สวยงาม ตามแบบที่ต้องการ
+//    2. ✅ แสดงข้อมูลผู้ใช้งานแบบ Card แนวนอน
+//    3. ✅ เพิ่มการรองรับ role 'osm' (อสม.) ครบทุกจุด
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -575,49 +574,46 @@ export default function StaffManagementPage() {
             </div>
           </div>
           
-          {/* ✅ User Card - แสดงด้านบนตรงกลาง */}
-          <div className="mt-6 flex justify-center">
-            <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl shadow-xl p-6 max-w-2xl w-full">
-              <div className="flex items-center gap-4">
-                {/* User Icon */}
-                <div className="w-16 h-16 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
-                  <Users className="w-8 h-8 text-white" />
-                </div>
-                
-                {/* User Info */}
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-xl font-bold text-white">{userName}</h3>
-                    {/* Role Badge */}
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          {/* ✅ User Card - แบบกระทัดรัด */}
+          <div className="mt-6">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 max-w-3xl">
+              <div className="flex items-center gap-4 flex-wrap">
+                {/* User Icon & Name */}
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                    <Users className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-gray-800">{userName}</h3>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ${
                       isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
                       'bg-blue-200 text-blue-800'
                     }`}>
                       {isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin'}
                     </span>
                   </div>
-                  
-                  {/* Hospital Info */}
-                  {userHospital && (
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 text-white text-sm">
-                        <Hospital className="w-4 h-4" />
-                        <span className="font-medium">{userHospital.name}</span>
-                        <span className="text-xs opacity-75">
-                          ({userHospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})
-                        </span>
-                      </div>
-                      
-                      {/* Parent Hospital (ถ้าเป็นลูกข่าย) */}
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <div className="flex items-center gap-2 text-white text-xs opacity-75 ml-6">
-                          <Building2 className="w-3 h-3" />
-                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
+
+                {/* Hospital Info */}
+                {userHospital && (
+                  <div className="flex items-center gap-4 text-sm">
+                    <div className="flex items-center gap-1.5 text-gray-700">
+                      <Hospital className="w-4 h-4 text-blue-600" />
+                      <span className="font-medium">{userHospital.name}</span>
+                      <span className="text-gray-500 text-xs">
+                        ({userHospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})
+                      </span>
+                    </div>
+                    
+                    {/* Parent Hospital (ถ้าเป็นลูกข่าย) */}
+                    {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                      <div className="flex items-center gap-1.5 text-gray-600">
+                        <Building2 className="w-4 h-4 text-gray-500" />
+                        <span className="text-xs">{userHospital.parent_hospital.name}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -808,7 +804,7 @@ export default function StaffManagementPage() {
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
+                               staff.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                                staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
