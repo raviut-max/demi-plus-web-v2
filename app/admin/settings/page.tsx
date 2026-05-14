@@ -1,12 +1,14 @@
 // app/admin/settings/page.tsx
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   checkSession,
   logout,
   getUserHospitalInfo,
-  isSuperAdmin
+  getAccessibleHospitalIds,
+  isSuperAdmin,
+  getHospitalsWithHierarchy,
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -21,8 +23,11 @@ import {
   LogOut,
   AlertCircle,
   FileSpreadsheet,
+  Upload,
   UserPlus,
-  Activity
+  Database,
+  FileText,
+  Activity,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -46,6 +51,14 @@ interface SystemStats {
   pendingApprovals: number;
 }
 
+interface Hospital {
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+}
+
 export default function SettingsPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -54,6 +67,7 @@ export default function SettingsPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [stats, setStats] = useState<SystemStats>({
     totalHospitals: 0,
     totalStaff: 0,
@@ -67,15 +81,18 @@ export default function SettingsPage() {
       router.push('/admin/login');
       return;
     }
+    
     // ✅ ตรวจสอบสิทธิ์: เฉพาะ Super Admin หรือ Hospital Admin เท่านั้น
     if (!isSuperAdmin(userData) && userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบระดับสูงเท่านั้นที่เข้าถึงได้');
       router.push('/admin/dashboard');
       return;
     }
+    
     setUser(userData);
     loadUserHospital(userData.id);
     loadSystemStats();
+    loadHospitals();
     setLoading(false);
   }, [router]);
 
@@ -86,6 +103,16 @@ export default function SettingsPage() {
       setUserHospital(hospitalInfo);
     } catch (error) {
       console.error('Error loading user hospital:', error);
+    }
+  };
+
+  // ✅ โหลดข้อมูลโรงพยาบาลทั้งหมด
+  const loadHospitals = async () => {
+    try {
+      const data = await getHospitalsWithHierarchy();
+      setHospitals(data);
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
     }
   };
 
@@ -102,7 +129,7 @@ export default function SettingsPage() {
       const { count: staffCount } = await supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
-        .in('role', ['admin', 'doctor', 'helper', 'osm'])
+        .in('role', ['admin', 'doctor', 'helper'])
         .eq('is_active', true);
 
       // ✅ นับผู้ป่วย
@@ -145,6 +172,30 @@ export default function SettingsPage() {
     }
   };
 
+  // ✅ จัดกลุ่มโรงพยาบาลแบบง่าย (แทนการใช้ Map)
+  const getGroupedHospitalsData = useMemo(() => {
+    const mainHospitals = hospitals.filter(h => h.type === 'main');
+    const subHospitals = hospitals.filter(h => h.type === 'sub');
+    
+    // ✅ ใช้ object แทน Map เพื่อป้องกันปัญหา serialization
+    const hospitalGroups: Record<string, Hospital[]> = {};
+    
+    subHospitals.forEach(sub => {
+      if (sub.parent_id) {
+        if (!hospitalGroups[sub.parent_id]) {
+          hospitalGroups[sub.parent_id] = [];
+        }
+        hospitalGroups[sub.parent_id].push(sub);
+      }
+    });
+
+    return { 
+      mainHospitals, 
+      hospitalGroups,
+      allHospitals: hospitals 
+    };
+  }, [hospitals]);
+
   // ✅ Loading state
   if (loading) {
     return (
@@ -170,6 +221,7 @@ export default function SettingsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -233,6 +285,7 @@ export default function SettingsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+        
         {!isAuthenticated ? (
           /* 🔐 หน้ายืนยันรหัสผ่าน */
           <div className="bg-white rounded-xl shadow-lg p-8 max-w-md mx-auto">
@@ -342,6 +395,7 @@ export default function SettingsPage() {
 
             {/* ✅ เมนูจัดการ - แบ่งเป็นหมวดหมู่ */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              
               {/* 📊 หมวดข้อมูลผู้ป่วย */}
               <div className="lg:col-span-3">
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -349,6 +403,7 @@ export default function SettingsPage() {
                   จัดการข้อมูลผู้ป่วย
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  
                   {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
                   <button
                     onClick={() => router.push('/admin/patients/import-excel')}
@@ -427,6 +482,7 @@ export default function SettingsPage() {
                   จัดการโรงพยาบาล
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
                   {/* 🏥 ปุ่มจัดการโรงพยาบาล */}
                   <button
                     onClick={() => router.push('/admin/hospitals')}
@@ -482,6 +538,7 @@ export default function SettingsPage() {
                   จัดการเจ้าหน้าที่
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
                   {/* 👥 ปุ่มจัดการเจ้าหน้าที่ */}
                   <button
                     onClick={() => router.push('/admin/staff')}
