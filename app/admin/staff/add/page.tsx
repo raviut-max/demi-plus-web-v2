@@ -12,7 +12,7 @@ import {
   isSuperAdmin,
   isHospitalAdmin
 } from '@/lib/supabase/queries';
-import { generateDummyIdCard } from '@/lib/utils/generateDummyIdCard';
+//import { generateDummyIdCard } from '@/lib/utils/generateDummyIdCard';
 import {
   UserPlus, Calendar, Key, Save, ArrowLeft, Lock, Shield,
   Hospital, Building2, Phone, Mail, Stethoscope, AlertCircle, CheckCircle
