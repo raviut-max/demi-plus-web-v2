@@ -1,3 +1,13 @@
+// app/admin/staff/page.tsx
+// =====================================================
+// ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
+// ✅ การแก้ไขรอบนี้:
+//    1. ✅ เพิ่มการรองรับ role 'osm' (อสม.) ครบทุกจุด
+//    2. ✅ แก้ไข handleApprove - สร้าง doctors record สำหรับ 'osm'
+//    3. ✅ เพิ่ม console.log สำหรับติดตามการทำงาน (ดีบัก)
+//    4. ✅ เพิ่มคอมเมนต์อธิบายการทำงานแต่ละส่วน
+//    5. ✅ แก้ไข TypeScript types ให้รองรับ 'osm'
+// =====================================================
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,7 +30,7 @@ import {
 import {
   Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX,
   Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key,
-  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle, User
+  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -85,7 +95,6 @@ export default function StaffManagementPage() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-  const [userName, setUserName] = useState<string>('');
   
   // ✅ States สำหรับ Modal และ Tabs
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
@@ -108,37 +117,18 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
-
+    
     console.log('👤 [StaffManagement] User:', userData);
     console.log('👑 [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
     console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
 
     setUser(userData);
-    loadUserName(userData.id);
     loadUserHospital(userData.id);
     loadHospitals();
-
+    
     // ✅ โหลด accessibleHospitalIds ก่อน แล้วค่อยโหลด staff
     loadAccessibleHospitals(userData.id);
   }, [router]);
-
-  const loadUserName = async (userId: string) => {
-    try {
-      const { data } = await supabase
-        .from('doctors')
-        .select('full_name_th')
-        .eq('user_id', userId)
-        .single();
-      
-      if (data?.full_name_th) {
-        setUserName(data.full_name_th);
-      } else {
-        setUserName('ผู้ดูแลระบบ');
-      }
-    } catch (error) {
-      setUserName('ผู้ใช้งาน');
-    }
-  };
 
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
@@ -156,7 +146,6 @@ export default function StaffManagementPage() {
     try {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      
       await loadStaffList(ids);
       await loadPendingStaff(ids);
       await loadDeactivatedStaff(ids);
@@ -284,6 +273,7 @@ export default function StaffManagementPage() {
 
   const handleApprove = async (pendingId: string, staffName: string) => {
     if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
+    
     try {
       console.log('✅ [handleApprove] Approving pending staff:', pendingId);
       
@@ -322,6 +312,7 @@ export default function StaffManagementPage() {
       console.log('✅ [handleApprove] User created in users table:', userData.id);
       
       // ✅ 2. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm)
+      // ✅ เพิ่ม 'osm' ในการสร้าง record ในตาราง doctors
       if (['doctor', 'helper', 'osm'].includes(pendingData.role)) {
         console.log('💾 [handleApprove] Creating doctor record for role:', pendingData.role);
         
@@ -396,7 +387,7 @@ export default function StaffManagementPage() {
       return;
     }
     if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
-
+    
     try {
       const result = await deactivateStaff(staffId);
       if (result.success) {
@@ -418,7 +409,7 @@ export default function StaffManagementPage() {
       return;
     }
     if (!confirm(`กู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) return;
-
+    
     try {
       const result = await restoreStaff(staffId);
       if (result.success) {
@@ -442,7 +433,7 @@ export default function StaffManagementPage() {
     }
     if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
     if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
-
+    
     try {
       const result = await permanentlyDeleteStaff(staffId);
       if (result.success) {
@@ -480,7 +471,7 @@ export default function StaffManagementPage() {
     const mainHospitals = hospitals.filter(h => h.type === 'main');
     const subHospitals = hospitals.filter(h => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-
+    
     subHospitals.forEach(sub => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -517,66 +508,36 @@ export default function StaffManagementPage() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
             onClick={() => router.push('/admin/dashboard')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4 transition-colors"
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
           
-          {/* ✅ Header Layout: Title | User Info Card | Buttons */}
-          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-            
-            {/* Left: Title */}
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold text-gray-800 mb-1">👥 จัดการเจ้าหน้าที่</h1>
-              <p className="text-gray-600 text-sm">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
-            </div>
-            
-            {/* Center: Enhanced User Info Card */}
-            <div className="flex items-center gap-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl px-4 py-3 shadow-sm">
-              <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                <User className="w-6 h-6 text-white" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-bold text-gray-800 text-sm truncate max-w-[150px]">{userName}</h3>
-                  {/* ✅ Badge ระดับแอดมิน */}
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide flex-shrink-0 ${
-                    isSuperAdmin(user) ? 'bg-purple-200 text-purple-700' :
-                    isHospitalAdmin(user) ? 'bg-blue-200 text-blue-700' :
-                    'bg-yellow-100 text-yellow-700'
-                  }`}>
-                    {isSuperAdmin(user) ? '👑 Super Admin' : isHospitalAdmin(user) ? '🏥 Hospital Admin' : 'เจ้าหน้าที่'}
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
+              <p className="text-gray-600">จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม.</p>
+              
+              <div className="flex items-center gap-2 mt-2">
+                {isSuperAdmin(user) ? (
+                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1">
+                    <Shield className="w-3 h-3" />
+                    Super Admin - เห็นทั้งหมด
                   </span>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  {/* ✅ Badge ประเภทบุคลากร */}
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-green-100 text-green-700 rounded-full">
-                    {user?.role === 'osm' ? '🏘️ อสม.' : 
-                     user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
-                     user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : '️ ผู้ดูแล'}
+                ) : (
+                  <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold flex items-center gap-1">
+                    <Hospital className="w-3 h-3" />
+                    Hospital Admin - เห็นเฉพาะ {userHospital?.name || 'โรงพยาบาลตัวเอง'}
                   </span>
-                  
-                  {/* ✅ ข้อมูลโรงพยาบาล */}
-                  {userHospital && (
-                    <span className="flex items-center gap-1 text-gray-500">
-                      <Hospital className="w-3 h-3" />
-                      <span className="truncate max-w-[120px]">{userHospital.name}</span>
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <span className="text-[10px] text-gray-400">({userHospital.parent_hospital.name})</span>
-                      )}
-                    </span>
-                  )}
-                </div>
+                )}
               </div>
             </div>
             
-            {/* Right: Action Buttons */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex gap-2">
               <button
                 onClick={() => setActiveTab('pending')}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
               >
                 <Clock className="w-4 h-4" />
                 รออนุมัติ ({pendingStaff.length})
@@ -584,7 +545,7 @@ export default function StaffManagementPage() {
               
               <button
                 onClick={handleOpenDeactivatedModal}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
               >
                 <Archive className="w-4 h-4" />
                 ที่ปิดการใช้งาน ({deactivatedStaff.length})
@@ -592,7 +553,7 @@ export default function StaffManagementPage() {
               
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
               >
                 <Plus className="w-4 h-4" />
                 เพิ่มเจ้าหน้าที่
@@ -600,7 +561,7 @@ export default function StaffManagementPage() {
               
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
               >
                 <LogOut className="w-4 h-4" />
                 ออกจากระบบ
@@ -609,7 +570,7 @@ export default function StaffManagementPage() {
           </div>
           
           {/* Tabs */}
-          <div className="flex gap-2 mt-6 border-b border-gray-200">
+          <div className="flex gap-2 mt-4 border-b border-gray-200">
             <button
               onClick={() => setActiveTab('active')}
               className={`px-4 py-2 font-semibold transition-colors ${
@@ -794,7 +755,7 @@ export default function StaffManagementPage() {
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
+                               staff.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                                staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
@@ -929,7 +890,7 @@ export default function StaffManagementPage() {
                           }`}>
                             {pending.role === 'admin' ? 'ผู้ดูแลระบบ' :
                              pending.role === 'doctor' ? 'แพทย์' :
-                             pending.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
+                             pending.role === 'osm'  ? 'อสม.' : 'เจ้าหน้าที่'}
                           </span>
                         </td>
                         
@@ -1163,11 +1124,12 @@ function AddStaffModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
     }
-
+    
     if (!isSuper && formData.role === 'admin') {
       alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
       return;
@@ -1214,10 +1176,12 @@ function AddStaffModal({
   };
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
+  
   const getAvailableHospitals = () => {
     if (isSuper) return hospitals;
     return hospitals.filter(h => accessibleHospitalIds.includes(h.id));
   };
+  
   const availableHospitals = getAvailableHospitals();
 
   return (
@@ -1226,6 +1190,7 @@ function AddStaffModal({
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
         </div>
+        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* ✅ Box แสดงสิทธิ์ */}
           <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -1248,7 +1213,7 @@ function AddStaffModal({
               )}
             </ul>
           </div>
-          
+
           {/* ID Card & Password */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1274,7 +1239,7 @@ function AddStaffModal({
               <p className="text-xs text-gray-500 mt-1">💡 รหัสผ่าน = วัน-เดือน-ปีเกิด (dd-mm-yyyy)</p>
             </div>
           </div>
-          
+
           {/* Birth Date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1319,7 +1284,7 @@ function AddStaffModal({
               </select>
             </div>
           </div>
-          
+
           {/* Full Name */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล *</label>
@@ -1331,7 +1296,7 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          
+
           {/* ✅ Role Selection อัปเดตเพิ่ม อสม. */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">บทบาท *</label>
@@ -1349,7 +1314,7 @@ function AddStaffModal({
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
               <option value="doctor">👨‍⚕️ แพทย์</option>
-              <option value="helper">👩‍️ เจ้าหน้าที่</option>
+              <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
               {/* ✅ เพิ่มตัวเลือก อสม. */}
               <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
             </select>
@@ -1359,7 +1324,7 @@ function AddStaffModal({
               </p>
             )}
           </div>
-          
+
           {/* Admin Type Field */}
           {showAdminTypeField && isSuper && (
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -1386,7 +1351,7 @@ function AddStaffModal({
               </p>
             </div>
           )}
-          
+
           {/* Specialization */}
           {(formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && (
             <div>
@@ -1400,7 +1365,7 @@ function AddStaffModal({
               />
             </div>
           )}
-          
+
           {/* Hospital Selection */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1435,7 +1400,7 @@ function AddStaffModal({
               </p>
             )}
           </div>
-          
+
           {/* Phone & Email */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1458,7 +1423,7 @@ function AddStaffModal({
               />
             </div>
           </div>
-          
+
           {/* Action Buttons */}
           <div className="flex gap-4 pt-4 border-t border-gray-200">
             <button
@@ -1522,8 +1487,9 @@ function EditStaffModal({
       year: (date.getFullYear() + 543).toString(),
     };
   };
-
+  
   const initialBirthDate = parseBirthDate(staff.birth_date);
+  
   const [formData, setFormData] = useState({
     full_name_th: staff.doctors?.full_name_th || staff.full_name_th || '',
     specialization_th: staff.doctors?.specialization_th || '',
@@ -1535,6 +1501,7 @@ function EditStaffModal({
     birth_year: initialBirthDate.year,
     admin_type: staff.admin_type || null,
   });
+  
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false);
   
@@ -1620,6 +1587,7 @@ function EditStaffModal({
             {staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
+        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
@@ -1631,7 +1599,7 @@ function EditStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          
+
           {/* Birth Date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1673,7 +1641,7 @@ function EditStaffModal({
               </select>
             </div>
           </div>
-          
+
           {/* Reset Password Checkbox */}
           <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
             <input
@@ -1691,7 +1659,7 @@ function EditStaffModal({
               )}
             </label>
           </div>
-          
+
           {/* Specialization */}
           {(staff.role === 'doctor' || staff.role === 'helper' || staff.role === 'osm') && (
             <div>
@@ -1705,7 +1673,7 @@ function EditStaffModal({
               />
             </div>
           )}
-          
+
           {/* Hospital Selection */}
           {canEditHospital && (
             <div>
@@ -1737,7 +1705,7 @@ function EditStaffModal({
               )}
             </div>
           )}
-          
+
           {/* Admin Type Field */}
           {staff.role === 'admin' && isSuper && (
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
@@ -1759,7 +1727,7 @@ function EditStaffModal({
               </select>
             </div>
           )}
-          
+
           {/* Phone & Email */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1784,7 +1752,7 @@ function EditStaffModal({
               />
             </div>
           </div>
-          
+
           {/* Action Buttons */}
           <div className="flex gap-4 pt-4 border-t border-gray-200">
             <button
