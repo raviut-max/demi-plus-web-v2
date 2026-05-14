@@ -3521,44 +3521,4 @@ export function formatIdCard(idCard: string): string {
   return `${cleaned[0]}-${cleaned.slice(1,5)}-${cleaned.slice(5,10)}-${cleaned.slice(10,12)}-${cleaned[12]}`;
 }
 
-export async function permanentlyDeletePatient(patientId: string) {
-  try {
-    // ✅ 1. ลบ screening_responses ก่อน (foreign key)
-    const screenings = await supabase.from('screenings').select('id').eq('user_id', patientId);
-    if (screenings.data?.length > 0) {
-      await supabase.from('screening_responses').delete().in('screening_id', screenings.data.map(s => s.id));
-    }
-    
-    // ✅ 2-6. ลบข้อมูลที่เกี่ยวข้องทั้งหมด
-    await supabase.from('appointment_followups').delete().eq('user_id', patientId);
-    await supabase.from('goals').delete().eq('user_id', patientId);
-    await supabase.from('records').delete().eq('user_id', patientId);
-    await supabase.from('screenings').delete().eq('user_id', patientId);
-    await supabase.from('appointments').delete().eq('user_id', patientId);
-    
-    // ✅ 7. ลบ profiles
-    await supabase.from('profiles').delete().eq('id', patientId);
-    
-    // ✅ 8. ลบ users (สุดท้าย)
-    await supabase.from('users').delete().eq('id', patientId);
-    
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วยถาวร' };
-  }
-}
 
-export async function permanentlyDeleteStaff(staffId: string) {
-  try {
-    // ✅ 1. ลบจากตาราง doctors ก่อน
-    await supabase.from('doctors').delete().eq('user_id', staffId);
-    
-    // ✅ 2. ลบจากตาราง users
-    const { error } = await supabase.from('users').delete().eq('id', staffId);
-    
-    if (error) throw error;
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: 'เกิดข้อผิดพลาดในการลบเจ้าหน้าที่ถาวร' };
-  }
-}
