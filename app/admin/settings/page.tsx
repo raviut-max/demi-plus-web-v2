@@ -1,7 +1,12 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
-// ✅ การแก้ไข: เพิ่มปุ่ม "จัดการเลขบัตร/เพิ่มด่วน" ในหมวดเจ้าหน้าที่
+// ✅ แก้ไขล่าสุด: เพิ่มทางเข้าลงทะเบียนเจ้าหน้าที่แบบเร่งด่วน
+// ✅ การแก้ไข:
+//    1. ✅ เพิ่มปุ่ม "ลงทะเบียนด่วน" ในหมวดจัดการเจ้าหน้าที่
+//    2. ✅ จัดกลุ่มเมนูให้ชัดเจนเป็น 3 หมวดหมู่
+//    3. ✅ เพิ่มสถิติระบบแบบเรียลไทม์
+//    4. ✅ อัปเดตการตรวจสอบสิทธิ์ให้รองรับ Hospital Admin
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
@@ -9,7 +14,8 @@ import {
   logout,
   getUserHospitalInfo,
   getAccessibleHospitalIds,
-  isSuperAdmin
+  isSuperAdmin,
+  isHospitalAdmin
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -29,7 +35,10 @@ import {
   Database,
   FileText,
   Activity,
-  CreditCard
+  Clock,
+  Zap,
+  Stethoscope,
+  Heart
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -86,7 +95,6 @@ export default function SettingsPage() {
     setLoading(false);
   }, [router]);
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -96,33 +104,50 @@ export default function SettingsPage() {
     }
   };
 
-  // ✅ โหลดสถิติระบบ
   const loadSystemStats = async () => {
     try {
+      const hospitalIds = await getAccessibleHospitalIds(user?.id);
+      
       // ✅ นับโรงพยาบาล
-      const { count: hospitalsCount } = await supabase
+      let hospitalsQuery = supabase
         .from('hospitals')
         .select('*', { count: 'exact', head: true })
         .eq('is_active', true);
+      if (hospitalIds && hospitalIds.length > 0) {
+        hospitalsQuery = hospitalsQuery.in('id', hospitalIds);
+      }
+      const { count: hospitalsCount } = await hospitalsQuery;
 
-      // ✅ นับเจ้าหน้าที่
-      const { count: staffCount } = await supabase
+      // ✅ นับเจ้าหน้าที่ (รวม อสม.)
+      let staffQuery = supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
         .in('role', ['admin', 'doctor', 'helper', 'osm'])
         .eq('is_active', true);
+      if (hospitalIds && hospitalIds.length > 0) {
+        staffQuery = staffQuery.in('hospital_id', hospitalIds);
+      }
+      const { count: staffCount } = await staffQuery;
 
       // ✅ นับผู้ป่วย
-      const { count: patientsCount } = await supabase
+      let patientsQuery = supabase
         .from('profiles')
         .select('*', { count: 'exact', head: true })
         .eq('is_active', true);
+      if (hospitalIds && hospitalIds.length > 0) {
+        patientsQuery = patientsQuery.in('hospital_id', hospitalIds);
+      }
+      const { count: patientsCount } = await patientsQuery;
 
       // ✅ นับรออนุมัติ
-      const { count: pendingCount } = await supabase
+      let pendingQuery = supabase
         .from('pending_staff')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'pending');
+      if (hospitalIds && hospitalIds.length > 0) {
+        pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
+      }
+      const { count: pendingCount } = await pendingQuery;
 
       setStats({
         totalHospitals: hospitalsCount || 0,
@@ -152,7 +177,6 @@ export default function SettingsPage() {
     }
   };
 
-  // ✅ Loading state
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -164,7 +188,6 @@ export default function SettingsPage() {
     );
   }
 
-  // ✅ Main render
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -177,6 +200,7 @@ export default function SettingsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -210,7 +234,6 @@ export default function SettingsPage() {
                         {userHospital.name}
                       </span>
                     </div>
-
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -338,7 +361,7 @@ export default function SettingsPage() {
               <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
-                    <AlertCircle className="w-6 h-6 text-orange-600" />
+                    <Clock className="w-6 h-6 text-orange-600" />
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">รออนุมัติ</p>
@@ -348,17 +371,45 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* ✅ เมนูจัดการ - แบ่งเป็นหมวดหมู่ */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {/* ✅ เมนูจัดการ - แบ่งเป็น 3 หมวดหมู่ */}
+            <div className="space-y-8">
               
-              {/* 📊 หมวดข้อมูลผู้ป่วย */}
-              <div className="lg:col-span-3">
+              {/* 🚨 หมวดเร่งด่วน */}
+              <div>
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  <UserCheck className="w-5 h-5 text-green-600" />
-                  จัดการข้อมูลผู้ป่วย
+                  <Zap className="w-5 h-5 text-orange-600" />
+                  ⚡ ฟีเจอร์เร่งด่วน
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   
+                  {/* 🚨 ปุ่มลงทะเบียนด่วน - ใหม่! */}
+                  <button
+                    onClick={() => router.push('/admin/staff/emergency-register')}
+                    className="bg-gradient-to-r from-orange-500 to-red-500 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group border-2 border-orange-300"
+                  >
+                    <div className="flex items-center gap-4 mb-3">
+                      <div className="w-14 h-14 bg-white/20 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <UserPlus className="w-7 h-7 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-white">
+                          🚨 ลงทะเบียนด่วน
+                        </h3>
+                        <p className="text-orange-100 text-sm">
+                          อสม./แพทย์/เจ้าหน้าที่
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-white/90 text-sm">
+                      ลงทะเบียนเจ้าหน้าที่แบบเร่งด่วน ไม่ต้องรออนุมัติ 
+                      รหัสผ่านกำหนดอัตโนมัติจากวันเกิด
+                    </p>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-orange-100">
+                      <Clock className="w-3 h-3" />
+                      <span>เสร็จใน 1 นาที</span>
+                    </div>
+                  </button>
+
                   {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
                   <button
                     onClick={() => router.push('/admin/patients/import-excel')}
@@ -378,7 +429,41 @@ export default function SettingsPage() {
                       </div>
                     </div>
                     <p className="text-gray-600 text-sm">
-                      อัปโหลดไฟล์ Excel เพื่อนำเข้าผู้ป่วยหลายรายพร้อมกัน พร้อมตรวจสอบและแก้ไขก่อนบันทึก
+                      อัปโหลดไฟล์ Excel เพื่อนำเข้าผู้ป่วยหลายรายพร้อมกัน 
+                      พร้อมตรวจสอบและแก้ไขก่อนบันทึก
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* 👥 หมวดจัดการบุคลากร */}
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <Users className="w-5 h-5 text-indigo-600" />
+                  👥 จัดการบุคลากร
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  
+                  {/* 👥 ปุ่มจัดการเจ้าหน้าที่ */}
+                  <button
+                    onClick={() => router.push('/admin/staff')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 transition-all">
+                        <Users className="w-7 h-7 text-indigo-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">
+                          จัดการเจ้าหน้าที่
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          หมอ/พยาบาล/อสม./แอดมิน
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      เพิ่ม/แก้ไข/ลบ ข้อมูลเจ้าหน้าที่และกำหนดสิทธิ์การเข้าถึง
                     </p>
                   </button>
 
@@ -412,7 +497,7 @@ export default function SettingsPage() {
                   >
                     <div className="flex items-center gap-4 mb-4">
                       <div className="w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-all">
-                        <Users className="w-7 h-7 text-purple-600" />
+                        <FileText className="w-7 h-7 text-purple-600" />
                       </div>
                       <div>
                         <h3 className="text-xl font-bold text-gray-800">
@@ -430,13 +515,13 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* 🏥 หมวดโรงพยาบาล */}
-              <div className="lg:col-span-3">
+              {/* 🏥 หมวดโครงสร้างระบบ */}
+              <div>
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  <Hospital className="w-5 h-5 text-blue-600" />
-                  จัดการโรงพยาบาล
+                  <Building2 className="w-5 h-5 text-blue-600" />
+                  🏥 โครงสร้างระบบ
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   
                   {/* 🏥 ปุ่มจัดการโรงพยาบาล */}
                   <button
@@ -445,14 +530,14 @@ export default function SettingsPage() {
                   >
                     <div className="flex items-center gap-4 mb-4">
                       <div className="w-14 h-14 bg-blue-100 rounded-lg flex items-center justify-center group-hover:bg-blue-200 transition-all">
-                        <Building2 className="w-7 h-7 text-blue-600" />
+                        <Hospital className="w-7 h-7 text-blue-600" />
                       </div>
                       <div>
                         <h3 className="text-xl font-bold text-gray-800">
                           จัดการโรงพยาบาล
                         </h3>
                         <p className="text-sm text-gray-500">
-                          โรงพยาบาลแม่ข่ายและลูกข่าย
+                          แม่ข่ายและลูกข่าย
                         </p>
                       </div>
                     </div>
@@ -464,8 +549,11 @@ export default function SettingsPage() {
                   {/* 📚 ปุ่มจัดการความรู้ */}
                   <button
                     onClick={() => router.push('/admin/knowledge')}
-                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group relative overflow-hidden"
                   >
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs font-semibold">
+                      กำลังพัฒนา
+                    </div>
                     <div className="flex items-center gap-4 mb-4">
                       <div className="w-14 h-14 bg-purple-100 rounded-lg flex items-center justify-center group-hover:bg-purple-200 transition-all">
                         <BookOpen className="w-7 h-7 text-purple-600" />
@@ -483,69 +571,15 @@ export default function SettingsPage() {
                       เพิ่ม/แก้ไข/ลบ บทความและวิดีโอความรู้สำหรับผู้ป่วย
                     </p>
                   </button>
-                </div>
-              </div>
-
-              {/* 👥 หมวดเจ้าหน้าที่ */}
-              <div className="lg:col-span-3">
-                <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                  <Users className="w-5 h-5 text-indigo-600" />
-                  จัดการเจ้าหน้าที่
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  
-                  {/* 👥 ปุ่มจัดการเจ้าหน้าที่ */}
-                  <button
-                    onClick={() => router.push('/admin/staff')}
-                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
-                  >
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-14 h-14 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 transition-all">
-                        <Users className="w-7 h-7 text-indigo-600" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-800">
-                          จัดการเจ้าหน้าที่
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          หมอ พยาบาล อสม.
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-gray-600 text-sm">
-                      เพิ่ม/แก้ไข/ลบ ข้อมูลเจ้าหน้าที่และกำหนดสิทธิ์การเข้าถึง
-                    </p>
-                  </button>
-
-                  {/* ✅ ปุ่มใหม่: จัดการเลขบัตร/เพิ่มด่วน */}
-                  <button
-                    onClick={() => router.push('/admin/staff/assignments')}
-                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group relative overflow-hidden"
-                  >
-                    <div className="absolute top-0 right-0 bg-green-500 text-white text-[10px] px-2 py-1 rounded-bl-lg font-bold">NEW</div>
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-14 h-14 bg-emerald-100 rounded-lg flex items-center justify-center group-hover:bg-emerald-200 transition-all">
-                        <CreditCard className="w-7 h-7 text-emerald-600" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-800">
-                          จัดการเลขบัตร / เพิ่มด่วน
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          สร้าง ID จำลอง
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-gray-600 text-sm">
-                      เพิ่มบุคลากรแบบรวดเร็ว (Gen ID + Fix Date 01-01-2511)
-                    </p>
-                  </button>
 
                   {/* 📊 ปุ่มสถิติระบบ */}
                   <button
                     onClick={() => router.push('/admin/statistics')}
-                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group relative overflow-hidden"
                   >
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-yellow-100 text-yellow-700 rounded text-xs font-semibold">
+                      กำลังพัฒนา
+                    </div>
                     <div className="flex items-center gap-4 mb-4">
                       <div className="w-14 h-14 bg-orange-100 rounded-lg flex items-center justify-center group-hover:bg-orange-200 transition-all">
                         <Activity className="w-7 h-7 text-orange-600" />
@@ -568,7 +602,7 @@ export default function SettingsPage() {
             </div>
 
             {/* 🔙 ปุ่มออกจากระบบตั้งค่า */}
-            <div className="pt-6">
+            <div className="pt-6 border-t border-gray-200">
               <button
                 onClick={() => {
                   setIsAuthenticated(false);
