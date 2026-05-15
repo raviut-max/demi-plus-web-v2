@@ -5,21 +5,20 @@
 //    2. เพิ่มหัวข้อ 4: การ์ดภาพความฝัน (อัปโหลดรูปภาพ + คำอธิบาย)
 //    3. ย้าย "ติดตามแผนปฏิบัติกิจกรรม" จากหัวข้อ 3 → หัวข้อ 5
 //    4. ปรับเลขหัวข้อใหม่ทั้งหมด
-
+//    5. ✅ อัปเดต Header แสดงข้อมูลคนไข้และผู้ใช้งานครบถ้วน
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar } from 'lucide-react';
+import { checkSession, logout, getUserHospitalInfo, isSuperAdmin, isHospitalAdmin } from '@/lib/supabase/queries';
+import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, User, Hospital, Shield, Building2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function FollowupPage() {
   const router = useRouter();
   const params = useParams();
   const appointmentId = params.id as string;
-  
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingFloating, setUploadingFloating] = useState(false);
@@ -29,7 +28,6 @@ export default function FollowupPage() {
   const [followupRound, setFollowupRound] = useState(1);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-
   const [formData, setFormData] = useState({
     // 1. ข้อมูลสุขภาพ
     weight: '',
@@ -85,8 +83,8 @@ export default function FollowupPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
+    loadUserHospital(userData.id);
     loadAppointmentData();
   }, [router]);
 
@@ -97,11 +95,20 @@ export default function FollowupPage() {
     }
   }, [appointment]);
 
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
+
   const loadAppointmentData = async () => {
     try {
       console.log('🔍 Loading appointment:', appointmentId);
       setError(null);
-
+      
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
@@ -146,7 +153,7 @@ export default function FollowupPage() {
         .from('appointment_followups')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', appointment.user_id);
-
+      
       setFollowupRound((count || 0) + 1);
     }
   };
@@ -229,7 +236,7 @@ export default function FollowupPage() {
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
     if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
-
+    
     if (successes.length > 0) {
       setFormData(prev => ({
         ...prev,
@@ -333,7 +340,7 @@ export default function FollowupPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
+      {/* ✅ Header - ปรับปรุงใหม่แสดงข้อมูลครบถ้วน */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
@@ -344,15 +351,87 @@ export default function FollowupPage() {
             กลับ
           </button>
           
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">
-              บันทึกผลการติดตามนัดหมาย
-            </h1>
-            <p className="text-gray-600">
-              ผู้ป่วย: {patientProfile?.first_name} {patientProfile?.last_name} |
-              HN: {patientProfile?.hospital_number} |
-              ครั้งที่: {followupRound}
-            </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* ✅ ข้อมูลผู้ป่วย */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-sm font-semibold text-blue-900 mb-2">ข้อมูลผู้ป่วย</h2>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-20">ชื่อ-นามสกุล:</span>
+                      <span className="text-sm font-semibold text-gray-800">
+                        {patientProfile?.first_name} {patientProfile?.last_name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-20">HN:</span>
+                      <span className="text-sm font-mono font-semibold text-gray-800">
+                        {patientProfile?.hospital_number}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-20">ครั้งที่:</span>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-200 text-blue-800">
+                        {followupRound}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ ข้อมูลผู้ใช้งาน */}
+            <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-5">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Shield className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h2 className="text-sm font-semibold text-purple-900 mb-2">ผู้บันทึกข้อมูล</h2>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-20">ชื่อ:</span>
+                      <span className="text-sm font-semibold text-gray-800 truncate">
+                        {user?.full_name_th || 'ผู้ใช้งาน'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-20">ระดับ:</span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
+                        isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
+                        isHospitalAdmin(user) ? 'bg-blue-200 text-blue-800' :
+                        'bg-green-200 text-green-800'
+                      }`}>
+                        {isSuperAdmin(user) ? '👑 Super Admin' :
+                         isHospitalAdmin(user) ? '🏥 Hospital Admin' :
+                         user?.role === 'doctor' ? '👨‍️ แพทย์' :
+                         user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                      </span>
+                    </div>
+                    {userHospital && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600 w-20">สังกัด:</span>
+                        <div className="flex items-center gap-1 flex-1">
+                          <Hospital className="w-3 h-3 text-purple-600 flex-shrink-0" />
+                          <span className="text-xs text-gray-700 truncate" title={userHospital.name}>
+                            {userHospital.name}
+                          </span>
+                          {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                            <span className="text-[10px] text-gray-500 flex-shrink-0">
+                              ({userHospital.parent_hospital.name})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
