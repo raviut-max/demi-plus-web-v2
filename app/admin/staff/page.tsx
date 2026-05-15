@@ -1,10 +1,11 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 14 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 15 พฤษภาคม 2569
 // ✅ การแก้ไขรอบนี้:
-//    1. ✅ เพิ่ม console.log สำหรับ debug
-//    2. ✅ แก้ไขการแสดงผลใน tab "ปิดการใช้งาน"
-//    3. ✅ แก้ไข modal ให้แสดงข้อมูลถูกต้อง
+//    1. ✅ เพิ่มระบบค้นหา (Search) แบบ Real-time
+//    2. ✅ เพิ่มระบบเรียงลำดับ (Sorting) ทุกคอลัมน์
+//    3. ✅ แสดงไอคอนเรียงลำดับ (↑↓)
+//    4. ✅ ปรับปรุง UX/UI ให้สะดวกต่อการใช้งาน
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -28,7 +29,8 @@ import {
 import {
   Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX,
   Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key,
-  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle
+  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle,
+  Search, ChevronUp, ChevronDown, ChevronsUpDown, Filter
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -58,6 +60,7 @@ interface UserHospital {
   parent_hospital?: { id: string; name: string; code: string };
 }
 
+// ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
 interface PendingStaff {
   id: string;
   id_card: string;
@@ -77,6 +80,14 @@ interface PendingStaff {
   admin_type?: 'super' | 'hospital' | null;
 }
 
+type SortDirection = 'asc' | 'desc';
+type SortField = 'name' | 'role' | 'hospital' | 'id_card' | 'specialization' | 'created_at';
+
+interface SortConfig {
+  field: SortField;
+  direction: SortDirection;
+}
+
 // =====================================================
 // 🎯 MAIN COMPONENT
 // =====================================================
@@ -92,6 +103,13 @@ export default function StaffManagementPage() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  
+  // ✅ States สำหรับ Search และ Sort
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortConfig, setSortConfig] = useState<SortConfig>({
+    field: 'name',
+    direction: 'asc'
+  });
   
   // ✅ States สำหรับ Modal และ Tabs
   const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
@@ -241,12 +259,102 @@ export default function StaffManagementPage() {
         console.log('📊 [loadDeactivatedStaff] Filtered deactivated for Hospital Admin:', filteredData.length);
       }
       
-      console.log('✅ [loadDeactivatedStaff] Total deactivated staff:', filteredData.length);
       setDeactivatedStaff(filteredData);
     } catch (error) {
       console.error('❌ [loadDeactivatedStaff] Error:', error);
       setDeactivatedStaff([]);
     }
+  };
+
+  // =====================================================
+  // 🔍 SEARCH & SORT FUNCTIONS
+  // =====================================================
+  
+  // ✅ ฟังก์ชันเรียงลำดับ
+  const requestSort = (field: SortField) => {
+    let direction: SortDirection = 'asc';
+    if (sortConfig.field === field && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ field, direction });
+  };
+
+  // ✅ ฟังก์ชันกรองและเรียงลำดับข้อมูล
+  const getSortedAndFilteredStaff = (staffData: any[]) => {
+    if (!staffData) return [];
+    
+    let filtered = [...staffData];
+    
+    // ✅ กรองตามคำค้นหา
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(staff => {
+        const name = (staff.doctors?.full_name_th || staff.full_name_th || '').toLowerCase();
+        const role = (staff.role || '').toLowerCase();
+        const hospital = (staff.hospitals?.name || '').toLowerCase();
+        const idCard = (staff.id_card || '').toLowerCase();
+        const specialization = (staff.doctors?.specialization_th || '').toLowerCase();
+        
+        return (
+          name.includes(search) ||
+          role.includes(search) ||
+          hospital.includes(search) ||
+          idCard.includes(search) ||
+          specialization.includes(search)
+        );
+      });
+    }
+    
+    // ✅ เรียงลำดับ
+    const sorted = filtered.sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+      
+      switch (sortConfig.field) {
+        case 'name':
+          aValue = (a.doctors?.full_name_th || a.full_name_th || '').toLowerCase();
+          bValue = (b.doctors?.full_name_th || b.full_name_th || '').toLowerCase();
+          break;
+        case 'role':
+          aValue = (a.role || '').toLowerCase();
+          bValue = (b.role || '').toLowerCase();
+          break;
+        case 'hospital':
+          aValue = (a.hospitals?.name || '').toLowerCase();
+          bValue = (b.hospitals?.name || '').toLowerCase();
+          break;
+        case 'id_card':
+          aValue = a.id_card || '';
+          bValue = b.id_card || '';
+          break;
+        case 'specialization':
+          aValue = (a.doctors?.specialization_th || '').toLowerCase();
+          bValue = (b.doctors?.specialization_th || '').toLowerCase();
+          break;
+        case 'created_at':
+          aValue = new Date(a.created_at || 0);
+          bValue = new Date(b.created_at || 0);
+          break;
+        default:
+          return 0;
+      }
+      
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+    
+    return sorted;
+  };
+
+  // ✅ แสดงไอคอนเรียงลำดับ
+  const getSortIcon = (field: SortField) => {
+    if (sortConfig.field !== field) {
+      return <ChevronsUpDown className="w-4 h-4 text-gray-400" />;
+    }
+    return sortConfig.direction === 'asc' 
+      ? <ChevronUp className="w-4 h-4 text-blue-600" />
+      : <ChevronDown className="w-4 h-4 text-blue-600" />;
   };
 
   // =====================================================
@@ -481,6 +589,11 @@ export default function StaffManagementPage() {
     return { mainHospitals, hospitalGroups };
   };
 
+  // ✅ ข้อมูลที่กรองและเรียงลำดับแล้ว
+  const filteredStaffList = getSortedAndFilteredStaff(staffList);
+  const filteredPendingStaff = getSortedAndFilteredStaff(pendingStaff);
+  const filteredDeactivatedStaff = getSortedAndFilteredStaff(deactivatedStaff);
+
   // =====================================================
   // ⏳ LOADING STATE
   // =====================================================
@@ -510,7 +623,7 @@ export default function StaffManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
@@ -683,6 +796,33 @@ export default function StaffManagementPage() {
           </div>
         )}
 
+        {/* ✅ Search Box */}
+        <div className="mb-6">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+            <input
+              type="text"
+              placeholder="🔍 ค้นหาจาก ชื่อ-นามสกุล, บทบาท, โรงพยาบาล, ID Card, ความเชี่ยวชาญ..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          {searchTerm && (
+            <p className="text-sm text-gray-500 mt-2">
+              พบ {activeTab === 'active' ? filteredStaffList.length : activeTab === 'pending' ? filteredPendingStaff.length : filteredDeactivatedStaff.length} รายการ
+            </p>
+          )}
+        </div>
+
         {/* Active Staff Table */}
         {activeTab === 'active' && (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
@@ -690,17 +830,57 @@ export default function StaffManagementPage() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ความเชี่ยวชาญ</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('name')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ชื่อ-นามสกุล
+                        {getSortIcon('name')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('role')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        บทบาท
+                        {getSortIcon('role')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('hospital')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        โรงพยาบาล
+                        {getSortIcon('hospital')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('id_card')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ID Card
+                        {getSortIcon('id_card')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('specialization')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ความเชี่ยวชาญ
+                        {getSortIcon('specialization')}
+                      </button>
+                    </th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {staffList.length === 0 ? (
+                  {filteredStaffList.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                         <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -708,6 +888,11 @@ export default function StaffManagementPage() {
                         {!isSuperAdmin(user) && (
                           <p className="text-sm text-gray-400 mt-2">
                             🔒 คุณเห็นเฉพาะเจ้าหน้าที่ในโรงพยาบาลของคุณ
+                          </p>
+                        )}
+                        {searchTerm && (
+                          <p className="text-sm text-gray-400 mt-2">
+                            ไม่พบผลการค้นหา "{searchTerm}"
                           </p>
                         )}
                         <button
@@ -719,7 +904,7 @@ export default function StaffManagementPage() {
                       </td>
                     </tr>
                   ) : (
-                    staffList.map((staff) => {
+                    filteredStaffList.map((staff) => {
                       const canEdit = canEditStaff(staff);
                       const isSuper = staff.admin_type === 'super' || staff.role === 'super_admin';
                       
@@ -752,7 +937,7 @@ export default function StaffManagementPage() {
                             }`}>
                               {isSuper ? '👑 Super Admin' :
                                staff.role === 'admin' ? '🏥 Hospital Admin' :
-                               staff.role === 'doctor' ? '👨‍️ แพทย์' :
+                               staff.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                                staff.role === 'osm' ? '🏘️ อสม.' : '👩‍⚕️ เจ้าหน้าที่'}
                             </span>
                           </td>
@@ -834,7 +1019,15 @@ export default function StaffManagementPage() {
               <table className="w-full">
                 <thead className="bg-orange-50 border-b border-orange-200">
                   <tr>
-                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('name')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ชื่อ-นามสกุล
+                        {getSortIcon('name')}
+                      </button>
+                    </th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
                     <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
@@ -843,7 +1036,7 @@ export default function StaffManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {pendingStaff.length === 0 ? (
+                  {filteredPendingStaff.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
                         <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -856,10 +1049,15 @@ export default function StaffManagementPage() {
                             🔒 คุณเห็นเฉพาะคำขอจากโรงพยาบาลในเครือข่ายของคุณ
                           </p>
                         )}
+                        {searchTerm && (
+                          <p className="text-sm text-gray-400 mt-2">
+                            ไม่พบผลการค้นหา "{searchTerm}"
+                          </p>
+                        )}
                       </td>
                     </tr>
                   ) : (
-                    pendingStaff.map((pending) => (
+                    filteredPendingStaff.map((pending) => (
                       <tr key={pending.id} className="hover:bg-orange-50 transition-colors">
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
@@ -973,7 +1171,6 @@ export default function StaffManagementPage() {
         />
       )}
 
-      {/* ✅ Deactivated Staff Modal - แก้ไขแล้ว */}
       {showDeactivatedModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
@@ -993,17 +1190,20 @@ export default function StaffManagementPage() {
             </div>
             
             <div className="p-6">
-              {deactivatedStaff.length === 0 ? (
+              {filteredDeactivatedStaff.length === 0 ? (
                 <div className="text-center py-12">
                   <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
                   <p className="text-gray-500">ไม่มีเจ้าหน้าที่ที่ปิดการใช้งาน</p>
+                  {searchTerm && (
+                    <p className="text-sm text-gray-400 mt-2">
+                      ไม่พบผลการค้นหา "{searchTerm}"
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {deactivatedStaff.map((staff) => {
+                  {filteredDeactivatedStaff.map((staff) => {
                     const canRestore = canEditStaff(staff);
-                    console.log('📋 Rendering deactivated staff:', staff.id, staff.doctors?.full_name_th);
-                    
                     return (
                       <div key={staff.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
                         <div className="flex items-center justify-between">
@@ -1099,6 +1299,7 @@ function AddStaffModal({
   onSuccess: () => void;
   userId: string;
 }) {
+  // ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
   const [formData, setFormData] = useState({
     id_card: '',
     birth_day: '',
@@ -1135,19 +1336,20 @@ function AddStaffModal({
       alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
       return;
     }
-    
+
+    // ✅ รวม 'osm' ในการตรวจสอบว่าต้องเลือกโรงพยาบาล
     if ((formData.role === 'admin' || formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
       alert('กรุณาเลือกโรงพยาบาลสังกัด');
       return;
     }
-    
+
     if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const password = generatePassword();
       const birthYearAD = parseInt(formData.birth_year) - 543;
@@ -1190,7 +1392,6 @@ function AddStaffModal({
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* ✅ Box แสดงสิทธิ์ */}
           <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -1313,7 +1514,7 @@ function AddStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             >
               {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
-              <option value="doctor">👨‍️ แพทย์</option>
+              <option value="doctor">👨‍⚕️ แพทย์</option>
               <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
               {/* ✅ เพิ่มตัวเลือก อสม. */}
               <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
@@ -1346,7 +1547,7 @@ function AddStaffModal({
                 <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
               </select>
               <p className="text-xs text-purple-600 mt-1">
-                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
+                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ <br/>
                 💡 Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
               </p>
             </div>
@@ -1487,7 +1688,7 @@ function EditStaffModal({
       year: (date.getFullYear() + 543).toString(),
     };
   };
-
+  
   const initialBirthDate = parseBirthDate(staff.birth_date);
   
   const [formData, setFormData] = useState({
@@ -1501,6 +1702,7 @@ function EditStaffModal({
     birth_year: initialBirthDate.year,
     admin_type: staff.admin_type || null,
   });
+  
   const [loading, setLoading] = useState(false);
   const [resetPassword, setResetPassword] = useState(false);
   
@@ -1520,15 +1722,15 @@ function EditStaffModal({
       alert('❌ คุณไม่มีสิทธิ์แก้ไขประเภทผู้ดูแลระบบ');
       return;
     }
-    
+
     if (!isSuper && formData.hospital_id !== staff.hospital_id && 
         formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
       alert('❌ คุณไม่มีสิทธิ์ย้ายเจ้าหน้าที่ไปโรงพยาบาลนี้');
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
@@ -1586,7 +1788,6 @@ function EditStaffModal({
             {staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
-        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
