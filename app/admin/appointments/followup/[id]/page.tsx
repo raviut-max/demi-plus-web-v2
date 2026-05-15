@@ -17,6 +17,7 @@ export default function FollowupPage() {
   const router = useRouter();
   const params = useParams();
   const appointmentId = params.id as string;
+  
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,7 @@ export default function FollowupPage() {
   const [followupRound, setFollowupRound] = useState(1);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     // 1. ข้อมูลสุขภาพ
     weight: '',
@@ -42,15 +44,15 @@ export default function FollowupPage() {
     adaptation_obstacles: '',
     adaptation_opportunities: '',
     adaptation_other: '',
-    
+
     // ✅ 3. กราฟวัดลอยจม (ใหม่)
     floating_chart_image_url: '',
     floating_chart_summary: '',
-    
+
     // ✅ 4. การ์ดภาพความฝัน (ใหม่)
     dream_card_image_url: '',
     dream_card_description: '',
-    
+
     // 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5)
     food_amount_status: 'not_in_plan',
     food_type_status: 'not_in_plan',
@@ -58,15 +60,15 @@ export default function FollowupPage() {
     food_amount_note: '',
     food_type_note: '',
     movement_note: '',
-    
+
     // 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6)
     confidence_score: 5,
     confidence_improvement_plan: '',
-    
+
     // 7. สรุป (เดิม 5 → 7)
     summary: '',
     recommendations: '',
-    
+
     // 8. สถานะการติดตาม (เดิม 6 → 8)
     followup_status: 'fair',
   });
@@ -88,6 +90,13 @@ export default function FollowupPage() {
     loadAppointmentData();
   }, [router]);
 
+  // ✅ useEffect สำหรับนับรอบ followup
+  useEffect(() => {
+    if (appointment?.user_id) {
+      loadFollowupRound();
+    }
+  }, [appointment]);
+
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -97,18 +106,11 @@ export default function FollowupPage() {
     }
   };
 
-  // ✅ useEffect สำหรับนับรอบ followup
-  useEffect(() => {
-    if (appointment?.user_id) {
-      loadFollowupRound();
-    }
-  }, [appointment]);
-
   const loadAppointmentData = async () => {
     try {
       console.log('🔍 Loading appointment:', appointmentId);
       setError(null);
-
+      
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
@@ -153,7 +155,7 @@ export default function FollowupPage() {
         .from('appointment_followups')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', appointment.user_id);
-
+      
       setFollowupRound((count || 0) + 1);
     }
   };
@@ -236,7 +238,7 @@ export default function FollowupPage() {
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
     if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
-
+    
     if (successes.length > 0) {
       setFormData(prev => ({
         ...prev,
@@ -408,8 +410,8 @@ export default function FollowupPage() {
                       }`}>
                         {isSuperAdmin(user) ? '👑 Super Admin' :
                          isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                         user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                         user?.role === 'doctor' ? '👨‍️ แพทย์' :
+                         user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 'ผู้ดูแล'}
                       </span>
                     </div>
                     {userHospital && (
@@ -488,9 +490,23 @@ export default function FollowupPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ความดันโลหิต (mmHg)</label>
               <div className="flex gap-2">
-                <input type="number" name="blood_pressure_sys" value={formData.blood_pressure_sys} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="SYS" />
+                <input
+                  type="number"
+                  name="blood_pressure_sys"
+                  value={formData.blood_pressure_sys}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="SYS"
+                />
                 <span className="flex items-center">/</span>
-                <input type="number" name="blood_pressure_dia" value={formData.blood_pressure_dia} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="DIA" />
+                <input
+                  type="number"
+                  name="blood_pressure_dia"
+                  value={formData.blood_pressure_dia}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  placeholder="DIA"
+                />
               </div>
             </div>
             <div>
@@ -526,7 +542,6 @@ export default function FollowupPage() {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      // ใช้ฟังก์ชัน handleImageUpload โดยตรง
                       handleImageUpload(e, 'life_schedule_image_url', () => {});
                     }
                   }}
@@ -553,13 +568,34 @@ export default function FollowupPage() {
                 <option value="other">อื่นๆ</option>
               </select>
               {formData.adaptation_summary === 'obstacles' && (
-                <textarea name="adaptation_obstacles" value={formData.adaptation_obstacles} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2" placeholder="อธิบายอุปสรรค/ความกังวล..." />
+                <textarea
+                  name="adaptation_obstacles"
+                  value={formData.adaptation_obstacles}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2"
+                  placeholder="อธิบายอุปสรรค/ความกังวล..."
+                />
               )}
               {formData.adaptation_summary === 'opportunities' && (
-                <textarea name="adaptation_opportunities" value={formData.adaptation_opportunities} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2" placeholder="อธิบายโอกาส..." />
+                <textarea
+                  name="adaptation_opportunities"
+                  value={formData.adaptation_opportunities}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2"
+                  placeholder="อธิบายโอกาส..."
+                />
               )}
               {formData.adaptation_summary === 'other' && (
-                <textarea name="adaptation_other" value={formData.adaptation_other} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2" placeholder="อธิบายอื่นๆ..." />
+                <textarea
+                  name="adaptation_other"
+                  value={formData.adaptation_other}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg mt-2"
+                  placeholder="อธิบายอื่นๆ..."
+                />
               )}
             </div>
           </div>
