@@ -3109,53 +3109,7 @@ export async function getIdCardAssignments(hospitalIds?: string[], status?: stri
   }
 }
 
-/**
- * ดึงรายการ ID Card ที่ยังไม่ได้บรรจุ (Pending)
- */
-export async function getPendingIdCards(hospitalIds?: string[]) {
-  try {
-    console.log('⏳ [getPendingIdCards] Fetching pending ID cards...');
-    
-    // ดึง ID Card จาก pending_staff ที่ยังไม่ได้บรรจุ
-    let query = supabase
-      .from('pending_staff')
-      .select(`
-        *,
-        hospitals (
-          id,
-          name,
-          code
-        )
-      `)
-      .eq('status', 'pending');
 
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('hospital_id', hospitalIds);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('❌ [getPendingIdCards] Error:', error);
-      return [];
-    }
-
-    // กรองเอาเฉพาะที่ยังไม่มีการบรรจุ
-    const { data: assignments } = await supabase
-      .from('id_card_assignments')
-      .select('id_card')
-      .eq('status', 'active');
-
-    const assignedCards = new Set(assignments?.map(a => a.id_card) || []);
-    const pendingCards = data?.filter(item => !assignedCards.has(item.id_card)) || [];
-
-    console.log('✅ [getPendingIdCards] Found:', pendingCards.length, 'pending ID cards');
-    return pendingCards;
-  } catch (err) {
-    console.error('❌ [getPendingIdCards] Exception:', err);
-    return [];
-  }
-}
 
 /**
  * ตรวจสอบว่า ID Card นี้ถูกบรรจุแล้วหรือไม่
