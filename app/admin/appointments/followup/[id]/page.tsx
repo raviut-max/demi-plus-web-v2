@@ -1,22 +1,17 @@
 // app/admin/appointments/followup/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 23 เมษายน 2569
-// ✅ การแก้ไข:
-//    1. เพิ่มหัวข้อ 3: กราฟวัดลอยจม (อัปโหลดรูปภาพ + สรุป)
-//    2. เพิ่มหัวข้อ 4: การ์ดภาพความฝัน (อัปโหลดรูปภาพ + คำอธิบาย)
-//    3. ย้าย "ติดตามแผนปฏิบัติกิจกรรม" จากหัวข้อ 3 → หัวข้อ 5
-//    4. ปรับเลขหัวข้อใหม่ทั้งหมด
-//    5. ✅ อัปเดต Header แสดงข้อมูลคนไข้และผู้ใช้งานครบถ้วน
 'use client';
+
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getUserHospitalInfo, isSuperAdmin, isHospitalAdmin } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, User, Hospital, Shield, Building2 } from 'lucide-react';
+import { checkSession, logout, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { ArrowLeft, Save, Upload, AlertCircle, Calendar, User, Hospital, Building2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function FollowupPage() {
   const router = useRouter();
   const params = useParams();
   const appointmentId = params.id as string;
+  
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -28,6 +23,7 @@ export default function FollowupPage() {
   const [followupRound, setFollowupRound] = useState(1);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     // 1. ข้อมูลสุขภาพ
     weight: '',
@@ -43,15 +39,15 @@ export default function FollowupPage() {
     adaptation_opportunities: '',
     adaptation_other: '',
     
-    // ✅ 3. กราฟวัดลอยจม (ใหม่)
+    // 3. กราฟวัดลอยจม (ใหม่)
     floating_chart_image_url: '',
     floating_chart_summary: '',
     
-    // ✅ 4. การ์ดภาพความฝัน (ใหม่)
+    // 4. การ์ดภาพความฝัน (ใหม่)
     dream_card_image_url: '',
     dream_card_description: '',
     
-    // 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5)
+    // 5. ติดตามแผนปฏิบัติกิจกรรม
     food_amount_status: 'not_in_plan',
     food_type_status: 'not_in_plan',
     movement_status: 'not_in_plan',
@@ -59,19 +55,18 @@ export default function FollowupPage() {
     food_type_note: '',
     movement_note: '',
     
-    // 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6)
+    // 6. คะแนนไม้บรรทัดวัดใจ
     confidence_score: 5,
     confidence_improvement_plan: '',
     
-    // 7. สรุป (เดิม 5 → 7)
+    // 7. สรุป
     summary: '',
     recommendations: '',
     
-    // 8. สถานะการติดตาม (เดิม 6 → 8)
+    // 8. สถานะการติดตาม
     followup_status: 'fair',
   });
 
-  // ✅ useEffect สำหรับตรวจสอบ session และโหลดข้อมูลเริ่มต้น
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -88,7 +83,6 @@ export default function FollowupPage() {
     loadAppointmentData();
   }, [router]);
 
-  // ✅ useEffect สำหรับนับรอบ followup
   useEffect(() => {
     if (appointment?.user_id) {
       loadFollowupRound();
@@ -106,9 +100,7 @@ export default function FollowupPage() {
 
   const loadAppointmentData = async () => {
     try {
-      console.log('🔍 Loading appointment:', appointmentId);
       setError(null);
-      
       const { data: aptData, error: aptError } = await supabase
         .from('appointments')
         .select('*')
@@ -153,7 +145,6 @@ export default function FollowupPage() {
         .from('appointment_followups')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', appointment.user_id);
-      
       setFollowupRound((count || 0) + 1);
     }
   };
@@ -165,40 +156,35 @@ export default function FollowupPage() {
     });
   };
 
-  // ✅ ฟังก์ชันอัปโหลดรูปภาพ (ใช้สำหรับทั้ง 2 รูป)
   const handleImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    fieldName: 'floating_chart_image_url' | 'dream_card_image_url',
+    fieldName: 'floating_chart_image_url' | 'dream_card_image_url' | 'life_schedule_image_url',
     setUploading: React.Dispatch<React.SetStateAction<boolean>>
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
+    
     try {
       setUploading(true);
 
-      // ตรวจสอบขนาดไฟล์
       const maxSize = 5 * 1024 * 1024;
       if (file.size > maxSize) {
         alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
         return;
       }
 
-      // ตรวจสอบประเภทไฟล์
       if (!file.type.startsWith('image/')) {
         alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
         return;
       }
 
-      // สร้างชื่อไฟล์
       const fileExt = file.name.split('.').pop();
       const timestamp = Date.now();
       const randomStr = Math.random().toString(36).substring(2, 15);
       const fileName = `${appointment?.user_id}_${followupRound}_${fieldName}_${timestamp}_${randomStr}.${fileExt}`;
 
-      // อัปโหลดไฟล์
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('followup-images') // ✅ ต้องสร้าง bucket นี้ใน Supabase Storage
+        .from('followup-images')
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false,
@@ -207,15 +193,13 @@ export default function FollowupPage() {
 
       if (uploadError) throw uploadError;
 
-      // สร้าง Signed URL
       const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from('followup-images')
-        .createSignedUrl(fileName, 60 * 60 * 24 * 365); // 1 ปี
+        .createSignedUrl(fileName, 60 * 60 * 24 * 365);
 
       if (signedUrlError) throw signedUrlError;
       if (!signedUrlData?.signedUrl) throw new Error('ไม่สามารถสร้าง Signed URL ได้');
 
-      // บันทึก URL ลง formData
       setFormData({
         ...formData,
         [fieldName]: signedUrlData.signedUrl,
@@ -230,13 +214,11 @@ export default function FollowupPage() {
     }
   };
 
-  // ✅ Auto-generate summary
   useEffect(() => {
     const successes: string[] = [];
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
     if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
-    
     if (successes.length > 0) {
       setFormData(prev => ({
         ...prev,
@@ -249,7 +231,7 @@ export default function FollowupPage() {
     e.preventDefault();
     setSaving(true);
     setError(null);
-
+    
     try {
       const currentUser = checkSession();
       if (!currentUser || !currentUser.id) {
@@ -276,11 +258,11 @@ export default function FollowupPage() {
         adaptation_opportunities: formData.adaptation_opportunities || null,
         adaptation_other: formData.adaptation_other || null,
         
-        // ✅ 3. กราฟวัดลอยจม
+        // 3. กราฟวัดลอยจม
         floating_chart_image_url: formData.floating_chart_image_url || null,
         floating_chart_summary: formData.floating_chart_summary || null,
         
-        // ✅ 4. การ์ดภาพความฝัน
+        // 4. การ์ดภาพความฝัน
         dream_card_image_url: formData.dream_card_image_url || null,
         dream_card_description: formData.dream_card_description || null,
         
@@ -314,7 +296,6 @@ export default function FollowupPage() {
 
       if (saveError) throw saveError;
 
-      // อัปเดตสถานะนัดหมาย
       await supabase
         .from('appointments')
         .update({ status: 'completed', updated_at: new Date().toISOString() })
@@ -340,7 +321,7 @@ export default function FollowupPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ✅ Header - ปรับปรุงใหม่แสดงข้อมูลครบถ้วน */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button
@@ -351,84 +332,41 @@ export default function FollowupPage() {
             กลับ
           </button>
           
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* ✅ ข้อมูลผู้ป่วย */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-5">
-              <div className="flex items-start gap-3 mb-3">
-                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-sm font-semibold text-blue-900 mb-2">ข้อมูลผู้ป่วย</h2>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-20">ชื่อ-นามสกุล:</span>
-                      <span className="text-sm font-semibold text-gray-800">
-                        {patientProfile?.first_name} {patientProfile?.last_name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-20">HN:</span>
-                      <span className="text-sm font-mono font-semibold text-gray-800">
-                        {patientProfile?.hospital_number}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-20">ครั้งที่:</span>
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-200 text-blue-800">
-                        {followupRound}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+            {/* Left: Title & Patient Info */}
+            <div className="flex-1">
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                บันทึกผลการติดตามนัดหมาย
+              </h1>
+              <p className="text-gray-600">
+                ผู้ป่วย: {patientProfile?.first_name} {patientProfile?.last_name} | 
+                HN: {patientProfile?.hospital_number} | 
+                ครั้งที่: {followupRound}
+              </p>
             </div>
 
-            {/* ✅ ข้อมูลผู้ใช้งาน */}
-            <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-5">
-              <div className="flex items-start gap-3 mb-3">
-                <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Shield className="w-5 h-5 text-white" />
+            {/* Right: User Info Card */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm min-w-[280px]">
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-sm font-semibold text-purple-900 mb-2">ผู้บันทึกข้อมูล</h2>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-20">ชื่อ:</span>
-                      <span className="text-sm font-semibold text-gray-800 truncate">
-                        {user?.full_name_th || 'ผู้ใช้งาน'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-600 w-20">ระดับ:</span>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ${
-                        isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
-                        isHospitalAdmin(user) ? 'bg-blue-200 text-blue-800' :
-                        'bg-green-200 text-green-800'
-                      }`}>
-                        {isSuperAdmin(user) ? '👑 Super Admin' :
-                         isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                         user?.role === 'doctor' ? '👨‍️ แพทย์' :
-                         user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 'ผู้ดูแล'}
-                      </span>
-                    </div>
-                    {userHospital && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-600 w-20">สังกัด:</span>
-                        <div className="flex items-center gap-1 flex-1">
-                          <Hospital className="w-3 h-3 text-purple-600 flex-shrink-0" />
-                          <span className="text-xs text-gray-700 truncate" title={userHospital.name}>
-                            {userHospital.name}
-                          </span>
-                          {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                            <span className="text-[10px] text-gray-500 flex-shrink-0">
-                              ({userHospital.parent_hospital.name})
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                  <h3 className="font-bold text-gray-800 text-sm mb-1 truncate">
+                    {user?.full_name_th || 'ผู้ใช้งาน'}
+                  </h3>
+                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
+                    <span className="px-2 py-0.5 bg-blue-200 text-blue-800 rounded font-semibold">
+                      {user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
+                       user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                    </span>
                   </div>
+                  {userHospital && (
+                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="truncate">{userHospital.name}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -523,13 +461,7 @@ export default function FollowupPage() {
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      // ใช้ฟังก์ชัน handleImageUpload โดยตรง
-                      handleImageUpload(e, 'life_schedule_image_url', () => {});
-                    }
-                  }}
+                  onChange={(e) => handleImageUpload(e, 'life_schedule_image_url', () => {})}
                   className="hidden"
                 />
               </label>
@@ -565,7 +497,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* ✅ 3. กราฟวัดลอยจม (ใหม่) */}
+        {/* 3. กราฟวัดลอยจม (ใหม่) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">3</span>
@@ -605,7 +537,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* ✅ 4. การ์ดภาพความฝัน (ใหม่) */}
+        {/* 4. การ์ดภาพความฝัน (ใหม่) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 text-sm font-bold">4</span>
@@ -645,7 +577,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5) */}
+        {/* 5. ติดตามแผนปฏิบัติกิจกรรม */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">5</span>
@@ -691,7 +623,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6) */}
+        {/* 6. คะแนนไม้บรรทัดวัดใจ */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -721,7 +653,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 7. สรุป (เดิม 5 → 7) */}
+        {/* 7. สรุป */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center text-teal-600 text-sm font-bold">7</span>
@@ -753,7 +685,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 8. สถานะการติดตาม (เดิม 6 → 8) */}
+        {/* 8. สถานะการติดตาม */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-bold">8</span>
