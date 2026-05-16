@@ -6,6 +6,7 @@
 //    3. ✅ เพิ่ม Validation และคำแนะนำ
 //    4. ✅ ลบฟิลด์ รพ.สต. ออก
 //    5. ✅ แสดงข้อผิดพลาดที่ชัดเจนเมื่อข้อมูลซ้ำ
+//    6. ✅ ✅ เพิ่มบทบาท 'osm' ให้สามารถใช้งานหน้านี้ได้
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -151,7 +152,8 @@ export default function NewPatientPage() {
       router.push('/admin/login');
       return;
     }
-    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+    // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
+    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
@@ -165,7 +167,7 @@ export default function NewPatientPage() {
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
+
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -186,7 +188,7 @@ export default function NewPatientPage() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-      
+
       // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
       const allHospitals = await getHospitalsWithHierarchy();
       
@@ -238,7 +240,6 @@ export default function NewPatientPage() {
       ...formData,
       [name]: value,
     });
-    
     // ✅ ล้าง error เมื่อผู้ใช้เริ่มแก้ไข
     if (validationErrors[name]) {
       setValidationErrors({
@@ -277,7 +278,7 @@ export default function NewPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-    
+
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -293,51 +294,51 @@ export default function NewPatientPage() {
   // ✅ Validate ฟอร์มก่อนส่ง
   const validateForm = (): boolean => {
     const errors: {[key: string]: string} = {};
-    
+
     // ✅ ตรวจสอบเลขบัตรประชาชน
     if (!formData.id_card) {
       errors.id_card = 'กรุณากรอกเลขบัตรประชาชน';
     } else if (formData.id_card.replace(/\D/g, '').length !== 13) {
       errors.id_card = 'เลขบัตรประชาชนต้อง 13 หลัก';
     }
-    
+
     // ✅ ตรวจสอบชื่อ-นามสกุล
     if (!formData.first_name) errors.first_name = 'กรุณากรอกชื่อ';
     if (!formData.last_name) errors.last_name = 'กรุณากรอกนามสกุล';
-    
+
     // ✅ ตรวจสอบ HN
     if (!formData.hospital_number) {
       errors.hospital_number = 'กรุณากรอกเลขที่ผู้ป่วย (HN)';
     }
-    
+
     // ✅ ตรวจสอบวันเกิด
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       errors.birth_date = 'กรุณากรอกวันเกิดให้ครบถ้วน';
     }
-    
+
     // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       errors.address = 'กรุณาเลือกที่อยู่ให้ครบถ้วน';
     }
-    
+
     // ✅ ตรวจสอบโรงพยาบาล
     if (!formData.hospital_id) {
       errors.hospital_id = 'กรุณาเลือกโรงพยาบาลสังกัด';
     }
-    
+
     // ✅ ตรวจสอบรหัสผ่าน
     if (formData.password !== formData.confirmPassword) {
       errors.password = 'รหัสผ่านไม่ตรงกัน';
     }
-    
+
     setValidationErrors(errors);
-    
+
     if (Object.keys(errors).length > 0) {
       const firstError = Object.values(errors)[0];
       setError(`❌ ${firstError}`);
       return false;
     }
-    
+
     return true;
   };
 
@@ -345,12 +346,11 @@ export default function NewPatientPage() {
     e.preventDefault();
     setError('');
     setValidationErrors({});
-    
     console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
     console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
-    
+
     // ✅ Validate ฟอร์มก่อน
     if (!validateForm()) {
       return;
@@ -427,7 +427,7 @@ export default function NewPatientPage() {
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
         
-        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
+        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย 
         let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
         
         if (result.error?.includes('23505') || result.error?.includes('duplicate key')) {
@@ -513,7 +513,7 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -538,7 +538,8 @@ export default function NewPatientPage() {
                       </p>
                       <p className="text-xs text-gray-500">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
+                         user?.role === 'helper' ? '👩‍💼 เจ้าหน้าที่' : '🏘️ อสม.'}
                       </p>
                     </div>
                   </div>
