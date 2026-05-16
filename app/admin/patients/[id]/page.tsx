@@ -1,19 +1,16 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานในส่วนหัว
-//    2. แสดงชื่อ, ระดับ, สังกัดโรงพยาบาล
-//    3. แสดงแม่ข่าย/ลูกข่าย (ถ้ามี)
+//    1. อนุญาตให้ อสม. เข้าถึงได้
+//    2. อสม. ดูรายละเอียด, ประวัติ, ทำแบบประเมิน, แก้ไขได้
+//    3. อสม. ไม่สามารถลบข้อมูลได้
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
-  getPatientDetail,
-  getUserHospitalInfo,
-  isSuperAdmin,
-  isHospitalAdmin
+  getPatientDetail
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -28,8 +25,8 @@ import {
   User,
   Heart,
   Hospital,
-  Shield,
-  Building2
+  Trash2,
+  Lock
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -49,13 +46,16 @@ interface NextAppointment {
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const patientId = params.id as string;
-
+  
+  // ✅ ตรวจสอบว่ามาจากไหน
+  const fromPage = searchParams.get('from') || 'patients';
+  
   const [user, setUser] = useState<any>(null);
-  const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
-
+  
   // ✅ State สำหรับข้อมูลจริงจากฐานข้อมูล
   const [nextAppointment, setNextAppointment] = useState<NextAppointment | null>(null);
   const [screeningCount, setScreeningCount] = useState(0);
@@ -67,24 +67,17 @@ export default function PatientDetailPage() {
       router.push('/admin/login');
       return;
     }
-    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+    
+    // ✅ เพิ่ม 'osm' ให้สามารถเข้าถึงได้
+    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+    
     setUser(userData);
-    loadUserHospital(userData.id);
     loadData();
   }, [router]);
-
-  const loadUserHospital = async (userId: string) => {
-    try {
-      const hospitalInfo = await getUserHospitalInfo(userId);
-      setUserHospital(hospitalInfo);
-    } catch (error) {
-      console.error('Error loading user hospital:', error);
-    }
-  };
 
   const loadData = async () => {
     try {
@@ -226,9 +219,24 @@ export default function PatientDetailPage() {
     return (weight / (heightInM * heightInM)).toFixed(1);
   };
 
+  // ✅ ฟังก์ชันจัดการปุ่มกลับ - กลับไปตามที่มา
+  const handleGoBack = () => {
+    console.log('🔙 [DEBUG] Going back, from:', fromPage);
+    if (fromPage === 'appointments') {
+      router.push('/admin/appointments/view');
+    } else {
+      router.push('/admin/patients');
+    }
+  };
+
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
+  };
+
+  // ✅ ตรวจสอบสิทธิ์การลบ - อสม. ลบไม่ได้
+  const canDelete = () => {
+    return user?.role !== 'osm';
   };
 
   if (loading) {
@@ -244,12 +252,13 @@ export default function PatientDetailPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={() => router.push('/admin/patients')}
+            onClick={handleGoBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับรายการผู้ป่วย
+            กลับ{fromPage === 'appointments' ? 'หน้าดูนัดหมาย' : 'รายการผู้ป่วย'}
           </button>
 
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -263,46 +272,7 @@ export default function PatientDetailPage() {
                 PAM: {patient?.pam_level || 'L1'}
               </p>
             </div>
-            
-            {/* ✅ การ์ดแสดงข้อมูลผู้ใช้งาน */}
-            <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-4 shadow-sm">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <Shield className="w-5 h-5 text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-gray-800 text-sm mb-1 truncate">
-                    {user?.full_name_th || 'ผู้ใช้งาน'}
-                  </h3>
-                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
-                      isHospitalAdmin(user) ? 'bg-blue-200 text-blue-800' :
-                      user?.role === 'doctor' ? 'bg-green-200 text-green-800' :
-                      user?.role === 'helper' ? 'bg-yellow-200 text-yellow-800' :
-                      'bg-gray-200 text-gray-800'
-                    }`}>
-                      {isSuperAdmin(user) ? '👑 Super Admin' :
-                       isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                       user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ดูแล'}
-                    </span>
-                  </div>
-                  {userHospital && (
-                    <div className="flex items-center gap-1 text-xs text-gray-600">
-                      <Hospital className="w-3 h-3 text-purple-600" />
-                      <span className="truncate max-w-[150px]">{userHospital.name}</span>
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <span className="text-[10px] text-gray-500">
-                          ({userHospital.parent_hospital.name})
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
+          
             <div className="flex gap-2">
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
@@ -311,7 +281,30 @@ export default function PatientDetailPage() {
                 <Edit className="w-4 h-4" />
                 แก้ไขข้อมูล
               </button>
-              
+            
+              {/* ✅ แสดงปุ่มลบเฉพาะผู้ที่ไม่ใช่อสม. */}
+              {canDelete() && (
+                <button
+                  onClick={async () => {
+                    if (confirm('คุณต้องการลบผู้ป่วยนี้หรือไม่?')) {
+                      // เรียกฟังก์ชันลบจาก lib
+                      const { deletePatient } = await import('@/lib/supabase/queries');
+                      const result = await deletePatient(patientId);
+                      if (result.success) {
+                        alert('ลบผู้ป่วยสำเร็จ!');
+                        router.push('/admin/patients');
+                      } else {
+                        alert('เกิดข้อผิดพลาด: ' + result.error);
+                      }
+                    }
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  ลบ
+                </button>
+              )}
+            
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -429,7 +422,7 @@ export default function PatientDetailPage() {
             <ClipboardCheck className="w-4 h-4" />
             ทำแบบประเมิน (PAM/PROMs)
           </button>
-          
+        
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -437,7 +430,7 @@ export default function PatientDetailPage() {
             <FileText className="w-4 h-4" />
             ดูประวัติการประเมิน
           </button>
-          
+        
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -445,7 +438,7 @@ export default function PatientDetailPage() {
             <Activity className="w-4 h-4" />
             ดูประวัติการติดตาม
           </button>
-          
+        
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
@@ -624,14 +617,14 @@ export default function PatientDetailPage() {
                 <p className="text-gray-500">รหัสไปรษณีย์</p>
                 <p className="font-semibold">{patient?.postal_code || '-'}</p>
               </div>
-              
+            
               {/* ✅ แสดงข้อมูลโรงพยาบาล (แทน รพสต) */}
               <div className="border-t border-gray-200 pt-3 mt-3">
                 <div className="flex items-center gap-2 mb-2">
                   <Hospital className="w-4 h-4 text-blue-600" />
                   <p className="font-bold text-gray-800">โรงพยาบาลสังกัด</p>
                 </div>
-                
+              
                 {patient?.hospitals ? (
                   <div className="space-y-2">
                     {/* ชื่อโรงพยาบาล */}
@@ -644,7 +637,7 @@ export default function PatientDetailPage() {
                         ({patient.hospitals.code})
                       </p>
                     </div>
-                    
+                  
                     {/* ประเภทโรงพยาบาล */}
                     <div>
                       <p className="text-gray-500 text-xs">ประเภท</p>
@@ -684,7 +677,7 @@ export default function PatientDetailPage() {
             <Heart className="w-6 h-6 text-red-500" />
             ผู้ติดต่อฉุกเฉิน
           </h2>
-          
+        
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* ผู้ติดต่อฉุกเฉิน (1 คน) */}
             <div className="border border-gray-200 rounded-lg p-4">
