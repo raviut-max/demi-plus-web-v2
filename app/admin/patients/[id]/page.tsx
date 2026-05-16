@@ -1,17 +1,19 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ลบวันที่วินิจฉัยออก (ไม่ใช้แล้ว)
-//    2. เพิ่มแสดงค่าน้ำตาล (blood_sugar)
-//    3. ดึงข้อมูลนัดหมาย/ประเมิน/ติดตาม จากฐานข้อมูลจริง
-
+//    1. เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานในส่วนหัว
+//    2. แสดงชื่อ, ระดับ, สังกัดโรงพยาบาล
+//    3. แสดงแม่ข่าย/ลูกข่าย (ถ้ามี)
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import {
   checkSession,
   logout,
-  getPatientDetail
+  getPatientDetail,
+  getUserHospitalInfo,
+  isSuperAdmin,
+  isHospitalAdmin
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -25,7 +27,9 @@ import {
   Phone,
   User,
   Heart,
-  Hospital
+  Hospital,
+  Shield,
+  Building2
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -45,16 +49,13 @@ interface NextAppointment {
 export default function PatientDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const searchParams = useSearchParams();
   const patientId = params.id as string;
-  
-  // ✅ ตรวจสอบว่ามาจากไหน
-  const fromPage = searchParams.get('from') || 'patients';
-  
+
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
-  
+
   // ✅ State สำหรับข้อมูลจริงจากฐานข้อมูล
   const [nextAppointment, setNextAppointment] = useState<NextAppointment | null>(null);
   const [screeningCount, setScreeningCount] = useState(0);
@@ -72,15 +73,25 @@ export default function PatientDetailPage() {
       return;
     }
     setUser(userData);
+    loadUserHospital(userData.id);
     loadData();
   }, [router]);
+
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
       console.log('📡 Loading patient detail:', patientId);
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
-      
+
       // ✅ โหลดข้อมูลจริงจากฐานข้อมูล
       await Promise.all([
         loadNextAppointment(patientId),
@@ -215,16 +226,6 @@ export default function PatientDetailPage() {
     return (weight / (heightInM * heightInM)).toFixed(1);
   };
 
-  // ✅ ฟังก์ชันจัดการปุ่มกลับ - กลับไปตามที่มา
-  const handleGoBack = () => {
-    console.log('🔙 [DEBUG] Going back, from:', fromPage);
-    if (fromPage === 'appointments') {
-      router.push('/admin/appointments/view');
-    } else {
-      router.push('/admin/patients');
-    }
-  };
-
   const handleLogout = () => {
     logout();
     router.push('/admin/login');
@@ -243,15 +244,14 @@ export default function PatientDetailPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ปุ่มกลับ - กลับไปตามที่มา */}
           <button
-            onClick={handleGoBack}
+            onClick={() => router.push('/admin/patients')}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับ{fromPage === 'appointments' ? 'หน้าดูนัดหมาย' : 'รายการผู้ป่วย'}
+            กลับรายการผู้ป่วย
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -264,6 +264,45 @@ export default function PatientDetailPage() {
               </p>
             </div>
             
+            {/* ✅ การ์ดแสดงข้อมูลผู้ใช้งาน */}
+            <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Shield className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-gray-800 text-sm mb-1 truncate">
+                    {user?.full_name_th || 'ผู้ใช้งาน'}
+                  </h3>
+                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
+                      isHospitalAdmin(user) ? 'bg-blue-200 text-blue-800' :
+                      user?.role === 'doctor' ? 'bg-green-200 text-green-800' :
+                      user?.role === 'helper' ? 'bg-yellow-200 text-yellow-800' :
+                      'bg-gray-200 text-gray-800'
+                    }`}>
+                      {isSuperAdmin(user) ? '👑 Super Admin' :
+                       isHospitalAdmin(user) ? '🏥 Hospital Admin' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                    </span>
+                  </div>
+                  {userHospital && (
+                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                      <Hospital className="w-3 h-3 text-purple-600" />
+                      <span className="truncate max-w-[150px]">{userHospital.name}</span>
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <span className="text-[10px] text-gray-500">
+                          ({userHospital.parent_hospital.name})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="flex gap-2">
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
