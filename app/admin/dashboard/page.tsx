@@ -1,9 +1,13 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มสิทธิ์ 'osm' ให้เข้าถึงหน้าแดชบอร์ดได้
-//    2. กำหนดเมนูที่ อสม. เข้าถึงได้ (ยกเว้น จัดการเจ้าหน้าที่ และ ตั้งค่า)
-//    3. ปรับ Badge แสดงบทบาทให้แสดง "🏘️ อสม." เมื่อเป็น role osm
+//    1. แสดงข้อมูลผู้ใช้งานที่ login (ชื่อ, บทบาท, โรงพยาบาล)
+//    2. แสดงลำดับชั้นโรงพยาบาล (แม่ข่าย → ลูกข่าย)
+//    3. Badge แสดงประเภทโรงพยาบาล
+//    4. ✅ สถิติ Dashboard กรองตามโรงพยาบาลที่เข้าถึงได้
+//    5. ✅ Super Admin เห็นทั้งหมด, Hospital Admin เห็นเฉพาะที่สังกัด
+//    6. เพิ่มปุ่ม Logout และ UI สอดคล้องกับหน้าอื่นๆ
+
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -74,12 +78,12 @@ export default function AdminDashboard() {
       router.push('/admin/login');
       return;
     }
-    // ✅ แก้ไข: เพิ่ม 'osm' ในการตรวจสอบสิทธิ์
-    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
+    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
@@ -105,6 +109,7 @@ export default function AdminDashboard() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      
       // ✅ โหลดสถิติหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไปด้วย)
       loadDashboardStats(ids);
     } catch (error) {
@@ -132,7 +137,7 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - แสดงตามสิทธิ์ (อัปเดตเพิ่ม 'osm' ในเมนูที่เข้าถึงได้)
+  // ✅ เมนูจัดการระบบ - แสดงตามสิทธิ์
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -140,7 +145,7 @@ export default function AdminDashboard() {
       icon: <Users className="w-6 h-6" />,
       color: 'from-blue-500 to-cyan-500',
       href: '/admin/patients',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'แบบประเมิน',
@@ -148,7 +153,7 @@ export default function AdminDashboard() {
       icon: <ClipboardCheck className="w-6 h-6" />,
       color: 'from-purple-500 to-pink-500',
       href: '/admin/screening',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'เป้าหมาย',
@@ -156,7 +161,7 @@ export default function AdminDashboard() {
       icon: <Target className="w-6 h-6" />,
       color: 'from-green-500 to-emerald-500',
       href: '/admin/goals',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'นัดหมาย',
@@ -164,7 +169,7 @@ export default function AdminDashboard() {
       icon: <Calendar className="w-6 h-6" />,
       color: 'from-orange-500 to-red-500',
       href: '/admin/appointments',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'จัดการเจ้าหน้าที่',
@@ -172,7 +177,7 @@ export default function AdminDashboard() {
       icon: <UserCheck className="w-6 h-6" />,
       color: 'from-indigo-500 to-purple-500',
       href: '/admin/staff',
-      allowedRoles: ['admin'], // ❌ เฉพาะ Admin เท่านั้น
+      allowedRoles: ['admin'], // ✅ เฉพาะ Admin
     },
     {
       title: 'รายงาน',
@@ -180,7 +185,7 @@ export default function AdminDashboard() {
       icon: <BarChart3 className="w-6 h-6" />,
       color: 'from-red-500 to-pink-500',
       href: '/admin/reports',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper'],
     },
     {
       title: 'ตั้งค่า',
@@ -188,7 +193,7 @@ export default function AdminDashboard() {
       icon: <Settings className="w-6 h-6" />,
       color: 'from-gray-500 to-slate-500',
       href: '/admin/settings',
-      allowedRoles: ['admin'], // ❌ เฉพาะ Admin เท่านั้น
+      allowedRoles: ['admin'], // ✅ เฉพาะ Admin เท่านั้น
     },
   ];
 
@@ -230,10 +235,8 @@ export default function AdminDashboard() {
                       {user?.full_name_th || 'ผู้ดูแลระบบ'}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {/* ✅ แก้ไข: เพิ่มการแสดงผลสำหรับ role 'osm' */}
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
