@@ -4,7 +4,8 @@
 //    1. ลบวันที่วินิจฉัยออก (ไม่ใช้แล้ว)
 //    2. เพิ่มแสดงค่าน้ำตาล (blood_sugar)
 //    3. ดึงข้อมูลนัดหมาย/ประเมิน/ติดตาม จากฐานข้อมูลจริง
-//    4. ✅ เพิ่ม User Info Card แสดงรายละเอียดผู้ใช้งานในส่วนหัว
+//    4. ✅ เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานในส่วนหัว
+//    5. ✅ อนุญาตให้ อสม. เข้าถึงและใช้งานได้ (ยกเว้นลบข้อมูล)
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -12,7 +13,9 @@ import {
   checkSession,
   logout,
   getPatientDetail,
-  getUserHospitalInfo
+  getUserHospitalInfo,
+  isSuperAdmin,
+  isHospitalAdmin
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -27,7 +30,8 @@ import {
   User,
   Heart,
   Hospital,
-  Shield
+  Shield,
+  Building2
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -69,17 +73,19 @@ export default function PatientDetailPage() {
       router.push('/admin/login');
       return;
     }
-    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+    
+    // ✅ อนุญาตให้ อสม. เข้าถึงได้
+    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+    
     setUser(userData);
     loadUserHospital(userData.id);
     loadData();
   }, [router]);
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -244,6 +250,51 @@ export default function PatientDetailPage() {
     router.push('/admin/login');
   };
 
+  // ✅ ฟังก์ชันตรวจสอบสิทธิ์การลบ (อสม. ลบไม่ได้)
+  const canDeleteData = () => {
+    return user?.role !== 'osm';
+  };
+
+  // ✅ ฟังก์ชันแสดง Badge บทบาท
+  const getRoleBadge = () => {
+    if (!user) return null;
+    
+    const roleConfig: any = {
+      'osm': { 
+        text: '🏘️ อสม.', 
+        bg: 'bg-orange-100', 
+        textCol: 'text-orange-700'
+      },
+      'admin': { 
+        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', 
+        bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100',
+        textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700'
+      },
+      'doctor': { 
+        text: '👨‍⚕️ แพทย์', 
+        bg: 'bg-green-100', 
+        textCol: 'text-green-700'
+      },
+      'helper': { 
+        text: '👩‍⚕️ เจ้าหน้าที่', 
+        bg: 'bg-yellow-100', 
+        textCol: 'text-yellow-700'
+      }
+    };
+
+    const config = roleConfig[user.role] || { 
+      text: user.role, 
+      bg: 'bg-gray-100', 
+      textCol: 'text-gray-700'
+    };
+
+    return (
+      <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
+        {config.text}
+      </span>
+    );
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -277,39 +328,53 @@ export default function PatientDetailPage() {
                 PAM: {patient?.pam_level || 'L1'}
               </p>
             </div>
-
-            {/* ✅ User Info Card - แสดงรายละเอียดผู้ใช้งาน */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm min-w-[280px]">
+            
+            {/* ✅ การ์ดแสดงข้อมูลผู้ใช้งาน */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm">
               <div className="flex items-start gap-3">
-                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <User className="w-6 h-6 text-white" />
+                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Shield className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-gray-800 text-sm mb-1 truncate">
-                    {user?.full_name_th || 'ผู้ใช้งาน'}
-                  </h3>
-                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
-                    <span className="px-2 py-0.5 bg-blue-200 text-blue-800 rounded font-semibold">
-                      {user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
-                       user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 
-                       user?.role === 'osm' ? '🏘️ อสม.' : 'ผู้ดูแล'}
-                    </span>
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="font-semibold text-gray-800 text-sm">
+                      {user?.full_name_th || 'ผู้ใช้งาน'}
+                    </h3>
+                    {getRoleBadge()}
                   </div>
+                  
+                  {/* ข้อมูลโรงพยาบาล */}
                   {userHospital && (
-                    <div className="flex items-center gap-1 text-xs text-gray-600">
-                      <Hospital className="w-3 h-3 text-blue-600" />
-                      <span className="truncate">{userHospital.name}</span>
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <span className="text-[10px] text-gray-500">
-                          ({userHospital.parent_hospital.name})
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center gap-1.5 text-gray-600">
+                        <Hospital className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                        <span className="truncate font-medium">
+                          {userHospital.name}
                         </span>
+                      </div>
+                      
+                      {/* แสดงประเภทโรงพยาบาล */}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1.5 text-green-600">
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">
+                            ลูกข่าย: {userHospital.parent_hospital.name}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {userHospital.type === 'main' && (
+                        <div className="flex items-center gap-1.5 text-purple-600">
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span>แม่ข่าย</span>
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
               </div>
             </div>
-          
+
             <div className="flex gap-2">
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
@@ -318,7 +383,7 @@ export default function PatientDetailPage() {
                 <Edit className="w-4 h-4" />
                 แก้ไขข้อมูล
               </button>
-            
+              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -436,7 +501,7 @@ export default function PatientDetailPage() {
             <ClipboardCheck className="w-4 h-4" />
             ทำแบบประเมิน (PAM/PROMs)
           </button>
-        
+          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -444,7 +509,7 @@ export default function PatientDetailPage() {
             <FileText className="w-4 h-4" />
             ดูประวัติการประเมิน
           </button>
-        
+          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -452,7 +517,7 @@ export default function PatientDetailPage() {
             <Activity className="w-4 h-4" />
             ดูประวัติการติดตาม
           </button>
-        
+          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
@@ -631,14 +696,14 @@ export default function PatientDetailPage() {
                 <p className="text-gray-500">รหัสไปรษณีย์</p>
                 <p className="font-semibold">{patient?.postal_code || '-'}</p>
               </div>
-            
+              
               {/* ✅ แสดงข้อมูลโรงพยาบาล (แทน รพสต) */}
               <div className="border-t border-gray-200 pt-3 mt-3">
                 <div className="flex items-center gap-2 mb-2">
                   <Hospital className="w-4 h-4 text-blue-600" />
                   <p className="font-bold text-gray-800">โรงพยาบาลสังกัด</p>
                 </div>
-              
+                
                 {patient?.hospitals ? (
                   <div className="space-y-2">
                     {/* ชื่อโรงพยาบาล */}
@@ -651,7 +716,7 @@ export default function PatientDetailPage() {
                         ({patient.hospitals.code})
                       </p>
                     </div>
-                  
+                    
                     {/* ประเภทโรงพยาบาล */}
                     <div>
                       <p className="text-gray-500 text-xs">ประเภท</p>
@@ -691,7 +756,7 @@ export default function PatientDetailPage() {
             <Heart className="w-6 h-6 text-red-500" />
             ผู้ติดต่อฉุกเฉิน
           </h2>
-        
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* ผู้ติดต่อฉุกเฉิน (1 คน) */}
             <div className="border border-gray-200 rounded-lg p-4">
