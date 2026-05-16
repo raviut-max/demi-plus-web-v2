@@ -1,16 +1,13 @@
 // app/admin/patients/[id]/followup-history/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มปุ่ม "บันทึกติดตามใหม่" ด้านบนหน้า
-//    2. ตรวจสอบว่ามีการนัดหมายที่ยังไม่ได้ติดตามหรือไม่
-//    3. แสดง confirm dialog แบบง่าย (ไม่ต้องแจ้งว่าไม่พบนัดหมาย)
-
+//    1. เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานในส่วนหัว
+//    2. แสดงชื่อ, บทบาท, สังกัดโรงพยาบาล (แม่ข่าย/ลูกข่าย)
 'use client';
-
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { checkSession, logout, getPatientDetail, getPatientFollowupHistory } from '@/lib/supabase/queries';
-import { ArrowLeft, Calendar, Activity, Heart, TrendingUp, FileText, Download, Printer, Plus } from 'lucide-react';
+import { checkSession, logout, getPatientDetail, getPatientFollowupHistory, getUserHospitalInfo, isSuperAdmin, isHospitalAdmin } from '@/lib/supabase/queries';
+import { ArrowLeft, Calendar, Activity, Heart, TrendingUp, FileText, Download, Printer, Plus, User, Hospital, Building2, Shield } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function FollowupHistoryPage() {
@@ -18,11 +15,11 @@ export default function FollowupHistoryPage() {
   const params = useParams();
   const patientId = params.id as string;
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   const [followups, setFollowups] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
-  
   // ✅ State สำหรับตรวจสอบการนัดหมาย
   const [hasUnfollowedAppointment, setHasUnfollowedAppointment] = useState(false);
   const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null);
@@ -39,8 +36,18 @@ export default function FollowupHistoryPage() {
       return;
     }
     setUser(userData);
+    loadUserHospital(userData.id);
     loadData();
   }, [router]);
+
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading user hospital:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -68,9 +75,8 @@ export default function FollowupHistoryPage() {
   const checkUnfollowedAppointments = async (pid: string) => {
     try {
       console.log('🔍 Checking unfollowed appointments for:', pid);
-      
       // ดึงนัดหมายที่เสร็จสิ้นแล้วทั้งหมด
-      const {  appointmentsData } = await supabase
+      const { appointmentsData } = await supabase
         .from('appointments')
         .select('id, appointment_date, status')
         .eq('user_id', pid)
@@ -82,7 +88,7 @@ export default function FollowupHistoryPage() {
         const latestApt = appointmentsData[0];
         
         // ตรวจสอบว่ามี followup แล้วหรือยัง
-        const {  existingFollowup } = await supabase
+        const { existingFollowup } = await supabase
           .from('appointment_followups')
           .select('id')
           .eq('appointment_id', latestApt.id)
@@ -110,7 +116,6 @@ export default function FollowupHistoryPage() {
     console.log('🔴 New Followup button clicked');
     console.log('hasUnfollowedAppointment:', hasUnfollowedAppointment);
     console.log('latestAppointmentId:', latestAppointmentId);
-
     if (hasUnfollowedAppointment && latestAppointmentId) {
       // ✅ มีการนัดหมายที่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม
       console.log('🔗 Has unfollowed appointment → Navigate to followup form');
@@ -241,8 +246,8 @@ export default function FollowupHistoryPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับหน้าผู้ป่วย
           </button>
-          
-          <div className="flex items-center justify-between">
+
+          <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
                 📋 ประวัติการติดตามนัดหมาย
@@ -253,7 +258,46 @@ export default function FollowupHistoryPage() {
                 ทั้งหมด: {followups.length} ครั้ง
               </p>
             </div>
-            
+
+            {/* ✅ User Info Card - การ์ดแสดงข้อมูลผู้ใช้งาน */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm min-w-[280px]">
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-gray-800 text-sm mb-1 truncate">
+                    {user?.full_name_th || 'ผู้ใช้งาน'}
+                  </h3>
+                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
+                    <span className={`px-2 py-0.5 rounded font-semibold ${
+                      isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
+                      isHospitalAdmin(user) ? 'bg-blue-200 text-blue-800' :
+                      user?.role === 'doctor' ? 'bg-green-200 text-green-800' :
+                      user?.role === 'helper' ? 'bg-yellow-200 text-yellow-800' :
+                      'bg-gray-200 text-gray-800'
+                    }`}>
+                      {isSuperAdmin(user) ? '👑 Super Admin' :
+                       isHospitalAdmin(user) ? '🏥 Hospital Admin' :
+                       user?.role === 'doctor' ? '👨‍️ แพทย์' :
+                       user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                    </span>
+                  </div>
+                  {userHospital && (
+                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="truncate">{userHospital.name}</span>
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <span className="text-[10px] text-gray-500">
+                          ({userHospital.parent_hospital.name})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             <div className="flex gap-2">
               {/* ✅ ปุ่มบันทึกติดตามใหม่ */}
               <button
@@ -528,7 +572,7 @@ export default function FollowupHistoryPage() {
                       className="w-full bg-blue-500 rounded-t-lg transition-all hover:bg-blue-600"
                       style={{
                         height: followup.weight ? `${(followup.weight / 150) * 100}%` : '0%',
-                        minHeight: followup.weight ? '20px' : '0'
+                        minHeight: followup.weight ? '20px' : '0' 
                       }}
                     ></div>
                     <p className="text-xs text-gray-600 mt-2 text-center">
