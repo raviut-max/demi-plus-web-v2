@@ -1,9 +1,9 @@
 // app/admin/patients/new/page.tsx
-// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
 //    1. ✅ อนุญาตให้อสม. (osm) ใช้งานหน้านี้ได้
-//    2. ✅ แสดงโรงพยาบาลทั้งแม่ข่ายและลูกข่ายที่เกี่ยวข้องกับผู้ใช้เท่านั้น
-//    3. ✅ ทุกสิทธิ์ (อสม, หมอ, เจ้าหน้าที่) เลือกได้ทั้งแม่ข่ายและลูกข่าย
+//    2. ✅ แสดงโรงพยาบาลทั้งแม่ข่ายและลูกข่ายที่เกี่ยวข้องกับผู้ใช้เท่านั้น (Network-based)
+//    3. ✅ แสดงโค้ชที่อยู่ในเครือข่ายโรงพยาบาลของผู้ใช้ พร้อมชื่อโรงพยาบาลสังกัด
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -14,7 +14,6 @@ import {
   getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  getAccessibleHospitalIds,
   isSuperAdmin
 } from '@/lib/supabase/queries';
 import {
@@ -97,16 +96,16 @@ export default function NewPatientPage() {
   const [loading, setLoading] = useState(false);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({});
+  const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
+
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -149,7 +148,7 @@ export default function NewPatientPage() {
       return;
     }
     
-    // ✅ แก้ไข: อนุญาตให้อสม. (osm) เข้าถึงหน้านี้ได้
+    // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -158,64 +157,80 @@ export default function NewPatientPage() {
 
     console.log('👤 [NewPatient] User:', userData);
     setUser(userData);
+    
+    // โหลดข้อมูลโรงพยาบาลของผู้ใช้ และ ข้อมูลเครือข่าย
     loadUserHospital(userData.id);
-    loadAccessibleHospitals(userData.id);
+    loadNetworkData(userData.id);
   }, [router]);
 
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้ (สำหรับแสดง Header)
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
       console.error('❌ [loadUserHospital] Error:', error);
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้ (Super Admin vs Hospital Admin vs OSM)
-  const loadAccessibleHospitals = async (userId: string) => {
+  // ✅ โหลดข้อมูลเครือข่ายโรงพยาบาลและโค้ช (Network-based)
+  const loadNetworkData = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
-      const ids = await getAccessibleHospitalIds(userId);
-      setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
+      setLoading(true);
       
-      // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
+      // 1. โหลดข้อมูลโรงพยาบาลของผู้ใช้เพื่อหา Parent/Network
+      const uHospital = await getUserHospitalInfo(userId);
+      
+      // 2. โหลดโรงพยาบาลทั้งหมดมากรอง
       const allHospitals = await getHospitalsWithHierarchy();
       
-      // ✅ กรองโรงพยาบาลตามสิทธิ์ - แสดงเฉพาะที่อยู่ใน accessibleHospitalIds
-      let filteredHospitals = allHospitals;
-      if (ids.length > 0 && !isSuperAdmin(user)) {
-        console.log('🔒 [loadAccessibleHospitals] Filtering hospitals for non-super-admin');
-        filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
+      let networkHospitals: Hospital[] = [];
+
+      if (uHospital) {
+        // หา Root ของเครือข่าย (แม่ข่ายสูงสุด)
+        // ถ้า user อยู่แม่ข่าย -> root คือตัวมันเอง
+        // ถ้า user อยู่ลูกข่าย -> root คือ parent_id ของมัน
+        let rootId = uHospital.type === 'main' ? uHospital.id : uHospital.parent_id;
+
+        if (rootId) {
+          // กรองเอาเฉพาะ รพ. ที่เป็นแม่ข่ายนี้ (rootId) หรือ เป็นลูกข่ายของแม่ข่ายนี้
+          networkHospitals = allHospitals.filter(h => 
+            h.id === rootId || h.parent_id === rootId
+          );
+          console.log('🏥 [loadNetworkData] Network Hospitals:', networkHospitals.length);
+        } else {
+           // กรณีไม่มี parent (และไม่ใช่ main?) 
+           networkHospitals = [uHospital as Hospital]; 
+        }
       } else {
-        console.log('👑 [loadAccessibleHospitals] Super Admin - showing all hospitals');
+        // กรณีผู้ใช้ไม่มีสังกัด (เช่น Super Admin ที่อาจจะไม่ได้ผูก hospital) แสดงทั้งหมด
+        networkHospitals = allHospitals;
       }
-      
-      setHospitals(filteredHospitals);
-      console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
-      
-      // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
-      await loadCoaches(ids);
+
+      setHospitals(networkHospitals);
+
+      // 3. โหลดโค้ชเฉพาะในเครือข่ายนี้
+      const networkHospitalIds = networkHospitals.map(h => h.id);
+      await loadCoaches(networkHospitalIds);
+
     } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      console.error('❌ [loadNetworkData] Error:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
   // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และ users)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
@@ -238,7 +253,6 @@ export default function NewPatientPage() {
       ...formData,
       [name]: value,
     });
-    
     // ✅ ล้าง error เมื่อผู้ใช้เริ่มแก้ไข
     if (validationErrors[name]) {
       setValidationErrors({
@@ -292,7 +306,7 @@ export default function NewPatientPage() {
 
   // ✅ Validate ฟอร์มก่อนส่ง
   const validateForm = (): boolean => {
-    const errors: {[key: string]: string} = {};
+    const errors: { [key: string]: string } = {};
 
     // ✅ ตรวจสอบเลขบัตรประชาชน
     if (!formData.id_card) {
@@ -345,23 +359,13 @@ export default function NewPatientPage() {
     e.preventDefault();
     setError('');
     setValidationErrors({});
-
+    
     console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
-    console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
-    console.log('👑 [handleSubmit] Is Super Admin:', isSuperAdmin(user));
 
     // ✅ Validate ฟอร์มก่อน
     if (!validateForm()) {
       return;
-    }
-
-    // ✅ ตรวจสอบสิทธิ์การเลือกโรงพยาบาล (Hospital Admin ต้องเลือกใน scope ของตัวเอง)
-    if (accessibleHospitalIds.length > 0 && !isSuperAdmin(user)) {
-      if (!accessibleHospitalIds.includes(formData.hospital_id)) {
-        setError('❌ คุณไม่มีสิทธิ์เลือกโรงพยาบาลนี้ กรุณาเลือกโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง');
-        return;
-      }
     }
 
     setLoading(true);
@@ -427,7 +431,7 @@ export default function NewPatientPage() {
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
         
-        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
+        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย 
         let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
         
         if (result.error?.includes('23505') || result.error?.includes('duplicate key')) {
@@ -539,7 +543,7 @@ export default function NewPatientPage() {
                       <p className="text-xs text-gray-500">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
                          user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
-                         user?.role === 'helper' ? '👩‍💼 เจ้าหน้าที่' : '🏘️ อสม.'}
+                         user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
@@ -554,7 +558,7 @@ export default function NewPatientPage() {
                     </div>
 
                     {/* ✅ Badge ประเภทโรงพยาบาล */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 justify-end">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
                           🏥 แม่ข่าย
@@ -606,14 +610,8 @@ export default function NewPatientPage() {
                 </strong>
               </li>
               <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
-              <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง</li>
-              <li>• โค้ชที่เลือกได้: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)</li>
-              {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
-                <li className="text-blue-600">• 🔒 แสดงเฉพาะโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง</li>
-              )}
-              {isSuperAdmin(user) && (
-                <li className="text-purple-600">• 👑 Super Admin - เข้าถึงได้ทั้งหมด</li>
-              )}
+              <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง (ในเครือข่ายของคุณ)</li>
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน (ในเครือข่ายของคุณ)</li>
             </ul>
           </div>
         </div>
@@ -1001,7 +999,7 @@ export default function NewPatientPage() {
             ที่อยู่และโรงพยาบาลสังกัด
           </h2>
         
-          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical (กรองตามสิทธิ์) */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แสดงเฉพาะเครือข่ายที่เกี่ยวข้อง */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               🏥 โรงพยาบาลสังกัด <span className="text-red-500">*</span>
@@ -1038,21 +1036,6 @@ export default function NewPatientPage() {
             <p className="text-xs text-gray-500 mt-1">
               💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
             </p>
-            {hospitals.length === 0 && (
-              <p className="text-xs text-orange-500 mt-1">
-                ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
-              </p>
-            )}
-            {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
-              <p className="text-xs text-blue-600 mt-1">
-                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
-              </p>
-            )}
-            {isSuperAdmin(user) && (
-              <p className="text-xs text-purple-600 mt-1">
-                👑 Super Admin - แสดงโรงพยาบาลทั้งหมด ({hospitals.length} แห่ง)
-              </p>
-            )}
           </div>
         
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1206,7 +1189,7 @@ export default function NewPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช (แก้ไขแล้ว - แสดงโค้ชจากโรงพยาบาลที่เข้าถึงได้) */}
+        {/* 6. กำหนดโค้ช (แก้ไขแล้ว - แสดงโค้ชจากโรงพยาบาลเครือข่าย) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -1236,18 +1219,8 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
+              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลในเครือข่ายของคุณ)
             </p>
-            {coaches.length === 0 && (
-              <p className="text-xs text-orange-500 mt-1">
-                ⚠️ ยังไม่มีโค้ชในโรงพยาบาลที่คุณมีสิทธิ์
-              </p>
-            )}
-            {isSuperAdmin(user) && (
-              <p className="text-xs text-purple-600 mt-1">
-                👑 Super Admin - สามารถเลือกโค้ชจากทุกโรงพยาบาล
-              </p>
-            )}
           </div>
         </div>
 
