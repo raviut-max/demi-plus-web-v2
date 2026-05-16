@@ -1,16 +1,18 @@
 // app/admin/patients/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 24 เมษายน 2569
 // ✅ การแก้ไข:
-//    1. อนุญาตให้ อสม. เข้าถึงได้
-//    2. อสม. ดูรายละเอียด, ประวัติ, ทำแบบประเมิน, แก้ไขได้
-//    3. อสม. ไม่สามารถลบข้อมูลได้
+//    1. ลบวันที่วินิจฉัยออก (ไม่ใช้แล้ว)
+//    2. เพิ่มแสดงค่าน้ำตาล (blood_sugar)
+//    3. ดึงข้อมูลนัดหมาย/ประเมิน/ติดตาม จากฐานข้อมูลจริง
+//    4. ✅ เพิ่ม User Info Card แสดงรายละเอียดผู้ใช้งานในส่วนหัว
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
-  getPatientDetail
+  getPatientDetail,
+  getUserHospitalInfo
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft,
@@ -25,8 +27,7 @@ import {
   User,
   Heart,
   Hospital,
-  Trash2,
-  Lock
+  Shield
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -53,6 +54,7 @@ export default function PatientDetailPage() {
   const fromPage = searchParams.get('from') || 'patients';
   
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
   
@@ -67,17 +69,25 @@ export default function PatientDetailPage() {
       router.push('/admin/login');
       return;
     }
-    
-    // ✅ เพิ่ม 'osm' ให้สามารถเข้าถึงได้
-    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
+    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-    
     setUser(userData);
+    loadUserHospital(userData.id);
     loadData();
   }, [router]);
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('❌ [loadUserHospital] Error:', error);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -234,11 +244,6 @@ export default function PatientDetailPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ตรวจสอบสิทธิ์การลบ - อสม. ลบไม่ได้
-  const canDelete = () => {
-    return user?.role !== 'osm';
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -272,6 +277,38 @@ export default function PatientDetailPage() {
                 PAM: {patient?.pam_level || 'L1'}
               </p>
             </div>
+
+            {/* ✅ User Info Card - แสดงรายละเอียดผู้ใช้งาน */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm min-w-[280px]">
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <User className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-bold text-gray-800 text-sm mb-1 truncate">
+                    {user?.full_name_th || 'ผู้ใช้งาน'}
+                  </h3>
+                  <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
+                    <span className="px-2 py-0.5 bg-blue-200 text-blue-800 rounded font-semibold">
+                      {user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
+                       user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 
+                       user?.role === 'osm' ? '🏘️ อสม.' : 'ผู้ดูแล'}
+                    </span>
+                  </div>
+                  {userHospital && (
+                    <div className="flex items-center gap-1 text-xs text-gray-600">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="truncate">{userHospital.name}</span>
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <span className="text-[10px] text-gray-500">
+                          ({userHospital.parent_hospital.name})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           
             <div className="flex gap-2">
               <button
@@ -281,29 +318,6 @@ export default function PatientDetailPage() {
                 <Edit className="w-4 h-4" />
                 แก้ไขข้อมูล
               </button>
-            
-              {/* ✅ แสดงปุ่มลบเฉพาะผู้ที่ไม่ใช่อสม. */}
-              {canDelete() && (
-                <button
-                  onClick={async () => {
-                    if (confirm('คุณต้องการลบผู้ป่วยนี้หรือไม่?')) {
-                      // เรียกฟังก์ชันลบจาก lib
-                      const { deletePatient } = await import('@/lib/supabase/queries');
-                      const result = await deletePatient(patientId);
-                      if (result.success) {
-                        alert('ลบผู้ป่วยสำเร็จ!');
-                        router.push('/admin/patients');
-                      } else {
-                        alert('เกิดข้อผิดพลาด: ' + result.error);
-                      }
-                    }
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  ลบ
-                </button>
-              )}
             
               <button
                 onClick={handleLogout}
