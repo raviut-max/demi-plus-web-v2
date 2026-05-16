@@ -107,7 +107,6 @@ export default function NewPatientPage() {
     subdistrict: '',
     postalCode: '',
   });
-
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -156,7 +155,7 @@ export default function NewPatientPage() {
       router.push('/admin/login');
       return;
     }
-    
+
     console.log('👤 [NewPatient] User:', userData);
     setUser(userData);
     loadUserHospital(userData.id);
@@ -278,7 +277,7 @@ export default function NewPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-    
+
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -294,7 +293,7 @@ export default function NewPatientPage() {
   // ✅ Validate ฟอร์มก่อนส่ง
   const validateForm = (): boolean => {
     const errors: {[key: string]: string} = {};
-    
+
     // ✅ ตรวจสอบเลขบัตรประชาชน
     if (!formData.id_card) {
       errors.id_card = 'กรุณากรอกเลขบัตรประชาชน';
@@ -346,7 +345,7 @@ export default function NewPatientPage() {
     e.preventDefault();
     setError('');
     setValidationErrors({});
-    
+
     console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
@@ -514,7 +513,7 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
