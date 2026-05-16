@@ -18,7 +18,8 @@ import {
 import {
   Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
-  Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield
+  Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
+  ChevronUp, ChevronDown, ChevronsUpDown
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -37,6 +38,10 @@ export default function PatientManagementPage() {
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [userName, setUserName] = useState<string>('');
+  
+  // ✅ Sorting State
+  const [sortColumn, setSortColumn] = useState<string>('first_name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     const userData = checkSession();
@@ -44,7 +49,6 @@ export default function PatientManagementPage() {
       router.push('/admin/login');
       return;
     }
-
     // ✅ ตรวจสอบสิทธิ์ - อนุญาตให้ osm เข้าถึงได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
@@ -67,7 +71,7 @@ export default function PatientManagementPage() {
         .select('full_name_th')
         .eq('user_id', userId)
         .single();
-      
+
       if (data?.full_name_th) {
         setUserName(data.full_name_th);
       } else {
@@ -106,7 +110,11 @@ export default function PatientManagementPage() {
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       console.log('🔍 [loadPatients] Loading with hospitalIds:', hospitalIds);
-      const data = await getPatientList(searchTerm, selectedPamLevel === 'all' ? undefined : selectedPamLevel, hospitalIds);
+      const data = await getPatientList(
+        searchTerm,
+        selectedPamLevel === 'all' ? undefined : selectedPamLevel,
+        hospitalIds
+      );
       console.log('✅ [loadPatients] Loaded:', data.length, 'patients');
       setPatients(data);
     } catch (error) {
@@ -118,7 +126,6 @@ export default function PatientManagementPage() {
   const loadDeletedPatients = async (hospitalIds?: string[]) => {
     try {
       const data = await getDeletedPatients();
-      
       // ✅ กรองตาม hospitalIds ถ้าไม่ใช่ Super Admin
       let filteredData = data;
       if (!isSuperAdmin(user) && hospitalIds && hospitalIds.length > 0) {
@@ -143,13 +150,52 @@ export default function PatientManagementPage() {
     loadPatients(accessibleHospitalIds);
   };
 
+  // ✅ Sorting Handler
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // Toggle direction if same column
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // New column, default to ascending
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+
+  // ✅ Sorted Patients Data
+  const sortedPatients = [...patients].sort((a, b) => {
+    let aValue: any = a[sortColumn];
+    let bValue: any = b[sortColumn];
+
+    // Handle nested properties (e.g., hospitals.name)
+    if (sortColumn.includes('.')) {
+      const [parent, child] = sortColumn.split('.');
+      aValue = a[parent]?.[child];
+      bValue = b[parent]?.[child];
+    }
+
+    // Handle null/undefined values
+    if (aValue == null) aValue = '';
+    if (bValue == null) bValue = '';
+
+    // Compare values
+    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      return sortDirection === 'asc' 
+        ? aValue.localeCompare(bValue, 'th')
+        : bValue.localeCompare(aValue, 'th');
+    }
+
+    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+    return 0;
+  });
+
   const handleDeletePatient = async (patientId: string, patientName: string) => {
     // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบ
     if (user?.role === 'osm') {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
-
     if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" ใช่หรือไม่?`)) return;
 
     try {
@@ -172,7 +218,6 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์กู้คืนข้อมูลผู้ป่วย');
       return;
     }
-
     if (!confirm(`คุณต้องการกู้คืนผู้ป่วย "${patientName}" ใช่หรือไม่?`)) return;
 
     try {
@@ -196,7 +241,6 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วยถาวร');
       return;
     }
-
     if (!confirm(`⚠️ คุณต้องการลบผู้ป่วย "${patientName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
     if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
 
@@ -222,7 +266,7 @@ export default function PatientManagementPage() {
   // ✅ ฟังก์ชันแสดง Badge บทบาท
   const getRoleBadge = () => {
     if (!user) return null;
-    
+
     const roleConfig: any = {
       'osm': { 
         text: '🏘️ อสม.', 
@@ -257,6 +301,16 @@ export default function PatientManagementPage() {
         {config.text}
       </span>
     );
+  };
+
+  // ✅ Get Sort Icon
+  const getSortIcon = (columnName: string) => {
+    if (sortColumn !== columnName) {
+      return <ChevronsUpDown className="w-4 h-4 ml-1 opacity-30" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ChevronUp className="w-4 h-4 ml-1" />
+      : <ChevronDown className="w-4 h-4 ml-1" />;
   };
 
   if (loading) {
@@ -484,9 +538,33 @@ export default function PatientManagementPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">HN / ID Card</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
+                  <th 
+                    onClick={() => handleSort('first_name')}
+                    className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                  >
+                    <div className="flex items-center">
+                      ชื่อ-นามสกุล
+                      {getSortIcon('first_name')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('users.id_card')}
+                    className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                  >
+                    <div className="flex items-center">
+                      HN / ID Card
+                      {getSortIcon('users.id_card')}
+                    </div>
+                  </th>
+                  <th 
+                    onClick={() => handleSort('hospitals.name')}
+                    className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                  >
+                    <div className="flex items-center">
+                      โรงพยาบาล
+                      {getSortIcon('hospitals.name')}
+                    </div>
+                  </th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ผู้สร้าง</th>
@@ -494,7 +572,7 @@ export default function PatientManagementPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {patients.length === 0 ? (
+                {sortedPatients.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -508,7 +586,7 @@ export default function PatientManagementPage() {
                     </td>
                   </tr>
                 ) : (
-                  patients.map((patient) => (
+                  sortedPatients.map((patient) => (
                     <tr key={patient.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
