@@ -202,7 +202,7 @@ export default function FollowupPage() {
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
+
     try {
       setUploading(true);
 
@@ -265,7 +265,6 @@ export default function FollowupPage() {
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
     if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
-    
     if (successes.length > 0) {
       setFormData(prev => ({
         ...prev,
@@ -447,8 +446,8 @@ export default function FollowupPage() {
                       }`}>
                         {isSuperAdmin(user) ? '👑 Super Admin' :
                          isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                         user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                         user?.role === 'doctor' ? '👨‍️ แพทย์' :
+                         user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 'ผู้ดูแล'}
                       </span>
                     </div>
                     {userHospital && (
