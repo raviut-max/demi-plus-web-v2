@@ -7,6 +7,7 @@
 //    4. ✅ ลบฟิลด์ รพ.สต. ออก
 //    5. ✅ แสดงข้อผิดพลาดที่ชัดเจนเมื่อข้อมูลซ้ำ
 //    6. ✅ ✅ เพิ่มบทบาท 'osm' ให้สามารถใช้งานหน้านี้ได้
+//    7. ✅ แก้ไข Dropdown โรงพยาบาล - แสดงทั้งแม่ข่ายและลูกข่ายเสมอ
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -152,12 +153,14 @@ export default function NewPatientPage() {
       router.push('/admin/login');
       return;
     }
+    
     // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+    
     console.log('👤 [NewPatient] User:', userData);
     setUser(userData);
     loadUserHospital(userData.id);
@@ -167,7 +170,7 @@ export default function NewPatientPage() {
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-
+  
   // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
@@ -188,21 +191,11 @@ export default function NewPatientPage() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-
-      // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
+      
+      // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น) - แสดงทั้งหมดทุกสิทธิ์
       const allHospitals = await getHospitalsWithHierarchy();
-      
-      // ✅ กรองโรงพยาบาลตามสิทธิ์
-      let filteredHospitals = allHospitals;
-      if (ids.length > 0 && !isSuperAdmin(user)) {
-        console.log('🔒 [loadAccessibleHospitals] Hospital Admin - filtering hospitals');
-        filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
-      } else {
-        console.log('👑 [loadAccessibleHospitals] Super Admin - showing all hospitals');
-      }
-      
-      setHospitals(filteredHospitals);
-      console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
+      setHospitals(allHospitals);
+      console.log('🏥 [loadAccessibleHospitals] Total hospitals loaded:', allHospitals.length);
       
       // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
       await loadCoaches(ids);
@@ -214,7 +207,7 @@ export default function NewPatientPage() {
   // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และ users)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
       console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
@@ -240,6 +233,7 @@ export default function NewPatientPage() {
       ...formData,
       [name]: value,
     });
+    
     // ✅ ล้าง error เมื่อผู้ใช้เริ่มแก้ไข
     if (validationErrors[name]) {
       setValidationErrors({
@@ -346,6 +340,7 @@ export default function NewPatientPage() {
     e.preventDefault();
     setError('');
     setValidationErrors({});
+    
     console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
     console.log('🏥 [handleSubmit] Accessible hospitals:', accessibleHospitalIds);
@@ -354,14 +349,6 @@ export default function NewPatientPage() {
     // ✅ Validate ฟอร์มก่อน
     if (!validateForm()) {
       return;
-    }
-
-    // ✅ ตรวจสอบสิทธิ์การเลือกโรงพยาบาล (Hospital Admin ต้องเลือกใน scope ของตัวเอง)
-    if (accessibleHospitalIds.length > 0 && !isSuperAdmin(user)) {
-      if (!accessibleHospitalIds.includes(formData.hospital_id)) {
-        setError('❌ คุณไม่มีสิทธิ์เลือกโรงพยาบาลนี้ กรุณาเลือกโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง');
-        return;
-      }
     }
 
     setLoading(true);
@@ -427,7 +414,7 @@ export default function NewPatientPage() {
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
         
-        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย 
+        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
         let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
         
         if (result.error?.includes('23505') || result.error?.includes('duplicate key')) {
@@ -1001,7 +988,7 @@ export default function NewPatientPage() {
             ที่อยู่และโรงพยาบาลสังกัด
           </h2>
         
-          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical (กรองตามสิทธิ์) */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical (แสดงทั้งหมดทุกสิทธิ์) */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               🏥 โรงพยาบาลสังกัด <span className="text-red-500">*</span>
@@ -1036,21 +1023,11 @@ export default function NewPatientPage() {
               <p className="text-xs text-red-600 mt-1">💡 {validationErrors.hospital_id}</p>
             )}
             <p className="text-xs text-gray-500 mt-1">
-              💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
+              💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย) - ทุกสิทธิ์สามารถเลือกได้
             </p>
             {hospitals.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
                 ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
-              </p>
-            )}
-            {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
-              <p className="text-xs text-blue-600 mt-1">
-                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
-              </p>
-            )}
-            {isSuperAdmin(user) && (
-              <p className="text-xs text-purple-600 mt-1">
-                👑 Super Admin - แสดงโรงพยาบาลทั้งหมด ({hospitals.length} แห่ง)
               </p>
             )}
           </div>
