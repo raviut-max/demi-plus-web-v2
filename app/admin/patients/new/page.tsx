@@ -1,13 +1,9 @@
 // app/admin/patients/new/page.tsx
-// ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไข Syntax Errors ทั้งหมด
-//    2. ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
-//    3. ✅ เพิ่ม Validation และคำแนะนำ
-//    4. ✅ ลบฟิลด์ รพ.สต. ออก
-//    5. ✅ แสดงข้อผิดพลาดที่ชัดเจนเมื่อข้อมูลซ้ำ
-//    6. ✅ ✅ เพิ่มบทบาท 'osm' ให้สามารถใช้งานหน้านี้ได้
-//    7. ✅ แก้ไข Dropdown โรงพยาบาล - แสดงทั้งแม่ข่ายและลูกข่ายเสมอ
+//    1. ✅ อนุญาตให้อสม. (osm) ใช้งานหน้านี้ได้
+//    2. ✅ แสดงโรงพยาบาลทั้งแม่ข่ายและลูกข่ายที่เกี่ยวข้องกับผู้ใช้เท่านั้น
+//    3. ✅ ทุกสิทธิ์ (อสม, หมอ, เจ้าหน้าที่) เลือกได้ทั้งแม่ข่ายและลูกข่าย
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -154,7 +150,7 @@ export default function NewPatientPage() {
       return;
     }
     
-    // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
+    // ✅ แก้ไข: อนุญาตให้อสม. (osm) เข้าถึงหน้านี้ได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -183,7 +179,7 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้ (Super Admin vs Hospital Admin)
+  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้ (Super Admin vs Hospital Admin vs OSM)
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
@@ -192,10 +188,20 @@ export default function NewPatientPage() {
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       
-      // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น) - แสดงทั้งหมดทุกสิทธิ์
+      // ✅ โหลดรายการโรงพยาบาลทั้งหมด (แบบมีลำดับชั้น)
       const allHospitals = await getHospitalsWithHierarchy();
-      setHospitals(allHospitals);
-      console.log('🏥 [loadAccessibleHospitals] Total hospitals loaded:', allHospitals.length);
+      
+      // ✅ กรองโรงพยาบาลตามสิทธิ์ - แสดงเฉพาะที่อยู่ใน accessibleHospitalIds
+      let filteredHospitals = allHospitals;
+      if (ids.length > 0 && !isSuperAdmin(user)) {
+        console.log('🔒 [loadAccessibleHospitals] Filtering hospitals for non-super-admin');
+        filteredHospitals = allHospitals.filter(h => ids.includes(h.id));
+      } else {
+        console.log('👑 [loadAccessibleHospitals] Super Admin - showing all hospitals');
+      }
+      
+      setHospitals(filteredHospitals);
+      console.log('🏥 [loadAccessibleHospitals] Filtered hospitals:', filteredHospitals.length);
       
       // ✅ โหลดโค้ชหลังจากได้โรงพยาบาลแล้ว
       await loadCoaches(ids);
@@ -272,7 +278,7 @@ export default function NewPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-
+    
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -288,7 +294,7 @@ export default function NewPatientPage() {
   // ✅ Validate ฟอร์มก่อนส่ง
   const validateForm = (): boolean => {
     const errors: {[key: string]: string} = {};
-
+    
     // ✅ ตรวจสอบเลขบัตรประชาชน
     if (!formData.id_card) {
       errors.id_card = 'กรุณากรอกเลขบัตรประชาชน';
@@ -349,6 +355,14 @@ export default function NewPatientPage() {
     // ✅ Validate ฟอร์มก่อน
     if (!validateForm()) {
       return;
+    }
+
+    // ✅ ตรวจสอบสิทธิ์การเลือกโรงพยาบาล (Hospital Admin ต้องเลือกใน scope ของตัวเอง)
+    if (accessibleHospitalIds.length > 0 && !isSuperAdmin(user)) {
+      if (!accessibleHospitalIds.includes(formData.hospital_id)) {
+        setError('❌ คุณไม่มีสิทธิ์เลือกโรงพยาบาลนี้ กรุณาเลือกโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง');
+        return;
+      }
     }
 
     setLoading(true);
@@ -500,7 +514,7 @@ export default function NewPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -988,7 +1002,7 @@ export default function NewPatientPage() {
             ที่อยู่และโรงพยาบาลสังกัด
           </h2>
         
-          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical (แสดงทั้งหมดทุกสิทธิ์) */}
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แบบ Hierarchical (กรองตามสิทธิ์) */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               🏥 โรงพยาบาลสังกัด <span className="text-red-500">*</span>
@@ -1023,11 +1037,21 @@ export default function NewPatientPage() {
               <p className="text-xs text-red-600 mt-1">💡 {validationErrors.hospital_id}</p>
             )}
             <p className="text-xs text-gray-500 mt-1">
-              💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย) - ทุกสิทธิ์สามารถเลือกได้
+              💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
             </p>
             {hospitals.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
                 ⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ
+              </p>
+            )}
+            {accessibleHospitalIds.length > 0 && !isSuperAdmin(user) && (
+              <p className="text-xs text-blue-600 mt-1">
+                🔒 แสดงโรงพยาบาลที่คุณมีสิทธิ์เข้าถึง ({hospitals.length} แห่ง)
+              </p>
+            )}
+            {isSuperAdmin(user) && (
+              <p className="text-xs text-purple-600 mt-1">
+                👑 Super Admin - แสดงโรงพยาบาลทั้งหมด ({hospitals.length} แห่ง)
               </p>
             )}
           </div>
@@ -1213,7 +1237,7 @@ export default function NewPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
+              👨⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง)
             </p>
             {coaches.length === 0 && (
               <p className="text-xs text-orange-500 mt-1">
