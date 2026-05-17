@@ -1,11 +1,12 @@
 // app/admin/patients/[id]/edit/page.tsx
 // ✅ แก้ไขล่าสุด: 17 พฤษภาคม 2569
 // ✅ การแก้ไข:
-//    1. ✅ เพิ่มสิทธิ์ให้ อสม. (osm) ใช้งานหน้านี้ได้
-//    2. ✅ ปรับแสดงโรงพยาบาลเฉพาะในเครือข่าย (แม่ข่าย+ลูกข่าย) ไม่สนสิทธิ์เดิม
+//    1. ✅ เพิ่มสิทธิ์ให้ อสม. (osm) ใช้งานหน้านี้ได้ (พร้อม trim/lowercase)
+//    2. ✅ ปรับแสดงโรงพยาบาลเฉพาะในเครือข่าย (แม่ข่าย+ลูกข่าย)
 //    3. ✅ ปรับแสดงโค้ชจากเครือข่ายโรงพยาบาล พร้อมชื่อโรงพยาบาลที่สังกัด
-//    4. ✅ แก้ไขข้อผิดพลาดทางไวยากรณ์ทั้งหมด
-//    5. ✅ ส่วนอื่นๆ คงเดิม
+//    4. ✅ เพิ่ม console.log สำหรับดีบักบทบาทผู้ใช้
+//    5. ✅ แก้ไขช่องว่างในโค้ดที่อาจเกิดจาก copy-paste
+
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -58,7 +59,7 @@ export default function EditPatientPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  
+
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,11 +70,11 @@ export default function EditPatientPage() {
     mainHospitalId: string | null;
     networkHospitalIds: string[];
   }>({ mainHospitalId: null, networkHospitalIds: [] });
-  
+
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
-  
+
   // ✅ State สำหรับที่อยู่จาก ThaiAddressSelector
   const [addressData, setAddressData] = useState({
     province: '',
@@ -81,7 +82,7 @@ export default function EditPatientPage() {
     subdistrict: '',
     postalCode: '',
   });
-  
+
   // ✅ State สำหรับข้อมูลเดิม (ไว้แสดงเปรียบเทียบ)
   const [originalData, setOriginalData] = useState({
     province: '',
@@ -90,7 +91,7 @@ export default function EditPatientPage() {
     postalCode: '',
     id_card: '',
   });
-  
+
   const [formData, setFormData] = useState({
     // ข้อมูลส่วนตัว
     id_card: '',
@@ -103,7 +104,6 @@ export default function EditPatientPage() {
     gender: '',
     phone: '',
     email: '',
-    
     // ข้อมูลสุขภาพ
     current_weight: '',
     height: '',
@@ -114,7 +114,6 @@ export default function EditPatientPage() {
     notes: '',
     occupation: '',
     education_level: '',
-    
     // ที่อยู่
     house_number: '',
     address_line1: '',
@@ -122,64 +121,78 @@ export default function EditPatientPage() {
     road: '',
     village_no: '',
     village_name: '',
-    
     // โรงพยาบาล
     hospital_id: '',
-    
     // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
   });
 
+  // ✅ useEffect สำหรับตรวจสอบสิทธิ์และโหลดข้อมูล
   useEffect(() => {
     const userData = checkSession();
+
+    // 🔍 Debug logging
+    console.log('🔍 [EditPatient] Session check:', userData);
+    console.log('🔍 [EditPatient] Raw role:', userData?.role);
+
     if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
-    
-    // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
-    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
+      console.warn('⚠️ [EditPatient] No session found, redirecting to login');
       router.push('/admin/login');
       return;
     }
 
+    // ✅ แก้ไข: ตรวจสอบบทบาทผู้ใช้แบบปลอดภัย (ตัดช่องว่าง + lowercase)
+    const userRole = userData.role?.toString().trim().toLowerCase();
+    const allowedRoles = ['admin', 'doctor', 'helper', 'osm'];
+
+    console.log('🔍 [EditPatient] Normalized role:', userRole);
+    console.log('🔍 [EditPatient] Allowed roles:', allowedRoles);
+    console.log('🔍 [EditPatient] Is allowed:', allowedRoles.includes(userRole || ''));
+
+    if (!userRole || !allowedRoles.includes(userRole)) {
+      console.error('❌ [EditPatient] Access denied. Role:', userData.role);
+      alert(`❌ ไม่มีสิทธิ์เข้าถึง
+
+บทบาทของคุณ: ${userData.role || 'ไม่ทราบ'}
+บทบาทที่อนุญาต: ${allowedRoles.join(', ')}`);
+      router.push('/admin/login');
+      return;
+    }
+
+    console.log('✅ [EditPatient] Access granted for role:', userRole);
     setUser(userData);
     loadPatientData();
     loadHospitalsWithNetwork(userData);
   }, [router]);
 
-  // ✅ โหลดรายการโรงพยาบาลตามเครือข่ายของผู้ใช้ (ไม่สนสิทธิ์เดิม)
+  // ✅ โหลดรายการโรงพยาบาลตามเครือข่ายของผู้ใช้
   const loadHospitalsWithNetwork = async (userData: any) => {
     try {
-      console.log('🏥 Loading hospitals with network logic...');
+      console.log('🏥 Loading hospitals with network logic for user:', userData.id);
       const allHospitals = await getHospitalsWithHierarchy();
-      
-      // ✅ หาเครือข่ายโรงพยาบาลของผู้ใช้
+
       let networkHospitalIds: string[] = [];
       let mainHospitalId: string | null = null;
-      
+
       if (userData.hospital_id) {
         const userHosp = allHospitals.find((h: HospitalData) => h.id === userData.hospital_id);
-        
+
         if (userHosp) {
           if (userHosp.type === 'main') {
-            // ✅ ผู้ใช้อยู่แม่ข่าย: แสดงแม่ข่าย + ลูกข่ายทั้งหมดในเครือ
             mainHospitalId = userHosp.id;
             networkHospitalIds = [userHosp.id];
-            const subs = allHospitals.filter((h: HospitalData) => 
+            const subs = allHospitals.filter((h: HospitalData) =>
               h.type === 'sub' && h.parent_id === userHosp.id
             );
             networkHospitalIds.push(...subs.map((s: HospitalData) => s.id));
           } else if (userHosp.type === 'sub' && userHosp.parent_id) {
-            // ✅ ผู้ใช้อยู่ลูกข่าย: หาแม่ข่าย แล้วแสดงทั้งเครือข่าย
             mainHospitalId = userHosp.parent_id;
             const mainHosp = allHospitals.find((h: HospitalData) => h.id === userHosp.parent_id);
             if (mainHosp) {
               networkHospitalIds = [mainHosp.id];
-              const subs = allHospitals.filter((h: HospitalData) => 
+              const subs = allHospitals.filter((h: HospitalData) =>
                 h.type === 'sub' && h.parent_id === mainHosp.id
               );
               networkHospitalIds.push(...subs.map((s: HospitalData) => s.id));
@@ -187,25 +200,21 @@ export default function EditPatientPage() {
           }
         }
       }
-      
-      // ✅ ถ้าไม่มีเครือข่าย หรือเป็น Super Admin ให้แสดงทั้งหมด
+
       if (networkHospitalIds.length === 0) {
         networkHospitalIds = allHospitals.map((h: HospitalData) => h.id);
       }
-      
+
       setUserHospitalNetwork({ mainHospitalId, networkHospitalIds });
-      
-      // ✅ กรองโรงพยาบาลให้เหลือเฉพาะในเครือข่าย
-      const filteredHospitals = allHospitals.filter((h: HospitalData) => 
+
+      const filteredHospitals = allHospitals.filter((h: HospitalData) =>
         networkHospitalIds.includes(h.id)
       );
-      
+
       console.log('✅ Network hospitals:', filteredHospitals.length, 'hospitals');
       setHospitals(filteredHospitals);
-      
-      // ✅ โหลดโค้ชจากเครือข่ายโรงพยาบาลเดียวกัน
+
       await loadCoachesFromNetwork(networkHospitalIds);
-      
     } catch (error) {
       console.error('❌ Error loading hospitals with network:', error);
       setHospitals([]);
@@ -216,7 +225,7 @@ export default function EditPatientPage() {
   const loadCoachesFromNetwork = async (hospitalIds: string[]) => {
     try {
       console.log('👨‍⚕️ Loading coaches from network hospitals:', hospitalIds);
-      
+
       const { data, error } = await supabase
         .from('doctors')
         .select(`
@@ -238,21 +247,19 @@ export default function EditPatientPage() {
         `)
         .in('users.hospital_id', hospitalIds)
         .eq('is_active', true);
-      
+
       if (error) {
         console.error('❌ Error loading coaches:', error);
         setCoaches([]);
         return;
       }
-      
-      // ✅ กรองเฉพาะแพทย์/เจ้าหน้าที่/อสม. ที่ใช้งานอยู่
-      const filteredCoaches = (data || []).filter((coach: any) => 
+
+      const filteredCoaches = (data || []).filter((coach: any) =>
         ['doctor', 'helper', 'osm'].includes(coach.users?.role) && coach.is_active
       );
-      
+
       console.log('✅ Coaches loaded:', filteredCoaches.length);
       setCoaches(filteredCoaches);
-      
     } catch (error) {
       console.error('❌ Error in loadCoachesFromNetwork:', error);
       setCoaches([]);
@@ -265,11 +272,11 @@ export default function EditPatientPage() {
       const data = await getPatientDetail(patientId);
       if (data) {
         setPatient(data);
-        
+
         let birthDay = '';
         let birthMonth = '';
         let birthYear = '';
-        
+
         if (data.birth_date) {
           const birthDate = new Date(data.birth_date);
           birthDay = birthDate.getDate().toString();
@@ -345,7 +352,7 @@ export default function EditPatientPage() {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, HospitalData[]>();
-    
+
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -428,7 +435,7 @@ export default function EditPatientPage() {
   useEffect(() => {
     const errors: Record<string, string> = {};
     const success: Record<string, boolean> = {};
-    
+
     const idCardResult = validateIdCard(formData.id_card);
     if (!idCardResult.valid) {
       errors.id_card = idCardResult.message;
@@ -478,7 +485,7 @@ export default function EditPatientPage() {
   // ✅ ฟังก์ชันแปลง error messages ให้เข้าใจง่าย
   const getFriendlyErrorMessage = (error: any): string => {
     if (!error) return '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
-    
+
     if (error.message?.includes('profiles_id_card_key') || error.message?.includes('id_card_unique')) {
       return '❌ เลขบัตรประชาชนนี้มีในระบบแล้ว\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลขบัตรประชาชน\n- หรือใช้เลขบัตรประชาชนอื่น';
     }
@@ -504,64 +511,65 @@ export default function EditPatientPage() {
     return `❌ เกิดข้อผิดพลาด: ${error.message}\n\n💡 วิธีแก้ไข:\n- ตรวจสอบข้อมูลที่กรอก\n- ลองใหม่อีกครั้ง`;
   };
 
+  // ✅ ฟังก์ชันจัดการฟอร์ม
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
+
     const errors: string[] = [];
-    
+
     const idCardResult = validateIdCard(formData.id_card);
     if (!idCardResult.valid) {
       errors.push(`• ${idCardResult.message}`);
     }
-    
+
     if (!formData.hospital_number) {
       errors.push('• HN เป็นข้อมูลจำเป็น');
     }
-    
+
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       errors.push('• กรุณากรอกวันเกิดให้ครบถ้วน');
     }
-    
+
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       errors.push('• กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
     }
-    
+
     if (formData.phone) {
       const phoneResult = validatePhoneNumber(formData.phone);
       if (!phoneResult.valid) {
         errors.push(`• ${phoneResult.message}`);
       }
     }
-    
+
     if (formData.email) {
       const emailResult = validateEmail(formData.email);
       if (!emailResult.valid) {
         errors.push(`• ${emailResult.message}`);
       }
     }
-    
+
     if (formData.current_weight) {
       const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
       if (!weightResult.valid) {
         errors.push(`• ${weightResult.message}`);
       }
     }
-    
+
     if (formData.height) {
       const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
       if (!heightResult.valid) {
         errors.push(`• ${heightResult.message}`);
       }
     }
-    
+
     if (formData.waist_circumference) {
       const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
       if (!waistResult.valid) {
         errors.push(`• ${waistResult.message}`);
       }
     }
-    
+
     if (errors.length > 0) {
       setError(
         `❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\n` +
@@ -645,7 +653,6 @@ export default function EditPatientPage() {
       setTimeout(() => {
         router.push(`/admin/patients/${patientId}`);
       }, 1500);
-      
     } catch (error: any) {
       console.error('❌ Exception during update:', error);
       const friendlyError = getFriendlyErrorMessage(error);
@@ -703,12 +710,11 @@ export default function EditPatientPage() {
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
-          
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลส่วนตัว</h2>
             <div className="grid grid-cols-2 gap-4">
-              {/* ID Card - แก้ไขได้ */}
+              {/* ID Card */}
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   เลขบัตรประชาชน * <span className="text-orange-500">(แก้ไขได้)</span>
@@ -716,7 +722,9 @@ export default function EditPatientPage() {
                 <input
                   type="text"
                   value={formData.id_card}
-                  onChange={(e) => setFormData({ ...formData, id_card: e.target.value.replace(/\D/g, '').slice(0, 13) })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, id_card: e.target.value.replace(/\D/g, '').slice(0, 13) })
+                  }
                   maxLength={13}
                   className={`w-full px-4 py-2 border rounded-lg ${
                     validationErrors.id_card
@@ -728,9 +736,7 @@ export default function EditPatientPage() {
                   placeholder="กรอกเลขบัตรประชาชน 13 หลัก"
                 />
                 {originalData.id_card && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    📝 เดิม: {originalData.id_card}
-                  </p>
+                  <p className="text-xs text-gray-500 mt-1">📝 เดิม: {originalData.id_card}</p>
                 )}
                 {validationErrors.id_card && (
                   <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
@@ -769,7 +775,9 @@ export default function EditPatientPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">HN (Hospital Number) *</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  HN (Hospital Number) *
+                </label>
                 <input
                   type="text"
                   required
@@ -790,7 +798,9 @@ export default function EditPatientPage() {
                   >
                     <option value="">วัน</option>
                     {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                      <option key={day} value={day}>{day}</option>
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
                     ))}
                   </select>
                   <select
@@ -801,7 +811,9 @@ export default function EditPatientPage() {
                   >
                     <option value="">เดือน</option>
                     {THAI_MONTHS.map((month, index) => (
-                      <option key={index + 1} value={index + 1}>{month}</option>
+                      <option key={index + 1} value={index + 1}>
+                        {month}
+                      </option>
                     ))}
                   </select>
                   <select
@@ -812,7 +824,9 @@ export default function EditPatientPage() {
                   >
                     <option value="">ปี พ.ศ.</option>
                     {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
-                      <option key={year} value={year}>{year}</option>
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -989,7 +1003,6 @@ export default function EditPatientPage() {
                 )}
               </div>
 
-              {/* ประเภทเบาหวาน */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทเบาหวาน</label>
                 <select
@@ -1003,7 +1016,6 @@ export default function EditPatientPage() {
                 </select>
               </div>
 
-              {/* ค่าน้ำตาล */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ค่าน้ำตาล (mg/dL)</label>
                 <input
@@ -1031,7 +1043,9 @@ export default function EditPatientPage() {
               </div>
 
               <div className="col-span-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (คำแนะนำเพิ่มเติม)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  หมายเหตุ (คำแนะนำเพิ่มเติม)
+                </label>
                 <input
                   type="text"
                   value={formData.notes}
@@ -1172,7 +1186,8 @@ export default function EditPatientPage() {
               {/* ✅ เลือกโรงพยาบาล (แบบลำดับชั้น - แสดงเฉพาะเครือข่าย) */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  🏥 โรงพยาบาลสังกัด <span className="text-blue-600">(เครือข่าย: {userHospitalNetwork.networkHospitalIds.length} แห่ง)</span>
+                  🏥 โรงพยาบาลสังกัด{' '}
+                  <span className="text-blue-600">(เครือข่าย: {userHospitalNetwork.networkHospitalIds.length} แห่ง)</span>
                 </label>
                 <select
                   value={formData.hospital_id}
@@ -1209,7 +1224,8 @@ export default function EditPatientPage() {
             <h2 className="text-xl font-bold text-gray-800 mb-4">กำหนดโค้ช/หมอผู้ดูแล</h2>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                👨‍⚕️ โค้ช/หมอผู้ดูแล <span className="text-blue-600">(เครือข่าย: {coaches.length} คน)</span>
+                👨‍⚕️ โค้ช/หมอผู้ดูแล{' '}
+                <span className="text-blue-600">(เครือข่าย: {coaches.length} คน)</span>
               </label>
               <select
                 value={formData.coach_id}
@@ -1221,7 +1237,7 @@ export default function EditPatientPage() {
                   const hospitalName = coach.users?.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
                   const hospitalCode = coach.users?.hospitals?.code || '';
                   const specialization = coach.specialization_th || 'ไม่ระบุความเชี่ยวชาญ';
-                  
+
                   return (
                     <option key={coach.id} value={coach.user_id}>
                       {coach.full_name_th} | {specialization} | 🏥 {hospitalName} ({hospitalCode})
