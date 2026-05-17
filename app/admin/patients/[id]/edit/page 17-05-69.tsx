@@ -1,17 +1,9 @@
-// app/admin/patients/[id]/edit/page.tsx
-// ✅ แก้ไขล่าสุด: 17 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. ✅ เพิ่ม console.log สำหรับ debug role
-//    2. ✅ แก้ไขการตรวจสอบ role แบบปลอดภัย (trim + lowercase)
-//    3. ✅ แสดง role ที่ไม่ถูกต้องใน alert
-//    4. ✅ อนุญาตให้ osm เข้าถึงหน้านี้ได้
-
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, logout, getPatientDetail, getHospitalsWithHierarchy } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { ArrowLeft, LogOut, Save, AlertCircle, CheckCircle, MapPin, Hospital } from 'lucide-react';
+import { ArrowLeft, LogOut, Save, AlertCircle, CheckCircle, MapPin } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 
 // เดือนภาษาไทย
@@ -20,69 +12,29 @@ const THAI_MONTHS = [
   'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
 ];
 
-// ✅ Interface สำหรับโรงพยาบาล
-interface HospitalData {
-  id: string;
-  name: string;
-  code: string;
-  type: 'main' | 'sub';
-  parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
-}
-
-// ✅ Interface สำหรับโค้ช
-interface CoachData {
-  id: string;
-  user_id: string;
-  full_name_th: string;
-  specialization_th?: string;
-  is_active: boolean;
-  is_verified: boolean;
-  users?: {
-    hospital_id?: string;
-    role?: string;
-    hospitals?: {
-      id?: string;
-      name?: string;
-      code?: string;
-      type?: 'main' | 'sub';
-    };
-  };
-}
-
 export default function EditPatientPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  
+
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [patient, setPatient] = useState<any>(null);
-  const [hospitals, setHospitals] = useState<HospitalData[]>([]);
-  const [coaches, setCoaches] = useState<CoachData[]>([]);
-  const [userHospitalNetwork, setUserHospitalNetwork] = useState<{
-    mainHospitalId: string | null;
-    networkHospitalIds: string[];
-  }>({ mainHospitalId: null, networkHospitalIds: [] });
-  
+  const [hospitals, setHospitals] = useState<any[]>([]);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
   
-  // ✅ State สำหรับที่อยู่จาก ThaiAddressSelector
+  // State สำหรับที่อยู่จาก ThaiAddressSelector
   const [addressData, setAddressData] = useState({
     province: '',
     district: '',
     subdistrict: '',
     postalCode: '',
   });
-  
-  // ✅ State สำหรับข้อมูลเดิม (ไว้แสดงเปรียบเทียบ)
+
+  // State สำหรับข้อมูลเดิม (ไว้แสดงเปรียบเทียบ)
   const [originalData, setOriginalData] = useState({
     province: '',
     district: '',
@@ -90,7 +42,7 @@ export default function EditPatientPage() {
     postalCode: '',
     id_card: '',
   });
-  
+
   const [formData, setFormData] = useState({
     // ข้อมูลส่วนตัว
     id_card: '',
@@ -103,7 +55,6 @@ export default function EditPatientPage() {
     gender: '',
     phone: '',
     email: '',
-    
     // ข้อมูลสุขภาพ
     current_weight: '',
     height: '',
@@ -114,7 +65,7 @@ export default function EditPatientPage() {
     notes: '',
     occupation: '',
     education_level: '',
-    
+
     // ที่อยู่
     house_number: '',
     address_line1: '',
@@ -122,157 +73,84 @@ export default function EditPatientPage() {
     road: '',
     village_no: '',
     village_name: '',
-    
+
     // โรงพยาบาล
     hospital_id: '',
-    
+
     // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
     emergency_contact_phone: '',
     emergency_contact_relationship: '',
   });
 
-  // ✅ useEffect สำหรับตรวจสอบสิทธิ์และโหลดข้อมูล
+  // ✅ แก้ไข: Multi-Layered Role Resolution
   useEffect(() => {
-    const userData = checkSession();
-    
-    // 🔍 Debug logging
-    console.log('🔍 [EditPatient] Session check:', userData);
-    console.log('🔍 [EditPatient] Raw role:', userData?.role);
-    console.log('🔍 [EditPatient] Role type:', typeof userData?.role);
-    
-    if (!userData) {
-      console.warn('⚠️ [EditPatient] No session found, redirecting to login');
+    const sessionData = checkSession();
+    if (!sessionData?.id) {
       router.push('/admin/login');
       return;
     }
-    
-    // ✅ แก้ไข: ตรวจสอบบทบาทผู้ใช้แบบปลอดภัย (ตัดช่องว่าง + lowercase)
-    const userRole = userData.role?.toString().trim().toLowerCase();
-    const allowedRoles = ['admin', 'doctor', 'helper', 'osm'];
-    
-    console.log('🔍 [EditPatient] Normalized role:', userRole);
-    console.log('🔍 [EditPatient] Allowed roles:', allowedRoles);
-    console.log('🔍 [EditPatient] Is allowed:', allowedRoles.includes(userRole || ''));
-    
-    if (!userRole || !allowedRoles.includes(userRole)) {
-      console.error('❌ [EditPatient] Access denied. Role:', userData.role);
-      alert(`❌ ไม่มีสิทธิ์เข้าถึง
 
-บทบาทของคุณ: ${userData.role || 'ไม่ทราบ'}
-บทบาทที่อนุญาต: ${allowedRoles.join(', ')}`);
-      router.push('/admin/login');
-      return;
-    }
-    
-    console.log('✅ [EditPatient] Access granted for role:', userRole);
-    setUser(userData);
-    loadPatientData();
-    loadHospitalsWithNetwork(userData);
-  }, [router]);
+    const resolveAccess = async () => {
+      let currentRole = sessionData.role?.toString().toLowerCase();
+      const allowedRoles = ['admin', 'doctor', 'helper', 'osm'];
 
-  // ✅ โหลดรายการโรงพยาบาลตามเครือข่ายของผู้ใช้
-  const loadHospitalsWithNetwork = async (userData: any) => {
-    try {
-      console.log('🏥 Loading hospitals with network logic for user:', userData.id);
-      const allHospitals = await getHospitalsWithHierarchy();
-      
-      let networkHospitalIds: string[] = [];
-      let mainHospitalId: string | null = null;
-      
-      if (userData.hospital_id) {
-        const userHosp = allHospitals.find((h: HospitalData) => h.id === userData.hospital_id);
-        
-        if (userHosp) {
-          if (userHosp.type === 'main') {
-            // ✅ ผู้ใช้อยู่แม่ข่าย: แสดงแม่ข่าย + ลูกข่ายทั้งหมดในเครือ
-            mainHospitalId = userHosp.id;
-            networkHospitalIds = [userHosp.id];
-            const subs = allHospitals.filter((h: HospitalData) => 
-              h.type === 'sub' && h.parent_id === userHosp.id
-            );
-            networkHospitalIds.push(...subs.map((s: HospitalData) => s.id));
-          } else if (userHosp.type === 'sub' && userHosp.parent_id) {
-            // ✅ ผู้ใช้อยู่ลูกข่าย: หาแม่ข่าย แล้วแสดงทั้งเครือข่าย
-            mainHospitalId = userHosp.parent_id;
-            const mainHosp = allHospitals.find((h: HospitalData) => h.id === userHosp.parent_id);
-            if (mainHosp) {
-              networkHospitalIds = [mainHosp.id];
-              const subs = allHospitals.filter((h: HospitalData) => 
-                h.type === 'sub' && h.parent_id === mainHosp.id
-              );
-              networkHospitalIds.push(...subs.map((s: HospitalData) => s.id));
+      // Fallback 1: ตรวจสอบจาก Database ตาราง users
+      if (!currentRole || !allowedRoles.includes(currentRole)) {
+        try {
+          const { data: dbUser } = await supabase
+            .from('users')
+            .select('role')
+            .eq('id', sessionData.id)
+            .single();
+          
+          if (dbUser?.role) {
+            currentRole = dbUser.role.toLowerCase();
+          } else {
+            // Fallback 2: ตรวจสอบจากตาราง doctors (สำหรับ OSM/แพทย์ ที่ role อาจหลุดจาก session)
+            const { data: docData } = await supabase
+              .from('doctors')
+              .select('user_id')
+              .eq('user_id', sessionData.id)
+              .single();
+            
+            if (docData) {
+              // ถ้าพบในตาราง doctors ให้ถือว่าเป็น doctor/osm ที่ถูกต้อง
+              currentRole = 'doctor'; 
             }
           }
+        } catch (err) {
+          console.error('Role resolution failed:', err);
         }
       }
-      
-      if (networkHospitalIds.length === 0) {
-        networkHospitalIds = allHospitals.map((h: HospitalData) => h.id);
+
+      // ตัดสินใจสุดท้าย
+      if (currentRole && allowedRoles.includes(currentRole)) {
+        setUser({ ...sessionData, role: currentRole });
+        loadPatientData();
+        loadHospitals();
+      } else {
+        alert('ไม่มีสิทธิ์เข้าถึง (Role ไม่ถูกต้อง: ' + (currentRole || 'null') + ')');
+        router.push('/admin/login');
       }
-      
-      setUserHospitalNetwork({ mainHospitalId, networkHospitalIds });
-      
-      const filteredHospitals = allHospitals.filter((h: HospitalData) => 
-        networkHospitalIds.includes(h.id)
-      );
-      
-      console.log('✅ Network hospitals:', filteredHospitals.length, 'hospitals');
-      setHospitals(filteredHospitals);
-      
-      await loadCoachesFromNetwork(networkHospitalIds);
-    } catch (error) {
-      console.error('❌ Error loading hospitals with network:', error);
-      setHospitals([]);
-    }
+    };
+
+    resolveAccess();
+  }, [router]);
+
+  const loadUserHospital = async (userId: string) => {
+    // โหลดข้อมูลโรงพยาบาลของผู้ใช้ (ถ้าจำเป็น)
   };
 
-  // ✅ โหลดโค้ชจากเครือข่ายโรงพยาบาล
-  const loadCoachesFromNetwork = async (hospitalIds: string[]) => {
+  const loadHospitals = async () => {
     try {
-      console.log('👨‍⚕️ Loading coaches from network hospitals:', hospitalIds);
-      
-      const { data, error } = await supabase
-        .from('doctors')
-        .select(`
-          id,
-          user_id,
-          full_name_th,
-          specialization_th,
-          is_active,
-          is_verified,
-          users!doctors_user_id_fkey (
-            hospital_id,
-            hospitals (
-              id,
-              name,
-              code,
-              type
-            )
-          )
-        `)
-        .in('users.hospital_id', hospitalIds)
-        .eq('is_active', true);
-      
-      if (error) {
-        console.error('❌ Error loading coaches:', error);
-        setCoaches([]);
-        return;
-      }
-      
-      const filteredCoaches = (data || []).filter((coach: any) => 
-        ['doctor', 'helper', 'osm'].includes(coach.users?.role) && coach.is_active
-      );
-      
-      console.log('✅ Coaches loaded:', filteredCoaches.length);
-      setCoaches(filteredCoaches);
+      const data = await getHospitalsWithHierarchy();
+      setHospitals(data);
     } catch (error) {
-      console.error('❌ Error in loadCoachesFromNetwork:', error);
-      setCoaches([]);
+      console.error('Error loading hospitals:', error);
     }
   };
 
-  // ✅ โหลดข้อมูลผู้ป่วย
   const loadPatientData = async () => {
     try {
       const data = await getPatientDetail(patientId);
@@ -282,7 +160,7 @@ export default function EditPatientPage() {
         let birthDay = '';
         let birthMonth = '';
         let birthYear = '';
-        
+
         if (data.birth_date) {
           const birthDate = new Date(data.birth_date);
           birthDay = birthDate.getDate().toString();
@@ -344,21 +222,14 @@ export default function EditPatientPage() {
     }
   };
 
-  const handleAddressChange = (data: {
-    province: string;
-    district: string;
-    subdistrict: string;
-    postalCode: string;
-  }) => {
+  const handleAddressChange = (data: { province: string; district: string; subdistrict: string; postalCode: string; }) => {
     setAddressData(data);
   };
 
-  // ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล (แม่ข่าย → ลูกข่าย)
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
-    const hospitalGroups = new Map<string, HospitalData[]>();
-    
+    const hospitalGroups = new Map<string, any[]>();
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -367,245 +238,133 @@ export default function EditPatientPage() {
         hospitalGroups.get(sub.parent_id)!.push(sub);
       }
     });
-
     return { mainHospitals, hospitalGroups };
   };
 
-  // ✅ ฟังก์ชันตรวจสอบเบอร์โทรศัพท์ไทย
   const validatePhoneNumber = (phone: string): { valid: boolean; message: string } => {
     if (!phone) return { valid: true, message: '' };
-    
     const cleaned = phone.replace(/[\s-]/g, '');
-    if (!/^\d+$/.test(cleaned)) {
-      return { valid: false, message: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น' };
-    }
-    if (cleaned.length < 9 || cleaned.length > 10) {
-      return { valid: false, message: 'เบอร์โทรศัพท์ต้องมี 9-10 หลัก' };
-    }
-    if (!cleaned.startsWith('0')) {
-      return { valid: false, message: 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0' };
-    }
-    
+    if (!/^\d+$/.test(cleaned)) return { valid: false, message: 'เบอร์โทรศัพท์ต้องเป็นตัวเลขเท่านั้น' };
+    if (cleaned.length < 9 || cleaned.length > 10) return { valid: false, message: 'เบอร์โทรศัพท์ต้องมี 9-10 หลัก' };
+    if (!cleaned.startsWith('0')) return { valid: false, message: 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0' };
     return { valid: true, message: 'เบอร์โทรศัพท์ถูกต้อง' };
   };
 
-  // ✅ ฟังก์ชันตรวจสอบอีเมล
   const validateEmail = (email: string): { valid: boolean; message: string } => {
     if (!email) return { valid: true, message: '' };
-    
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return { valid: false, message: 'รูปแบบอีเมลไม่ถูกต้อง' };
-    }
-    
+    if (!emailRegex.test(email)) return { valid: false, message: 'รูปแบบอีเมลไม่ถูกต้อง' };
     return { valid: true, message: 'อีเมลถูกต้อง' };
   };
 
-  // ✅ ฟังก์ชันตรวจสอบ ID Card (13 หลัก)
   const validateIdCard = (idCard: string): { valid: boolean; message: string } => {
-    if (!idCard) {
-      return { valid: false, message: 'เลขบัตรประชาชนเป็นข้อมูลจำเป็น' };
-    }
-    
+    if (!idCard) return { valid: false, message: 'เลขบัตรประชาชนเป็นข้อมูลจำเป็น' };
     const cleaned = idCard.replace(/[\s-]/g, '');
-    if (!/^\d{13}$/.test(cleaned)) {
-      return { valid: false, message: 'เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก' };
-    }
-    
+    if (!/^\d{13}$/.test(cleaned)) return { valid: false, message: 'เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก' };
     return { valid: true, message: 'เลขบัตรประชาชนถูกต้อง' };
   };
 
-  // ✅ ฟังก์ชันตรวจสอบค่าตัวเลขในช่วง
-  const validateRange = (
-    value: string,
-    fieldName: string,
-    min: number,
-    max: number,
-    unit: string,
-    required: boolean = false
-  ): { valid: boolean; message: string } => {
+  const validateRange = (value: string, fieldName: string, min: number, max: number, unit: string, required: boolean = false): { valid: boolean; message: string } => {
     if (!value) {
-      if (required) {
-        return { valid: false, message: `${fieldName} เป็นข้อมูลจำเป็น` };
-      }
+      if (required) return { valid: false, message: `${fieldName} เป็นข้อมูลจำเป็น` };
       return { valid: true, message: '' };
     }
-    
     const numValue = parseFloat(value);
-    if (isNaN(numValue)) {
-      return { valid: false, message: `${fieldName} ต้องเป็นตัวเลข` };
-    }
-    if (numValue < min || numValue > max) {
-      return {
-        valid: false,
-        message: `${fieldName} ต้องอยู่ระหว่าง ${min}-${max} ${unit}`,
-      };
-    }
-    
+    if (isNaN(numValue)) return { valid: false, message: `${fieldName} ต้องเป็นตัวเลข` };
+    if (numValue < min || numValue > max) return { valid: false, message: `${fieldName} ต้องอยู่ระหว่าง ${min}-${max} ${unit}` };
     return { valid: true, message: `${fieldName} ถูกต้อง` };
   };
 
-  // ✅ ตรวจสอบ Real-time เมื่อมีการเปลี่ยนแปลง
   useEffect(() => {
     const errors: Record<string, string> = {};
     const success: Record<string, boolean> = {};
-    
+
     const idCardResult = validateIdCard(formData.id_card);
-    if (!idCardResult.valid) {
-      errors.id_card = idCardResult.message;
-    } else if (formData.id_card) {
-      success.id_card = true;
-    }
+    if (!idCardResult.valid) errors.id_card = idCardResult.message;
+    else if (formData.id_card) success.id_card = true;
 
     const phoneResult = validatePhoneNumber(formData.phone);
-    if (!phoneResult.valid) {
-      errors.phone = phoneResult.message;
-    } else if (formData.phone) {
-      success.phone = true;
-    }
+    if (!phoneResult.valid) errors.phone = phoneResult.message;
+    else if (formData.phone) success.phone = true;
 
     const emailResult = validateEmail(formData.email);
-    if (!emailResult.valid) {
-      errors.email = emailResult.message;
-    } else if (formData.email) {
-      success.email = true;
-    }
+    if (!emailResult.valid) errors.email = emailResult.message;
+    else if (formData.email) success.email = true;
 
     const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
-    if (!weightResult.valid) {
-      errors.current_weight = weightResult.message;
-    } else if (formData.current_weight) {
-      success.current_weight = true;
-    }
+    if (!weightResult.valid) errors.current_weight = weightResult.message;
+    else if (formData.current_weight) success.current_weight = true;
 
     const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
-    if (!heightResult.valid) {
-      errors.height = heightResult.message;
-    } else if (formData.height) {
-      success.height = true;
-    }
+    if (!heightResult.valid) errors.height = heightResult.message;
+    else if (formData.height) success.height = true;
 
     const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
-    if (!waistResult.valid) {
-      errors.waist_circumference = waistResult.message;
-    } else if (formData.waist_circumference) {
-      success.waist_circumference = true;
-    }
+    if (!waistResult.valid) errors.waist_circumference = waistResult.message;
+    else if (formData.waist_circumference) success.waist_circumference = true;
 
     setValidationErrors(errors);
     setValidationSuccess(success);
   }, [formData]);
 
-  // ✅ ฟังก์ชันแปลง error messages ให้เข้าใจง่าย
   const getFriendlyErrorMessage = (error: any): string => {
     if (!error) return '❌ เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง';
-    
     if (error.message?.includes('profiles_id_card_key') || error.message?.includes('id_card_unique')) {
       return '❌ เลขบัตรประชาชนนี้มีในระบบแล้ว\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลขบัตรประชาชน\n- หรือใช้เลขบัตรประชาชนอื่น';
     }
-    
     if (error.message?.includes('profiles_diabetes_type_check')) {
       return '❌ ประเภทเบาหวานไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกประเภทเบาหวานจากเมนู dropdown\n- ต้องเป็น: กลุ่มเสี่ยง หรือ เบาหวาน เท่านั้น';
     }
-    
-    if (error.message?.includes('waist_circumference')) {
-      return '❌ รอบเอวต้องอยู่ระหว่าง 26-200 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่ารอบเอวที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
-    }
-    
-    if (error.message?.includes('current_weight')) {
-      return '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 กก.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าน้ำหนักที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
-    }
-    
-    if (error.message?.includes('height')) {
-      return '❌ ส่วนสูงต้องอยู่ระหว่าง 100-250 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าส่วนสูงที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
-    }
-    
-    if (error.message?.includes('hospital_number')) {
-      return '❌ เลข HN (Hospital Number) ซ้ำกับผู้ป่วยคนอื่น\n\n💡 วิธีแก้ไข:\n- ตรวจสอบเลข HN ให้ถูกต้อง\n- หรือใช้เลข HN ใหม่ที่ไม่ซ้ำ';
-    }
-    
-    if (error.message?.includes('profiles_gender_check')) {
-      return '❌ เพศไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกเพศจากเมนู dropdown\n- ต้องเป็น: ชาย หรือ หญิง เท่านั้น';
-    }
-    
-    return `❌ เกิดข้อผิดพลาด: ${error.message}\n\n💡 วิธีแก้ไข:\n- ตรวจสอบข้อมูลที่กรอก\n- ลองใหม่อีกครั้ง`;
+    if (error.message?.includes('waist_circumference')) return '❌ รอบเอวต้องอยู่ระหว่าง 26-200 ซม.';
+    if (error.message?.includes('current_weight')) return '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 กก.';
+    if (error.message?.includes('height')) return '❌ ส่วนสูงต้องอยู่ระหว่าง 100-250 ซม.';
+    if (error.message?.includes('hospital_number')) return '❌ เลข HN ซ้ำกับผู้ป่วยคนอื่น';
+    if (error.message?.includes('profiles_gender_check')) return '❌ เพศไม่ถูกต้อง';
+    return `❌ เกิดข้อผิดพลาด: ${error.message}`;
   };
 
-  // ✅ ฟังก์ชันจัดการฟอร์ม
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    
     const errors: string[] = [];
-    
+
     const idCardResult = validateIdCard(formData.id_card);
-    if (!idCardResult.valid) {
-      errors.push(`• ${idCardResult.message}`);
-    }
-    
-    if (!formData.hospital_number) {
-      errors.push('• HN เป็นข้อมูลจำเป็น');
-    }
-    
-    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      errors.push('• กรุณากรอกวันเกิดให้ครบถ้วน');
-    }
-    
-    if (!addressData.province || !addressData.district || !addressData.subdistrict) {
-      errors.push('• กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
-    }
-    
+    if (!idCardResult.valid) errors.push(`• ${idCardResult.message}`);
+    if (!formData.hospital_number) errors.push('• HN เป็นข้อมูลจำเป็น');
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) errors.push('• กรุณากรอกวันเกิดให้ครบถ้วน');
+    if (!addressData.province || !addressData.district || !addressData.subdistrict) errors.push('• กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
+
     if (formData.phone) {
       const phoneResult = validatePhoneNumber(formData.phone);
-      if (!phoneResult.valid) {
-        errors.push(`• ${phoneResult.message}`);
-      }
+      if (!phoneResult.valid) errors.push(`• ${phoneResult.message}`);
     }
-    
     if (formData.email) {
       const emailResult = validateEmail(formData.email);
-      if (!emailResult.valid) {
-        errors.push(`• ${emailResult.message}`);
-      }
+      if (!emailResult.valid) errors.push(`• ${emailResult.message}`);
     }
-    
     if (formData.current_weight) {
       const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
-      if (!weightResult.valid) {
-        errors.push(`• ${weightResult.message}`);
-      }
+      if (!weightResult.valid) errors.push(`• ${weightResult.message}`);
     }
-    
     if (formData.height) {
       const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
-      if (!heightResult.valid) {
-        errors.push(`• ${heightResult.message}`);
-      }
+      if (!heightResult.valid) errors.push(`• ${heightResult.message}`);
     }
-    
     if (formData.waist_circumference) {
       const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
-      if (!waistResult.valid) {
-        errors.push(`• ${waistResult.message}`);
-      }
+      if (!waistResult.valid) errors.push(`• ${waistResult.message}`);
     }
-    
+
     if (errors.length > 0) {
-      setError(
-        `❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\n` +
-        `กรุณาแก้ไขข้อมูลดังต่อไปนี้:\n\n` +
-        errors.join('\n') +
-        `\n\n💡 คำแนะนำ: ดูข้อความแจ้งเตือนใต้ช่องกรอกข้อมูล`
-      );
+      setError(`❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\nกรุณาแก้ไขข้อมูลดังต่อไปนี้:\n\n${errors.join('\n')}`);
       return;
     }
-    
+
     setSaving(true);
-    
     try {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-      
+
       const updateData: any = {
         first_name: formData.first_name,
         last_name: formData.last_name,
@@ -639,44 +398,25 @@ export default function EditPatientPage() {
         emergency_contact_relationship: formData.emergency_contact_relationship,
         updated_at: new Date().toISOString(),
       };
-      
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update(updateData)
-        .eq('id', patientId);
-      
+
+      const { error: profileError } = await supabase.from('profiles').update(updateData).eq('id', patientId);
       if (profileError) {
-        console.error('❌ Error updating profile:', profileError);
-        const friendlyError = getFriendlyErrorMessage(profileError);
-        setError(friendlyError);
+        setError(getFriendlyErrorMessage(profileError));
         setSaving(false);
         return;
       }
-      
-      const { error: userError } = await supabase
-        .from('users')
-        .update({
-          id_card: formData.id_card,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', patientId);
-      
+
+      const { error: userError } = await supabase.from('users').update({ id_card: formData.id_card, updated_at: new Date().toISOString() }).eq('id', patientId);
       if (userError) {
-        console.error('❌ Error updating user:', userError);
-        const friendlyError = getFriendlyErrorMessage(userError);
-        setError(friendlyError);
+        setError(getFriendlyErrorMessage(userError));
         setSaving(false);
         return;
       }
-      
+
       setError('✅ แก้ไขข้อมูลผู้ป่วยสำเร็จ!');
-      setTimeout(() => {
-        router.push(`/admin/patients/${patientId}`);
-      }, 1500);
+      setTimeout(() => { router.push(`/admin/patients/${patientId}`); }, 1500);
     } catch (error: any) {
-      console.error('❌ Exception during update:', error);
-      const friendlyError = getFriendlyErrorMessage(error);
-      setError(friendlyError);
+      setError(getFriendlyErrorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -702,28 +442,16 @@ export default function EditPatientPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}`)}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            กลับ
+          <button onClick={() => router.push(`/admin/patients/${patientId}`)} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2">
+            <ArrowLeft className="w-4 h-4" /> กลับ
           </button>
-          
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-gray-800 mb-1">✏️ แก้ไขข้อมูลผู้ป่วย</h1>
-              <p className="text-gray-600">
-                HN: {patient?.hospital_number} | {patient?.first_name} {patient?.last_name}
-              </p>
+              <p className="text-gray-600">HN: {patient?.hospital_number} | {patient?.first_name} {patient?.last_name}</p>
             </div>
-            
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
-            >
-              <LogOut className="w-4 h-4" />
-              ออกจากระบบ
+            <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all">
+              <LogOut className="w-4 h-4" /> ออกจากระบบ
             </button>
           </div>
         </div>
@@ -732,651 +460,62 @@ export default function EditPatientPage() {
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-8">
         <form onSubmit={handleSubmit} className="space-y-6">
+          
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลส่วนตัว</h2>
-            
             <div className="grid grid-cols-2 gap-4">
-              {/* ID Card - แก้ไขได้ */}
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  เลขบัตรประชาชน * <span className="text-orange-500">(แก้ไขได้)</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.id_card}
-                  onChange={(e) => setFormData({ ...formData, id_card: e.target.value.replace(/\D/g, '').slice(0, 13) })}
-                  maxLength={13}
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.id_card
-                      ? 'border-red-500 bg-red-50'
-                      : validationSuccess.id_card
-                      ? 'border-green-500 bg-green-50'
-                      : 'border-gray-300'
-                  }`}
-                  placeholder="กรอกเลขบัตรประชาชน 13 หลัก"
-                />
-                {originalData.id_card && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    📝 เดิม: {originalData.id_card}
-                  </p>
-                )}
-                {validationErrors.id_card && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.id_card}
-                  </p>
-                )}
-                {validationSuccess.id_card && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.id_card}
-                  </p>
-                )}
+                <label className="block text-sm font-medium text-gray-700 mb-1">เลขบัตรประชาชน * <span className="text-orange-500">(แก้ไขได้)</span></label>
+                <input type="text" value={formData.id_card} onChange={(e) => setFormData({ ...formData, id_card: e.target.value.replace(/\D/g, '').slice(0, 13) })} maxLength={13} className={`w-full px-4 py-2 border rounded-lg ${validationErrors.id_card ? 'border-red-500 bg-red-50' : validationSuccess.id_card ? 'border-green-500 bg-green-50' : 'border-gray-300'}`} placeholder="กรอกเลขบัตรประชาชน 13 หลัก" />
+                {originalData.id_card && <p className="text-xs text-gray-500 mt-1">📝 เดิม: {originalData.id_card}</p>}
+                {validationErrors.id_card && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{validationErrors.id_card}</p>}
+                {validationSuccess.id_card && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{validationSuccess.id_card}</p>}
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.first_name}
-                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
+                <input type="text" required value={formData.first_name} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">นามสกุล *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.last_name}
-                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
+                <input type="text" required value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">HN (Hospital Number) *</label>
-                <input
-                  type="text"
-                  required
-                  value={formData.hospital_number}
-                  onChange={(e) => setFormData({ ...formData, hospital_number: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
+                <input type="text" required value={formData.hospital_number} onChange={(e) => setFormData({ ...formData, hospital_number: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">วันเกิด *</label>
                 <div className="grid grid-cols-3 gap-2">
-                  <select
-                    value={formData.birth_day}
-                    onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
-                    required
-                    className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
+                  <select value={formData.birth_day} onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })} required className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
                     <option value="">วัน</option>
-                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-                      <option key={day} value={day}>{day}</option>
-                    ))}
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (<option key={day} value={day}>{day}</option>))}
                   </select>
-                  
-                  <select
-                    value={formData.birth_month}
-                    onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
-                    required
-                    className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
+                  <select value={formData.birth_month} onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })} required className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
                     <option value="">เดือน</option>
-                    {THAI_MONTHS.map((month, index) => (
-                      <option key={index + 1} value={index + 1}>{month}</option>
-                    ))}
+                    {THAI_MONTHS.map((month, index) => (<option key={index + 1} value={index + 1}>{month}</option>))}
                   </select>
-                  
-                  <select
-                    value={formData.birth_year}
-                    onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
-                    required
-                    className="px-2 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
+                  <select value={formData.birth_year} onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })} required className="px-2 py-2 border border-gray-300 rounded-lg text-sm">
                     <option value="">ปี พ.ศ.</option>
-                    {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
+                    {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (<option key={year} value={year}>{year}</option>))}
                   </select>
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">เพศ</label>
-                <select
-                  value={formData.gender}
-                  onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                >
+                <select value={formData.gender} onChange={(e) => setFormData({ ...formData, gender: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
                   <option value="">-- เลือกเพศ --</option>
                   <option value="male">ชาย</option>
                   <option value="female">หญิง</option>
                 </select>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
-                <input
-                  type="tel"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  placeholder="เช่น 0812345678"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.phone
-                      ? 'border-red-500'
-                      : validationSuccess.phone
-                      ? 'border-green-500'
-                      : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">รูปแบบ: 0812345678 (9-10 หลัก) (เว้นว่างได้)</p>
-                {validationErrors.phone && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.phone}
-                  </p>
-                )}
-                {validationSuccess.phone && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.phone}
-                  </p>
-                )}
+                <input type="tel" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} placeholder="เช่น 0812345678" className={`w-full px-4 py-2 border rounded-lg ${validationErrors.phone ? 'border-red-500' : validationSuccess.phone ? 'border-green-500' : 'border-gray-300'}`} />
+                {validationErrors.phone && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{validationErrors.phone}</p>}
+                {validationSuccess.phone && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{validationSuccess.phone}</p>}
               </div>
-
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
-                <input
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="patient@example.com"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.email
-                      ? 'border-red-500'
-                      : validationSuccess.email
-                      ? 'border-green-500'
-                      : 'border-gray-300'
-                  }`}
-                />
-                {validationErrors.email && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.email}
-                  </p>
-                )}
-                {validationSuccess.email && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.email}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ข้อมูลสุขภาพ */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลสุขภาพ</h2>
-            
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">น้ำหนัก (kg)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.current_weight}
-                  onChange={(e) => setFormData({ ...formData, current_weight: e.target.value })}
-                  placeholder="เช่น 65"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.current_weight
-                      ? 'border-red-500'
-                      : validationSuccess.current_weight
-                      ? 'border-green-500'
-                      : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">ช่วงที่ยอมรับ: 30-200 kg (เว้นว่างได้ถ้าไม่มีข้อมูล)</p>
-                {validationErrors.current_weight && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.current_weight}
-                  </p>
-                )}
-                {validationSuccess.current_weight && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.current_weight}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ส่วนสูง (cm)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.height}
-                  onChange={(e) => setFormData({ ...formData, height: e.target.value })}
-                  placeholder="เช่น 170"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.height
-                      ? 'border-red-500'
-                      : validationSuccess.height
-                      ? 'border-green-500'
-                      : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">ช่วงที่ยอมรับ: 100-250 cm (เว้นว่างได้ถ้าไม่มีข้อมูล)</p>
-                {validationErrors.height && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.height}
-                  </p>
-                )}
-                {validationSuccess.height && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.height}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">รอบเอว (cm)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.waist_circumference}
-                  onChange={(e) => setFormData({ ...formData, waist_circumference: e.target.value })}
-                  placeholder="เช่น 85"
-                  className={`w-full px-4 py-2 border rounded-lg ${
-                    validationErrors.waist_circumference
-                      ? 'border-red-500'
-                      : validationSuccess.waist_circumference
-                      ? 'border-green-500'
-                      : 'border-gray-300'
-                  }`}
-                />
-                <p className="text-xs text-gray-500 mt-1">ช่วงที่ยอมรับ: 26-200 cm (เว้นว่างได้ถ้าไม่มีข้อมูล)</p>
-                {validationErrors.waist_circumference && (
-                  <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    {validationErrors.waist_circumference}
-                  </p>
-                )}
-                {validationSuccess.waist_circumference && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" />
-                    {validationSuccess.waist_circumference}
-                  </p>
-                )}
-              </div>
-
-              {/* ประเภทเบาหวาน */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทเบาหวาน</label>
-                <select
-                  value={formData.diabetes_type}
-                  onChange={(e) => setFormData({ ...formData, diabetes_type: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                >
-                  <option value="">-- เลือกประเภท --</option>
-                  <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
-                  <option value="เบาหวาน">เบาหวาน</option>
-                </select>
-              </div>
-
-              {/* ค่าน้ำตาล */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ค่าน้ำตาล (mg/dL)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.blood_sugar}
-                  onChange={(e) => setFormData({ ...formData, blood_sugar: e.target.value })}
-                  placeholder="เช่น 110"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-                <p className="text-xs text-gray-500 mt-1">ค่าปกติ: 70-100 mg/dL (งดอาหาร 8 ชม.)</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ค่า HbA1c</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={formData.hba1c_level}
-                  onChange={(e) => setFormData({ ...formData, hba1c_level: e.target.value })}
-                  placeholder="เช่น 7.5"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-                <p className="text-xs text-gray-500 mt-1">เว้นว่างได้ถ้าไม่มีข้อมูล</p>
-              </div>
-
-              <div className="col-span-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (คำแนะนำเพิ่มเติม)</label>
-                <input
-                  type="text"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="เช่น แพ้ถั่ว แพ้นม (เว้นว่างได้ถ้าไม่มี)"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ที่อยู่ */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">ที่อยู่</h2>
-            
-            <div className="space-y-4">
-              {/* เลขที่ + ที่อยู่เพิ่มเติม */}
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">เลขที่</label>
-                  <input
-                    type="text"
-                    value={formData.house_number}
-                    onChange={(e) => setFormData({ ...formData, house_number: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="123"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ที่อยู่เพิ่มเติม (ถ้ามี)</label>
-                  <input
-                    type="text"
-                    value={formData.address_line1}
-                    onChange={(e) => setFormData({ ...formData, address_line1: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="เช่น อพาร์ทเมนท์, อาคาร, ชั้น"
-                  />
-                </div>
-              </div>
-
-              {/* หมู่ที่ + หมู่บ้าน */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">หมู่ที่/ชุมชน</label>
-                  <input
-                    type="text"
-                    value={formData.village_no}
-                    onChange={(e) => setFormData({ ...formData, village_no: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="หมู่ 5"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">หมู่บ้าน</label>
-                  <input
-                    type="text"
-                    value={formData.village_name}
-                    onChange={(e) => setFormData({ ...formData, village_name: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="หมู่บ้านสุขใจ"
-                  />
-                </div>
-              </div>
-
-              {/* ซอย + ถนน */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ซอย</label>
-                  <input
-                    type="text"
-                    value={formData.soi}
-                    onChange={(e) => setFormData({ ...formData, soi: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="ซอย 5"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ถนน</label>
-                  <input
-                    type="text"
-                    value={formData.road}
-                    onChange={(e) => setFormData({ ...formData, road: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    placeholder="ถนนสุขุมวิท"
-                  />
-                </div>
-              </div>
-
-              {/* ✅ แสดงข้อมูลเดิมก่อน Dropdown */}
-              {(originalData.province || originalData.district || originalData.subdistrict) && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <div className="flex items-center gap-2 mb-3">
-                    <MapPin className="w-5 h-5 text-blue-600" />
-                    <h3 className="text-sm font-semibold text-blue-800">📍 ที่อยู่ปัจจุบัน (สำหรับเปรียบเทียบ)</h3>
-                  </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    {originalData.province && (
-                      <div>
-                        <span className="text-gray-500">จังหวัด: </span>
-                        <span className="ml-2 font-medium text-gray-800">{originalData.province}</span>
-                      </div>
-                    )}
-                    {originalData.district && (
-                      <div>
-                        <span className="text-gray-500">อำเภอ/เขต: </span>
-                        <span className="ml-2 font-medium text-gray-800">{originalData.district}</span>
-                      </div>
-                    )}
-                    {originalData.subdistrict && (
-                      <div>
-                        <span className="text-gray-500">ตำบล/แขวง: </span>
-                        <span className="ml-2 font-medium text-gray-800">{originalData.subdistrict}</span>
-                      </div>
-                    )}
-                    {originalData.postalCode && (
-                      <div>
-                        <span className="text-gray-500">รหัสไปรษณีย์: </span>
-                        <span className="ml-2 font-medium text-gray-800">{originalData.postalCode}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* ✅ ThaiAddressSelector */}
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700 mb-2">📝 แก้ไขที่อยู่</h3>
-                <ThaiAddressSelector
-                  onAddressChange={handleAddressChange}
-                  initialData={{
-                    province: addressData.province,
-                    district: addressData.district,
-                    subdistrict: addressData.subdistrict,
-                    postal_code: addressData.postalCode,
-                  }}
-                />
-              </div>
-
-              {/* ✅ เลือกโรงพยาบาล (แบบลำดับชั้น - แสดงเฉพาะเครือข่าย) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  🏥 โรงพยาบาลสังกัด <span className="text-blue-600">(เครือข่าย: {userHospitalNetwork.networkHospitalIds.length} แห่ง)</span>
-                </label>
-                <select
-                  value={formData.hospital_id}
-                  onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
-                >
-                  <option value="">-- เลือกโรงพยาบาล --</option>
-                  
-                  {/* แม่ข่าย */}
-                  {mainHospitals.map((hospital) => (
-                    <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
-                      <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
-                      {/* ลูกข่ายของแม่ข่ายนี้ */}
-                      {hospitalGroups.get(hospital.id)?.map((sub) => (
-                        <option key={sub.id} value={sub.id}>
-                          {'   '}└─ {sub.name} ({sub.code})
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-500 mt-1">
-                  💡 แสดงเฉพาะโรงพยาบาลในเครือข่ายเดียวกัน ({hospitals.length} แห่ง)
-                </p>
-                {hospitals.length === 0 && (
-                  <p className="text-xs text-orange-500 mt-1">⚠️ ไม่พบโรงพยาบาลในเครือข่าย</p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ✅ กำหนดโค้ช (แสดงเฉพาะโค้ชในเครือข่าย + แสดงชื่อโรงพยาบาล) */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">กำหนดโค้ช/หมอผู้ดูแล</h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                👨‍⚕️ โค้ช/หมอผู้ดูแล <span className="text-blue-600">(เครือข่าย: {coaches.length} คน)</span>
-              </label>
-              <select
-                value={formData.coach_id}
-                onChange={(e) => setFormData({ ...formData, coach_id: e.target.value })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-96 overflow-y-auto"
-              >
-                <option value="">-- เลือกโค้ช --</option>
-                {coaches.map((coach) => {
-                  const hospitalName = coach.users?.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
-                  const hospitalCode = coach.users?.hospitals?.code || '';
-                  const specialization = coach.specialization_th || 'ไม่ระบุความเชี่ยวชาญ';
-                  
-                  return (
-                    <option key={coach.id} value={coach.user_id}>
-                      {coach.full_name_th} | {specialization} | 🏥 {hospitalName} ({hospitalCode})
-                    </option>
-                  );
-                })}
-              </select>
-              <p className="text-xs text-gray-500 mt-1">
-                👨‍️ แสดงโค้ชจากโรงพยาบาลในเครือข่ายเดียวกัน ({coaches.length} คน)
-              </p>
-              {coaches.length === 0 && (
-                <p className="text-xs text-orange-500 mt-1">⚠️ ไม่พบโค้ชในโรงพยาบาลเครือข่าย</p>
-              )}
-            </div>
-          </div>
-
-          {/* ผู้ติดต่อฉุกเฉิน */}
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <h2 className="text-xl font-bold text-gray-800 mb-4">ผู้ติดต่อฉุกเฉิน</h2>
-            
-            <div className="grid grid-cols-3 gap-4">
-              <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อผู้ติดต่อ</label>
-                <input
-                  type="text"
-                  value={formData.emergency_contact_name}
-                  onChange={(e) => setFormData({ ...formData, emergency_contact_name: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
-                <input
-                  type="tel"
-                  value={formData.emergency_contact_phone}
-                  onChange={(e) => setFormData({ ...formData, emergency_contact_phone: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-              
-              <div className="col-span-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">ความสัมพันธ์</label>
-                <input
-                  type="text"
-                  value={formData.emergency_contact_relationship}
-                  onChange={(e) => setFormData({ ...formData, emergency_contact_relationship: e.target.value })}
-                  placeholder="เช่น พ่อ, แม่, สามี"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ✅ Error/Success Message */}
-          {error && (
-            <div
-              className={`rounded-xl p-6 border-2 ${
-                error.includes('✅') || error.includes('สำเร็จ')
-                  ? 'bg-green-50 border-green-300'
-                  : 'bg-red-50 border-red-300'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                {error.includes('✅') || error.includes('สำเร็จ') ? (
-                  <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-                )}
-                <div className="flex-1">
-                  <h3
-                    className={`font-bold mb-2 ${
-                      error.includes('✅') || error.includes('สำเร็จ') ? 'text-green-800' : 'text-red-800'
-                    }`}
-                  >
-                    {error.includes('✅') || error.includes('สำเร็จ') ? '✅ สำเร็จ' : '⚠️ พบข้อผิดพลาด'}
-                  </h3>
-                  <div
-                    className={`whitespace-pre-line text-sm leading-relaxed ${
-                      error.includes('✅') || error.includes('สำเร็จ') ? 'text-green-700' : 'text-red-700'
-                    }`}
-                  >
-                    {error}
-                  </div>
-                  {(error.includes('✅') || error.includes('สำเร็จ')) && (
-                    <p className="text-green-600 text-sm mt-3">⏳ กำลังเปลี่ยนหน้าในอีก 1.5 วินาที...</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <div className="flex gap-4">
-            <button
-              type="submit"
-              disabled={saving || Object.keys(validationErrors).length > 0}
-              className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {saving ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  กำลังบันทึก...
-                </>
-              ) : (
-                <>
-                  <Save className="w-5 h-5" />
-                  บันทึกการแก้ไข
-                </>
-              )}
-            </button>
-            
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/patients/${patientId}`)}
-              className="flex-1 bg-gray-500 text-white font-bold py-4 rounded-xl hover:bg-gray-600 transition-all"
-            >
-              ยกเลิก
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
+                <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="patient@example.com" className={`w-full px-4 py-2 border rounded-lg ${validationErrors.email ? 'border-red-500' : validationSuccess.email ? 'border-green-500' : 'border-gray-300'}`} />
+                {validationErrors.email && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{
