@@ -518,4 +518,169 @@ export default function EditPatientPage() {
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
                 <input type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} placeholder="patient@example.com" className={`w-full px-4 py-2 border rounded-lg ${validationErrors.email ? 'border-red-500' : validationSuccess.email ? 'border-green-500' : 'border-gray-300'}`} />
-                {validationErrors.email && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{
+                {validationErrors.email && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{validationErrors.email}</p>}
+                {validationSuccess.email && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{validationSuccess.email}</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* ข้อมูลสุขภาพ */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">ข้อมูลสุขภาพ</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">น้ำหนัก (kg)</label>
+                <input type="number" step="0.1" value={formData.current_weight} onChange={(e) => setFormData({ ...formData, current_weight: e.target.value })} placeholder="เช่น 65" className={`w-full px-4 py-2 border rounded-lg ${validationErrors.current_weight ? 'border-red-500' : validationSuccess.current_weight ? 'border-green-500' : 'border-gray-300'}`} />
+                {validationErrors.current_weight && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{validationErrors.current_weight}</p>}
+                {validationSuccess.current_weight && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{validationSuccess.current_weight}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ส่วนสูง (cm)</label>
+                <input type="number" step="0.1" value={formData.height} onChange={(e) => setFormData({ ...formData, height: e.target.value })} placeholder="เช่น 170" className={`w-full px-4 py-2 border rounded-lg ${validationErrors.height ? 'border-red-500' : validationSuccess.height ? 'border-green-500' : 'border-gray-300'}`} />
+                {validationErrors.height && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{validationErrors.height}</p>}
+                {validationSuccess.height && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{validationSuccess.height}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">รอบเอว (cm)</label>
+                <input type="number" step="0.1" value={formData.waist_circumference} onChange={(e) => setFormData({ ...formData, waist_circumference: e.target.value })} placeholder="เช่น 85" className={`w-full px-4 py-2 border rounded-lg ${validationErrors.waist_circumference ? 'border-red-500' : validationSuccess.waist_circumference ? 'border-green-500' : 'border-gray-300'}`} />
+                {validationErrors.waist_circumference && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" />{validationErrors.waist_circumference}</p>}
+                {validationSuccess.waist_circumference && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle className="w-3 h-3" />{validationSuccess.waist_circumference}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทเบาหวาน</label>
+                <select value={formData.diabetes_type} onChange={(e) => setFormData({ ...formData, diabetes_type: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <option value="">-- เลือกประเภท --</option>
+                  <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
+                  <option value="เบาหวาน">เบาหวาน</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ค่าน้ำตาล (mg/dL)</label>
+                <input type="number" step="0.1" value={formData.blood_sugar} onChange={(e) => setFormData({ ...formData, blood_sugar: e.target.value })} placeholder="เช่น 110" className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ค่า HbA1c</label>
+                <input type="number" step="0.1" value={formData.hba1c_level} onChange={(e) => setFormData({ ...formData, hba1c_level: e.target.value })} placeholder="เช่น 7.5" className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div className="col-span-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ (คำแนะนำเพิ่มเติม)</label>
+                <input type="text" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} placeholder="เช่น แพ้ถั่ว แพ้นม (เว้นว่างได้ถ้าไม่มี)" className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+            </div>
+          </div>
+
+          {/* ที่อยู่ */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">ที่อยู่</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">เลขที่</label>
+                  <input type="text" value={formData.house_number} onChange={(e) => setFormData({ ...formData, house_number: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="123" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ที่อยู่เพิ่มเติม (ถ้ามี)</label>
+                  <input type="text" value={formData.address_line1} onChange={(e) => setFormData({ ...formData, address_line1: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="เช่น อพาร์ทเมนท์, อาคาร, ชั้น" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">หมู่ที่/ชุมชน</label>
+                  <input type="text" value={formData.village_no} onChange={(e) => setFormData({ ...formData, village_no: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="หมู่ 5" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">หมู่บ้าน</label>
+                  <input type="text" value={formData.village_name} onChange={(e) => setFormData({ ...formData, village_name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="หมู่บ้านสุขใจ" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ซอย</label>
+                  <input type="text" value={formData.soi} onChange={(e) => setFormData({ ...formData, soi: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="ซอย 5" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ถนน</label>
+                  <input type="text" value={formData.road} onChange={(e) => setFormData({ ...formData, road: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="ถนนสุขุมวิท" />
+                </div>
+              </div>
+              {(originalData.province || originalData.district || originalData.subdistrict) && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <MapPin className="w-5 h-5 text-blue-600" />
+                    <h3 className="text-sm font-semibold text-blue-800">📍 ที่อยู่ปัจจุบัน (สำหรับเปรียบเทียบ)</h3>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    {originalData.province && <div><span className="text-gray-500">จังหวัด: </span><span className="ml-2 font-medium text-gray-800">{originalData.province}</span></div>}
+                    {originalData.district && <div><span className="text-gray-500">อำเภอ/เขต: </span><span className="ml-2 font-medium text-gray-800">{originalData.district}</span></div>}
+                    {originalData.subdistrict && <div><span className="text-gray-500">ตำบล/แขวง: </span><span className="ml-2 font-medium text-gray-800">{originalData.subdistrict}</span></div>}
+                    {originalData.postalCode && <div><span className="text-gray-500">รหัสไปรษณีย์: </span><span className="ml-2 font-medium text-gray-800">{originalData.postalCode}</span></div>}
+                  </div>
+                </div>
+              )}
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 mb-2">📝 แก้ไขที่อยู่</h3>
+                <ThaiAddressSelector onAddressChange={handleAddressChange} initialData={{ province: addressData.province, district: addressData.district, subdistrict: addressData.subdistrict, postal_code: addressData.postalCode }} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">🏥 โรงพยาบาลสังกัด</label>
+                <select value={formData.hospital_id} onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto">
+                  <option value="">-- เลือกโรงพยาบาล --</option>
+                  {mainHospitals.map((hospital) => (
+                    <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
+                      <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
+                      {hospitalGroups.get(hospital.id)?.map((sub) => (<option key={sub.id} value={sub.id}>{'   '}└─ {sub.name} ({sub.code})</option>))}
+                    </optgroup>
+                  ))}
+                </select>
+                {hospitals.length === 0 && <p className="text-xs text-orange-500 mt-1">⚠️ ยังไม่มีข้อมูลโรงพยาบาลในระบบ</p>}
+              </div>
+            </div>
+          </div>
+
+          {/* ผู้ติดต่อฉุกเฉิน */}
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+            <h2 className="text-xl font-bold text-gray-800 mb-4">ผู้ติดต่อฉุกเฉิน</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อผู้ติดต่อ</label>
+                <input type="text" value={formData.emergency_contact_name} onChange={(e) => setFormData({ ...formData, emergency_contact_name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
+                <input type="tel" value={formData.emergency_contact_phone} onChange={(e) => setFormData({ ...formData, emergency_contact_phone: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div className="col-span-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">ความสัมพันธ์</label>
+                <input type="text" value={formData.emergency_contact_relationship} onChange={(e) => setFormData({ ...formData, emergency_contact_relationship: e.target.value })} placeholder="เช่น พ่อ, แม่, สามี" className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+            </div>
+          </div>
+
+          {/* Error/Success Message */}
+          {error && (
+            <div className={`rounded-xl p-6 border-2 ${error.includes('✅') || error.includes('สำเร็จ') ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+              <div className="flex items-start gap-3">
+                {error.includes('✅') || error.includes('สำเร็จ') ? <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" /> : <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />}
+                <div className="flex-1">
+                  <h3 className={`font-bold mb-2 ${error.includes('✅') || error.includes('สำเร็จ') ? 'text-green-800' : 'text-red-800'}`}>
+                    {error.includes('✅') || error.includes('สำเร็จ') ? '✅ สำเร็จ' : '⚠️ พบข้อผิดพลาด'}
+                  </h3>
+                  <div className={`whitespace-pre-line text-sm leading-relaxed ${error.includes('✅') || error.includes('สำเร็จ') ? 'text-green-700' : 'text-red-700'}`}>{error}</div>
+                  {(error.includes('✅') || error.includes('สำเร็จ')) && <p className="text-green-600 text-sm mt-3">⏳ กำลังเปลี่ยนหน้าในอีก 1.5 วินาที...</p>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Submit Button */}
+          <div className="flex gap-4">
+            <button type="submit" disabled={saving || Object.keys(validationErrors).length > 0} className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+              {saving ? (<><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>กำลังบันทึก...</>) : (<><Save className="w-5 h-5" />บันทึกการแก้ไข</>)}
+            </button>
+            <button type="button" onClick={() => router.push(`/admin/patients/${patientId}`)} className="flex-1 bg-gray-500 text-white font-bold py-4 rounded-xl hover:bg-gray-600 transition-all">ยกเลิก</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
