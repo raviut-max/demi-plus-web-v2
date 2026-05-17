@@ -89,7 +89,7 @@ export default function EditPatientPage() {
     postalCode: '',
     id_card: '',
   });
-  
+
   const [formData, setFormData] = useState({
     // ข้อมูลส่วนตัว
     id_card: '',
@@ -102,6 +102,7 @@ export default function EditPatientPage() {
     gender: '',
     phone: '',
     email: '',
+    
     // ข้อมูลสุขภาพ
     current_weight: '',
     height: '',
@@ -112,6 +113,7 @@ export default function EditPatientPage() {
     notes: '',
     occupation: '',
     education_level: '',
+    
     // ที่อยู่
     house_number: '',
     address_line1: '',
@@ -119,8 +121,10 @@ export default function EditPatientPage() {
     road: '',
     village_no: '',
     village_name: '',
+    
     // โรงพยาบาล
     hospital_id: '',
+    
     // ผู้ติดต่อฉุกเฉิน
     emergency_contact_name: '',
     emergency_contact_phone: '',
@@ -133,12 +137,14 @@ export default function EditPatientPage() {
       router.push('/admin/login');
       return;
     }
+    
     // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
+    
     setUser(userData);
     loadPatientData();
     loadHospitalsWithNetwork(userData);
@@ -196,7 +202,7 @@ export default function EditPatientPage() {
       console.log('✅ Network hospitals:', filteredHospitals.length, 'hospitals');
       setHospitals(filteredHospitals);
       
-      // ✅ โหลดโค้ชจากเครือข่ายโรงพยาบาลเดียวกัน
+      // ✅ โหลดโค้ช จากเครือข่ายโรงพยาบาลเดียวกัน
       await loadCoachesFromNetwork(networkHospitalIds);
       
     } catch (error) {
@@ -421,7 +427,7 @@ export default function EditPatientPage() {
   useEffect(() => {
     const errors: Record<string, string> = {};
     const success: Record<string, boolean> = {};
-
+    
     const idCardResult = validateIdCard(formData.id_card);
     if (!idCardResult.valid) {
       errors.id_card = idCardResult.message;
@@ -493,52 +499,61 @@ export default function EditPatientPage() {
     if (error.message?.includes('profiles_gender_check')) {
       return '❌ เพศไม่ถูกต้อง\n\n💡 วิธีแก้ไข:\n- เลือกเพศจากเมนู dropdown\n- ต้องเป็น: ชาย หรือ หญิง เท่านั้น';
     }
-    
+
     return `❌ เกิดข้อผิดพลาด: ${error.message}\n\n💡 วิธีแก้ไข:\n- ตรวจสอบข้อมูลที่กรอก\n- ลองใหม่อีกครั้ง`;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    
     const errors: string[] = [];
-
+    
     const idCardResult = validateIdCard(formData.id_card);
     if (!idCardResult.valid) {
       errors.push(`• ${idCardResult.message}`);
     }
+    
     if (!formData.hospital_number) {
       errors.push('• HN เป็นข้อมูลจำเป็น');
     }
+    
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       errors.push('• กรุณากรอกวันเกิดให้ครบถ้วน');
     }
+    
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       errors.push('• กรุณาเลือกจังหวัด อำเภอ/เขต และตำบล ให้ครบถ้วน');
     }
+    
     if (formData.phone) {
       const phoneResult = validatePhoneNumber(formData.phone);
       if (!phoneResult.valid) {
         errors.push(`• ${phoneResult.message}`);
       }
     }
+    
     if (formData.email) {
       const emailResult = validateEmail(formData.email);
       if (!emailResult.valid) {
         errors.push(`• ${emailResult.message}`);
       }
     }
+    
     if (formData.current_weight) {
       const weightResult = validateRange(formData.current_weight, 'น้ำหนัก', 30, 200, 'kg', false);
       if (!weightResult.valid) {
         errors.push(`• ${weightResult.message}`);
       }
     }
+    
     if (formData.height) {
       const heightResult = validateRange(formData.height, 'ส่วนสูง', 100, 250, 'cm', false);
       if (!heightResult.valid) {
         errors.push(`• ${heightResult.message}`);
       }
     }
+    
     if (formData.waist_circumference) {
       const waistResult = validateRange(formData.waist_circumference, 'รอบเอว', 26, 200, 'cm', false);
       if (!waistResult.valid) {
