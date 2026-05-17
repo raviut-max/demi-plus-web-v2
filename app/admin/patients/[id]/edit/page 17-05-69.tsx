@@ -4,7 +4,8 @@
 //    1. ✅ เพิ่มสิทธิ์ให้ อสม. (osm) ใช้งานหน้านี้ได้
 //    2. ✅ ปรับแสดงโรงพยาบาลเฉพาะในเครือข่าย (แม่ข่าย+ลูกข่าย) ไม่สนสิทธิ์เดิม
 //    3. ✅ ปรับแสดงโค้ชจากเครือข่ายโรงพยาบาล พร้อมชื่อโรงพยาบาลที่สังกัด
-//    4. ✅ ส่วนอื่นๆ คงเดิม
+//    4. ✅ แก้ไขข้อผิดพลาดทางไวยากรณ์ทั้งหมด
+//    5. ✅ ส่วนอื่นๆ คงเดิม
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -89,7 +90,7 @@ export default function EditPatientPage() {
     postalCode: '',
     id_card: '',
   });
-
+  
   const [formData, setFormData] = useState({
     // ข้อมูลส่วนตัว
     id_card: '',
@@ -144,7 +145,7 @@ export default function EditPatientPage() {
       router.push('/admin/login');
       return;
     }
-    
+
     setUser(userData);
     loadPatientData();
     loadHospitalsWithNetwork(userData);
@@ -202,7 +203,7 @@ export default function EditPatientPage() {
       console.log('✅ Network hospitals:', filteredHospitals.length, 'hospitals');
       setHospitals(filteredHospitals);
       
-      // ✅ โหลดโค้ช จากเครือข่ายโรงพยาบาลเดียวกัน
+      // ✅ โหลดโค้ชจากเครือข่ายโรงพยาบาลเดียวกัน
       await loadCoachesFromNetwork(networkHospitalIds);
       
     } catch (error) {
@@ -560,7 +561,7 @@ export default function EditPatientPage() {
         errors.push(`• ${waistResult.message}`);
       }
     }
-
+    
     if (errors.length > 0) {
       setError(
         `❌ พบข้อผิดพลาดในการกรอกข้อมูล\n\n` +
@@ -644,6 +645,7 @@ export default function EditPatientPage() {
       setTimeout(() => {
         router.push(`/admin/patients/${patientId}`);
       }, 1500);
+      
     } catch (error: any) {
       console.error('❌ Exception during update:', error);
       const friendlyError = getFriendlyErrorMessage(error);
