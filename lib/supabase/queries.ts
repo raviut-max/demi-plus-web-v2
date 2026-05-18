@@ -2951,62 +2951,6 @@ export async function getCoachesByHospitals(hospitalIds: string[]) {
   }
 }
 
-// ✅ โหลดโค้ชพร้อมข้อมูลโรงพยาบาล (แก้ไขแล้ว)
-export async function getCoachesWithHospitals(hospitalIds?: string[]) {
-  try {
-    console.log('👨‍️ [getCoachesWithHospitals] Loading coaches...', hospitalIds);
-    
-    // ✅ Query ที่ join กับ users และ hospitals
-    let query = supabase
-      .from('doctors')
-      .select(`
-        id,
-        user_id,
-        full_name_th,
-        specialization_th,
-        is_active,
-        is_verified,
-        users (
-          hospital_id,
-          role,
-          admin_type,
-          is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type,
-            parent_id
-          )
-        )
-      `)
-      .eq('is_active', true)
-      .eq('users.is_active', true);
-
-    // ✅ กรองตาม hospitalIds ถ้ามี (สำหรับ Hospital Admin)
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('users.hospital_id', hospitalIds);
-    }
-
-    const { data, error } = await query.order('full_name_th', { ascending: true });
-
-    if (error) {
-      console.error('❌ [getCoachesWithHospitals] Error:', error);
-      return [];
-    }
-
-    // ✅ กรองเอาเฉพาะ coaches ที่มี hospital_id
-    const coachesWithHospitals = (data || []).filter(coach => 
-      coach.users?.hospital_id && coach.users?.hospitals?.name
-    );
-
-    console.log('✅ [getCoachesWithHospitals] Loaded:', coachesWithHospitals.length, 'coaches');
-    return coachesWithHospitals;
-  } catch (err) {
-    console.error('❌ [getCoachesWithHospitals] Exception:', err);
-    return [];
-  }
-}
 
 // =====================================================
 // 🆔 ID Card Assignment Functions (ใหม่)
@@ -3582,5 +3526,135 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
   } catch (err) {
     console.error('❌ [getPendingIdCards] Exception:', err);
     return [];
+  }
+}
+
+// ✅ โหลดโค้ชพร้อมข้อมูลโรงพยาบาล (แก้ไขแล้ว - ทำงานถูกต้อง)
+export async function getCoachesWithHospitals(hospitalIds?: string[]) {
+  try {
+    console.log('👨‍⚕️ [getCoachesWithHospitals] Loading coaches...', hospitalIds);
+    
+    // ✅ Query ที่ถูกต้อง - join กับ users และ hospitals
+    let query = supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        specialization_th,
+        is_active,
+        is_verified,
+        users!doctors_user_id_fkey (
+          id,
+          role,
+          hospital_id,
+          is_active,
+          hospitals (
+            id,
+            name,
+            code,
+            type,
+            parent_id
+          )
+        )
+      `)
+      .eq('is_active', true);
+
+    // ✅ กรองตาม hospitalIds ถ้ามี (สำหรับ Hospital Admin)
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('users.hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query.order('full_name_th', { ascending: true });
+
+    if (error) {
+      console.error('❌ [getCoachesWithHospitals] Error:', error);
+      return [];
+    }
+
+    // ✅ กรองผลลัพธ์เพิ่มเติม - เอาเฉพาะที่มี role ที่ต้องการ
+    const validRoles = ['doctor', 'helper', 'osm', 'admin'];
+    const filteredCoaches = (data || []).filter(coach => {
+      const role = coach.users?.role;
+      const hasHospital = coach.users?.hospital_id && coach.users?.hospitals?.name;
+      const isActive = coach.is_active && coach.users?.is_active;
+      
+      return validRoles.includes(role) && hasHospital && isActive;
+    });
+
+    console.log('✅ [getCoachesWithHospitals] Loaded:', filteredCoaches.length, 'coaches');
+    if (filteredCoaches.length > 0) {
+      console.log('📋 Sample coach:', {
+        name: filteredCoaches[0].full_name_th,
+        hospital: filteredCoaches[0].users?.hospitals?.name,
+        role: filteredCoaches[0].users?.role
+      });
+    }
+    
+    return filteredCoaches;
+  } catch (err) {
+    console.error('❌ [getCoachesWithHospitals] Exception:', err);
+    return [];
+  }
+}
+
+// ✅ ฟังก์ชัน debug สำหรับตรวจสอบปัญหา
+export async function debugCoachesQuery(hospitalIds?: string[]) {
+  try {
+    console.log('🔍 [DEBUG] Starting coaches query debug...');
+    
+    // 1. นับ coaches ทั้งหมด
+    const { count: totalCoaches } = await supabase
+      .from('doctors')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_active', true);
+    
+    console.log('📊 Total active coaches:', totalCoaches);
+    
+    // 2. ดึง coaches พร้อม users
+    const { data: coachesWithData } = await supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        is_active,
+        users!doctors_user_id_fkey (
+          id,
+          role,
+          hospital_id,
+          is_active
+        )
+      `)
+      .eq('is_active', true)
+      .limit(5);
+    
+    console.log('📋 Sample coaches:', coachesWithData);
+    
+    // 3. ถ้ามี hospitalIds ให้ตรวจสอบ
+    if (hospitalIds && hospitalIds.length > 0) {
+      const { data: withHospitals } = await supabase
+        .from('doctors')
+        .select(`
+          id,
+          user_id,
+          full_name_th,
+          users!doctors_user_id_fkey (
+            hospital_id,
+            role,
+            hospitals (
+              name
+            )
+          )
+        `)
+        .in('users.hospital_id', hospitalIds)
+        .eq('is_active', true)
+        .limit(5);
+      
+      console.log('🏥 Coaches in specified hospitals:', withHospitals);
+    }
+    
+  } catch (err) {
+    console.error('❌ [DEBUG] Error:', err);
   }
 }
