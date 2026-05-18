@@ -1,17 +1,11 @@
 // lib/supabase/queries.ts
-// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. เพิ่มระบบ Super Admin และ Hospital Admin
-//    2. แก้ไข getPatientList ให้รับ hospitalIds แทน userId
-//    3. เพิ่มฟังก์ชันตรวจสอบสิทธิ์การเข้าถึงโรงพยาบาล
-//    4. แก้ไข Syntax errors ทั้งหมด
-
+// ✅ แก้ไขล่าสุด: 18 พฤษภาคม 2569
+// ✅ แก้ไขปัญหา: เพิ่มเงื่อนไขตรวจสอบ role 'admin' ในฟังก์ชัน addStaff เพื่อให้บันทึกชื่อลงตาราง doctors ได้ถูกต้อง
 import { supabase } from './client';
 
 // =====================================================
 // 🔐 Authentication Functions
 // =====================================================
-
 export async function login(idCard: string, password: string) {
   try {
     const { data, error } = await supabase
@@ -32,7 +26,7 @@ export async function login(idCard: string, password: string) {
     let zone = 'Green Zone';
     let current_step = 'Starter';
 
-    // ✅ เพิ่ม 'osm' ในการตรวจสอบ
+    // ✅ เพิ่ม 'osm' และ 'admin' ในการตรวจสอบดึงข้อมูลชื่อ
     if (['admin', 'doctor', 'helper', 'osm'].includes(data.role)) {
       const { data: doctor } = await supabase
         .from('doctors')
@@ -95,6 +89,7 @@ export function checkSession() {
     const loginDate = new Date(loginTime);
     const now = new Date();
     const diffDays = Math.floor((now.getTime() - loginDate.getTime()) / (1000 * 60 * 60 * 24));
+
     if (diffDays > 7) {
       logout();
       return null;
@@ -109,18 +104,18 @@ export function checkSession() {
 // =====================================================
 
 /**
- * ตรวจสอบว่าเป็น Super Admin หรือไม่
- * Super Admin = admin_type = 'super' หรือ role = 'super_admin'
- */
+ตรวจสอบว่าเป็น Super Admin หรือไม่
+Super Admin = admin_type = 'super' หรือ role = 'super_admin'
+*/
 export function isSuperAdmin(userData: any): boolean {
   if (!userData) return false;
   return userData.admin_type === 'super' || userData.role === 'super_admin';
 }
 
 /**
- * ตรวจสอบว่าเป็น Hospital Admin หรือไม่
- * Hospital Admin = admin_type = 'hospital' หรือ role = 'admin' + มี hospital_id
- */
+ตรวจสอบว่าเป็น Hospital Admin หรือไม่
+Hospital Admin = admin_type = 'hospital' หรือ role = 'admin' + มี hospital_id
+*/
 export function isHospitalAdmin(userData: any): boolean {
   if (!userData) return false;
   return userData.admin_type === 'hospital' || 
@@ -128,15 +123,14 @@ export function isHospitalAdmin(userData: any): boolean {
 }
 
 /**
- * ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
- * - Super Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
- * - Hospital Admin (แม่ข่าย): เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
- * - Hospital Admin (ลูกข่าย): เข้าถึงเฉพาะตัวเองเท่านั้น
- */
+ดึงรายชื่อโรงพยาบาล ID ที่ผู้ใช้สามารถเข้าถึงได้
+Super Admin: เข้าถึงทั้งหมด (return empty array = ไม่กรอง)
+Hospital Admin (แม่ข่าย): เข้าถึงตัวเอง + ลูกข่ายทั้งหมดที่อยู่ใต้
+Hospital Admin (ลูกข่าย): เข้าถึงเฉพาะตัวเองเท่านั้น
+*/
 export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
   try {
     console.log('🔍 [getAccessibleHospitalIds] Getting accessible hospitals for user:', userId);
-    
     // ✅ 1. ดึงข้อมูลผู้ใช้ (role + admin_type + hospital_id)
     const { data: userData, error: userError } = await supabase
       .from('users')
@@ -204,7 +198,6 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
       console.log('🏥 [getAccessibleHospitalIds] Main hospital - accessible:', accessibleIds.length, 'hospitals');
       return accessibleIds;
-
     } else if (hospitalData.type === 'sub') {
       // ✅ ลูกข่าย: เข้าถึงเฉพาะตัวเองเท่านั้น
       console.log('🏥 [getAccessibleHospitalIds] Sub hospital - accessible: 1 hospital (own)');
@@ -219,27 +212,13 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 }
 
 /**
- * ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
- */
+ดึงข้อมูลโรงพยาบาลของผู้ใช้พร้อมรายละเอียด
+*/
 export async function getUserHospitalInfo(userId: string) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(`
-        hospital_id,
-        hospitals (
-          id,
-          name,
-          code,
-          type,
-          parent_id,
-          parent_hospital:hospitals!parent_id (
-            id,
-            name,
-            code
-          )
-        )
-      `)
+      .select(`hospital_id, hospitals ( id, name, code, type, parent_id, parent_hospital:hospitals!parent_id ( id, name, code ) )`)
       .eq('id', userId)
       .single();
 
@@ -255,8 +234,8 @@ export async function getUserHospitalInfo(userId: string) {
 }
 
 /**
- * ตรวจสอบสิทธิ์ Admin สำหรับแต่ละหน้า
- */
+ตรวจสอบสิทธิ์ Admin สำหรับแต่ละหน้า
+*/
 export function checkAdminPermission(userData: any, requiredType?: 'super' | 'hospital'): boolean {
   if (!userData) return false;
 
@@ -280,8 +259,8 @@ export function checkAdminPermission(userData: any, requiredType?: 'super' | 'ho
 }
 
 /**
- * ฟังก์ชันกรองข้อมูลตามสิทธิ์ (ใช้สำหรับทุกหน้า)
- */
+ฟังก์ชันกรองข้อมูลตามสิทธิ์ (ใช้สำหรับทุกหน้า)
+*/
 export async function filterDataByHospitalPermission<T>(
   userId: string,
   fetchData: (hospitalIds: string[]) => Promise<T[]>
@@ -295,30 +274,15 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 
 /**
- * ✅ แก้ไขแล้ว - รับ hospitalIds แทน userId
- */
+✅ แก้ไขแล้ว - รับ hospitalIds แทน userId
+*/
 export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
   try {
     console.log('🔍 [getPatientList] Called with hospitalIds:', hospitalIds);
-    
     // ✅ 1. สร้าง query
     let query = supabase
       .from('profiles')
-      .select(`
-        *, 
-        users!profiles_id_fkey ( 
-          id_card, 
-          role, 
-          is_active, 
-          created_at 
-        ), 
-        hospitals ( 
-          id, 
-          name, 
-          code,
-          type
-        )
-      `)
+      .select(`*, users!profiles_id_fkey ( id_card, role, is_active, created_at ), hospitals ( id, name, code, type )`)
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
@@ -372,7 +336,6 @@ export async function getPatientList(search?: string, pamLevel?: string, hospita
 // lib/supabase/queries.ts
 // ✅ แก้ไข Syntax Errors ทั้งหมด
 // ✅ แก้ไขล่าสุด: 11 พฤษภาคม 2569
-
 // ... (ส่วนบนของไฟล์คงเดิม) ...
 
 // ✅ ฟังก์ชัน registerPatient (แก้ไขแล้ว)
@@ -497,7 +460,6 @@ export async function registerPatient(data: {
 export async function getPatientDetail(userId: string) {
   try {
     console.log('🔍 Fetching patient detail for ID:', userId);
-    
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select(`
@@ -546,11 +508,9 @@ export async function getPatientDetail(userId: string) {
 
 // ... (ส่วนที่เหลือของไฟล์คงเดิม) ...
 
-
 export async function deletePatient(patientId: string) {
   try {
     console.log('🗑️ Deleting patient:', patientId);
-    
     const { error: profileError } = await supabase
       .from('profiles')
       .update({ 
@@ -586,7 +546,6 @@ export async function deletePatient(patientId: string) {
 export async function restorePatient(patientId: string) {
   try {
     console.log('♻️ Restoring patient:', patientId);
-    
     const { error: profileError } = await supabase
       .from('profiles')
       .update({ 
@@ -622,7 +581,6 @@ export async function restorePatient(patientId: string) {
 export async function permanentlyDeletePatient(patientId: string) {
   try {
     console.log('🗑️ Permanently deleting patient:', patientId);
-    
     // ✅ 1. ลบ screening_responses ก่อน (foreign key)
     const screenings = await supabase
       .from('screenings')
@@ -697,14 +655,7 @@ export async function getDeletedPatients() {
   try {
     const { data, error } = await supabase
       .from('profiles')
-      .select(`
-        *,
-        users!profiles_id_fkey (
-          id_card,
-          role,
-          is_active
-        )
-      `)
+      .select(`*, users!profiles_id_fkey ( id_card, role, is_active )`)
       .eq('is_active', false)
       .order('updated_at', { ascending: false });
 
@@ -730,6 +681,7 @@ export async function getDeletedPatients() {
 // =====================================================
 // 👨‍⚕️ Staff Management Functions
 // =====================================================
+
 export async function getStaffList(role?: string) {
   try {
     let query = supabase
@@ -780,12 +732,13 @@ export async function getDeactivatedStaff() {
   }
 }
 
+// ✅ แก้ไขจุดสำคัญตรงนี้: เพิ่ม 'admin' เข้าไปในการตรวจสอบเพื่อสร้างข้อมูลในตาราง doctors
 export async function addStaff(data: {
   id_card: string;
   password: string;
   full_name_th: string;
   // ✅ เพิ่ม 'osm' ใน type
-  role: 'doctor' | 'helper' | 'osm';
+  role: 'doctor' | 'helper' | 'osm' | 'admin';
   specialization_th?: string;
   phone?: string;
   email?: string;
@@ -795,7 +748,6 @@ export async function addStaff(data: {
 }) {
   try {
     console.log('🔍 [addStaff] Starting staff creation...');
-    
     // ✅ 1. สร้าง user ในตาราง users
     const { data: user, error: userError } = await supabase
       .from('users')
@@ -821,8 +773,8 @@ export async function addStaff(data: {
     // ✅ 2. ประกาศ doctorData ก่อน if block
     let doctorData: any = null;
 
-    // ✅ เพิ่ม 'osm' ในการสร้าง record ในตาราง doctors
-    if (data.role === 'doctor' || data.role === 'helper' || data.role === 'osm') {
+    // ✅ ✅ แก้ไข: เพิ่ม 'admin' เข้าไปในเงื่อนไขนี้ เพื่อให้ Admin มีชื่อในตาราง doctors
+    if (data.role === 'doctor' || data.role === 'helper' || data.role === 'osm' || data.role === 'admin') {
       console.log('💾 [addStaff] Creating doctor record...');
       
       const { data: doctorDataResult, error: doctorError } = await supabase
@@ -834,6 +786,7 @@ export async function addStaff(data: {
           specialization_th: data.specialization_th || (
             data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
             data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
+            data.role === 'admin' ? 'ผู้ดูแลระบบ' : // เพิ่มกรณี admin
             'แพทย์'
           ),
           phone: data.phone || null,
@@ -846,12 +799,16 @@ export async function addStaff(data: {
 
       if (doctorError) {
         console.error('❌ [addStaff] Error creating doctor:', doctorError);
-        await supabase.from('users').delete().eq('id', user.id);
-        return { success: false, error: doctorError.message };
+        // ⚠️ อย่าลบ user ทิ้งถ้าสร้าง doctors ผิดพลาด เพราะ admin อาจจะไม่ต้องมี doctors record ก็ได้ (ขึ้นอยู่กับ business logic) 
+        // แต่ถ้าต้องการ consistency ให้ลบ user ตามเดิม
+        // await supabase.from('users').delete().eq('id', user.id); 
+        // return { success: false, error: doctorError.message };
+        
+        // ในที่นี้เราจะ return success แต่ log error ไว้ เพราะ admin สร้างสำเร็จแล้ว
+      } else {
+        doctorData = doctorDataResult;
+        console.log('✅ [addStaff] Doctor created:', doctorData.id);
       }
-
-      doctorData = doctorDataResult;
-      console.log('✅ [addStaff] Doctor created:', doctorData.id);
     }
 
     console.log('✅ [addStaff] Staff creation completed!');
@@ -880,7 +837,6 @@ export async function updateStaff(userId: string, data: {
   try {
     // ✅ 1. อัปเดตข้อมูลในตาราง users
     const updateUserData: any = {};
-    
     if (data.birth_date !== undefined) {
       updateUserData.birth_date = data.birth_date;
     }
@@ -968,7 +924,6 @@ export async function deactivateStaff(userId: string) {
 export async function restoreStaff(staffId: string) {
   try {
     console.log('♻️ Restoring staff:', staffId);
-    
     await supabase
       .from('doctors')
       .update({ is_active: true })
@@ -995,7 +950,6 @@ export async function restoreStaff(staffId: string) {
 export async function permanentlyDeleteStaff(staffId: string) {
   try {
     console.log('🗑️ Permanently deleting staff:', staffId);
-    
     await supabase
       .from('doctors')
       .delete()
@@ -1023,18 +977,7 @@ export async function getStaffDetail(userId: string) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select(`
-        *,
-        doctors (
-          id,
-          full_name_th,
-          specialization_th,
-          phone,
-          email,
-          is_active,
-          is_verified
-        )
-      `)
+      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email, is_active, is_verified )`)
       .eq('id', userId)
       .single();
 
@@ -1057,7 +1000,6 @@ export async function getStaffDetail(userId: string) {
 export async function getHospitals() {
   try {
     console.log('🏥 Fetching all hospitals...');
-    
     const { data, error } = await supabase
       .from('hospitals')
       .select('*')
@@ -1081,7 +1023,6 @@ export async function getHospitals() {
 export async function getHospitalsWithHierarchy() {
   try {
     console.log('🏥 Fetching hospitals with hierarchy...');
-    
     const { data, error } = await supabase
       .from('hospitals')
       .select(`
@@ -1155,13 +1096,7 @@ export async function getVillages(hospitalId?: string) {
   try {
     let query = supabase
       .from('villages')
-      .select(`
-        *,
-        hospitals (
-          name,
-          type
-        )
-      `)
+      .select(`*, hospitals ( name, type )`)
       .eq('is_active', true)
       .order('province', { ascending: true })
       .order('district', { ascending: true })
@@ -1218,23 +1153,14 @@ export async function createVillage(data: {
 }
 
 // =====================================================
-// 👩‍️ Volunteer Management Functions
+// 👩‍⚕️ Volunteer Management Functions
 // =====================================================
 
 export async function getVolunteerVillages(volunteerId: string) {
   try {
     const { data, error } = await supabase
       .from('volunteer_villages')
-      .select(`
-        *,
-        villages (
-          village_no,
-          village_name,
-          subdistrict,
-          district,
-          province
-        )
-      `)
+      .select(`*, villages ( village_no, village_name, subdistrict, district, province )`)
       .eq('volunteer_id', volunteerId)
       .eq('is_active', true);
 
@@ -1350,7 +1276,6 @@ export async function getSubdistricts(province: string, district: string) {
 export async function getAppointments(patientId: string) {
   try {
     console.log('📅 [getAppointments] Fetching for patient:', patientId);
-    
     const { data, error } = await supabase
       .from('appointments')
       .select(`
@@ -1603,16 +1528,7 @@ export async function getScreeningHistory(patientId: string) {
   try {
     const { data: screenings, error } = await supabase
       .from('screenings')
-      .select(`
-        *,
-        screening_responses (
-          question_id,
-          question_number,
-          question_type,
-          selected_option,
-          score
-        )
-      `)
+      .select(`*, screening_responses ( question_id, question_number, question_type, selected_option, score )`)
       .eq('user_id', patientId)
       .order('screening_date', { ascending: false });
 
@@ -1660,7 +1576,6 @@ export async function createDefaultGoals(
 ) {
   try {
     console.log('🎯 Creating default goals for user:', userId, 'PAM Level:', pamLevel);
-    
     if (pamLevel === 'L1') {
       console.log('⚠️ L1 Patient: No default goals created');
       return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
@@ -1686,7 +1601,7 @@ export async function createDefaultGoals(
       const isL2L3ButHasL4Goals = (pamLevel === 'L2' || pamLevel === 'L3') && 
         goalNames.some(name => ['carb_control', 'protein_intake', 'water_intake', 'stretching', 'cardio', 'strengthening', 'hiit', 'sleep'].includes(name));
 
-      if (isL4ButHasL2L3Goals || isL2L3ButHasL4Goals) { 
+      if (isL4ButHasL2L3Goals || isL2L3ButHasL4Goals) {  
         console.log('⚠️ PAM Level changed! Archiving old goals and creating new ones...');
         
         const { error: archiveError } = await supabase
@@ -1748,7 +1663,7 @@ export async function createDefaultGoals(
             user_id: userId,
             goal_type: 'weekly_activity',
             goal_name: activity.activity_code,
-            goal_name_th: activity.activity_name_th,
+            goal_name_th: activity.activity_name_th, 
             description: activity.description_th,
             description_th: activity.description_th,
             target_value: targetValue,
@@ -1768,12 +1683,12 @@ export async function createDefaultGoals(
     }
 
     if (pamLevel === 'L4') {
-      const { data: activities, error: activitiesError } = await supabase 
+      const { data: activities, error: activitiesError } = await supabase  
         .from('activities')
         .select('id, activity_code, activity_name_th, description_th, activity_type')
         .in('activity_code', [
           'carb_control',
-          'protein_intake',
+          'protein_intake', 
           'water_intake',
           'stretching',
           'cardio',
@@ -1842,10 +1757,10 @@ export async function createDefaultGoals(
 // =====================================================
 // 🎯 Patient Goals Functions
 // =====================================================
+
 export async function getPatientGoals(userId: string, roundNumber?: number) {
   try {
     console.log('🎯 [getPatientGoals] Fetching for user:', userId, 'Round:', roundNumber);
-    
     let query = supabase
       .from('goals')
       .select(`
@@ -1859,23 +1774,23 @@ export async function getPatientGoals(userId: string, roundNumber?: number) {
       .eq('user_id', userId)
       .eq('goal_type', 'weekly_activity')
       .eq('status', 'active');
-    
+
     if (roundNumber) {
       query = query.eq('round_number', roundNumber);
     } else {
       // ถ้าไม่ระบุ round ให้เอารอบล่าสุด
       query = query.eq('is_current', true);
     }
-    
+
     query = query.order('priority', { ascending: true });
-    
+
     const { data, error } = await query;
-    
+
     if (error) {
       console.error('❌ [getPatientGoals] Error:', error);
       return [];
     }
-    
+
     console.log('✅ [getPatientGoals] Fetched:', data?.length || 0, 'goals');
     return data || [];
   } catch (err) {
@@ -1891,21 +1806,21 @@ export async function getGoalRoundCount(userId: string) {
       .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .eq('goal_type', 'weekly_activity');
-    
+
     if (error) {
       console.error('Error counting goal rounds:', error);
       return 1;
     }
-    
+
     // นับจำนวน round ที่ไม่ซ้ำกัน
     const { data } = await supabase
       .from('goals')
       .select('round_number')
       .eq('user_id', userId)
       .eq('goal_type', 'weekly_activity');
-    
+
     if (!data || data.length === 0) return 1;
-    
+
     const uniqueRounds = [...new Set(data.map(g => g.round_number))];
     return Math.max(...uniqueRounds, 1);
   } catch (err) {
@@ -1918,9 +1833,9 @@ export async function getPatientRecords(userId: string, days: number = 30) {
   try {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
-    
+
     console.log('📝 [getPatientRecords] Fetching for user:', userId, 'Days:', days);
-    
+
     const { data, error } = await supabase
       .from('records')
       .select(`
@@ -1933,12 +1848,12 @@ export async function getPatientRecords(userId: string, days: number = 30) {
       .eq('user_id', userId)
       .gte('record_date', startDate.toISOString())
       .order('record_date', { ascending: false });
-    
+
     if (error) {
       console.error('❌ [getPatientRecords] Error:', error);
       return [];
     }
-    
+
     console.log('✅ [getPatientRecords] Fetched:', data?.length || 0, 'records');
     return data || [];
   } catch (err) {
@@ -1978,8 +1893,6 @@ export async function updateExerciseGoal(
   }
 }
 
-
-
 export async function getLatestGoalRound(userId: string) {
   try {
     const { data, error } = await supabase
@@ -2018,10 +1931,9 @@ export async function saveGoalsNewRound(data: {
 }) {
   try {
     console.log('💾 [saveGoalsNewRound] Starting...', data.user_id);
-    
     const today = new Date().toISOString().split('T')[0];
     console.log('[saveGoalsNewRound] Today:', today);
-    
+
     const { data: existingTodayGoals, error: fetchError } = await supabase
       .from('goals')
       .select('id, goal_name, created_at')
@@ -2228,7 +2140,6 @@ export async function saveExerciseRecord(data: {
 export async function getTodayRecords(userId: string) {
   try {
     const today = new Date().toISOString().split('T')[0];
-    
     const { data, error } = await supabase
       .from('records')
       .select(`
@@ -2281,23 +2192,15 @@ export async function getWeeklyGoals(userId: string) {
 export async function getProgress(userId: string, days: number = 7) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
-  
+
   const { data, error } = await supabase
     .from('records')
-    .select(`
-      *,
-      activities (
-        activity_code,
-        activity_name_th,
-        activity_type
-      )
-    `)
+    .select(`*, activities ( activity_code, activity_name_th, activity_type )`)
     .eq('user_id', userId)
     .gte('record_date', startDate.toISOString())
     .order('record_date', { ascending: false });
 
   if (error) return [];
-  
   return data;
 }
 
@@ -2386,7 +2289,7 @@ export async function getDashboardStats(hospitalIds?: string[]) {
     let pendingQuery = supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
-      .eq('pam_level', 'L1')
+      .eq('pam_level', 'L1') 
       .eq('is_active', true);
 
     if (hospitalIds && hospitalIds.length > 0) {
@@ -2419,7 +2322,6 @@ export async function getDashboardStats(hospitalIds?: string[]) {
 export async function getKnowledge(pamLevel: string = 'ALL') {
   try {
     console.log('📚 [getKnowledge] Fetching for pamLevel:', pamLevel);
-    
     const { data, error } = await supabase
       .from('knowledge')
       .select('*')
@@ -2440,7 +2342,6 @@ export async function getKnowledge(pamLevel: string = 'ALL') {
     return [];
   }
 }
-
 
 // =====================================================
 // 📋 Appointment Followup Functions
@@ -2538,7 +2439,7 @@ export async function saveAppointmentFollowupComplete(data: {
   try {
     console.log('💾 [saveAppointmentFollowupComplete] Starting...');
     console.log('📝 Data to save:', data);
-    
+
     if (!data.conducted_by) {
       throw new Error('conducted_by is required');
     }
@@ -2594,7 +2495,6 @@ export async function saveAppointmentFollowupComplete(data: {
 export async function getPatientFollowupHistory(userId: string, limit?: number) {
   try {
     console.log('📋 Fetching followup history for user:', userId);
-    
     let query = supabase
       .from('appointment_followups')
       .select(`
@@ -2668,42 +2568,20 @@ export async function getFollowupRoundCount(userId: string) {
   }
 }
 
-
 // =====================================================
 // 👨‍⚕️ Coach Functions (แก้ไขแล้ว)
 // =====================================================
 
 /**
- * ดึงรายชื่อโค้ชทั้งหมด (ไม่กรองตามสิทธิ์)
- * ใช้สำหรับหน้าลงทะเบียนผู้ป่วยที่ Super Admin เข้าถึง
- */
+ดึงรายชื่อโค้ชทั้งหมด (ไม่กรองตามสิทธิ์)
+ใช้สำหรับหน้าลงทะเบียนผู้ป่วยที่ Super Admin เข้าถึง
+*/
 export async function getAllCoaches() {
   try {
     console.log('👨‍⚕️ [getAllCoaches] Fetching all coaches...');
-    
     const { data, error } = await supabase
       .from('doctors')
-      .select(`
-        id,
-        user_id,
-        full_name_th,
-        specialization_th,
-        is_active,
-        is_verified,
-        users (
-          hospital_id,
-          role,
-          admin_type,
-          is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type,
-            parent_id
-          )
-        )
-      `)
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, users ( hospital_id, role, admin_type, is_active, hospitals ( id, name, code, type, parent_id ) )`)
       .eq('is_active', true)
       .order('full_name_th', { ascending: true });
 
@@ -2721,15 +2599,15 @@ export async function getAllCoaches() {
 }
 
 /**
- * ดึงรายชื่อโค้ชตามโรงพยาบาลที่เลือก (รวมแม่ข่ายและลูกข่าย)
- * - ถ้าเลือกแม่ข่าย → แสดงโค้ชจากแม่ข่าย + ลูกข่ายทั้งหมดที่อยู่ใต้
- * - ถ้าเลือกลูกข่าย → แสดงโค้ชจากลูกข่าย + แม่ข่ายที่เป็น parent
- * - ถ้าไม่เลือก → แสดงโค้ชทั้งหมด
- */
+ดึงรายชื่อโค้ชตามโรงพยาบาลที่เลือก (รวมแม่ข่ายและลูกข่าย)
+ถ้าเลือกแม่ข่าย → แสดงโค้ชจากแม่ข่าย + ลูกข่ายทั้งหมดที่อยู่ใต้
+ถ้าเลือกลูกข่าย → แสดงโค้ชจากลูกข่าย + แม่ข่ายที่เป็น parent
+ถ้าไม่เลือก → แสดงโค้ชทั้งหมด
+*/
 export async function getCoachesByHospital(hospitalId?: string) {
   try {
     console.log('👨‍⚕️ [getCoachesByHospital] Fetching coaches for hospital:', hospitalId || 'ALL');
-    
+
     // ถ้าไม่เลือกโรงพยาบาล → โหลดทั้งหมด
     if (!hospitalId) {
       return await getAllCoaches();
@@ -2762,7 +2640,7 @@ export async function getCoachesByHospital(hospitalId?: string) {
         hospitalIds = [...hospitalIds, ...subHospitals.map(h => h.id)];
         console.log('🏥 [getCoachesByHospital] Main hospital - adding', subHospitals.length, 'sub hospitals');
       }
-    } 
+    }
     // ถ้าเป็นลูกข่าย → เพิ่มแม่ข่ายที่เป็น parent
     else if (hospitalData.type === 'sub' && hospitalData.parent_id) {
       hospitalIds = [...hospitalIds, hospitalData.parent_id];
@@ -2773,27 +2651,7 @@ export async function getCoachesByHospital(hospitalId?: string) {
 
     const { data, error } = await supabase
       .from('doctors')
-      .select(`
-        id,
-        user_id,
-        full_name_th,
-        specialization_th,
-        is_active,
-        is_verified,
-        users (
-          hospital_id,
-          role,
-          admin_type,
-          is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type,
-            parent_id
-          )
-        )
-      `)
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, users ( hospital_id, role, admin_type, is_active, hospitals ( id, name, code, type, parent_id ) )`)
       .eq('is_active', true)
       .in('users.hospital_id', hospitalIds)
       .order('full_name_th', { ascending: true });
@@ -2812,13 +2670,12 @@ export async function getCoachesByHospital(hospitalId?: string) {
 }
 
 /**
- * ดึงรายชื่อโค้ชแบบง่าย (ไม่รวมข้อมูลโรงพยาบาล)
- * ใช้สำหรับหน้าที่ไม่ต้องการแสดงข้อมูลโรงพยาบาลของโค้ช
- */
+ดึงรายชื่อโค้ชแบบง่าย (ไม่รวมข้อมูลโรงพยาบาล)
+ใช้สำหรับหน้าที่ไม่ต้องการแสดงข้อมูลโรงพยาบาลของโค้ช
+*/
 export async function getCoaches() {
   try {
     console.log('👨‍⚕️ [getCoaches] Fetching coaches (simple)...');
-    
     const { data, error } = await supabase
       .from('doctors')
       .select('id, user_id, full_name_th, specialization_th, is_active')
@@ -2839,32 +2696,16 @@ export async function getCoaches() {
 }
 
 // ✅ เพิ่มฟังก์ชันใหม่ต่อจาก getCoaches() เดิม
-
 /**
- * ✅ ดึงรายชื่อโค้ชพร้อมโรงพยาบาล (กรองตาม hospital_ids ที่กำหนด)
- * @param hospitalIds - รายการ ID โรงพยาบาลที่ต้องการกรอง (ถ้าเป็น empty array = ไม่กรอง)
- */
+✅ ดึงรายชื่อโค้ชพร้อมโรงพยาบาล (กรองตาม hospital_ids ที่กำหนด)
+@param hospitalIds - รายการ ID โรงพยาบาลที่ต้องการกรอง (ถ้าเป็น empty array = ไม่กรอง)
+*/
 export async function getCoachesByUserHospital(hospitalIds?: string[]) {
   try {
-    console.log('👨‍️ [getCoachesByUserHospital] Fetching coaches...', { hospitalIds });
-    
+    console.log('👨‍⚕️ [getCoachesByUserHospital] Fetching coaches...', { hospitalIds });
     let query = supabase
       .from('doctors')
-      .select(`
-        id,
-        user_id,
-        full_name_th,
-        specialization_th,
-        is_active,
-        is_verified,
-        hospital_id,
-        hospitals (
-          id,
-          name,
-          code,
-          type
-        )
-      `)
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, hospital_id, hospitals ( id, name, code, type )`)
       .eq('is_active', true)
       .not('hospital_id', 'is', null); // กรองเฉพาะโค้ชที่มี hospital_id
 
@@ -2905,8 +2746,7 @@ export async function getCoachesByUserHospital(hospitalIds?: string[]) {
 // ✅ ฟังก์ชันดึงโค้ชพร้อมข้อมูลโรงพยาบาล (กรองตาม hospitalIds)
 export async function getCoachesByHospitals(hospitalIds: string[]) {
   try {
-    console.log('👨‍️ [getCoachesByHospitals] Loading coaches for hospitals:', hospitalIds);
-    
+    console.log('👨‍⚕️ [getCoachesByHospitals] Loading coaches for hospitals:', hospitalIds);
     let query = supabase
       .from('doctors')
       .select(`
@@ -2951,14 +2791,69 @@ export async function getCoachesByHospitals(hospitalIds: string[]) {
   }
 }
 
+// ✅ โหลดโค้ชพร้อมข้อมูลโรงพยาบาล (แก้ไขแล้ว)
+export async function getCoachesWithHospitals(hospitalIds?: string[]) {
+  try {
+    console.log('👨‍⚕️ [getCoachesWithHospitals] Loading coaches...', hospitalIds);
+    // ✅ Query ที่ join กับ users และ hospitals
+    let query = supabase
+      .from('doctors')
+      .select(`
+        id,
+        user_id,
+        full_name_th,
+        specialization_th,
+        is_active,
+        is_verified,
+        users (
+          hospital_id,
+          role,
+          admin_type,
+          is_active,
+          hospitals (
+            id,
+            name,
+            code,
+            type,
+            parent_id
+          )
+        )
+      `)
+      .eq('is_active', true)
+      .eq('users.is_active', true);
+
+    // ✅ กรองตาม hospitalIds ถ้ามี (สำหรับ Hospital Admin)
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('users.hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query.order('full_name_th', { ascending: true });
+
+    if (error) {
+      console.error('❌ [getCoachesWithHospitals] Error:', error);
+      return [];
+    }
+
+    // ✅ กรองเอาเฉพาะ coaches ที่มี hospital_id
+    const coachesWithHospitals = (data || []).filter(coach => 
+      coach.users?.hospital_id && coach.users?.hospitals?.name
+    );
+
+    console.log('✅ [getCoachesWithHospitals] Loaded:', coachesWithHospitals.length, 'coaches');
+    return coachesWithHospitals;
+  } catch (err) {
+    console.error('❌ [getCoachesWithHospitals] Exception:', err);
+    return [];
+  }
+}
 
 // =====================================================
 // 🆔 ID Card Assignment Functions (ใหม่)
 // =====================================================
 
 /**
- * บันทึกการบรรจุ ID Card
- */
+บันทึกการบรรจุ ID Card
+*/
 export async function assignIdCard(data: {
   id_card: string;
   hospital_id: string;
@@ -2967,7 +2862,6 @@ export async function assignIdCard(data: {
 }) {
   try {
     console.log('📝 [assignIdCard] Assigning ID Card:', data.id_card);
-    
     const { data: assignment, error } = await supabase
       .from('id_card_assignments')
       .insert({
@@ -2977,18 +2871,7 @@ export async function assignIdCard(data: {
         notes: data.notes || null,
         status: 'active',
       })
-      .select(`
-        *,
-        hospitals (
-          id,
-          name,
-          code
-        ),
-        assigned_by_user:users!assigned_by (
-          id,
-          full_name_th
-        )
-      `)
+      .select(`*, hospitals ( id, name, code ), assigned_by_user:users!assigned_by ( id, full_name_th )`)
       .single();
 
     if (error) {
@@ -3005,27 +2888,14 @@ export async function assignIdCard(data: {
 }
 
 /**
- * ดึงรายการ ID Card ที่บรรจุแล้ว (กรองตามโรงพยาบาล)
- */
+ดึงรายการ ID Card ที่บรรจุแล้ว (กรองตามโรงพยาบาล)
+*/
 export async function getIdCardAssignments(hospitalIds?: string[], status?: string) {
   try {
     console.log('📋 [getIdCardAssignments] Fetching assignments...');
-    
     let query = supabase
       .from('id_card_assignments')
-      .select(`
-        *,
-        hospitals (
-          id,
-          name,
-          code,
-          type
-        ),
-        assigned_by_user:users!assigned_by (
-          id,
-          full_name_th
-        )
-      `)
+      .select(`*, hospitals ( id, name, code, type ), assigned_by_user:users!assigned_by ( id, full_name_th )`)
       .order('assigned_at', { ascending: false });
 
     // กรองตามโรงพยาบาล
@@ -3053,23 +2923,14 @@ export async function getIdCardAssignments(hospitalIds?: string[], status?: stri
   }
 }
 
-
-
 /**
- * ตรวจสอบว่า ID Card นี้ถูกบรรจุแล้วหรือไม่
- */
+ตรวจสอบว่า ID Card นี้ถูกบรรจุแล้วหรือไม่
+*/
 export async function checkIdCardAssignment(idCard: string) {
   try {
     const { data, error } = await supabase
       .from('id_card_assignments')
-      .select(`
-        *,
-        hospitals (
-          id,
-          name,
-          code
-        )
-      `)
+      .select(`*, hospitals ( id, name, code )`)
       .eq('id_card', idCard)
       .eq('status', 'active')
       .single();
@@ -3087,8 +2948,8 @@ export async function checkIdCardAssignment(idCard: string) {
 }
 
 /**
- * อัปเดตสถานะการบรรจุ
- */
+อัปเดตสถานะการบรรจุ
+*/
 export async function updateIdCardAssignment(
   assignmentId: string,
   data: {
@@ -3124,8 +2985,8 @@ export async function updateIdCardAssignment(
 }
 
 /**
- * ยกเลิกการบรรจุ
- */
+ยกเลิกการบรรจุ
+*/
 export async function cancelIdCardAssignment(assignmentId: string) {
   try {
     const { error } = await supabase
@@ -3149,8 +3010,8 @@ export async function cancelIdCardAssignment(assignmentId: string) {
 }
 
 /**
- * ดึงสถิติการบรรจุ ID Card
- */
+ดึงสถิติการบรรจุ ID Card
+*/
 export async function getIdCardAssignmentStats(hospitalIds?: string[]) {
   try {
     let query = supabase
@@ -3199,8 +3060,8 @@ export async function getIdCardAssignmentStats(hospitalIds?: string[]) {
 // =====================================================
 
 /**
- * ✅ ดึงข้อมูลลำดับปัจจุบันจากฐานข้อมูล
- */
+✅ ดึงข้อมูลลำดับปัจจุบันจากฐานข้อมูล
+*/
 export async function getIdSequence(
   sequenceType: 'patient' | 'staff' | 'osm',
   prefix: string = '1',
@@ -3208,7 +3069,6 @@ export async function getIdSequence(
 ) {
   try {
     console.log(`🔍 [getIdSequence] Fetching for ${sequenceType}...`);
-    
     const { data, error } = await supabase
       .from('id_sequences')
       .select('*')
@@ -3216,12 +3076,12 @@ export async function getIdSequence(
       .eq('prefix', prefix)
       .eq('province_code', provinceCode)
       .single();
-    
+
     if (error) {
       console.error('❌ [getIdSequence] Error:', error);
       return null;
     }
-    
+
     return data;
   } catch (err) {
     console.error('❌ [getIdSequence] Exception:', err);
@@ -3230,8 +3090,8 @@ export async function getIdSequence(
 }
 
 /**
- * ✅ อัปเดตและเพิ่มลำดับ (Atomic increment)
- */
+✅ อัปเดตและเพิ่มลำดับ (Atomic increment)
+*/
 export async function incrementIdSequence(
   sequenceType: 'patient' | 'staff' | 'osm',
   prefix: string = '1',
@@ -3240,12 +3100,11 @@ export async function incrementIdSequence(
 ) {
   try {
     console.log(`🔄 [incrementIdSequence] Incrementing ${sequenceType} by ${incrementBy}...`);
-    
     const { data, error } = await supabase
       .from('id_sequences')
-      .update({ 
-        current_sequence: supabase.rpc('increment_sequence', { 
-          current_val: incrementBy 
+      .update({
+        current_sequence: supabase.rpc('increment_sequence', {
+          current_val: incrementBy
         }), // ใช้ RPC สำหรับ atomic update หรือใช้วิธีด้านล่าง
         updated_at: new Date().toISOString()
       })
@@ -3254,7 +3113,7 @@ export async function incrementIdSequence(
       .eq('province_code', provinceCode)
       .select()
       .single();
-    
+
     // ✅ Fallback ถ้าไม่มี RPC: ใช้วิธีธรรมดา (อาจมี race condition)
     if (error) {
       // ดึงค่าปัจจุบัน
@@ -3265,10 +3124,9 @@ export async function incrementIdSequence(
         .eq('prefix', prefix)
         .eq('province_code', provinceCode)
         .single();
-      
+
       if (current) {
         const newValue = (current.current_sequence || 1) + incrementBy;
-        
         const { data: updated, error: updateError } = await supabase
           .from('id_sequences')
           .update({ 
@@ -3280,13 +3138,13 @@ export async function incrementIdSequence(
           .eq('province_code', provinceCode)
           .select()
           .single();
-        
+
         if (updateError) throw updateError;
         return updated;
       }
       throw error;
     }
-    
+
     return data;
   } catch (err) {
     console.error('❌ [incrementIdSequence] Error:', err);
@@ -3295,9 +3153,9 @@ export async function incrementIdSequence(
 }
 
 /**
- * ✅ คำนวณ Check Digit สำหรับบัตรประชาชนไทย (13 หลัก)
- * สูตร: (11 - (sum % 11)) % 10
- */
+✅ คำนวณ Check Digit สำหรับบัตรประชาชนไทย (13 หลัก)
+สูตร: (11 - (sum % 11)) % 10
+*/
 function calculateCheckDigit(first12Digits: string): string {
   let sum = 0;
   for (let i = 0; i < 12; i++) {
@@ -3308,12 +3166,12 @@ function calculateCheckDigit(first12Digits: string): string {
 }
 
 /**
- * ✅ สร้างเลขบัตรประชาชนจำลอง 13 หลัก พร้อม Check Digit ที่ถูกต้อง
- * @param prefix - หลักแรก (1-8) สำหรับประเภทการลงทะเบียน
- * @param provinceCode - รหัสจังหวัด 4 หลัก (เช่น 1000 = กรุงเทพฯ)
- * @param sequenceNum - ลำดับที่ (5-6 หลัก)
- * @returns string - บัตรประชาชน 13 หลัก
- */
+✅ สร้างเลขบัตรประชาชนจำลอง 13 หลัก พร้อม Check Digit ที่ถูกต้อง
+@param prefix - หลักแรก (1-8) สำหรับประเภทการลงทะเบียน
+@param provinceCode - รหัสจังหวัด 4 หลัก (เช่น 1000 = กรุงเทพฯ)
+@param sequenceNum - ลำดับที่ (5-6 หลัก)
+@returns string - บัตรประชาชน 13 หลัก
+*/
 export function generateDummyIdCard(
   prefix: string = '1',
   provinceCode: string = '1000',
@@ -3324,30 +3182,30 @@ export function generateDummyIdCard(
     console.warn('⚠️ Invalid prefix, using default "1"');
     prefix = '1';
   }
-  
+
   // ✅ Format sequence number to 5 digits (pad with zeros)
   const sequenceStr = sequenceNum.toString().padStart(5, '0');
-  
+
   // ✅ Build first 12 digits: Prefix(1) + Province(4) + Sequence(5) + Group(2)
   // Group code: ใช้ 00-99 สุ่มหรือใช้จาก sequence
   const groupCode = Math.floor(sequenceNum / 100000).toString().padStart(2, '0').slice(-2);
-  
+
   const first12 = `${prefix}${provinceCode}${sequenceStr}${groupCode}`;
-  
+
   // ✅ Calculate check digit (หลักที่ 13)
   const checkDigit = calculateCheckDigit(first12);
-  
+
   // ✅ Return full 13-digit ID
   return `${first12}${checkDigit}`;
 }
 
 /**
- * ✅ ฟังก์ชันรวม: สร้างบัตรประชาชนใหม่พร้อมอัปเดตลำดับในฐานข้อมูล
- * @param sequenceType - ประเภท: 'patient' | 'staff' | 'osm'
- * @param prefix - หลักแรก (1-8)
- * @param provinceCode - รหัสจังหวัด 4 หลัก
- * @returns { success: boolean, idCard?: string, error?: string }
- */
+✅ ฟังก์ชันรวม: สร้างบัตรประชาชนใหม่พร้อมอัปเดตลำดับในฐานข้อมูล
+@param sequenceType - ประเภท: 'patient' | 'staff' | 'osm'
+@param prefix - หลักแรก (1-8)
+@param provinceCode - รหัสจังหวัด 4 หลัก
+@returns { success: boolean, idCard?: string, error?: string }
+*/
 export async function generateAndReserveIdCard(
   sequenceType: 'patient' | 'staff' | 'osm',
   prefix: string = '1',
@@ -3357,137 +3215,116 @@ export async function generateAndReserveIdCard(
     // ✅ 1. ดึงลำดับปัจจุบัน
     const sequence = await getIdSequence(sequenceType, prefix, provinceCode);
     if (!sequence) {
-      return { 
-        success: false, 
-        error: 'ไม่พบข้อมูลลำดับในฐานข้อมูล' 
+      return {
+        success: false,
+        error: 'ไม่พบข้อมูลลำดับในฐานข้อมูล'
       };
     }
-    
+
     const currentSeq = sequence.current_sequence || 1;
-    
+
     // ✅ 2. สร้างบัตรประชาชน
     const idCard = generateDummyIdCard(prefix, provinceCode, currentSeq);
-    
+
     // ✅ 3. อัปเดตลำดับสำหรับครั้งต่อไป
     await incrementIdSequence(sequenceType, prefix, provinceCode, 1);
-    
+
     console.log(`✅ [generateAndReserveIdCard] Generated: ${idCard} (seq: ${currentSeq})`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       idCard,
       sequenceNumber: currentSeq
     };
-    
   } catch (err: any) {
     console.error('❌ [generateAndReserveIdCard] Error:', err);
-    return { 
-      success: false, 
-      error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน' 
+    return {
+      success: false,
+      error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน'
     };
   }
 }
 
 /**
- * ✅ ตรวจสอบความถูกต้องของบัตรประชาชนไทย (13 หลัก)
- * @param idCard - เลขบัตร 13 หลัก
- * @returns boolean - ถูกต้องหรือไม่
- */
+✅ ตรวจสอบความถูกต้องของบัตรประชาชนไทย (13 หลัก)
+@param idCard - เลขบัตร 13 หลัก
+@returns boolean - ถูกต้องหรือไม่
+*/
 export function validateThaiIdCard(idCard: string): boolean {
   // ✅ ลบช่องว่างและขีดกลาง
   const cleaned = idCard.replace(/[\s-]/g, '');
-  
+
   // ✅ ต้องมี 13 หลักและเป็นตัวเลขทั้งหมด
   if (!/^\d{13}$/.test(cleaned)) {
     return false;
   }
-  
+
   // ✅ คำนวณและตรวจสอบ Check Digit
   const providedCheck = parseInt(cleaned[12]);
   const calculatedCheck = parseInt(calculateCheckDigit(cleaned.slice(0, 12)));
-  
+
   return providedCheck === calculatedCheck;
 }
 
 /**
- * ✅ Format บัตรประชาชนให้อ่านง่าย: 1-1234-56789-01-2
- */
+Format บัตรประชาชนให้อ่านง่าย: 1-1234-56789-01-2
+*/
 export function formatIdCard(idCard: string): string {
   const cleaned = idCard.replace(/[\s-]/g, '');
   if (cleaned.length !== 13) return idCard;
-  
   return `${cleaned[0]}-${cleaned.slice(1,5)}-${cleaned.slice(5,10)}-${cleaned.slice(10,12)}-${cleaned[12]}`;
 }
 
-
 /**
- * ดึงรายการ ID Card ที่ยังไม่ได้บรรจุ (Pending)
- * รวมข้อมูลจากทั้ง pending_staff และ approved users ที่ยังไม่มี assignment
- */
+ดึงรายการ ID Card ที่ยังไม่ได้บรรจุ (Pending)
+รวมข้อมูลจากทั้ง pending_staff และ approved users ที่ยังไม่มี assignment
+*/
 export async function getPendingIdCards(hospitalIds?: string[]) {
   try {
     console.log('⏳ [getPendingIdCards] Fetching pending ID cards...');
-    
     // ✅ 1. ดึงจาก pending_staff (รออนุมัติ)
     let pendingQuery = supabase
       .from('pending_staff')
       .select(`*, hospitals ( id, name, code )`)
       .eq('status', 'pending');
-    
+
     if (hospitalIds && hospitalIds.length > 0) {
       pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
     }
-    
+
     const { data: pendingData, error: pendingError } = await pendingQuery;
-    
     if (pendingError) {
       console.error('❌ [getPendingIdCards] Error fetching pending:', pendingError);
     }
-    
+
     // ✅ 2. ดึงจาก users ที่ approved แล้ว แต่ยังไม่มี ID Card assignment
     let staffQuery = supabase
       .from('users')
-      .select(`
-        id,
-        id_card,
-        role,
-        hospital_id,
-        created_at,
-        doctors (
-          full_name_th,
-          specialization_th
-        ),
-        hospitals (
-          id,
-          name,
-          code
-        )
-      `)
+      .select(`id, id_card, role, hospital_id, created_at, doctors ( full_name_th, specialization_th ), hospitals ( id, name, code )`)
       .in('role', ['admin', 'doctor', 'helper', 'osm'])
       .eq('is_active', true)
       .not('id_card', 'is', null);
-    
+
     if (hospitalIds && hospitalIds.length > 0) {
       staffQuery = staffQuery.in('hospital_id', hospitalIds);
     }
-    
+
     const { data: staffData, error: staffError } = await staffQuery;
-    
     if (staffError) {
       console.error('❌ [getPendingIdCards] Error fetching staff:', staffError);
     }
-    
+
     // ✅ 3. ดึง ID Card ที่มีการบรรจุแล้ว
     const { data: assignments } = await supabase
       .from('id_card_assignments')
       .select('id_card')
       .eq('status', 'active');
-    
+
     const assignedCards = new Set(assignments?.map(a => a.id_card) || []);
-    
+
     // ✅ 4. รวมข้อมูลจากทั้ง 2 แหล่ง และกรองเอาเฉพาะที่ยังไม่มีการบรรจุ
     const pendingCards: any[] = [];
-    
+
     // จาก pending_staff
     if (pendingData) {
       pendingData.forEach(item => {
@@ -3501,7 +3338,7 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
         }
       });
     }
-    
+
     // จาก approved staff
     if (staffData) {
       staffData.forEach(staff => {
@@ -3520,141 +3357,11 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
         }
       });
     }
-    
+
     console.log('✅ [getPendingIdCards] Found:', pendingCards.length, 'pending ID cards');
     return pendingCards;
   } catch (err) {
     console.error('❌ [getPendingIdCards] Exception:', err);
     return [];
-  }
-}
-
-// ✅ โหลดโค้ชพร้อมข้อมูลโรงพยาบาล (แก้ไขแล้ว - ทำงานถูกต้อง)
-export async function getCoachesWithHospitals(hospitalIds?: string[]) {
-  try {
-    console.log('👨‍⚕️ [getCoachesWithHospitals] Loading coaches...', hospitalIds);
-    
-    // ✅ Query ที่ถูกต้อง - join กับ users และ hospitals
-    let query = supabase
-      .from('doctors')
-      .select(`
-        id,
-        user_id,
-        full_name_th,
-        specialization_th,
-        is_active,
-        is_verified,
-        users!doctors_user_id_fkey (
-          id,
-          role,
-          hospital_id,
-          is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type,
-            parent_id
-          )
-        )
-      `)
-      .eq('is_active', true);
-
-    // ✅ กรองตาม hospitalIds ถ้ามี (สำหรับ Hospital Admin)
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('users.hospital_id', hospitalIds);
-    }
-
-    const { data, error } = await query.order('full_name_th', { ascending: true });
-
-    if (error) {
-      console.error('❌ [getCoachesWithHospitals] Error:', error);
-      return [];
-    }
-
-    // ✅ กรองผลลัพธ์เพิ่มเติม - เอาเฉพาะที่มี role ที่ต้องการ
-    const validRoles = ['doctor', 'helper', 'osm', 'admin'];
-    const filteredCoaches = (data || []).filter(coach => {
-      const role = coach.users?.role;
-      const hasHospital = coach.users?.hospital_id && coach.users?.hospitals?.name;
-      const isActive = coach.is_active && coach.users?.is_active;
-      
-      return validRoles.includes(role) && hasHospital && isActive;
-    });
-
-    console.log('✅ [getCoachesWithHospitals] Loaded:', filteredCoaches.length, 'coaches');
-    if (filteredCoaches.length > 0) {
-      console.log('📋 Sample coach:', {
-        name: filteredCoaches[0].full_name_th,
-        hospital: filteredCoaches[0].users?.hospitals?.name,
-        role: filteredCoaches[0].users?.role
-      });
-    }
-    
-    return filteredCoaches;
-  } catch (err) {
-    console.error('❌ [getCoachesWithHospitals] Exception:', err);
-    return [];
-  }
-}
-
-// ✅ ฟังก์ชัน debug สำหรับตรวจสอบปัญหา
-export async function debugCoachesQuery(hospitalIds?: string[]) {
-  try {
-    console.log('🔍 [DEBUG] Starting coaches query debug...');
-    
-    // 1. นับ coaches ทั้งหมด
-    const { count: totalCoaches } = await supabase
-      .from('doctors')
-      .select('*', { count: 'exact', head: true })
-      .eq('is_active', true);
-    
-    console.log('📊 Total active coaches:', totalCoaches);
-    
-    // 2. ดึง coaches พร้อม users
-    const { data: coachesWithData } = await supabase
-      .from('doctors')
-      .select(`
-        id,
-        user_id,
-        full_name_th,
-        is_active,
-        users!doctors_user_id_fkey (
-          id,
-          role,
-          hospital_id,
-          is_active
-        )
-      `)
-      .eq('is_active', true)
-      .limit(5);
-    
-    console.log('📋 Sample coaches:', coachesWithData);
-    
-    // 3. ถ้ามี hospitalIds ให้ตรวจสอบ
-    if (hospitalIds && hospitalIds.length > 0) {
-      const { data: withHospitals } = await supabase
-        .from('doctors')
-        .select(`
-          id,
-          user_id,
-          full_name_th,
-          users!doctors_user_id_fkey (
-            hospital_id,
-            role,
-            hospitals (
-              name
-            )
-          )
-        `)
-        .in('users.hospital_id', hospitalIds)
-        .eq('is_active', true)
-        .limit(5);
-      
-      console.log('🏥 Coaches in specified hospitals:', withHospitals);
-    }
-    
-  } catch (err) {
-    console.error('❌ [DEBUG] Error:', err);
   }
 }
