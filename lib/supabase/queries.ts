@@ -890,6 +890,8 @@ export async function permanentlyDeleteStaff(staffId: string) {
   }
 }
 
+
+
 export async function getStaffDetail(userId: string) {
   try {
     const { data, error } = await supabase
