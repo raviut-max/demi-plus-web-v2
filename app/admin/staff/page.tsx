@@ -1323,66 +1323,71 @@ function AddStaffModal({
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+// ✅ ในฟังก์ชัน handleSubmit ของ AddStaffModal
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  // ✅ Validate: ต้องกรอกวันเกิดครบ
+  if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+    alert('กรุณากรอกวันเกิดให้ครบถ้วน');
+    return;
+  }
+
+  // ✅ Validate: Hospital Admin ไม่สามารถสร้าง Admin ใหม่ได้
+  if (!isSuper && formData.role === 'admin') {
+    alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
+    return;
+  }
+
+  // ✅ Validate: ต้องเลือกโรงพยาบาลสำหรับบทบาทที่ต้องการ
+  if ((formData.role === 'admin' || formData.role === 'doctor' || 
+       formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
+    alert('กรุณาเลือกโรงพยาบาลสังกัด');
+    return;
+  }
+
+  // ✅ Validate: Hospital Admin สร้างได้เฉพาะในโรงพยาบาลที่ตัวเองดูแล
+  if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
+    alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    const password = generatePassword();
+    const birthYearAD = parseInt(formData.birth_year) - 543;
+    const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
     
-    // ✅ VALIDATION: ตรวจสอบชื่อ-นามสกุล
-    if (!formData.full_name_th || !formData.full_name_th.trim()) {
-      alert('❌ กรุณากรอกชื่อ-นามสกุล');
-      return;
-    }
+    // ✅ ส่งข้อมูลพร้อม admin_type ไปยัง backend
+    const result = await addStaff({
+      id_card: formData.id_card,
+      password: password,
+      full_name_th: formData.full_name_th.trim(),  // ✅ trim ชื่อป้องกันช่องว่าง
+      role: formData.role,
+      specialization_th: formData.specialization_th?.trim() || undefined,
+      phone: formData.phone || undefined,
+      email: formData.email || undefined,
+      hospital_id: formData.hospital_id || undefined,
+      birth_date: birthDate,
+      created_by: userId,
+      // ✅ สำคัญ: ส่ง admin_type เมื่อสร้าง Admin
+      admin_type: formData.role === 'admin' ? formData.admin_type : null,
+    });
     
-    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-      alert('กรุณากรอกวันเกิดให้ครบถ้วน');
-      return;
+    if (result.success) {
+      alert(`✅ เพิ่มเจ้าหน้าที่สำเร็จ!\n\nชื่อ: ${formData.full_name_th}\nบทบาท: ${formData.role === 'admin' ? (formData.admin_type === 'super' ? 'Super Admin' : 'Hospital Admin') : formData.role}\nรหัสผ่าน: ${password}\n(วัน-เดือน-ปีเกิด)`);
+      onSuccess();
+    } else {
+      alert('❌ เกิดข้อผิดพลาด: ' + result.error);
     }
-
-    if (!isSuper && formData.role === 'admin') {
-      alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
-      return;
-    }
-
-    // ✅ รวม 'osm' ในการตรวจสอบว่าต้องเลือกโรงพยาบาล
-    if ((formData.role === 'admin' || formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
-      alert('กรุณาเลือกโรงพยาบาลสังกัด');
-      return;
-    }
-
-    if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
-      alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const password = generatePassword();
-      const birthYearAD = parseInt(formData.birth_year) - 543;
-      const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-      
-      // ✅ TRIM ชื่อ-นามสกุล ก่อนส่ง
-      const result = await addStaff({
-        ...formData,
-        full_name_th: formData.full_name_th.trim(), // ✅ Trim ที่นี่
-        password: password,
-        birth_date: birthDate,
-        created_by: userId,
-        admin_type: formData.role === 'admin' ? formData.admin_type : null,
-      });
-      
-      if (result.success) {
-        alert(`เพิ่มเจ้าหน้าที่สำเร็จ!\nรหัสผ่าน: ${password}\n(วัน-เดือน-ปีเกิด)`);
-        onSuccess();
-      } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
-      }
-    } catch (error: any) {
-      console.error('❌ [AddStaffModal] Error:', error);
-      alert('เกิดข้อผิดพลาด: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  } catch (error: any) {
+    console.error('❌ [AddStaffModal] Error:', error);
+    alert('เกิดข้อผิดพลาด: ' + (error.message || 'ไม่สามารถเพิ่มเจ้าหน้าที่ได้'));
+  } finally {
+    setLoading(false);
+  }
+};
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
 

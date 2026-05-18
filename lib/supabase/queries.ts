@@ -732,102 +732,6 @@ export async function getDeactivatedStaff() {
   }
 }
 
-// ✅ แก้ไขจุดสำคัญตรงนี้: เพิ่ม 'admin' เข้าไปในการตรวจสอบเพื่อสร้างข้อมูลในตาราง doctors
-// lib/supabase/queries.ts
-
-export async function addStaff(data: {
-  id_card: string;
-  password: string;
-  full_name_th: string;
-  role: 'doctor' | 'helper' | 'osm' | 'admin';
-  specialization_th?: string;
-  phone?: string;
-  email?: string;
-  hospital_id?: string;
-  birth_date?: string;
-  created_by: string;
-}) {
-  try {
-    console.log('🔍 [addStaff] Starting staff creation...');
-    
-    // Validate name
-    const fullName = data.full_name_th?.trim();
-    if (!fullName) {
-      return { success: false, error: 'ชื่อ-นามสกุล ไม่ถูกต้อง' };
-    }
-
-    // 1. Create user
-    const { data: user, error: userError } = await supabase
-      .from('users')
-      .insert({
-        id_card: data.id_card,
-        password_hash: data.password,
-        role: data.role,
-        is_active: true,
-        created_by: data.created_by,
-        hospital_id: data.hospital_id || null,
-        birth_date: data.birth_date || null,
-      })
-      .select()
-      .single();
-
-    if (userError) {
-      console.error('❌ [addStaff] Error creating user:', userError);
-      return { success: false, error: userError.message };
-    }
-
-    console.log('✅ [addStaff] User created:', user.id);
-
-    let doctorData: any = null;
-
-    // 2. Create doctor record if role is doctor/helper/osm
-    if (data.role === 'doctor' || data.role === 'helper' || data.role === 'osm') {
-      console.log('💾 [addStaff] Creating doctor record...');
-      
-      const specialization = data.specialization_th?.trim() || (
-        data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
-        data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
-        'แพทย์'
-      );
-
-      const { data: doctorDataResult, error: doctorError } = await supabase
-        .from('doctors')
-        .insert({
-          user_id: user.id,
-          full_name: fullName,
-          full_name_th: fullName,
-          specialization_th: specialization,
-          phone: data.phone || null,
-          email: data.email || null,
-          is_active: true,
-          is_verified: false,
-        })
-        .select()
-        .single();
-
-      if (doctorError) {
-        console.error('❌ [addStaff] Error creating doctor:', doctorError);
-        // Rollback user creation
-        await supabase.from('users').delete().eq('id', user.id);
-        return { success: false, error: doctorError.message };
-      }
-
-      doctorData = doctorDataResult;
-      console.log('✅ [addStaff] Doctor created:', doctorData.id);
-    }
-
-    console.log('✅ [addStaff] Staff creation completed!');
-
-    return { 
-      success: true, 
-      user,
-      doctor: doctorData
-    };
-  } catch (err: any) {
-    console.error('❌ [addStaff] Unexpected error:', err);
-    return { success: false, error: err.message };
-  }
-}
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
   specialization_th?: string;
@@ -3367,5 +3271,104 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
   } catch (err) {
     console.error('❌ [getPendingIdCards] Exception:', err);
     return [];
+  }
+}
+
+// ✅ แก้ไข: เพิ่ม 'admin' ใน type definition และเงื่อนไขสร้าง doctor record
+export async function addStaff(data: {
+  id_card: string;
+  password: string;
+  full_name_th: string;
+  // ✅ เพิ่ม 'admin' และ 'osm' ใน type
+  role: 'doctor' | 'helper' | 'osm' | 'admin';
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;
+  birth_date?: string;
+  created_by: string;
+  admin_type?: 'super' | 'hospital' | null;  // ✅ เพิ่ม field นี้
+}) {
+  try {
+    console.log('🔍 [addStaff] Starting staff creation...', { 
+      role: data.role, 
+      admin_type: data.admin_type 
+    });
+
+    // ✅ 1. สร้าง user ในตาราง users
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id_card: data.id_card,
+        password_hash: data.password,
+        role: data.role,
+        is_active: true,
+        created_by: data.created_by,
+        hospital_id: data.hospital_id || null,
+        birth_date: data.birth_date || null,
+        // ✅ สำคัญ: ส่ง admin_type ไปบันทึกด้วย
+        admin_type: data.admin_type || null,
+      })
+      .select()
+      .single();
+
+    if (userError) {
+      console.error('❌ [addStaff] Error creating user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    console.log('✅ [addStaff] User created:', user.id);
+
+    // ✅ 2. ประกาศ doctorData ก่อน if block
+    let doctorData: any = null;
+
+    // ✅ 3. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm/admin)
+    if (['doctor', 'helper', 'osm', 'admin'].includes(data.role)) {
+      console.log('💾 [addStaff] Creating doctor record for role:', data.role);
+      
+      const specialization = data.specialization_th?.trim() || (
+        data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
+        data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
+        data.role === 'admin' ? 'ผู้ดูแลระบบ' :  // ✅ เพิ่มกรณี admin
+        'แพทย์'
+      );
+
+      const { data: doctorDataResult, error: doctorError } = await supabase
+        .from('doctors')
+        .insert({
+          user_id: user.id,
+          full_name: data.full_name_th.trim(),  // ✅ trim ชื่อ
+          full_name_th: data.full_name_th.trim(),
+          specialization_th: specialization,
+          phone: data.phone || null,
+          email: data.email || null,
+          is_active: true,
+          is_verified: false,
+        })
+        .select()
+        .single();
+
+      if (doctorError) {
+        console.error('❌ [addStaff] Error creating doctor:', doctorError);
+        // ⚠️ Rollback user ถ้าสร้าง doctors ล้มเหลว
+        await supabase.from('users').delete().eq('id', user.id);
+        return { success: false, error: doctorError.message };
+      }
+
+      doctorData = doctorDataResult;
+      console.log('✅ [addStaff] Doctor record created:', doctorData.id);
+    }
+
+    console.log('✅ [addStaff] Staff creation completed!');
+
+    return { 
+      success: true, 
+      user,
+      doctor: doctorData
+    };
+
+  } catch (err: any) {
+    console.error('❌ [addStaff] Unexpected error:', err);
+    return { success: false, error: err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด' };
   }
 }
