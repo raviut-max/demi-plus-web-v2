@@ -1,11 +1,10 @@
 // app/admin/staff/page.tsx
 // =====================================================
-// ✅ แก้ไขล่าสุด: 15 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 18 พฤษภาคม 2569
 // ✅ การแก้ไขรอบนี้:
-//    1. ✅ เพิ่มระบบค้นหา (Search) แบบ Real-time
-//    2. ✅ เพิ่มระบบเรียงลำดับ (Sorting) ทุกคอลัมน์
-//    3. ✅ แสดงไอคอนเรียงลำดับ (↑↓)
-//    4. ✅ ปรับปรุง UX/UI ให้สะดวกต่อการใช้งาน
+//    1. ✅ แก้ไข AddStaffModal - เพิ่ม validation และ trim ชื่อ-นามสกุล
+//    2. ✅ ป้องกันการบันทึกชื่อว่างเปล่า
+//    3. ✅ แสดง error ที่ชัดเจนเมื่อกรอกข้อมูลไม่ครบ
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
@@ -60,7 +59,6 @@ interface UserHospital {
   parent_hospital?: { id: string; name: string; code: string };
 }
 
-// ✅ เพิ่ม 'osm' เข้าไปใน type ของ role
 interface PendingStaff {
   id: string;
   id_card: string;
@@ -127,12 +125,13 @@ export default function StaffManagementPage() {
       router.push('/admin/login');
       return;
     }
+    
     if (userData.role !== 'admin') {
       alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
       router.push('/admin/login');
       return;
     }
-
+    
     console.log('👤 [StaffManagement] User:', userData);
     console.log('👑 [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
     console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
@@ -269,8 +268,6 @@ export default function StaffManagementPage() {
   // =====================================================
   // 🔍 SEARCH & SORT FUNCTIONS
   // =====================================================
-  
-  // ✅ ฟังก์ชันเรียงลำดับ
   const requestSort = (field: SortField) => {
     let direction: SortDirection = 'asc';
     if (sortConfig.field === field && sortConfig.direction === 'asc') {
@@ -279,12 +276,11 @@ export default function StaffManagementPage() {
     setSortConfig({ field, direction });
   };
 
-  // ✅ ฟังก์ชันกรองและเรียงลำดับข้อมูล
   const getSortedAndFilteredStaff = (staffData: any[]) => {
     if (!staffData) return [];
     
     let filtered = [...staffData];
-    
+
     // ✅ กรองตามคำค้นหา
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase();
@@ -304,7 +300,7 @@ export default function StaffManagementPage() {
         );
       });
     }
-    
+
     // ✅ เรียงลำดับ
     const sorted = filtered.sort((a, b) => {
       let aValue: any;
@@ -343,16 +339,15 @@ export default function StaffManagementPage() {
       if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
-    
+
     return sorted;
   };
 
-  // ✅ แสดงไอคอนเรียงลำดับ
   const getSortIcon = (field: SortField) => {
     if (sortConfig.field !== field) {
       return <ChevronsUpDown className="w-4 h-4 text-gray-400" />;
     }
-    return sortConfig.direction === 'asc' 
+    return sortConfig.direction === 'asc'
       ? <ChevronUp className="w-4 h-4 text-blue-600" />
       : <ChevronDown className="w-4 h-4 text-blue-600" />;
   };
@@ -450,7 +445,7 @@ export default function StaffManagementPage() {
           reviewed_by: user.id,
         })
         .eq('id', pendingId);
-       
+      
       alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
       console.log('✅ [handleApprove] Approval completed');
       
@@ -491,6 +486,7 @@ export default function StaffManagementPage() {
       alert('❌ คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
       return;
     }
+    
     if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
     
     try {
@@ -513,6 +509,7 @@ export default function StaffManagementPage() {
       alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
       return;
     }
+    
     if (!confirm(`กู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) return;
     
     try {
@@ -536,6 +533,7 @@ export default function StaffManagementPage() {
       alert('❌ คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
       return;
     }
+    
     if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
     if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
     
@@ -1313,12 +1311,13 @@ function AddStaffModal({
     hospital_id: '',
     admin_type: null as 'super' | 'hospital' | null,
   });
+  
   const [loading, setLoading] = useState(false);
   const [showAdminTypeField, setShowAdminTypeField] = useState(false);
   
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
-  
+
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
@@ -1327,11 +1326,17 @@ function AddStaffModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    // ✅ VALIDATION: ตรวจสอบชื่อ-นามสกุล
+    if (!formData.full_name_th || !formData.full_name_th.trim()) {
+      alert('❌ กรุณากรอกชื่อ-นามสกุล');
+      return;
+    }
+    
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       alert('กรุณากรอกวันเกิดให้ครบถ้วน');
       return;
     }
-    
+
     if (!isSuper && formData.role === 'admin') {
       alert('❌ คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
       return;
@@ -1355,8 +1360,10 @@ function AddStaffModal({
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
       
+      // ✅ TRIM ชื่อ-นามสกุล ก่อนส่ง
       const result = await addStaff({
         ...formData,
+        full_name_th: formData.full_name_th.trim(), // ✅ Trim ที่นี่
         password: password,
         birth_date: birthDate,
         created_by: userId,
@@ -1378,12 +1385,12 @@ function AddStaffModal({
   };
 
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
-  
+
   const getAvailableHospitals = () => {
     if (isSuper) return hospitals;
     return hospitals.filter(h => accessibleHospitalIds.includes(h.id));
   };
-  
+
   const availableHospitals = getAvailableHospitals();
 
   return (
@@ -1392,6 +1399,7 @@ function AddStaffModal({
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
         </div>
+        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* ✅ Box แสดงสิทธิ์ */}
           <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
@@ -1414,7 +1422,7 @@ function AddStaffModal({
               )}
             </ul>
           </div>
-          
+
           {/* ID Card & Password */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1495,6 +1503,7 @@ function AddStaffModal({
               onChange={(e) => setFormData({ ...formData, full_name_th: e.target.value })}
               required
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="เช่น สมชาย ใจดี"
             />
           </div>
           
@@ -1547,7 +1556,7 @@ function AddStaffModal({
                 <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
               </select>
               <p className="text-xs text-purple-600 mt-1">
-                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ <br/>
+                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
                 💡 Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
               </p>
             </div>
@@ -1688,7 +1697,7 @@ function EditStaffModal({
       year: (date.getFullYear() + 543).toString(),
     };
   };
-  
+
   const initialBirthDate = parseBirthDate(staff.birth_date);
   
   const [formData, setFormData] = useState({
@@ -1709,7 +1718,7 @@ function EditStaffModal({
   const isSuper = isSuperAdmin(currentUser);
   const isHospAdmin = isHospitalAdmin(currentUser);
   const canEditHospital = isSuper || !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id);
-  
+
   const generatePassword = () => {
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
     return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
@@ -1788,6 +1797,7 @@ function EditStaffModal({
             {staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
           </p>
         </div>
+        
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {/* Full Name */}
           <div>
@@ -1799,7 +1809,7 @@ function EditStaffModal({
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          
+
           {/* Birth Date */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">

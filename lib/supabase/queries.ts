@@ -733,11 +733,12 @@ export async function getDeactivatedStaff() {
 }
 
 // ✅ แก้ไขจุดสำคัญตรงนี้: เพิ่ม 'admin' เข้าไปในการตรวจสอบเพื่อสร้างข้อมูลในตาราง doctors
+// lib/supabase/queries.ts
+
 export async function addStaff(data: {
   id_card: string;
   password: string;
   full_name_th: string;
-  // ✅ เพิ่ม 'osm' ใน type
   role: 'doctor' | 'helper' | 'osm' | 'admin';
   specialization_th?: string;
   phone?: string;
@@ -748,7 +749,14 @@ export async function addStaff(data: {
 }) {
   try {
     console.log('🔍 [addStaff] Starting staff creation...');
-    // ✅ 1. สร้าง user ในตาราง users
+    
+    // Validate name
+    const fullName = data.full_name_th?.trim();
+    if (!fullName) {
+      return { success: false, error: 'ชื่อ-นามสกุล ไม่ถูกต้อง' };
+    }
+
+    // 1. Create user
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert({
@@ -770,25 +778,25 @@ export async function addStaff(data: {
 
     console.log('✅ [addStaff] User created:', user.id);
 
-    // ✅ 2. ประกาศ doctorData ก่อน if block
     let doctorData: any = null;
 
-    // ✅ ✅ แก้ไข: เพิ่ม 'admin' เข้าไปในเงื่อนไขนี้ เพื่อให้ Admin มีชื่อในตาราง doctors
-    if (data.role === 'doctor' || data.role === 'helper' || data.role === 'osm' || data.role === 'admin') {
+    // 2. Create doctor record if role is doctor/helper/osm
+    if (data.role === 'doctor' || data.role === 'helper' || data.role === 'osm') {
       console.log('💾 [addStaff] Creating doctor record...');
       
+      const specialization = data.specialization_th?.trim() || (
+        data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
+        data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
+        'แพทย์'
+      );
+
       const { data: doctorDataResult, error: doctorError } = await supabase
         .from('doctors')
         .insert({
           user_id: user.id,
-          full_name: data.full_name_th,
-          full_name_th: data.full_name_th,
-          specialization_th: data.specialization_th || (
-            data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
-            data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
-            data.role === 'admin' ? 'ผู้ดูแลระบบ' : // เพิ่มกรณี admin
-            'แพทย์'
-          ),
+          full_name: fullName,
+          full_name_th: fullName,
+          specialization_th: specialization,
           phone: data.phone || null,
           email: data.email || null,
           is_active: true,
@@ -799,16 +807,13 @@ export async function addStaff(data: {
 
       if (doctorError) {
         console.error('❌ [addStaff] Error creating doctor:', doctorError);
-        // ⚠️ อย่าลบ user ทิ้งถ้าสร้าง doctors ผิดพลาด เพราะ admin อาจจะไม่ต้องมี doctors record ก็ได้ (ขึ้นอยู่กับ business logic) 
-        // แต่ถ้าต้องการ consistency ให้ลบ user ตามเดิม
-        // await supabase.from('users').delete().eq('id', user.id); 
-        // return { success: false, error: doctorError.message };
-        
-        // ในที่นี้เราจะ return success แต่ log error ไว้ เพราะ admin สร้างสำเร็จแล้ว
-      } else {
-        doctorData = doctorDataResult;
-        console.log('✅ [addStaff] Doctor created:', doctorData.id);
+        // Rollback user creation
+        await supabase.from('users').delete().eq('id', user.id);
+        return { success: false, error: doctorError.message };
       }
+
+      doctorData = doctorDataResult;
+      console.log('✅ [addStaff] Doctor created:', doctorData.id);
     }
 
     console.log('✅ [addStaff] Staff creation completed!');
@@ -823,7 +828,6 @@ export async function addStaff(data: {
     return { success: false, error: err.message };
   }
 }
-
 export async function updateStaff(userId: string, data: {
   full_name_th?: string;
   specialization_th?: string;
