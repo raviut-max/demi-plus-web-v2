@@ -858,11 +858,20 @@ export async function restoreStaff(staffId: string) {
 export async function permanentlyDeleteStaff(staffId: string) {
   try {
     console.log('🗑️ Permanently deleting staff:', staffId);
+    
+    // ✅ 1. Set created_by เป็น NULL สำหรับ users ที่ถูกสร้างโดยคนนี้
+    await supabase
+      .from('users')
+      .update({ created_by: null })
+      .eq('created_by', staffId);
+    
+    // ✅ 2. ลบ record ในตาราง doctors
     await supabase
       .from('doctors')
       .delete()
       .eq('user_id', staffId);
 
+    // ✅ 3. ลบ users (สุดท้าย)
     const { error } = await supabase
       .from('users')
       .delete()
