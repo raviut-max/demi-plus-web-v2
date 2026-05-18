@@ -64,7 +64,7 @@ export default function BaselinePage() {
       router.push('/admin/login');
       return;
     }
-    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
+    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
@@ -353,7 +353,7 @@ export default function BaselinePage() {
         throw new Error('ไม่สามารถตรวจสอบสิทธิ์ผู้ใช้ได้');
       }
 
-      const allowedRoles = ['admin', 'doctor', 'helper'];
+      const allowedRoles = ['admin', 'doctor', 'helper', 'osm'];
       if (!allowedRoles.includes(userRoleData.role)) {
         throw new Error(`ไม่มีสิทธิ์บันทึกข้อมูล (บทบาทปัจจุบัน: ${userRoleData.role})`);
       }
