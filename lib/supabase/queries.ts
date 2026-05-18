@@ -859,27 +859,35 @@ export async function permanentlyDeleteStaff(staffId: string) {
   try {
     console.log('🗑️ Permanently deleting staff:', staffId);
     
-    // ✅ 1. Set created_by เป็น NULL สำหรับ users ที่ถูกสร้างโดยคนนี้
+    // ✅ 1. แก้ไข pending_staff ที่ reference มาที่ user นี้ก่อน
     await supabase
-      .from('users')
-      .update({ created_by: null })
-      .eq('created_by', staffId);
+      .from('pending_staff')
+      .update({ 
+        reviewed_by: null,
+        reviewed_at: null,
+        rejection_reason: null
+      })
+      .eq('reviewed_by', staffId);
+    
+    console.log('✅ Cleared pending_staff references');
     
     // ✅ 2. ลบ record ในตาราง doctors
     await supabase
       .from('doctors')
       .delete()
       .eq('user_id', staffId);
+    
+    console.log('✅ Deleted doctors record');
 
     // ✅ 3. ลบ users (สุดท้าย)
-    const { error } = await supabase
+    const { error: userError } = await supabase
       .from('users')
       .delete()
       .eq('id', staffId);
 
-    if (error) {
-      console.error('Error deleting staff:', error);
-      return { success: false, error: error.message };
+    if (userError) {
+      console.error('Error deleting user:', userError);
+      return { success: false, error: userError.message };
     }
 
     console.log('✅ Staff permanently deleted');
@@ -889,7 +897,6 @@ export async function permanentlyDeleteStaff(staffId: string) {
     return { success: false, error: 'เกิดข้อผิดพลาดในการลบเจ้าหน้าที่ถาวร' };
   }
 }
-
 
 
 export async function getStaffDetail(userId: string) {
