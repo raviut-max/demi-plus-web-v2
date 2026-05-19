@@ -1,42 +1,42 @@
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, validateThaiIdCard } from '@/lib/supabase/queries';
-import { Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, CheckCircle, XCircle, Edit3, ChevronDown } from 'lucide-react';
+import { Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, CheckCircle, XCircle, Edit3 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// 📋 กำหนดคอลัมน์มาตรฐานที่ระบบต้องการ
+// 📋 กำหนดคอลัมน์มาตรฐาน + ประเภท Input สำหรับแก้ไขในตาราง
 const STANDARD_FIELDS = [
-  { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, type: 'id_card' },
-  { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true },
-  { key: 'last_name', label: 'นามสกุลผู้ป่วย', required: true },
-  { key: 'hospital_number', label: 'HN', required: true },
-  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, type: 'date_th' },
-  { key: 'gender', label: 'เพศ', required: true, type: 'gender' },
-  { key: 'hospital_name', label: 'โรงพยาบาล', required: true },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย' },
-  { key: 'email', label: 'อีเมลผู้ป่วย' },
-  { key: 'current_weight', label: 'น้ำหนัก(กก.)', type: 'number', min: 30, max: 200 },
-  { key: 'height', label: 'ส่วนสูง(ซม.)', type: 'number', min: 100, max: 250 },
-  { key: 'waist_circumference', label: 'รอบเอว(ซม.)', type: 'number', min: 26, max: 200 },
-  { key: 'diabetes_type', label: 'ประเภทเบาหวาน', type: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล(มก./ดล.)', type: 'number' },
-  { key: 'hba1c_level', label: 'ค่าHbA1c', type: 'number' },
-  { key: 'notes', label: 'หมายเหตุสุขภาพ' },
-  { key: 'house_number', label: 'บ้านเลขที่' },
-  { key: 'village_no', label: 'หมู่ที่' },
-  { key: 'village_name', label: 'หมู่บ้าน' },
-  { key: 'soi', label: 'ซอย' },
-  { key: 'road', label: 'ถนน' },
-  { key: 'subdistrict', label: 'ตำบล' },
-  { key: 'district', label: 'อำเภอ' },
-  { key: 'province', label: 'จังหวัด' },
-  { key: 'postal_code', label: 'รหัสไปรษณีย์' },
-  { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน' },
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน' },
-  { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน' },
-  { key: 'coach_name', label: 'โค้ชผู้ดูแล' },
+  { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
+  { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
+  { key: 'last_name', label: 'นามสกุลผู้ป่วย', required: true, inputType: 'text' },
+  { key: 'hospital_number', label: 'HN', required: true, inputType: 'text' },
+  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
+  { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
+  { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
+  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text' },
+  { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
+  { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
+  { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
+  { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
+  { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
+  { key: 'blood_sugar', label: 'ค่าน้ำตาล(มก./ดล.)', inputType: 'number' },
+  { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
+  { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
+  { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
+  { key: 'village_no', label: 'หมู่ที่', inputType: 'text' },
+  { key: 'village_name', label: 'หมู่บ้าน', inputType: 'text' },
+  { key: 'soi', label: 'ซอย', inputType: 'text' },
+  { key: 'road', label: 'ถนน', inputType: 'text' },
+  { key: 'subdistrict', label: 'ตำบล', inputType: 'text' },
+  { key: 'district', label: 'อำเภอ', inputType: 'text' },
+  { key: 'province', label: 'จังหวัด', inputType: 'text' },
+  { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
+  { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text' },
+  { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
+  { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
 
 export default function ImportExcelPage() {
@@ -48,6 +48,7 @@ export default function ImportExcelPage() {
   const [headerMapping, setHeaderMapping] = useState<Record<string, string>>({});
   const [previewData, setPreviewData] = useState<any[]>([]);
   const [editingCell, setEditingCell] = useState<{ row: number; key: string } | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
   const [validationErrors, setValidationErrors] = useState<Record<number, string[]>>({});
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -64,13 +65,10 @@ export default function ImportExcelPage() {
 
   // 🔄 แปลงข้อมูลดิบ + จับคู่ Header
   useEffect(() => {
-    if (rawData.length === 0) return;
-    if (excelHeaders.length === 0) return;
-
-    // Auto-mapping เบื้องต้น
+    if (rawData.length === 0 || excelHeaders.length === 0) return;
     const autoMap: Record<string, string> = {};
     excelHeaders.forEach(header => {
-      const cleanHeader = header.replace(/\s+/g, '').toLowerCase();
+      const cleanHeader = header.replace(/\s+/g, '').toLowerCase().replace(/[()\.\-]/g, '');
       const match = STANDARD_FIELDS.find(f => {
         const fClean = f.label.replace(/\s+/g, '').replace(/[()\.\-]/g, '').toLowerCase();
         return cleanHeader.includes(fClean) || fClean.includes(cleanHeader);
@@ -83,53 +81,80 @@ export default function ImportExcelPage() {
 
   // 📊 สร้าง Preview Data ตาม Mapping
   const buildPreview = useCallback(() => {
-    if (!selectedFile || rawData.length === 0) return;
-    
     const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _errors: [] as string[] };
+      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) newRow[dbKey] = String(row[excelKey] ?? '').trim();
       });
       return newRow;
     });
-
     setPreviewData(mapped);
     setStep('preview');
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
   // ✅ Validation Logic
+  const validateRow = (row: any) => {
+    const errors: string[] = [];
+    STANDARD_FIELDS.forEach(field => {
+      const val = row[field.key];
+      if (field.required && (!val || val === '')) {
+        errors.push(`${field.label} เป็นฟิลด์บังคับ`);
+        return;
+      }
+      if (!val && val !== 0) return;
+
+      if (field.key === 'id_card') {
+        if (!validateThaiIdCard(val)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง (ต้อง 13 หลัก และ Check Digit ตรง)');
+      } else if (field.key === 'birth_date') {
+        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(val)) errors.push('รูปแบบวันเกิดต้องเป็น วว/ดด/ปปปป');
+      } else if (field.key === 'gender') {
+        if (!['ชาย', 'หญิง'].includes(val)) errors.push('เพศต้องเป็น ชาย หรือ หญิง');
+      } else if (field.inputType === 'number') {
+        const num = parseFloat(val);
+        if (isNaN(num)) errors.push(`${field.label} ต้องเป็นตัวเลข`);
+        else if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่าค่าต่ำสุด (${field.min})`);
+        else if (field.max !== undefined && num > field.max) errors.push(`${field.label} เกินค่าสูงสุด (${field.max})`);
+      } else if (field.inputType === 'select') {
+        if (!field.options?.includes(val)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
+      }
+    });
+    return errors;
+  };
+
   const runValidation = (data: any[]) => {
     const errors: Record<number, string[]> = {};
     data.forEach((row, idx) => {
-      const rowErrors: string[] = [];
-      STANDARD_FIELDS.forEach(field => {
-        const val = row[field.key];
-        if (field.required && (!val || val === '')) {
-          rowErrors.push(`${field.label} เป็นฟิลด์บังคับ`);
-          return;
-        }
-        if (!val && val !== 0) return;
-
-        if (field.type === 'id_card') {
-          if (!validateThaiIdCard(val)) rowErrors.push('เลขบัตรประชาชนไม่ถูกต้อง (ต้อง 13 หลัก และ Check Digit ตรง)');
-        } else if (field.type === 'date_th') {
-          if (!/^\d{2}\/\d{2}\/\d{4}$/.test(val)) rowErrors.push('รูปแบบวันเกิดต้องเป็น วว/ดด/ปปปป');
-        } else if (field.type === 'gender') {
-          if (!['ชาย', 'หญิง'].includes(val)) rowErrors.push('เพศต้องเป็น ชาย หรือ หญิง');
-        } else if (field.type === 'number') {
-          const num = parseFloat(val);
-          if (isNaN(num)) rowErrors.push(`${field.label} ต้องเป็นตัวเลข`);
-          else if (field.min !== undefined && num < field.min) rowErrors.push(`${field.label} น้อยกว่าค่าต่ำสุด (${field.min})`);
-          else if (field.max !== undefined && num > field.max) rowErrors.push(`${field.label} เกินค่าสูงสุด (${field.max})`);
-        } else if (field.type === 'select') {
-          if (!field.options?.includes(val)) rowErrors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
-        }
-      });
-      if (rowErrors.length > 0) errors[idx] = rowErrors;
+      errors[idx] = validateRow(row);
     });
     setValidationErrors(errors);
-    setPreviewData(prev => prev.map((row, idx) => ({ ...row, _errors: errors[idx] || [] })));
+    setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
+  };
+
+  // 🔄 จัดการการแก้ไขในตาราง
+  const startEdit = (rIdx: number, key: string) => {
+    setEditingCell({ row: rIdx, key });
+    setEditValue(previewData[rIdx][key] || '');
+  };
+
+  const cancelEdit = () => setEditingCell(null);
+
+  const saveEdit = () => {
+    if (!editingCell) return;
+    const { row, key } = editingCell;
+    setPreviewData(prev => {
+      const next = [...prev];
+      next[row] = { ...next[row], [key]: editValue.trim() };
+      return next;
+    });
+    // อัปเดต Validation ทันทีหลังแก้ไข
+    runValidation(previewData.map((r, i) => i === row ? { ...r, [key]: editValue.trim() } : r));
+    setEditingCell(null);
+  };
+
+  const handleCellKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') saveEdit();
+    else if (e.key === 'Escape') cancelEdit();
   };
 
   // 📥 อ่านไฟล์
@@ -152,15 +177,7 @@ export default function ImportExcelPage() {
     reader.readAsArrayBuffer(file);
   };
 
-  // 🔄 จัดการการแก้ไขในตาราง
-  const handleCellEdit = (rowIdx: number, key: string, value: string) => {
-    setPreviewData(prev => prev.map((row, i) => i === rowIdx ? { ...row, [key]: value } : row));
-  };
-
-  const handleMappingChange = (excelHeader: string, dbKey: string) => {
-    setHeaderMapping(prev => ({ ...prev, [excelHeader]: dbKey }));
-  };
-
+  // 🔘 เลือกแถว
   const toggleSelectRow = (idx: number) => {
     const next = new Set(selectedRows);
     next.has(idx) ? next.delete(idx) : next.add(idx);
@@ -176,13 +193,13 @@ export default function ImportExcelPage() {
 
   if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
+  // คอลัมน์ที่แสดงในตาราง (เฉพาะที่จับคู่แล้ว)
+  const displayFields = STANDARD_FIELDS.filter(f => Object.values(headerMapping).includes(f.key));
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200 px-4 py-6">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
-          <ArrowLeft className="w-4 h-4" /> กลับ
-        </button>
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"><ArrowLeft className="w-4 h-4" /> กลับ</button>
         <h1 className="text-3xl font-bold text-gray-800">📥 นำเข้าข้อมูลผู้ป่วยจาก Excel</h1>
         <p className="text-gray-600 mt-1">ตรวจสอบ แก้ไข และเลือกข้อมูลก่อนนำเข้าระบบ</p>
       </div>
@@ -222,7 +239,7 @@ export default function ImportExcelPage() {
                 <div key={header} className="p-3 border rounded-lg bg-gray-50">
                   <p className="text-xs text-gray-500 mb-1">คอลัมน์ใน Excel</p>
                   <p className="font-medium text-gray-800 truncate">{header}</p>
-                  <select value={headerMapping[header] || ''} onChange={e => handleMappingChange(header, e.target.value)} className="w-full mt-2 px-2 py-1 border rounded text-sm">
+                  <select value={headerMapping[header] || ''} onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} className="w-full mt-2 px-2 py-1 border rounded text-sm">
                     <option value="">-- ไม่จับคู่ --</option>
                     {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                   </select>
@@ -232,7 +249,7 @@ export default function ImportExcelPage() {
           </div>
         )}
 
-        {/* 🔹 Step 3: Preview & Validate & Select */}
+        {/* 🔹 Step 3: Preview & Validate & Select & EDIT */}
         {step === 'preview' && previewData.length > 0 && (
           <>
             <div className="bg-white rounded-xl shadow p-4 border border-gray-200 flex flex-wrap gap-4 justify-between items-center">
@@ -258,8 +275,8 @@ export default function ImportExcelPage() {
                     <tr>
                       <th className="p-3 w-10 text-center sticky left-0 bg-gray-100 z-10">เลือก</th>
                       <th className="p-3 w-12 text-center sticky left-10 bg-gray-100 z-10">สถานะ</th>
-                      {STANDARD_FIELDS.filter(f => headerMapping && Object.values(headerMapping).includes(f.key)).map(field => (
-                        <th key={field.key} className="p-3 min-w-[120px] text-left font-medium text-gray-700 whitespace-nowrap">
+                      {displayFields.map(field => (
+                        <th key={field.key} className="p-3 min-w-[140px] text-left font-medium text-gray-700 whitespace-nowrap">
                           {field.label} {field.required && <span className="text-red-500">*</span>}
                         </th>
                       ))}
@@ -267,12 +284,12 @@ export default function ImportExcelPage() {
                   </thead>
                   <tbody>
                     {previewData.map((row, rIdx) => (
-                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors.length > 0 ? 'bg-red-50' : ''}`}>
+                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors?.length > 0 ? 'bg-red-50' : ''}`}>
                         <td className="p-3 text-center sticky left-0 bg-white z-10">
                           <input type="checkbox" checked={row._selected} onChange={() => toggleSelectRow(rIdx)} className="w-4 h-4" />
                         </td>
                         <td className="p-3 text-center sticky left-10 bg-white z-10">
-                          {row._errors.length > 0 ? (
+                          {row._errors?.length > 0 ? (
                             <div className="group relative">
                               <XCircle className="w-5 h-5 text-red-500 mx-auto cursor-help" />
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none z-20">
@@ -281,25 +298,52 @@ export default function ImportExcelPage() {
                             </div>
                           ) : <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />}
                         </td>
-                        {STANDARD_FIELDS.filter(f => headerMapping && Object.values(headerMapping).includes(f.key)).map(field => (
-                          <td key={field.key} className="p-2 whitespace-nowrap">
-                            {editingCell?.row === rIdx && editingCell?.key === field.key ? (
-                              field.type === 'select' ? (
-                                <select autoFocus className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500" value={row[field.key] || ''} onChange={e => handleCellEdit(rIdx, field.key, e.target.value)} onBlur={() => setEditingCell(null)} onKeyDown={e => e.key === 'Enter' && setEditingCell(null)}>
-                                  <option value="">-- เลือก --</option>
-                                  {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                </select>
+                        {displayFields.map(field => {
+                          const isEditing = editingCell?.row === rIdx && editingCell?.key === field.key;
+                          const val = row[field.key] || '';
+                          
+                          return (
+                            <td key={field.key} className="p-2 whitespace-nowrap relative">
+                              {isEditing ? (
+                                field.inputType === 'select' ? (
+                                  <select
+                                    autoFocus
+                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:ring-2 focus:ring-blue-200 bg-blue-50"
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    onBlur={saveEdit}
+                                    onKeyDown={handleCellKeyDown}
+                                  >
+                                    <option value="">-- เลือก --</option>
+                                    {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                  </select>
+                                ) : (
+                                  <input
+                                    autoFocus
+                                    type={field.inputType === 'number' ? 'number' : 'text'}
+                                    step={field.inputType === 'number' ? '0.1' : undefined}
+                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:ring-2 focus:ring-blue-200 bg-blue-50"
+                                    value={editValue}
+                                    onChange={e => setEditValue(e.target.value)}
+                                    onBlur={saveEdit}
+                                    onKeyDown={handleCellKeyDown}
+                                    placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'}
+                                  />
+                                )
                               ) : (
-                                <input autoFocus className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500" value={row[field.key] || ''} onChange={e => handleCellEdit(rIdx, field.key, e.target.value)} onBlur={() => setEditingCell(null)} onKeyDown={e => e.key === 'Enter' && setEditingCell(null)} />
-                              )
-                            ) : (
-                              <div onClick={() => setEditingCell({ row: rIdx, key: field.key })} className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1">
-                                {row[field.key] || <span className="text-gray-400 text-xs">คลิกเพื่อแก้ไข</span>}
-                                <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100" />
-                              </div>
-                            )}
-                          </td>
-                        ))}
+                                <div
+                                  onClick={() => startEdit(rIdx, field.key)}
+                                  className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1 group"
+                                >
+                                  <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
+                                    {val || 'คลิกเพื่อแก้ไข'}
+                                  </span>
+                                  <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
