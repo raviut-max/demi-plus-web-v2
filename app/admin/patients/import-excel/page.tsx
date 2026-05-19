@@ -5,9 +5,8 @@ import {
   checkSession, 
   logout, 
   validateThaiIdCard,
-  validateAddress,
   getAllValidAddresses,
-  validateAndConvertDate 
+  validateAddress 
 } from '@/lib/supabase/queries';
 import { 
   Upload, 
@@ -19,17 +18,18 @@ import {
   CheckCircle, 
   XCircle, 
   Edit3,
-  AlertTriangle
+  AlertTriangle,
+  ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// 📋 กำหนดคอลัมน์มาตรฐาน + ประเภท Input สำหรับแก้ไขในตาราง
+//  กำหนดคอลัมน์มาตรฐาน + ประเภท Input สำหรับแก้ไขและตรวจสอบ
 const STANDARD_FIELDS = [
   { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
   { key: 'last_name', label: 'นามสกุลผู้ป่วย', required: true, inputType: 'text' },
   { key: 'hospital_number', label: 'HN', required: true, inputType: 'text' },
-  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
+  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'date' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
   { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text' },
@@ -73,7 +73,7 @@ export default function ImportExcelPage() {
   const [error, setError] = useState('');
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
   
-  // ✅ เพิ่ม State สำหรับข้อมูลที่อยู่ถูกต้อง
+  // ✅ State สำหรับข้อมูลที่อยู่ถูกต้อง
   const [validAddresses, setValidAddresses] = useState<Array<{
     province: string;
     district: string;
@@ -92,15 +92,17 @@ export default function ImportExcelPage() {
   // ✅ โหลดข้อมูลที่อยู่ถูกต้องเมื่อเข้าหน้า
   useEffect(() => {
     const loadValidAddresses = async () => {
-      console.log('📍 Loading valid addresses...');
-      const addresses = await getAllValidAddresses();
-      setValidAddresses(addresses);
-      console.log('✅ Loaded', addresses.length, 'valid addresses');
+      try {
+        const addresses = await getAllValidAddresses();
+        setValidAddresses(addresses || []);
+      } catch (err) {
+        console.warn('⚠️ ไม่สามารถโหลดข้อมูลที่อยู่เพื่อตรวจสอบได้ ระบบจะข้ามการตรวจสอบ DB');
+      }
     };
     loadValidAddresses();
   }, []);
 
-  // 🔄 แปลงข้อมูลดิบ + จับคู่ Header
+  // 🔄 แปลงข้อมูลดิบ + จับคู่ Header อัตโนมัติ
   useEffect(() => {
     if (rawData.length === 0 || excelHeaders.length === 0) return;
     const autoMap: Record<string, string> = {};
@@ -121,7 +123,11 @@ export default function ImportExcelPage() {
     const mapped = rawData.map((row, idx) => {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
-        if (dbKey) newRow[dbKey] = String(row[excelKey] ?? '').trim();
+        if (dbKey) {
+          // แปลงค่าเป็น String และตัดช่องว่างส่วนเกิน
+          const val = row[excelKey];
+          newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
+        }
       });
       return newRow;
     });
@@ -130,46 +136,65 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ Validation Logic
+  // ✅ Validation Logic (เข้มงวด)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
-      if (field.required && (!val || val === '')) {
+      const strVal = String(val ?? '').trim();
+
+      // 1. ตรวจสอบฟิลด์บังคับ
+      if (field.required && strVal === '') {
         errors.push(`${field.label} เป็นฟิลด์บังคับ`);
         return;
       }
-      if (!val && val !== 0) return;
+      if (strVal === '') return; // ข้ามฟิลด์ไม่บังคับที่ว่าง
 
-      if (field.key === 'id_card') {
-        if (!validateThaiIdCard(val)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง (ต้อง 13 หลัก และ Check Digit ตรง)');
-      } else if (field.key === 'birth_date') {
-        const dateCheck = validateAndConvertDate(val);
-        if (!dateCheck.valid) errors.push(dateCheck.error);
-      } else if (field.key === 'gender') {
-        if (!['ชาย', 'หญิง'].includes(val)) errors.push('เพศต้องเป็น ชาย หรือ หญิง');
-      } else if (field.inputType === 'number') {
-        const num = parseFloat(val);
-        if (isNaN(num)) errors.push(`${field.label} ต้องเป็นตัวเลข`);
-        else if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่าค่าต่ำสุด (${field.min})`);
-        else if (field.max !== undefined && num > field.max) errors.push(`${field.label} เกินค่าสูงสุด (${field.max})`);
-      } else if (field.inputType === 'select') {
-        if (!field.options?.includes(val)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
+      // 2. ตรวจสอบตามประเภทข้อมูล
+      if (field.inputType === 'number') {
+        //  ตรวจสอบว่าเป็นตัวเลขล้วนหรือไม่ (ไม่รับตัวหนังสือ)
+        if (!/^-?\d+(\.\d+)?$/.test(strVal)) {
+          errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น`);
+        } else {
+          const num = parseFloat(strVal);
+          if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่า ${field.min}`);
+          if (field.max !== undefined && num > field.max) errors.push(`${field.label} มากกว่า ${field.max}`);
+        }
+      } 
+      else if (field.inputType === 'date') {
+        // 🔴 ตรวจสอบรูปแบบวันที่เข้มงวด
+        const dateRegex = /^(\d{2})[\/-](\d{2})[\/-](\d{4})$/;
+        const match = strVal.match(dateRegex);
+        if (!match) {
+          errors.push(`${field.label} รูปแบบต้องเป็น วว/ดด/ปปปป หรือ วว-ดด-ปปปป`);
+        } else {
+          const [, d, m, y] = match;
+          const day = parseInt(d), month = parseInt(m), year = parseInt(y);
+          if (day < 1 || day > 31) errors.push(`${field.label} วันไม่ถูกต้อง (1-31)`);
+          if (month < 1 || month > 12) errors.push(`${field.label} เดือนไม่ถูกต้อง (1-12)`);
+          if (year < 2400 || year > 2569) errors.push(`${field.label} ปี พ.ศ. ไม่ถูกต้อง`);
+        }
+      } 
+      else if (field.inputType === 'select') {
+        // 🔴 ตรวจสอบค่า Dropdown
+        if (!field.options?.includes(strVal)) {
+          errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
+        }
+      } 
+      else if (field.key === 'id_card') {
+        if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง (ต้อง 13 หลัก และ Check Digit ตรง)');
       }
     });
 
-    // ✅ ตรวจสอบที่อยู่ (จังหวัด, อำเภอ, ตำบล, รหัสไปรษณีย์)
-    if (validAddresses.length > 0) {
-      const addressValidation = validateAddress({
+    // ✅ ตรวจสอบที่อยู่ (ถ้ามีข้อมูลและโหลด DB สำเร็จ)
+    if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
+      const addrCheck = validateAddress({
         province: row.province || '',
         district: row.district || '',
         subdistrict: row.subdistrict || '',
         postal_code: row.postal_code || ''
       }, validAddresses);
-
-      if (!addressValidation.valid) {
-        errors.push(...addressValidation.errors);
-      }
+      if (!addrCheck.valid) errors.push(...addrCheck.errors);
     }
 
     return errors;
@@ -200,7 +225,6 @@ export default function ImportExcelPage() {
       next[row] = { ...next[row], [key]: editValue.trim() };
       return next;
     });
-    // อัปเดต Validation ทันทีหลังแก้ไข
     runValidation(previewData.map((r, i) => i === row ? { ...r, [key]: editValue.trim() } : r));
     setEditingCell(null);
   };
@@ -210,7 +234,7 @@ export default function ImportExcelPage() {
     else if (e.key === 'Escape') cancelEdit();
   };
 
-  // 📥 อ่านไฟล์
+  //  อ่านไฟล์
   const processFile = (file: File) => {
     if (!file.name.match(/\.(xlsx|xls)$/i)) { setError('กรุณาเลือกไฟล์ Excel เท่านั้น'); return; }
     setSelectedFile(file);
@@ -219,9 +243,10 @@ export default function ImportExcelPage() {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const wb = XLSX.read(e.target?.result, { type: 'array' });
+        const wb = XLSX.read(e.target?.result, { type: 'array', cellDates: false });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        // แปลงเป็น JSON โดยไม่แปลงวันที่อัตโนมัติ เพื่อควบคุมการตรวจสอบเอง
+        const json = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
         setRawData(json);
         if (json.length > 0) setExcelHeaders(Object.keys(json[0]));
       } catch { setError('❌ ไม่สามารถอ่านไฟล์ได้'); }
@@ -244,9 +269,13 @@ export default function ImportExcelPage() {
     setPreviewData(prev => prev.map((r, i) => ({ ...r, _selected: next.has(i) })));
   };
 
+  // ✅ ตรวจสอบว่าแถวที่เลือกมี Error หรือไม่ (สำหรับปิดปุ่มนำเข้า)
+  const hasErrorsInSelected = Array.from(selectedRows).some(idx => 
+    previewData[idx]?._errors?.length > 0
+  );
+
   if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
-  // คอลัมน์ที่แสดงในตาราง (เฉพาะที่จับคู่แล้ว)
   const displayFields = STANDARD_FIELDS.filter(f => Object.values(headerMapping).includes(f.key));
 
   return (
@@ -292,46 +321,21 @@ export default function ImportExcelPage() {
                 ถัดไป: Preview & Validation →
               </button>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
               {excelHeaders.map(header => {
-                // ตรวจสอบว่า Header นี้จับคู่กับมาตรฐานตัวไหนบ้าง
                 const matchedKey = headerMapping[header];
                 const isMatched = matchedKey && matchedKey !== '';
-                
                 return (
-                  <div 
-                    key={header} 
-                    className={`p-4 border rounded-lg transition-all duration-200 ${
-                      isMatched 
-                        ? 'bg-green-50 border-green-400 shadow-md' // ✅ สีเขียวอ่อนสำหรับที่จับคู่ได้
-                        : 'bg-gray-50 border-gray-200 opacity-90' // ⚪ สีเทาสำหรับที่ยังไม่จับคู่
-                    }`}
-                  >
+                  <div key={header} className={`p-4 border rounded-lg transition-all ${isMatched ? 'bg-green-50 border-green-400' : 'bg-gray-50 border-gray-200'}`}>
                     <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
                     <p className={`font-semibold truncate mb-2 ${isMatched ? 'text-green-900' : 'text-gray-800'}`}>
-                      {header}
-                      {isMatched && <span className="ml-2 text-lg">✅</span>}
+                      {header} {isMatched && <span className="ml-2">✅</span>}
                     </p>
-                    
-                    <select 
-                      value={headerMapping[header] || ''} 
-                      onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} 
-                      className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                        isMatched ? 'border-green-400 bg-white' : 'border-gray-300'
-                      }`}
-                    >
+                    <select value={headerMapping[header] || ''} onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} className={`w-full px-3 py-2 border rounded-lg text-sm ${isMatched ? 'border-green-400' : 'border-gray-300'}`}>
                       <option value="">-- ไม่จับคู่ --</option>
-                      {STANDARD_FIELDS.map(f => (
-                        <option key={f.key} value={f.key}>{f.label}</option>
-                      ))}
+                      {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                     </select>
-                    
-                    {!isMatched && (
-                      <p className="text-xs text-red-500 mt-2 flex items-center gap-1 font-medium">
-                        <AlertCircle className="w-3 h-3" /> ยังไม่ได้จับคู่ (ระบบจะข้ามคอลัมน์นี้)
-                      </p>
-                    )}
+                    {!isMatched && <p className="text-xs text-red-500 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> ยังไม่ได้จับคู่</p>}
                   </div>
                 );
               })}
@@ -349,12 +353,20 @@ export default function ImportExcelPage() {
                   <span className="text-sm font-medium">เลือกทั้งหมด ({previewData.length} แถว)</span>
                 </label>
                 <span className="text-sm text-gray-500">✅ ถูกเลือก: {selectedRows.size} แถว</span>
-                <span className="text-sm text-green-600">✅ ผ่านตรวจสอบ: {previewData.length - Object.keys(validationErrors).length} แถว</span>
+                <span className={`text-sm font-medium ${hasErrorsInSelected ? 'text-red-600' : 'text-green-600'}`}>
+                  {hasErrorsInSelected ? '⚠️ มีข้อมูลที่เลือกยังไม่ผ่านตรวจสอบ' : '✅ ข้อมูลที่เลือกพร้อมนำเข้า'}
+                </span>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบข้อมูลใหม่</button>
+                <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
                 <button onClick={() => setStep('mapping')} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔧 แก้ไขการจับคู่</button>
-                <button disabled={selectedRows.size === 0} className="px-4 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm">🚀 นำเข้าที่เลือก</button>
+                <button 
+                  disabled={selectedRows.size === 0 || hasErrorsInSelected} 
+                  className="px-4 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                >
+                  {hasErrorsInSelected ? <ShieldAlert className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
+                  {hasErrorsInSelected ? 'แก้ไขข้อผิดพลาดก่อนนำเข้า' : '🚀 นำเข้าที่เลือก'}
+                </button>
               </div>
             </div>
 
@@ -370,12 +382,14 @@ export default function ImportExcelPage() {
                           {field.label} {field.required && <span className="text-red-500">*</span>}
                         </th>
                       ))}
-                      <th className="p-3 min-w-[200px] text-left font-medium text-red-700 whitespace-nowrap">⚠️ ข้อผิดพลาด</th>
+                      <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">
+                        ️ ข้อผิดพลาด
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {previewData.map((row, rIdx) => (
-                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors?.length > 0 ? 'bg-red-50' : ''}`}>
+                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors?.length > 0 ? 'bg-red-50/50' : ''}`}>
                         <td className="p-3 text-center sticky left-0 bg-white z-10">
                           <input type="checkbox" checked={row._selected} onChange={() => toggleSelectRow(rIdx)} className="w-4 h-4" />
                         </td>
@@ -387,51 +401,27 @@ export default function ImportExcelPage() {
                         {displayFields.map(field => {
                           const isEditing = editingCell?.row === rIdx && editingCell?.key === field.key;
                           const val = row[field.key] || '';
-                          
                           return (
                             <td key={field.key} className="p-2 whitespace-nowrap relative">
                               {isEditing ? (
                                 field.inputType === 'select' ? (
-                                  <select
-                                    autoFocus
-                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:ring-2 focus:ring-blue-200 bg-blue-50"
-                                    value={editValue}
-                                    onChange={e => setEditValue(e.target.value)}
-                                    onBlur={saveEdit}
-                                    onKeyDown={handleCellKeyDown}
-                                  >
+                                  <select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}>
                                     <option value="">-- เลือก --</option>
                                     {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                                   </select>
                                 ) : (
-                                  <input
-                                    autoFocus
-                                    type={field.inputType === 'number' ? 'number' : 'text'}
-                                    step={field.inputType === 'number' ? '0.1' : undefined}
-                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded focus:ring-2 focus:ring-blue-200 bg-blue-50"
-                                    value={editValue}
-                                    onChange={e => setEditValue(e.target.value)}
-                                    onBlur={saveEdit}
-                                    onKeyDown={handleCellKeyDown}
-                                    placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'}
-                                  />
+                                  <input autoFocus type={field.inputType === 'number' ? 'number' : 'text'} step={field.inputType === 'number' ? '0.1' : undefined} className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown} placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'} />
                                 )
                               ) : (
-                                <div
-                                  onClick={() => startEdit(rIdx, field.key)}
-                                  className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1 group"
-                                >
-                                  <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
-                                    {val || 'คลิกเพื่อแก้ไข'}
-                                  </span>
+                                <div onClick={() => startEdit(rIdx, field.key)} className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1 group">
+                                  <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val || 'คลิกเพื่อแก้ไข'}</span>
                                   <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
                                 </div>
                               )}
                             </td>
                           );
                         })}
-                        {/* ✅ คอลัมน์แสดงข้อผิดพลาด */}
-                        <td className="p-3 align-top">
+                        <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
                           {row._errors?.length > 0 ? (
                             <div className="space-y-1">
                               {row._errors.map((err, idx) => (
@@ -442,7 +432,7 @@ export default function ImportExcelPage() {
                               ))}
                             </div>
                           ) : (
-                            <span className="text-xs text-green-600">✓ ผ่านการตรวจสอบ</span>
+                            <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>
                           )}
                         </td>
                       </tr>
