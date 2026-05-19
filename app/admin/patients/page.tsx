@@ -12,8 +12,7 @@ import {
   getDeletedPatients,
   getAccessibleHospitalIds,
   getUserHospitalInfo,
-  isSuperAdmin,
-  isHospitalAdmin
+  isSuperAdmin
 } from '@/lib/supabase/queries';
 import {
   Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
@@ -49,15 +48,17 @@ export default function PatientManagementPage() {
       router.push('/admin/login');
       return;
     }
+    
     // ✅ ตรวจสอบสิทธิ์ - อนุญาตให้ osm เข้าถึงได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-
+    
     console.log('👤 [PatientManagement] User:', userData);
     console.log('🏥 [PatientManagement] Role:', userData.role);
+    
     setUser(userData);
     loadUserHospital(userData.id);
     loadUserName(userData.id);
@@ -71,7 +72,7 @@ export default function PatientManagementPage() {
         .select('full_name_th')
         .eq('user_id', userId)
         .single();
-
+      
       if (data?.full_name_th) {
         setUserName(data.full_name_th);
       } else {
@@ -126,6 +127,7 @@ export default function PatientManagementPage() {
   const loadDeletedPatients = async (hospitalIds?: string[]) => {
     try {
       const data = await getDeletedPatients();
+      
       // ✅ กรองตาม hospitalIds ถ้าไม่ใช่ Super Admin
       let filteredData = data;
       if (!isSuperAdmin(user) && hospitalIds && hospitalIds.length > 0) {
@@ -166,95 +168,136 @@ export default function PatientManagementPage() {
   const sortedPatients = [...patients].sort((a, b) => {
     let aValue: any = a[sortColumn];
     let bValue: any = b[sortColumn];
-
+    
     // Handle nested properties (e.g., hospitals.name)
     if (sortColumn.includes('.')) {
       const [parent, child] = sortColumn.split('.');
       aValue = a[parent]?.[child];
       bValue = b[parent]?.[child];
     }
-
+    
     // Handle null/undefined values
     if (aValue == null) aValue = '';
     if (bValue == null) bValue = '';
-
+    
     // Compare values
     if (typeof aValue === 'string' && typeof bValue === 'string') {
       return sortDirection === 'asc' 
         ? aValue.localeCompare(bValue, 'th')
         : bValue.localeCompare(aValue, 'th');
     }
-
+    
     if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
     if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
     return 0;
   });
 
+  // ✅ Soft Delete - ลบแบบกู้คืนได้
   const handleDeletePatient = async (patientId: string, patientName: string) => {
     // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบ
     if (user?.role === 'osm') {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
-    if (!confirm(`คุณต้องการลบผู้ป่วย "${patientName}" ใช่หรือไม่?`)) return;
-
+    
+    // ✅ แสดง Modal ยืนยันการลบ
+    const confirmDelete = confirm(
+      `⚠️ ยืนยันการลบผู้ป่วย\n\n` +
+      `ชื่อ: ${patientName}\n\n` +
+      `การลบนี้จะย้ายผู้ป่วยไปยัง "ถังขยะ" \n` +
+      `คุณสามารถกู้คืนได้ในภายหลัง\n\n` +
+      `ต้องการดำเนินการต่อหรือไม่?`
+    );
+    
+    if (!confirmDelete) return;
+    
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
-        alert('ลบผู้ป่วยสำเร็จ!');
+        alert('✅ ลบผู้ป่วยสำเร็จ!\nผู้ป่วยถูกย้ายไปยังถังขยะ');
         await loadPatients(accessibleHospitalIds);
+        await loadDeletedPatients(accessibleHospitalIds);
       } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
+        alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
       console.error('❌ [handleDeletePatient] Error:', error);
-      alert('เกิดข้อผิดพลาดในการลบ');
+      alert('❌ เกิดข้อผิดพลาดในการลบ');
     }
   };
 
+  // ✅ Restore - กู้คืนผู้ป่วย
   const handleRestorePatient = async (patientId: string, patientName: string) => {
     // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบ (และห้ามกู้คืน)
     if (user?.role === 'osm') {
       alert('❌ อสม. ไม่มีสิทธิ์กู้คืนข้อมูลผู้ป่วย');
       return;
     }
-    if (!confirm(`คุณต้องการกู้คืนผู้ป่วย "${patientName}" ใช่หรือไม่?`)) return;
-
+    
+    const confirmRestore = confirm(
+      `♻️ ยืนยันการกู้คืนผู้ป่วย\n\n` +
+      `ชื่อ: ${patientName}\n\n` +
+      `ต้องการกู้คืนผู้ป่วยนี้กลับมาหรือไม่?`
+    );
+    
+    if (!confirmRestore) return;
+    
     try {
       const result = await restorePatient(patientId);
       if (result.success) {
-        alert('กู้คืนผู้ป่วยสำเร็จ!');
+        alert('✅ กู้คืนผู้ป่วยสำเร็จ!');
         await loadPatients(accessibleHospitalIds);
         await loadDeletedPatients(accessibleHospitalIds);
       } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
+        alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
       console.error('❌ [handleRestorePatient] Error:', error);
-      alert('เกิดข้อผิดพลาดในการกู้คืน');
+      alert('❌ เกิดข้อผิดพลาดในการกู้คืน');
     }
   };
 
+  // ✅ Permanent Delete - ลบถาวร
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
     // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบถาวร
     if (user?.role === 'osm') {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วยถาวร');
       return;
     }
-    if (!confirm(`⚠️ คุณต้องการลบผู้ป่วย "${patientName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
-    if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
-
+    
+    // ✅ ยืนยัน 2 ชั้น
+    const firstConfirm = confirm(
+      `️ ⚠️ คำเตือน: การลบถาวร\n\n` +
+      `ชื่อ: ${patientName}\n\n` +
+      `การกระทำนี้ไม่สามารถย้อนกลับได้!\n` +
+      `ข้อมูลผู้ป่วยจะถูกลบออกจากระบบอย่างถาวร\n\n` +
+      `คุณต้องการดำเนินการต่อหรือไม่?`
+    );
+    
+    if (!firstConfirm) return;
+    
+    // ✅ ยืนยันครั้งที่ 2 - พิมพ์ YES
+    const secondConfirm = prompt(
+      `⚠️ ยืนยันการลบถาวรครั้งที่ 2\n\n` +
+      `พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:`
+    );
+    
+    if (secondConfirm !== 'YES') {
+      alert('❌ ยกเลิกการลบถาวร');
+      return;
+    }
+    
     try {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
-        alert('ลบผู้ป่วยถาวรสำเร็จ!');
+        alert('✅ ลบผู้ป่วยถาวรสำเร็จ!');
         await loadDeletedPatients(accessibleHospitalIds);
       } else {
-        alert('เกิดข้อผิดพลาด: ' + result.error);
+        alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
       console.error('❌ [handlePermanentlyDeletePatient] Error:', error);
-      alert('เกิดข้อผิดพลาดในการลบถาวร');
+      alert('❌ เกิดข้อผิดพลาดในการลบถาวร');
     }
   };
 
@@ -266,7 +309,7 @@ export default function PatientManagementPage() {
   // ✅ ฟังก์ชันแสดง Badge บทบาท
   const getRoleBadge = () => {
     if (!user) return null;
-
+    
     const roleConfig: any = {
       'osm': { 
         text: '🏘️ อสม.', 
@@ -284,18 +327,18 @@ export default function PatientManagementPage() {
         textCol: 'text-green-700'
       },
       'helper': { 
-        text: '👩‍️ เจ้าหน้าที่', 
+        text: '👩‍💼 เจ้าหน้าที่', 
         bg: 'bg-yellow-100', 
         textCol: 'text-yellow-700'
       }
     };
-
+    
     const config = roleConfig[user.role] || { 
       text: user.role, 
       bg: 'bg-gray-100', 
       textCol: 'text-gray-700'
     };
-
+    
     return (
       <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
         {config.text}
@@ -308,7 +351,7 @@ export default function PatientManagementPage() {
     if (sortColumn !== columnName) {
       return <ChevronsUpDown className="w-4 h-4 ml-1 opacity-30" />;
     }
-    return sortDirection === 'asc' 
+    return sortDirection === 'asc'
       ? <ChevronUp className="w-4 h-4 ml-1" />
       : <ChevronDown className="w-4 h-4 ml-1" />;
   };
@@ -337,7 +380,7 @@ export default function PatientManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-
+          
           {/* Row 2: Main Header Content */}
           <div className="flex items-center justify-between flex-wrap gap-4">
             {/* Left: Title */}
@@ -345,7 +388,7 @@ export default function PatientManagementPage() {
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการผู้ป่วย</h1>
               <p className="text-gray-600">จัดการข้อมูลผู้ป่วยและติดตามผลการรักษา</p>
             </div>
-
+            
             {/* Center: User Info Card */}
             <div className="flex-1 max-w-md mx-4">
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200 shadow-sm">
@@ -391,7 +434,7 @@ export default function PatientManagementPage() {
                 </div>
               </div>
             </div>
-
+            
             {/* Right: Action Buttons */}
             <div className="flex gap-2">
               {canDeleteData() && (
@@ -669,7 +712,7 @@ export default function PatientManagementPage() {
                             <button
                               onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)}
                               className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="ลบ"
+                              title="ลบ (กู้คืนได้)"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
