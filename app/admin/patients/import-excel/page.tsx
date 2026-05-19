@@ -1,8 +1,26 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkSession, logout, validateThaiIdCard } from '@/lib/supabase/queries';
-import { Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, CheckCircle, XCircle, Edit3 } from 'lucide-react';
+import { 
+  checkSession, 
+  logout, 
+  validateThaiIdCard,
+  validateAddress,
+  getAllValidAddresses,
+  validateAndConvertDate 
+} from '@/lib/supabase/queries';
+import { 
+  Upload, 
+  FileSpreadsheet, 
+  AlertCircle, 
+  Loader2, 
+  ArrowLeft, 
+  LogOut, 
+  CheckCircle, 
+  XCircle, 
+  Edit3,
+  AlertTriangle
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 // 📋 กำหนดคอลัมน์มาตรฐาน + ประเภท Input สำหรับแก้ไขในตาราง
@@ -54,6 +72,14 @@ export default function ImportExcelPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
+  
+  // ✅ เพิ่ม State สำหรับข้อมูลที่อยู่ถูกต้อง
+  const [validAddresses, setValidAddresses] = useState<Array<{
+    province: string;
+    district: string;
+    subdistrict: string;
+    postal_code: string;
+  }>>([]);
 
   // ✅ ตรวจสอบ Session
   useEffect(() => {
@@ -62,6 +88,17 @@ export default function ImportExcelPage() {
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) { router.push('/admin/patients'); return; }
     setUser(userData);
   }, [router]);
+
+  // ✅ โหลดข้อมูลที่อยู่ถูกต้องเมื่อเข้าหน้า
+  useEffect(() => {
+    const loadValidAddresses = async () => {
+      console.log('📍 Loading valid addresses...');
+      const addresses = await getAllValidAddresses();
+      setValidAddresses(addresses);
+      console.log('✅ Loaded', addresses.length, 'valid addresses');
+    };
+    loadValidAddresses();
+  }, []);
 
   // 🔄 แปลงข้อมูลดิบ + จับคู่ Header
   useEffect(() => {
@@ -107,7 +144,8 @@ export default function ImportExcelPage() {
       if (field.key === 'id_card') {
         if (!validateThaiIdCard(val)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง (ต้อง 13 หลัก และ Check Digit ตรง)');
       } else if (field.key === 'birth_date') {
-        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(val)) errors.push('รูปแบบวันเกิดต้องเป็น วว/ดด/ปปปป');
+        const dateCheck = validateAndConvertDate(val);
+        if (!dateCheck.valid) errors.push(dateCheck.error);
       } else if (field.key === 'gender') {
         if (!['ชาย', 'หญิง'].includes(val)) errors.push('เพศต้องเป็น ชาย หรือ หญิง');
       } else if (field.inputType === 'number') {
@@ -119,6 +157,21 @@ export default function ImportExcelPage() {
         if (!field.options?.includes(val)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
       }
     });
+
+    // ✅ ตรวจสอบที่อยู่ (จังหวัด, อำเภอ, ตำบล, รหัสไปรษณีย์)
+    if (validAddresses.length > 0) {
+      const addressValidation = validateAddress({
+        province: row.province || '',
+        district: row.district || '',
+        subdistrict: row.subdistrict || '',
+        postal_code: row.postal_code || ''
+      }, validAddresses);
+
+      if (!addressValidation.valid) {
+        errors.push(...addressValidation.errors);
+      }
+    }
+
     return errors;
   };
 
@@ -231,20 +284,57 @@ export default function ImportExcelPage() {
         {step === 'mapping' && (
           <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> ตรวจสอบการจับคู่คอลัมน์</h2>
-              <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">ถัดไป: Preview & Validation</button>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> 
+                ตรวจสอบการจับคู่คอลัมน์
+              </h2>
+              <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">
+                ถัดไป: Preview & Validation →
+              </button>
             </div>
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-              {excelHeaders.map(header => (
-                <div key={header} className="p-3 border rounded-lg bg-gray-50">
-                  <p className="text-xs text-gray-500 mb-1">คอลัมน์ใน Excel</p>
-                  <p className="font-medium text-gray-800 truncate">{header}</p>
-                  <select value={headerMapping[header] || ''} onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} className="w-full mt-2 px-2 py-1 border rounded text-sm">
-                    <option value="">-- ไม่จับคู่ --</option>
-                    {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-                  </select>
-                </div>
-              ))}
+              {excelHeaders.map(header => {
+                // ตรวจสอบว่า Header นี้จับคู่กับมาตรฐานตัวไหนบ้าง
+                const matchedKey = headerMapping[header];
+                const isMatched = matchedKey && matchedKey !== '';
+                
+                return (
+                  <div 
+                    key={header} 
+                    className={`p-4 border rounded-lg transition-all duration-200 ${
+                      isMatched 
+                        ? 'bg-green-50 border-green-400 shadow-md' // ✅ สีเขียวอ่อนสำหรับที่จับคู่ได้
+                        : 'bg-gray-50 border-gray-200 opacity-90' // ⚪ สีเทาสำหรับที่ยังไม่จับคู่
+                    }`}
+                  >
+                    <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
+                    <p className={`font-semibold truncate mb-2 ${isMatched ? 'text-green-900' : 'text-gray-800'}`}>
+                      {header}
+                      {isMatched && <span className="ml-2 text-lg">✅</span>}
+                    </p>
+                    
+                    <select 
+                      value={headerMapping[header] || ''} 
+                      onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} 
+                      className={`w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                        isMatched ? 'border-green-400 bg-white' : 'border-gray-300'
+                      }`}
+                    >
+                      <option value="">-- ไม่จับคู่ --</option>
+                      {STANDARD_FIELDS.map(f => (
+                        <option key={f.key} value={f.key}>{f.label}</option>
+                      ))}
+                    </select>
+                    
+                    {!isMatched && (
+                      <p className="text-xs text-red-500 mt-2 flex items-center gap-1 font-medium">
+                        <AlertCircle className="w-3 h-3" /> ยังไม่ได้จับคู่ (ระบบจะข้ามคอลัมน์นี้)
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -280,6 +370,7 @@ export default function ImportExcelPage() {
                           {field.label} {field.required && <span className="text-red-500">*</span>}
                         </th>
                       ))}
+                      <th className="p-3 min-w-[200px] text-left font-medium text-red-700 whitespace-nowrap">⚠️ ข้อผิดพลาด</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -290,12 +381,7 @@ export default function ImportExcelPage() {
                         </td>
                         <td className="p-3 text-center sticky left-10 bg-white z-10">
                           {row._errors?.length > 0 ? (
-                            <div className="group relative">
-                              <XCircle className="w-5 h-5 text-red-500 mx-auto cursor-help" />
-                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none z-20">
-                                {row._errors.join(', ')}
-                              </div>
-                            </div>
+                            <XCircle className="w-5 h-5 text-red-500 mx-auto" />
                           ) : <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />}
                         </td>
                         {displayFields.map(field => {
@@ -344,6 +430,21 @@ export default function ImportExcelPage() {
                             </td>
                           );
                         })}
+                        {/* ✅ คอลัมน์แสดงข้อผิดพลาด */}
+                        <td className="p-3 align-top">
+                          {row._errors?.length > 0 ? (
+                            <div className="space-y-1">
+                              {row._errors.map((err, idx) => (
+                                <div key={idx} className="flex items-start gap-1 text-xs text-red-700 bg-red-100 px-2 py-1 rounded">
+                                  <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                  <span>{err}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-green-600">✓ ผ่านการตรวจสอบ</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
