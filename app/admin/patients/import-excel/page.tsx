@@ -215,36 +215,38 @@ export default function ImportExcelPage() {
     loadValidAddresses();
   }, []);
 
-  const loadNetworkData = async (userId: string) => {
-    try {
-      console.log('🏥 [loadNetworkData] Loading hospitals...');
-      const allHospitals = await getHospitalsWithHierarchy();
-      setHospitals(allHospitals);
-      const hospitalIds = allHospitals.map(h => h.id);
-      
-      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
-      const allCoaches = await getCoachesWithHospitals(hospitalIds);
-      setCoaches(allCoaches);
-      
-      console.log('✅ [loadNetworkData] Loaded:', {
-        hospitals: allHospitals.length,
-        coaches: allCoaches.length
+const loadNetworkData = async (userId: string) => {
+  try {
+    console.log('🏥 [loadNetworkData] Loading hospitals...');
+    const allHospitals = await getHospitalsWithHierarchy();
+    setHospitals(allHospitals);
+    const hospitalIds = allHospitals.map(h => h.id);
+    
+    console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+    const allCoaches = await getCoachesWithHospitals(hospitalIds);
+    setCoaches(allCoaches);
+    
+    console.log('✅ [loadNetworkData] Loaded:', {
+      hospitals: allHospitals.length,
+      coaches: allCoaches.length
+    });
+    
+    // ✅ Debug: ตรวจสอบโครงสร้างโค้ช
+    if (allCoaches.length > 0) {
+      console.log('📋 [loadNetworkData] Sample coach structure:', {
+        id: allCoaches[0].id,
+        full_name_th: allCoaches[0].full_name_th,
+        users: allCoaches[0].users,
+        hospital_id: allCoaches[0].users?.hospital_id,
+        hospital_name: allCoaches[0].users?.hospitals?.name,
+        has_users: !!allCoaches[0].users,
+        has_hospital_id: !!allCoaches[0].users?.hospital_id
       });
-      
-      // ✅ Debug: ตรวจสอบโครงสร้างโค้ช
-      if (allCoaches.length > 0) {
-        console.log('📋 [loadNetworkData] Sample coach structure:', {
-          id: allCoaches[0].id,
-          full_name_th: allCoaches[0].full_name_th,
-          users: allCoaches[0].users,
-          hospital_id: allCoaches[0].users?.hospital_id,
-          hospital_name: allCoaches[0].users?.hospitals?.name
-        });
-      }
-    } catch (error) { 
-      console.error('❌ [loadNetworkData] Error:', error); 
     }
-  };
+  } catch (error) { 
+    console.error('❌ [loadNetworkData] Error:', error); 
+  }
+};
 
   useEffect(() => {
     if (rawData.length === 0 || excelHeaders.length === 0) return;
@@ -382,80 +384,114 @@ export default function ImportExcelPage() {
 
   const hasErrorsInSelected = Array.from(selectedRows).some(idx => previewData[idx]?._errors?.length > 0);
 
-  const getNetworkHospitalIds = (hospitalId: string): string[] => {
-    const hospital = hospitals.find(h => h.id === hospitalId);
-    if (!hospital) return [hospitalId];
-    const networkIds: string[] = [hospitalId];
-    if (hospital.type === 'main') {
-      const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
-      subHospitals.forEach(sub => networkIds.push(sub.id));
-    } else if (hospital.type === 'sub' && hospital.parent_id) {
-      networkIds.push(hospital.parent_id);
-    }
-    return networkIds;
-  };
+const getNetworkHospitalIds = (hospitalId: string): string[] => {
+  console.log('🔍 [getNetworkHospitalIds] Input hospitalId:', hospitalId);
+  
+  const hospital = hospitals.find(h => h.id === hospitalId);
+  console.log('🏥 Found hospital:', hospital ? {
+    id: hospital.id,
+    name: hospital.name,
+    type: hospital.type,
+    parent_id: hospital.parent_id
+  } : 'NOT FOUND');
+  
+  if (!hospital) {
+    console.warn('⚠️ Hospital not found, returning [hospitalId]');
+    return [hospitalId];
+  }
+  
+  const networkIds: string[] = [hospitalId];
+  
+  if (hospital.type === 'main') {
+    const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
+    console.log('📊 Found', subHospitals.length, 'sub hospitals');
+    subHospitals.forEach(sub => {
+      networkIds.push(sub.id);
+      console.log('  Added sub hospital:', sub.id, sub.name);
+    });
+  } else if (hospital.type === 'sub' && hospital.parent_id) {
+    console.log('📊 Adding parent hospital:', hospital.parent_id);
+    networkIds.push(hospital.parent_id);
+  }
+  
+  console.log('✅ [getNetworkHospitalIds] Final networkIds:', networkIds);
+  return networkIds;
+};
 
-  // ✅ ฟังก์ชันโหลดโค้ช - เพิ่ม Debug Log แบบละเอียด
-  const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-    if (!hospitalId) {
-      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
-      return;
-    }
+  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว
+const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
+  if (!hospitalId) {
+    console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
+    return;
+  }
+  
+  // ✅ ป้องกันการโหลดซ้ำ
+  if (modalCoaches[errorIndex]) {
+    console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
+    return;
+  }
+
+  try {
+    console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
+    console.log(`📝 Error Index: ${errorIndex}`);
+    console.log(`🏥 Hospital ID: ${hospitalId}`);
+    console.log(`📊 Total coaches in state: ${coaches.length}`);
     
-    if (modalCoaches[errorIndex]) {
-      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
-      return;
-    }
-
-    try {
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
-      console.log(`🔍 Error Index: ${errorIndex}`);
-      console.log(`🏥 Hospital ID: ${hospitalId}`);
-      console.log(`📊 Total coaches in state: ${coaches.length}`);
-      
-      // ✅ หา network hospital IDs
-      const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log('🏥 Network Hospital IDs:', networkIds);
-      
-      // ✅ Filter coaches ที่อยู่ใน network
-      console.log('\n🔍 Starting to filter coaches...');
-      const networkCoaches = coaches.filter((coach, idx) => {
-        const coachHospitalId = coach.users?.hospital_id;
-        const isInNetwork = coachHospitalId && networkIds.includes(coachHospitalId);
-        
-        // Log 5 คนแรกเพื่อดูโครงสร้าง
-        if (idx < 5) {
-          console.log(`\n  Coach ${idx}:`, {
-            name: coach.full_name_th,
-            coach_hospital_id: coachHospitalId,
-            in_network: isInNetwork,
-            users_data: coach.users
-          });
-        }
-        
-        return isInNetwork;
-      });
-      
-      console.log(`\n✅ Found ${networkCoaches.length} coaches in network`);
+    // ✅ หา network hospital IDs
+    const networkIds = getNetworkHospitalIds(hospitalId);
+    console.log('🏥 Network Hospital IDs:', networkIds);
+    console.log('🏥 Network IDs Type:', typeof networkIds, 'Length:', networkIds.length);
+    
+    // ✅ Debug: ตรวจสอบ coaches แต่ละคน
+    console.log('\n📋 Checking all coaches:');
+    coaches.forEach((coach, idx) => {
+      if (idx < 3) { // แสดงแค่ 3 คนแรก
+        console.log(`  Coach ${idx}:`, {
+          name: coach.full_name_th,
+          user_hospital_id: coach.users?.hospital_id,
+          user_hospital_name: coach.users?.hospitals?.name,
+          has_users: !!coach.users,
+          has_hospital_id: !!coach.users?.hospital_id
+        });
+      }
+    });
+    
+    // ✅ Filter coaches ที่อยู่ใน network
+    const networkCoaches = coaches.filter(coach => {
+      const coachHospitalId = coach.users?.hospital_id;
+      const isInNetwork = coachHospitalId && networkIds.includes(coachHospitalId);
+      return isInNetwork;
+    });
+    
+    console.log(`\n✅ Found ${networkCoaches.length} coaches in network`);
+    
+    if (networkCoaches.length > 0) {
       console.log('📋 Coach Details:', networkCoaches.map(c => ({
         name: c.full_name_th,
         hospital_id: c.users?.hospital_id,
         hospital_name: c.users?.hospitals?.name,
         specialization: c.specialization_th
       })));
-      
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-      
-      // ✅ อัปเดต state
-      setModalCoaches(prev => ({ 
-        ...prev, 
-        [errorIndex]: networkCoaches 
-      }));
-      
-    } catch (err) {
-      console.error('❌ [loadCoachesForErrorRow] Error:', err);
+    } else {
+      console.warn('⚠️ No coaches found! Possible reasons:');
+      console.warn('  1. coaches array is empty');
+      console.warn('  2. coach.users is undefined');
+      console.warn('  3. coach.users.hospital_id does not match networkIds');
+      console.warn('  4. networkIds is empty or incorrect');
     }
-  };
+    
+    console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
+    
+    // ✅ อัปเดต state
+    setModalCoaches(prev => ({ 
+      ...prev, 
+      [errorIndex]: networkCoaches 
+    }));
+    
+  } catch (err) {
+    console.error('❌ [loadCoachesForErrorRow] Error:', err);
+  }
+};
 
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
@@ -515,6 +551,7 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
+  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
     const currentError = importResult.errors[errorIndex];
@@ -525,28 +562,39 @@ export default function ImportExcelPage() {
       return;
     }
 
+    console.log('💾 [handleSaveHospitalFix] Saving hospital fix for row:', rowIndex);
+
+    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
       const hospital = hospitals.find(h => h.id === currentError.hospital_id);
       if (hospital) {
         row.hospital_name = hospital.name;
+        console.log('✅ Updated hospital name to:', hospital.name);
       }
       newData[rowIndex] = row;
       return newData;
     });
 
+    // 2. รอให้ Preview อัปเดต
     setTimeout(() => {
       runValidation(previewData);
     }, 100);
 
+    // 3. ตรวจสอบว่ามี error อื่นๆ อีกหรือไม่
     setTimeout(() => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
       
+      console.log('🔍 [handleSaveHospitalFix] Validation errors:', rowErrors);
+      
       if (rowErrors.length === 0) {
+        console.log('✅ No errors - importing single row');
         handleImportSingleRow(rowIndex);
       } else {
+        console.log('⚠️ Still has errors - updating modal');
+        // ⚠️ ยังมี error อื่น - อัปเดต Modal แสดง error ถัดไป
         const newErrors = [...importResult.errors];
         newErrors[errorIndex] = { 
           ...newErrors[errorIndex], 
@@ -559,6 +607,13 @@ export default function ImportExcelPage() {
         if (nextError) {
           setError(`✅ โรงพยาบาลถูกต้องแล้ว แต่พบปัญหา: ${nextError}`);
         }
+        
+        // ✅ ปิด Modal และกลับไปหน้า Preview
+        setTimeout(() => {
+          console.log('🔙 Closing modal and returning to preview');
+          setImportResult(null);
+          setStep('preview');
+        }, 500);
       }
     }, 200);
   };
