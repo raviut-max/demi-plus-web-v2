@@ -395,53 +395,70 @@ export default function ImportExcelPage() {
   };
 
   // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว: โหลดจาก API โดยตรง
-  const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-    if (!hospitalId) {
-      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
-      return;
+const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
+  if (!hospitalId) {
+    console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
+    return;
+  }
+  
+  // ✅ ป้องกันการโหลดซ้ำ
+  if (modalCoaches[errorIndex]) {
+    console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
+    return;
+  }
+
+  try {
+    console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
+    console.log(`📝 Error Index: ${errorIndex}`);
+    console.log(`🏥 Hospital ID: ${hospitalId}`);
+    
+    // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
+    const networkIds = getNetworkHospitalIds(hospitalId);
+    console.log('🏥 Network Hospital IDs:', networkIds);
+    console.log('📊 Total hospitals in network:', networkIds.length);
+    
+    // ✅ โหลดโค้ชจาก API สำหรับทุกโรงพยาบาลในเครือข่าย
+    console.log('🔄 Loading coaches from API for all hospitals in network...');
+    const networkCoaches = await getCoachesWithHospitals(networkIds);
+    
+    console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
+    
+    if (networkCoaches.length > 0) {
+      // ✅ จัดกลุ่มโค้ชตามโรงพยาบาล
+      const coachesByHospital = networkCoaches.reduce((acc, coach) => {
+        const hospName = coach.users?.hospitals?.name || 'ไม่มีสังกัด';
+        if (!acc[hospName]) {
+          acc[hospName] = [];
+        }
+        acc[hospName].push(coach);
+        return acc;
+      }, {} as Record<string, any[]>);
+      
+      console.log('📋 Coaches by Hospital:');
+      Object.entries(coachesByHospital).forEach(([hospName, coaches]) => {
+        console.log(`  ${hospName}: ${coaches.length} coaches`);
+        coaches.forEach(c => {
+          console.log(`    - ${c.full_name_th} (${c.specialization_th || 'ไม่ระบุ'})`);
+        });
+      });
+    } else {
+      console.warn('⚠️ No coaches found in this hospital network!');
+      console.warn(' Network IDs:', networkIds);
     }
     
-    // ✅ ป้องกันการโหลดซ้ำ
-    if (modalCoaches[errorIndex]) {
-      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
-      return;
-    }
+    console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
+    
+    // ✅ อัปเดต state
+    setModalCoaches(prev => ({ 
+      ...prev, 
+      [errorIndex]: networkCoaches 
+    }));
+    
+  } catch (err) {
+    console.error('❌ [loadCoachesForErrorRow] Error:', err);
+  }
+};
 
-    try {
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
-      console.log(`📝 Error Index: ${errorIndex}`);
-      console.log(`🏥 Hospital ID: ${hospitalId}`);
-      
-      // ✅ โหลดโค้ชจาก API โดยตรง (ไม่ใช้ state)
-      console.log('🔄 Loading coaches from API for hospital:', hospitalId);
-      const networkCoaches = await getCoachesWithHospitals([hospitalId]);
-      
-      console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
-      
-      if (networkCoaches.length > 0) {
-        console.log('📋 Coach Details:', networkCoaches.map(c => ({
-          name: c.full_name_th,
-          hospital_id: c.users?.hospital_id,
-          hospital_name: c.users?.hospitals?.name,
-          specialization: c.specialization_th
-        })));
-      } else {
-        console.warn('⚠️ No coaches found for this hospital!');
-        console.warn(' Hospital ID:', hospitalId);
-      }
-      
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-      
-      // ✅ อัปเดต state
-      setModalCoaches(prev => ({ 
-        ...prev, 
-        [errorIndex]: networkCoaches 
-      }));
-      
-    } catch (err) {
-      console.error('❌ [loadCoachesForErrorRow] Error:', err);
-    }
-  };
 
   // ✅ useEffect โหลดโค้ชอัตโนมัติเมื่อ Modal เปิด
   useEffect(() => {
