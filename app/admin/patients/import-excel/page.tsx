@@ -114,7 +114,8 @@ const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   let bestScore = 0;
   hospitals.forEach(hospital => {
     const score = calculateSimilarity(hospitalName, hospital.name);
-    if (score > 0.6 && score > bestScore) {
+    // เกณฑ์ความเหมือนของโรงพยาบาลต้องสูงหน่อย (80%)
+    if (score > 0.80 && score > bestScore) {
       bestScore = score;
       bestMatch = hospital;
     }
@@ -127,7 +128,8 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
   let bestScore = 0;
   coaches.forEach(coach => {
     const score = calculateSimilarity(coachName, coach.full_name_th);
-    if (score > 0.75 && score > bestScore) {
+    // เกณฑ์ความเหมือนของโค้ชต้องสูงมาก (90%)
+    if (score > 0.90 && score > bestScore) {
       bestScore = score;
       bestMatch = coach;
     }
@@ -156,6 +158,8 @@ export default function ImportExcelPage() {
   const [validAddresses, setValidAddresses] = useState<Array<{ province: string; district: string; subdistrict: string; postal_code: string; }>>([]);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  
+  // ✅ ผลลัพธ์การตรวจสอบก่อนนำเข้า
   const [importResult, setImportResult] = useState<{
     success: number;
     failed: number;
@@ -164,6 +168,7 @@ export default function ImportExcelPage() {
       id_card: string; 
       hospital_number: string; 
       error: string;
+      error_type: 'hospital' | 'coach' | 'other'; // ระบุประเภท Error
       hospital_id?: string;
       coach_id?: string;
       province?: string;
@@ -179,7 +184,7 @@ export default function ImportExcelPage() {
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   
-  // ✅ เพิ่ม State สำหรับเก็บโค้ชของแต่ละแถวใน Modal
+  // ✅ State สำหรับเก็บโค้ชของแต่ละแถวใน Modal
   const [modalCoaches, setModalCoaches] = useState<Record<number, any[]>>({});
 
   useEffect(() => {
@@ -241,7 +246,7 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation (ไม่เช็คโค้ชใน Preview - ไปเช็คที่ handleImport แทน)
+  // ✅ ฟังก์ชัน Validation (เฉพาะข้อมูลที่แก้ไขง่ายในตาราง)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -273,7 +278,6 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
-      // ✅ ไม่เช็คโค้ชใน Preview (จะไปเช็คที่ handleImport แทน)
     });
 
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
@@ -358,7 +362,8 @@ export default function ImportExcelPage() {
 
   // ✅ โหลดโค้ชสำหรับแถวที่ Error
   const loadCoachesForRow = async (errorIndex: number, hospitalId: string) => {
-    if (modalCoaches[errorIndex]) return;
+    if (!hospitalId) return;
+    if (modalCoaches[errorIndex]) return; // โหลดแล้ว
     
     try {
       const networkIds = getNetworkHospitalIds(hospitalId);
@@ -429,57 +434,89 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
-  // ✅ ฟังก์ชันนำเข้าข้อมูล (เพิ่มการตรวจสอบโค้ชก่อนนำเข้า)
+  // ✅ ฟังก์ชันนำเข้าข้อมูล (ตรวจสอบ Hospital -> Coach)
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
     
-    // ✅ ตรวจสอบข้อผิดพลาดอื่นๆ (ที่ไม่ใช่โค้ช) ใน Preview
+    // 1. ตรวจสอบข้อผิดพลาดพื้นฐานก่อน
     if (hasErrorsInSelected) { 
       setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบ กรุณาแก้ไขก่อนนำเข้า'); 
       return; 
     }
 
-    // ✅ ตรวจสอบโค้ชในแถวที่เลือก (ก่อนนำเข้าจริง)
-    const rowsWithCoachErrors: Array<{rowIndex: number; rowData: any; coachName: string}> = [];
-    
+    // 2. ตรวจสอบ Hospital และ Coach
+    const errors: typeof importResult.errors = [];
+    const successRecords: typeof importResult.successRecords = [];
+    let successCount = 0;
+
     selectedRows.forEach(rowIdx => {
       const row = previewData[rowIdx];
-      if (row.coach_name && row.coach_name.trim()) {
-        const coachMatch = findBestCoachMatch(row.coach_name, coaches);
-        // ถ้าไม่พบโค้ช หรือ ความคล้ายคลึงน้อยกว่า 95%
-        if (!coachMatch || coachMatch.similarity < 0.95) {
-          rowsWithCoachErrors.push({
-            rowIndex: rowIdx,
-            rowData: row,
-            coachName: row.coach_name
+      const rowNumber = rowIdx + 1;
+      
+      // Step 1: ตรวจสอบโรงพยาบาล
+      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
+      
+      if (!hospitalMatch) {
+        // กรณีโรงพยาบาลผิด
+        errors.push({
+          row: rowNumber,
+          id_card: row.id_card,
+          hospital_number: row.hospital_number,
+          error: `ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`,
+          error_type: 'hospital',
+          hospital_id: undefined,
+          original_hospital_name: row.hospital_name,
+          fixed: false
+        });
+      } else {
+        // โรงพยาบาลถูกแล้ว -> ไปตรวจโค้ช
+        const hospitalId = hospitalMatch.hospital.id;
+        
+        // โหลดโค้ชในเครือข่ายโรงพยาบาลนี้
+        const networkIds = getNetworkHospitalIds(hospitalId);
+        const networkCoaches = coaches.filter(c => c.users?.hospitals?.id && networkIds.includes(c.users.hospitals.id));
+        
+        const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
+
+        if (row.coach_name && !coachMatch) {
+          // กรณีโรงพยาบาลถูก แต่โค้ชผิด
+          errors.push({
+            row: rowNumber,
+            id_card: row.id_card,
+            hospital_number: row.hospital_number,
+            error: `ไม่พบโค้ช "${row.coach_name}" ในโรงพยาบาล ${hospitalMatch.hospital.name}`,
+            error_type: 'coach',
+            hospital_id: hospitalId, // ได้ Hospital ID แล้ว
+            original_hospital_name: row.hospital_name,
+            original_coach_name: row.coach_name,
+            fixed: false
+          });
+        } else {
+          // ผ่านหมด
+          successCount++;
+          successRecords.push({
+            row: rowNumber,
+            id_card: row.id_card,
+            hospital_number: row.hospital_number,
+            first_name: row.first_name,
+            last_name: row.last_name
           });
         }
       }
     });
 
-    // ✅ ถ้ามีโค้ชที่ไม่ถูกต้อง แสดง Modal แก้ไข
-    if (rowsWithCoachErrors.length > 0) {
-      const errors = rowsWithCoachErrors.map((item, idx) => ({
-        row: item.rowIndex + 1,
-        id_card: item.rowData.id_card,
-        hospital_number: item.rowData.hospital_number,
-        error: `ไม่พบโค้ช "${item.coachName}" ในระบบ กรุณาเลือกโค้ชใหม่`,
-        hospital_id: previewData[item.rowIndex].hospital_id,
-        original_coach_name: item.coachName,
-        coach_id: undefined,
-        fixed: false
-      }));
-
+    // 3. หากมี Error ให้แสดง Modal
+    if (errors.length > 0) {
       setImportResult({
-        success: 0,
-        failed: rowsWithCoachErrors.length,
+        success: successCount,
+        failed: errors.length,
         errors: errors,
-        successRecords: []
+        successRecords: successRecords
       });
       return;
     }
 
-    // ✅ ผ่านการตรวจสอบทั้งหมด - นำเข้าข้อมูลจริง
+    // 4. หากไม่มี Error เลย -> นำเข้าจริง
     setError('');
     setImporting(true);
     setImportProgress({ current: 0, total: selectedRows.size });
@@ -514,8 +551,8 @@ export default function ImportExcelPage() {
       });
 
       const result = await importPatientsBatch(selectedData, user.id);
-      const successRecords = selectedData.filter((_, idx) => idx < result.success).map((data, idx) => ({ row: idx + 1, id_card: data.id_card, hospital_number: data.hospital_number, first_name: data.first_name, last_name: data.last_name }));
-      setImportResult({ ...result, successRecords });
+      const finalSuccessRecords = selectedData.filter((_, idx) => idx < result.success).map((data, idx) => ({ row: idx + 1, id_card: data.id_card, hospital_number: data.hospital_number, first_name: data.first_name, last_name: data.last_name }));
+      setImportResult({ ...result, successRecords: finalSuccessRecords });
     } catch (err: any) {
       console.error('❌ [handleImport] Error:', err);
       setError(`เกิดข้อผิดพลาดในการนำเข้า: ${err.message}`);
@@ -541,18 +578,24 @@ export default function ImportExcelPage() {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
 
+      // 1. อัปเดตโรงพยาบาล
       if (currentError.hospital_id) {
         const hospital = hospitals.find(h => h.id === currentError.hospital_id);
-        if (hospital) row.hospital_name = hospital.name;
-      }
-      
-      if (currentError.coach_id) {
-        const coach = coaches.find(c => c.user_id === currentError.coach_id);
-        if (coach) {
-          row.coach_name = coach.full_name_th; 
+        if (hospital) {
+          row.hospital_name = hospital.name; // แก้ชื่อโรงพยาบาลให้ถูกต้อง
+          row.hospital_id = hospital.id;
         }
       }
       
+      // 2. อัปเดตโค้ช
+      if (currentError.coach_id) {
+        const coach = coaches.find(c => c.user_id === currentError.coach_id);
+        if (coach) {
+          row.coach_name = coach.full_name_th; // แก้ชื่อโค้ชให้ถูกต้อง
+        }
+      }
+      
+      // 3. อัปเดตที่อยู่
       if (currentError.province) row.province = currentError.province;
       if (currentError.district) row.district = currentError.district;
       if (currentError.subdistrict) row.subdistrict = currentError.subdistrict;
@@ -814,9 +857,7 @@ export default function ImportExcelPage() {
                   </h4>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-96 overflow-auto space-y-3">
                     {importResult.errors.map((err, idx) => {
-                      const hospitalMatch = err.error.includes('ไม่พบโรงพยาบาล') && err.original_hospital_name ? findBestHospitalMatch(err.original_hospital_name, hospitals) : null;
-                      const coachMatch = err.error.includes('ไม่พบโค้ช') || err.error.includes('Coach') ? findBestCoachMatch(err.original_coach_name || '', coaches) : null;
-
+                      
                       if (err.fixed) {
                         return (
                           <div key={idx} className="bg-green-50 border border-green-200 rounded p-4 flex items-center gap-3">
@@ -828,6 +869,10 @@ export default function ImportExcelPage() {
                           </div>
                         );
                       }
+
+                      // ตรวจสอบสถานะ Hospital ของ Error นี้
+                      const isHospitalMissing = !err.hospital_id;
+                      const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
 
                       return (
                         <div key={idx} className="bg-white border border-red-200 rounded p-4">
@@ -843,47 +888,31 @@ export default function ImportExcelPage() {
                             </div>
                           </div>
                           
-                          {hospitalMatch && (
-                            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 text-blue-600" />
-                              <span className="text-sm text-blue-800">
-                                💡 ระบบพบโรงพยาบาลที่ใกล้เคียง: <strong>{hospitalMatch.hospital.name}</strong> (ความคล้ายคลึง {Math.round(hospitalMatch.similarity * 100)}%)
-                              </span>
-                            </div>
-                          )}
-                          
-                          {coachMatch && (
-                            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 text-blue-600" />
-                              <span className="text-sm text-blue-800">
-                                💡 ระบบพบโค้ชที่ใกล้เคียง: <strong>{coachMatch.coach.full_name_th}</strong> (ความคล้ายคลึง {Math.round(coachMatch.similarity * 100)}%)
-                              </span>
-                            </div>
-                          )}
-                          
-                          {err.error.includes('ไม่พบโรงพยาบาล') && (
-                            <div className="mt-3 pl-6 space-y-2">
-                              <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                                <Hospital className="w-3 h-3" /> เลือกโรงพยาบาลใหม่:
+                          {/* ✅ ส่วนแก้ไขโรงพยาบาล (แสดงเมื่อไม่มี Hospital ID) */}
+                          {isHospitalMissing && (
+                            <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
+                              <label className="block text-xs font-bold text-red-700 flex items-center gap-1">
+                                <Hospital className="w-3 h-3" /> 1. เลือกโรงพยาบาลที่ถูกต้องก่อน:
                               </label>
-                              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={err.hospital_id || hospitalMatch?.hospital.id || ''} onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}>
+                              <select 
+                                className="w-full px-3 py-2 border border-red-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500"
+                                value={err.hospital_id || ''}
+                                onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}
+                              >
                                 <option value="">-- เลือกโรงพยาบาล --</option>
                                 {hospitals.map(h => (
                                   <option key={h.id} value={h.id}>{h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}</option>
                                 ))}
                               </select>
-                              <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all">
-                                <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
-                              </button>
+                              <p className="text-xs text-gray-500">เมื่อเลือกโรงพยาบาล ระบบจะโหลดรายชื่อโค้ชให้โดยอัตโนมัติ</p>
                             </div>
                           )}
 
-                          {/* ✅ ส่วนแก้ไขโค้ช (Dropdown + Validation) */}
-                          {(err.error.includes('ไม่พบโค้ช') || err.error.includes('Coach')) && (
-                            <div className="mt-3 pl-6 space-y-2">
-                              <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3" /> 
-                                เลือกโค้ชจากเครือข่ายโรงพยาบาล:
+                          {/* ✅ ส่วนแก้ไขโค้ช (แสดงเมื่อมี Hospital ID แล้ว) */}
+                          {!isHospitalMissing && (
+                            <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
+                              <label className="block text-xs font-bold text-blue-700 flex items-center gap-1">
+                                <UserCheck className="w-3 h-3" /> 2. เลือกโค้ชผู้ดูแล (จากโรงพยาบาล {hospitalMatch?.hospital?.name}):
                               </label>
                               
                               {/* แสดง Loading ขณะโหลดข้อมูล */}
@@ -909,7 +938,7 @@ export default function ImportExcelPage() {
                                   handleEditInModal(idx, 'coach_id', e.target.value);
                                   const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === e.target.value);
                                   if (selectedCoach) {
-                                    handleEditInModal(idx, 'coach_name', selectedCoach.full_name_th);
+                                    handleEditInModal(idx, 'original_coach_name', selectedCoach.full_name_th); // อัปเดตชื่อโค้ชที่ถูกต้อง
                                   }
                                 }}
                                 disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}
@@ -930,32 +959,17 @@ export default function ImportExcelPage() {
                               <p className="text-xs text-gray-500">
                                 💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
                               </p>
-                              
-                              <button
-                                onClick={() => handleApplyModalFix(idx)}
-                                disabled={!err.coach_id}
-                                className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
-                              </button>
                             </div>
                           )}
 
-                          {(err.error.includes('ที่อยู่') || err.error.includes('จังหวัด') || err.error.includes('อำเภอ') || err.error.includes('ตำบล')) && (
-                            <div className="mt-3 pl-6 space-y-2">
-                              <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                                <MapPin className="w-3 h-3" /> แก้ไขที่อยู่:
-                              </label>
-                              <div className="grid grid-cols-3 gap-2">
-                                <input type="text" placeholder="จังหวัด" className="px-2 py-1 border border-gray-300 rounded text-sm" value={err.province || ''} onChange={(e) => handleEditInModal(idx, 'province', e.target.value)} />
-                                <input type="text" placeholder="อำเภอ" className="px-2 py-1 border border-gray-300 rounded text-sm" value={err.district || ''} onChange={(e) => handleEditInModal(idx, 'district', e.target.value)} />
-                                <input type="text" placeholder="ตำบล" className="px-2 py-1 border border-gray-300 rounded text-sm" value={err.subdistrict || ''} onChange={(e) => handleEditInModal(idx, 'subdistrict', e.target.value)} />
-                              </div>
-                              <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all mt-2">
-                                <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
-                              </button>
-                            </div>
-                          )}
+                          {/* ✅ ปุ่มยืนยันการแก้ไข (Active เมื่อแก้ครบทั้งสองอย่าง) */}
+                          <button
+                            onClick={() => handleApplyModalFix(idx)}
+                            disabled={!err.hospital_id || !err.coach_id} // ต้องมีทั้ง รพ. และ โค้ช
+                            className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Save className="w-4 h-4" /> ✅ บันทึกการแก้ไขและนำเข้า
+                          </button>
                         </div>
                       );
                     })}
