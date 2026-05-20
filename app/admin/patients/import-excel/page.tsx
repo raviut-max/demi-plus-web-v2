@@ -375,7 +375,6 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว: โหลดจาก API โดยตรง
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
     if (!hospitalId) {
       console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
@@ -388,35 +387,23 @@ export default function ImportExcelPage() {
     }
 
     try {
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
-      console.log(`📝 Error Index: ${errorIndex}`);
-      console.log(`🏥 Hospital ID: ${hospitalId}`);
+      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for error ${errorIndex}, hospital: ${hospitalId}`);
       
-      // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
       const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log('🏥 Network Hospital IDs:', networkIds);
+      console.log('🏥 [loadCoachesForErrorRow] Network IDs:', networkIds);
       
-      // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state)
-      console.log('🔄 Loading coaches from API for network...');
-      const networkCoaches = await getCoachesWithHospitals(networkIds);
+      const networkCoaches = coaches.filter(coach => {
+        const coachHospitalId = coach.users?.hospital_id;
+        return coachHospitalId && networkIds.includes(coachHospitalId);
+      });
       
-      console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
+      console.log(`✅ [loadCoachesForErrorRow] Found ${networkCoaches.length} coaches for this hospital network`);
+      console.log('📋 Coaches:', networkCoaches.map(c => ({
+        name: c.full_name_th,
+        hospital: c.users?.hospitals?.name,
+        hospital_id: c.users?.hospital_id
+      })));
       
-      if (networkCoaches.length > 0) {
-        console.log('📋 Coach Details:', networkCoaches.map(c => ({
-          name: c.full_name_th,
-          hospital_id: c.users?.hospital_id,
-          hospital_name: c.users?.hospitals?.name,
-          specialization: c.specialization_th
-        })));
-      } else {
-        console.warn('⚠️ No coaches found in this network!');
-        console.warn(' Network IDs:', networkIds);
-      }
-      
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-      
-      // ✅ อัปเดต state
       setModalCoaches(prev => ({ 
         ...prev, 
         [errorIndex]: networkCoaches 
@@ -426,18 +413,6 @@ export default function ImportExcelPage() {
       console.error('❌ [loadCoachesForErrorRow] Error:', err);
     }
   };
-
-  // ✅ Auto-load coaches when modal opens
-  useEffect(() => {
-    if (importResult && importResult.errors.length > 0) {
-      importResult.errors.forEach((err, idx) => {
-        if (err.hospital_id && !modalCoaches[idx]) {
-          console.log('🔄 Auto-loading coaches for error', idx, 'hospital:', err.hospital_id);
-          loadCoachesForErrorRow(idx, err.hospital_id);
-        }
-      });
-    }
-  }, [importResult]);
 
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
@@ -1136,9 +1111,9 @@ export default function ImportExcelPage() {
                                 </div>
                               )}
                               
-                              {/* ✅ แก้ไข: เพิ่ม key แบบ dynamic และลบ onLoad */}
+                              {/* ✅ แก้ไข: เพิ่ม key แบบ dynamic และบังคับ re-render */}
                               <select
-                                key={`coach-select-${idx}-${err.coach_id || 'none'}`}
+                                key={`coach-select-${idx}-${err.coach_id || 'none'}-${modalCoaches[idx]?.length || 0}`}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                                 value={err.coach_id || ''}
                                 onChange={(e) => {
@@ -1146,13 +1121,22 @@ export default function ImportExcelPage() {
                                   console.log('🎯 Coach selected:', selectedCoachId);
                                   
                                   // ✅ อัปเดตค่าใน state ทันที
-                                  handleEditInModal(idx, 'coach_id', selectedCoachId);
+                                  const updatedErrors = [...importResult.errors];
+                                  updatedErrors[idx] = { 
+                                    ...updatedErrors[idx], 
+                                    coach_id: selectedCoachId 
+                                  };
+                                  setImportResult({ ...importResult, errors: updatedErrors });
                                   
                                   // ✅ หาชื่อโค้ชที่เลือกเพื่ออัปเดต
                                   const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId);
                                   if (selectedCoach) {
                                     console.log('✅ Coach found:', selectedCoach.full_name_th);
-                                    handleEditInModal(idx, 'original_coach_name', selectedCoach.full_name_th);
+                                    updatedErrors[idx] = { 
+                                      ...updatedErrors[idx], 
+                                      original_coach_name: selectedCoach.full_name_th 
+                                    };
+                                    setImportResult({ ...importResult, errors: updatedErrors });
                                   }
                                 }}
                                 disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}
@@ -1171,6 +1155,7 @@ export default function ImportExcelPage() {
                               
                               <p className="text-xs text-gray-500 mt-2">
                                 💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
+                                {err.coach_id && ` | ✅ เลือกแล้ว: ${err.original_coach_name || '...'}`}
                               </p>
 
                               <button
