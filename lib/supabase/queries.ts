@@ -3390,3 +3390,275 @@ export async function addStaff(data: {
     return { success: false, error: err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด' };
   }
 }
+
+// =====================================================
+// 📥 Import Patients from Excel Functions
+// =====================================================
+
+/**
+ * แปลงวันที่จาก วว/ดด/ปปปป (พ.ศ.) เป็น YYYY-MM-DD (ค.ศ.)
+ */
+export function convertThaiDateToISO(thaiDateStr: string): string | null {
+  if (!thaiDateStr) return null;
+  
+  const dateRegex = /^(\d{2})[\/-](\d{2})[\/-](\d{4})$/;
+  const match = thaiDateStr.match(dateRegex);
+  
+  if (!match) return null;
+  
+  const [, day, month, year] = match;
+  const yearAD = parseInt(year) - 543; // แปลง พ.ศ. เป็น ค.ศ.
+  
+  return `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+
+/**
+ * ค้นหาโรงพยาบาลจากชื่อ (case-insensitive)
+ */
+export async function findHospitalByName(hospitalName: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select('id')
+      .ilike('name', hospitalName.trim())
+      .eq('is_active', true)
+      .single();
+    
+    if (error || !data) {
+      console.error('❌ [findHospitalByName] Not found:', hospitalName);
+      return null;
+    }
+    
+    return data.id;
+  } catch (err) {
+    console.error('❌ [findHospitalByName] Error:', err);
+    return null;
+  }
+}
+
+/**
+ * ค้นหาโค้ชจากชื่อเต็ม (case-insensitive)
+ */
+export async function findCoachByFullName(coachFullName: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('user_id')
+      .ilike('full_name_th', coachFullName.trim())
+      .eq('is_active', true)
+      .single();
+    
+    if (error || !data) {
+      console.error('❌ [findCoachByFullName] Not found:', coachFullName);
+      return null;
+    }
+    
+    return data.user_id;
+  } catch (err) {
+    console.error('❌ [findCoachByFullName] Error:', err);
+    return null;
+  }
+}
+
+/**
+ * ✅ ฟังก์ชันนำเข้าผู้ป่วยแบบ Batch
+ * @param rows - ข้อมูลผู้ป่วยจาก Excel (array ของ objects)
+ * @param createdBy - ID ของผู้ใช้ที่นำเข้า
+ * @returns { success: number, failed: number, errors: Array }
+ */
+export async function importPatientsBatch(
+  rows: Array<{
+    id_card: string;
+    first_name: string;
+    last_name: string;
+    hospital_number: string;
+    birth_date: string; // วว/ดด/ปปปป พ.ศ.
+    gender: string; // ชาย/หญิง
+    hospital_name: string;
+    phone?: string;
+    email?: string;
+    current_weight?: string;
+    height?: string;
+    waist_circumference?: string;
+    diabetes_type?: string;
+    blood_sugar?: string;
+    hba1c_level?: string;
+    notes?: string;
+    house_number?: string;
+    village_no?: string;
+    village_name?: string;
+    soi?: string;
+    road?: string;
+    subdistrict?: string;
+    district?: string;
+    province?: string;
+    postal_code?: string;
+    address_line1?: string;
+    emergency_contact_name?: string;
+    emergency_contact_phone?: string;
+    emergency_contact_relationship?: string;
+    coach_name?: string;
+  }>,
+  createdBy: string
+) {
+  const results = {
+    success: 0,
+    failed: 0,
+    errors: [] as Array<{ row: number; id_card: string; hospital_number: string; error: string }>
+  };
+
+  console.log(`📥 [importPatientsBatch] Starting import of ${rows.length} patients...`);
+
+  // ✅ โหลดข้อมูล hospitals และ coaches ทั้งหมดล่วงหน้า (เพื่อ performance)
+  const { data: allHospitals } = await supabase
+    .from('hospitals')
+    .select('id, name')
+    .eq('is_active', true);
+  
+  const { data: allCoaches } = await supabase
+    .from('doctors')
+    .select('user_id, full_name_th')
+    .eq('is_active', true);
+
+  const hospitalMap = new Map<string, string>();
+  allHospitals?.forEach(h => {
+    hospitalMap.set(h.name.toLowerCase().trim(), h.id);
+  });
+
+  const coachMap = new Map<string, string>();
+  allCoaches?.forEach(c => {
+    coachMap.set(c.full_name_th.toLowerCase().trim(), c.user_id);
+  });
+
+  // ✅ ประมวลผลทีละแถว
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowIndex = i + 1; // 1-based index
+
+    try {
+      // 1. แปลงเพศ
+      const genderMap: Record<string, string> = {
+        'ชาย': 'male',
+        'หญิง': 'female'
+      };
+      const gender = genderMap[row.gender] || row.gender.toLowerCase();
+
+      // 2. แปลงวันที่
+      const birthDateISO = convertThaiDateToISO(row.birth_date);
+      if (!birthDateISO) {
+        throw new Error(`รูปแบบวันเกิดไม่ถูกต้อง: ${row.birth_date}`);
+      }
+
+      // 3. ค้นหา hospital_id
+      let hospitalId = hospitalMap.get(row.hospital_name.toLowerCase().trim());
+      if (!hospitalId) {
+        // ลองค้นหาอีกครั้งแบบ dynamic
+        hospitalId = await findHospitalByName(row.hospital_name);
+      }
+      if (!hospitalId) {
+        throw new Error(`ไม่พบโรงพยาบาล: ${row.hospital_name}`);
+      }
+
+      // 4. ค้นหา coach_id (ถ้ามี)
+      let coachId: string | undefined = undefined;
+      if (row.coach_name && row.coach_name.trim()) {
+        coachId = coachMap.get(row.coach_name.toLowerCase().trim());
+        if (!coachId) {
+          coachId = await findCoachByFullName(row.coach_name);
+        }
+      }
+
+      // 5. สร้างรหัสผ่านจากวันเกิด (dd-mm-yyyy พ.ศ.)
+      const password = row.birth_date;
+
+      // 6. Insert user
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .insert({
+          id_card: row.id_card.replace(/\D/g, ''), // ลบ non-digit
+          password_hash: password,
+          role: 'patient',
+          is_active: true,
+          created_by: createdBy,
+          hospital_id: hospitalId,
+        })
+        .select()
+        .single();
+
+      if (userError) {
+        if (userError.code === '23505') { // Unique violation
+          throw new Error('เลขบัตรประชาชนหรือ HN ซ้ำในระบบ');
+        }
+        throw userError;
+      }
+
+      // 7. Insert profile
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: user.id,
+          first_name: row.first_name.trim(),
+          last_name: row.last_name.trim(),
+          hospital_number: row.hospital_number.trim(),
+          birth_date: birthDateISO,
+          gender: gender,
+          phone: row.phone?.trim() || null,
+          email: row.email?.trim() || null,
+          current_weight: row.current_weight ? parseFloat(row.current_weight) : null,
+          height: row.height ? parseFloat(row.height) : null,
+          waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : null,
+          diabetes_type: row.diabetes_type?.trim() || null,
+          blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : null,
+          hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : null,
+          notes: row.notes?.trim() || null,
+          house_number: row.house_number?.trim() || null,
+          village_no: row.village_no?.trim() || null,
+          village_name: row.village_name?.trim() || null,
+          soi: row.soi?.trim() || null,
+          road: row.road?.trim() || null,
+          subdistrict: row.subdistrict?.trim() || null,
+          district: row.district?.trim() || null,
+          province: row.province?.trim() || null,
+          postal_code: row.postal_code?.trim() || null,
+          address_line1: row.address_line1?.trim() || null,
+          emergency_contact_name: row.emergency_contact_name?.trim() || null,
+          emergency_contact_phone: row.emergency_contact_phone?.trim() || null,
+          emergency_contact_relationship: row.emergency_contact_relationship?.trim() || null,
+          hospital_id: hospitalId,
+          coach_id: coachId || null,
+          pam_level: 'L0',
+          pam_score: 0,
+          zone: 'Zero Zone',
+          current_step: 'Starter',
+          is_active: true,
+          status: 'active',
+        });
+
+      if (profileError) {
+        if (profileError.code === '23505') {
+          throw new Error('HN ซ้ำในโรงพยาบาลนี้');
+        }
+        // Rollback user
+        await supabase.from('users').delete().eq('id', user.id);
+        throw profileError;
+      }
+
+      results.success++;
+      console.log(`✅ [importPatientsBatch] Row ${rowIndex}: Success - ${row.first_name} ${row.last_name}`);
+
+    } catch (error: any) {
+      results.failed++;
+      results.errors.push({
+        row: rowIndex,
+        id_card: row.id_card,
+        hospital_number: row.hospital_number,
+        error: error.message || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ'
+      });
+      console.error(`❌ [importPatientsBatch] Row ${rowIndex} failed:`, error.message);
+    }
+  }
+
+  console.log(`📊 [importPatientsBatch] Completed: ${results.success} success, ${results.failed} failed`);
+  return results;
+}
+

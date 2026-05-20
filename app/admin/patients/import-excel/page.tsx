@@ -6,7 +6,8 @@ import {
   logout, 
   validateThaiIdCard,
   getAllValidAddresses,
-  validateAddress 
+  validateAddress,
+  importPatientsBatch
 } from '@/lib/supabase/queries';
 import { 
   Upload, 
@@ -23,7 +24,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-//  กำหนดคอลัมน์มาตรฐาน + ประเภท Input สำหรับแก้ไขและตรวจสอบ
+// 📋 กำหนดคอลัมน์มาตรฐาน + ประเภท Input สำหรับแก้ไขและตรวจสอบ
 const STANDARD_FIELDS = [
   { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
@@ -81,6 +82,15 @@ export default function ImportExcelPage() {
     postal_code: string;
   }>>([]);
 
+  // ✅ State สำหรับ Import Progress และ Result
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [importResult, setImportResult] = useState<{
+    success: number;
+    failed: number;
+    errors: Array<{ row: number; id_card: string; hospital_number: string; error: string }>;
+  } | null>(null);
+
   // ✅ ตรวจสอบ Session
   useEffect(() => {
     const userData = checkSession();
@@ -124,7 +134,6 @@ export default function ImportExcelPage() {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
-          // แปลงค่าเป็น String และตัดช่องว่างส่วนเกิน
           const val = row[excelKey];
           newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
         }
@@ -148,11 +157,10 @@ export default function ImportExcelPage() {
         errors.push(`${field.label} เป็นฟิลด์บังคับ`);
         return;
       }
-      if (strVal === '') return; // ข้ามฟิลด์ไม่บังคับที่ว่าง
+      if (strVal === '') return;
 
       // 2. ตรวจสอบตามประเภทข้อมูล
       if (field.inputType === 'number') {
-        //  ตรวจสอบว่าเป็นตัวเลขล้วนหรือไม่ (ไม่รับตัวหนังสือ)
         if (!/^-?\d+(\.\d+)?$/.test(strVal)) {
           errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น`);
         } else {
@@ -162,7 +170,6 @@ export default function ImportExcelPage() {
         }
       } 
       else if (field.inputType === 'date') {
-        // 🔴 ตรวจสอบรูปแบบวันที่เข้มงวด
         const dateRegex = /^(\d{2})[\/-](\d{2})[\/-](\d{4})$/;
         const match = strVal.match(dateRegex);
         if (!match) {
@@ -176,7 +183,6 @@ export default function ImportExcelPage() {
         }
       } 
       else if (field.inputType === 'select') {
-        // 🔴 ตรวจสอบค่า Dropdown
         if (!field.options?.includes(strVal)) {
           errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
         }
@@ -186,7 +192,7 @@ export default function ImportExcelPage() {
       }
     });
 
-    // ✅ ตรวจสอบที่อยู่ (ถ้ามีข้อมูลและโหลด DB สำเร็จ)
+    // ✅ ตรวจสอบที่อยู่
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
       const addrCheck = validateAddress({
         province: row.province || '',
@@ -234,7 +240,7 @@ export default function ImportExcelPage() {
     else if (e.key === 'Escape') cancelEdit();
   };
 
-  //  อ่านไฟล์
+  // 📥 อ่านไฟล์
   const processFile = (file: File) => {
     if (!file.name.match(/\.(xlsx|xls)$/i)) { setError('กรุณาเลือกไฟล์ Excel เท่านั้น'); return; }
     setSelectedFile(file);
@@ -245,7 +251,6 @@ export default function ImportExcelPage() {
       try {
         const wb = XLSX.read(e.target?.result, { type: 'array', cellDates: false });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        // แปลงเป็น JSON โดยไม่แปลงวันที่อัตโนมัติ เพื่อควบคุมการตรวจสอบเอง
         const json = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
         setRawData(json);
         if (json.length > 0) setExcelHeaders(Object.keys(json[0]));
@@ -269,10 +274,86 @@ export default function ImportExcelPage() {
     setPreviewData(prev => prev.map((r, i) => ({ ...r, _selected: next.has(i) })));
   };
 
-  // ✅ ตรวจสอบว่าแถวที่เลือกมี Error หรือไม่ (สำหรับปิดปุ่มนำเข้า)
+  // ✅ ตรวจสอบว่าแถวที่เลือกมี Error หรือไม่
   const hasErrorsInSelected = Array.from(selectedRows).some(idx => 
     previewData[idx]?._errors?.length > 0
   );
+
+  // 🚀 ฟังก์ชันนำเข้าข้อมูล
+  const handleImport = async () => {
+    if (selectedRows.size === 0) {
+      setError('กรุณาเลือกแถวที่ต้องการนำเข้า');
+      return;
+    }
+
+    if (hasErrorsInSelected) {
+      setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบ กรุณาแก้ไขก่อนนำเข้า');
+      return;
+    }
+
+    setError('');
+    setImporting(true);
+    setImportProgress({ current: 0, total: selectedRows.size });
+
+    try {
+      const selectedData = previewData
+        .filter(row => row._selected)
+        .map(row => {
+          const data: any = {
+            id_card: row.id_card,
+            first_name: row.first_name,
+            last_name: row.last_name,
+            hospital_number: row.hospital_number,
+            birth_date: row.birth_date,
+            gender: row.gender,
+            hospital_name: row.hospital_name,
+          };
+
+          if (row.phone) data.phone = row.phone;
+          if (row.email) data.email = row.email;
+          if (row.current_weight) data.current_weight = row.current_weight;
+          if (row.height) data.height = row.height;
+          if (row.waist_circumference) data.waist_circumference = row.waist_circumference;
+          if (row.diabetes_type) data.diabetes_type = row.diabetes_type;
+          if (row.blood_sugar) data.blood_sugar = row.blood_sugar;
+          if (row.hba1c_level) data.hba1c_level = row.hba1c_level;
+          if (row.notes) data.notes = row.notes;
+          if (row.house_number) data.house_number = row.house_number;
+          if (row.village_no) data.village_no = row.village_no;
+          if (row.village_name) data.village_name = row.village_name;
+          if (row.soi) data.soi = row.soi;
+          if (row.road) data.road = row.road;
+          if (row.subdistrict) data.subdistrict = row.subdistrict;
+          if (row.district) data.district = row.district;
+          if (row.province) data.province = row.province;
+          if (row.postal_code) data.postal_code = row.postal_code;
+          if (row.address_line1) data.address_line1 = row.address_line1;
+          if (row.emergency_contact_name) data.emergency_contact_name = row.emergency_contact_name;
+          if (row.emergency_contact_phone) data.emergency_contact_phone = row.emergency_contact_phone;
+          if (row.emergency_contact_relationship) data.emergency_contact_relationship = row.emergency_contact_relationship;
+          if (row.coach_name) data.coach_name = row.coach_name;
+
+          return data;
+        });
+
+      console.log('📥 [handleImport] Importing', selectedData.length, 'patients...');
+      const result = await importPatientsBatch(selectedData, user.id);
+      setImportResult(result);
+      
+      if (result.success > 0) {
+        setTimeout(() => {
+          router.push('/admin/patients');
+        }, 3000);
+      }
+
+    } catch (err: any) {
+      console.error('❌ [handleImport] Error:', err);
+      setError(`เกิดข้อผิดพลาดในการนำเข้า: ${err.message}`);
+    } finally {
+      setImporting(false);
+      setImportProgress({ current: 0, total: 0 });
+    }
+  };
 
   if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -361,11 +442,26 @@ export default function ImportExcelPage() {
                 <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
                 <button onClick={() => setStep('mapping')} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔧 แก้ไขการจับคู่</button>
                 <button 
-                  disabled={selectedRows.size === 0 || hasErrorsInSelected} 
+                  disabled={selectedRows.size === 0 || hasErrorsInSelected || importing} 
+                  onClick={handleImport}
                   className="px-4 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
                 >
-                  {hasErrorsInSelected ? <ShieldAlert className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
-                  {hasErrorsInSelected ? 'แก้ไขข้อผิดพลาดก่อนนำเข้า' : '🚀 นำเข้าที่เลือก'}
+                  {importing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      กำลังนำเข้า... ({importProgress.current}/{importProgress.total})
+                    </>
+                  ) : hasErrorsInSelected ? (
+                    <>
+                      <ShieldAlert className="w-4 h-4" />
+                      แก้ไขข้อผิดพลาดก่อนนำเข้า
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4" />
+                      🚀 นำเข้าที่เลือก ({selectedRows.size})
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -383,7 +479,7 @@ export default function ImportExcelPage() {
                         </th>
                       ))}
                       <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">
-                        ️ ข้อผิดพลาด
+                        ⚠️ ข้อผิดพลาด
                       </th>
                     </tr>
                   </thead>
@@ -444,6 +540,68 @@ export default function ImportExcelPage() {
           </>
         )}
       </div>
+
+      {/* ✅ Modal แสดงผลการนำเข้า */}
+      {importResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-auto">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                {importResult.failed === 0 ? (
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                    <CheckCircle className="w-6 h-6 text-green-600" />
+                  </div>
+                ) : (
+                  <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
+                    <AlertCircle className="w-6 h-6 text-yellow-600" />
+                  </div>
+                )}
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">
+                    {importResult.failed === 0 ? '✅ นำเข้าสำเร็จ!' : '⚠️ นำเข้าบางส่วนสำเร็จ'}
+                  </h3>
+                  <p className="text-gray-600">
+                    สำเร็จ: {importResult.success} รายการ | ล้มเหลว: {importResult.failed} รายการ
+                  </p>
+                </div>
+              </div>
+
+              {importResult.errors.length > 0 && (
+                <div className="mb-4">
+                  <h4 className="font-semibold text-red-700 mb-2">รายการที่ล้มเหลว:</h4>
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-64 overflow-auto">
+                    {importResult.errors.map((err, idx) => (
+                      <div key={idx} className="text-sm text-red-800 mb-2 pb-2 border-b border-red-200 last:border-0">
+                        <p><strong>แถวที่ {err.row}:</strong> {err.error}</p>
+                        <p className="text-xs text-red-600 mt-1">
+                          บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 mt-6">
+                {importResult.failed > 0 && (
+                  <button
+                    onClick={() => setImportResult(null)}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    ปิดและแก้ไข
+                  </button>
+                )}
+                <button
+                  onClick={() => router.push('/admin/patients')}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                >
+                  ไปหน้ารายการผู้ป่วย
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
