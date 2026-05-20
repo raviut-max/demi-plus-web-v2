@@ -241,7 +241,7 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation (เพิ่มการเช็คโค้ช)
+  // ✅ ฟังก์ชัน Validation (ไม่เช็คโค้ชใน Preview - ไปเช็คที่ handleImport แทน)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -273,13 +273,7 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
-      // ✅ เพิ่มการตรวจสอบโค้ช
-      else if (field.key === 'coach_name' && strVal) {
-        const coachMatch = findBestCoachMatch(strVal, coaches);
-        if (!coachMatch || coachMatch.similarity < 0.95) {
-          errors.push(`ไม่พบชื่อโค้ช "${strVal}" ในระบบ กรุณาเลือกโค้ชจากรายชื่อที่มี`);
-        }
-      }
+      // ✅ ไม่เช็คโค้ชใน Preview (จะไปเช็คที่ handleImport แทน)
     });
 
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
@@ -435,10 +429,57 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
-  // ✅ ฟังก์ชันนำเข้าข้อมูล
+  // ✅ ฟังก์ชันนำเข้าข้อมูล (เพิ่มการตรวจสอบโค้ชก่อนนำเข้า)
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
-    if (hasErrorsInSelected) { setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบ กรุณาแก้ไขก่อนนำเข้า'); return; }
+    
+    // ✅ ตรวจสอบข้อผิดพลาดอื่นๆ (ที่ไม่ใช่โค้ช) ใน Preview
+    if (hasErrorsInSelected) { 
+      setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบ กรุณาแก้ไขก่อนนำเข้า'); 
+      return; 
+    }
+
+    // ✅ ตรวจสอบโค้ชในแถวที่เลือก (ก่อนนำเข้าจริง)
+    const rowsWithCoachErrors: Array<{rowIndex: number; rowData: any; coachName: string}> = [];
+    
+    selectedRows.forEach(rowIdx => {
+      const row = previewData[rowIdx];
+      if (row.coach_name && row.coach_name.trim()) {
+        const coachMatch = findBestCoachMatch(row.coach_name, coaches);
+        // ถ้าไม่พบโค้ช หรือ ความคล้ายคลึงน้อยกว่า 95%
+        if (!coachMatch || coachMatch.similarity < 0.95) {
+          rowsWithCoachErrors.push({
+            rowIndex: rowIdx,
+            rowData: row,
+            coachName: row.coach_name
+          });
+        }
+      }
+    });
+
+    // ✅ ถ้ามีโค้ชที่ไม่ถูกต้อง แสดง Modal แก้ไข
+    if (rowsWithCoachErrors.length > 0) {
+      const errors = rowsWithCoachErrors.map((item, idx) => ({
+        row: item.rowIndex + 1,
+        id_card: item.rowData.id_card,
+        hospital_number: item.rowData.hospital_number,
+        error: `ไม่พบโค้ช "${item.coachName}" ในระบบ กรุณาเลือกโค้ชใหม่`,
+        hospital_id: previewData[item.rowIndex].hospital_id,
+        original_coach_name: item.coachName,
+        coach_id: undefined,
+        fixed: false
+      }));
+
+      setImportResult({
+        success: 0,
+        failed: rowsWithCoachErrors.length,
+        errors: errors,
+        successRecords: []
+      });
+      return;
+    }
+
+    // ✅ ผ่านการตรวจสอบทั้งหมด - นำเข้าข้อมูลจริง
     setError('');
     setImporting(true);
     setImportProgress({ current: 0, total: selectedRows.size });
