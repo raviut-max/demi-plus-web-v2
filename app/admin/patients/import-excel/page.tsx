@@ -352,15 +352,20 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
+  // ✅ ฟังก์ชันโหลดโค้ช - ใช้ getCoachesWithHospitals
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
     if (!hospitalId) return;
     if (modalCoaches[errorIndex]) return;
+    
     try {
+      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for hospital: ${hospitalId}`);
       const networkIds = getNetworkHospitalIds(hospitalId);
-      const networkCoaches = coaches.filter(c => {
-        const cHospId = c.users?.hospital_id;
-        return cHospId && networkIds.includes(cHospId);
-      });
+      console.log(`🏥 Network IDs:`, networkIds);
+      
+      // ✅ ใช้ getCoachesWithHospitals จาก queries
+      const networkCoaches = await getCoachesWithHospitals(networkIds);
+      console.log(`✅ Loaded ${networkCoaches.length} coaches`);
+      
       setModalCoaches(prev => ({ ...prev, [errorIndex]: networkCoaches }));
     } catch (err) {
       console.error('❌ Error loading coaches:', err);
