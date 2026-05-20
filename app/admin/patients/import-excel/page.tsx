@@ -375,7 +375,7 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว
+  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว: โหลดจาก API โดยตรง
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
     if (!hospitalId) {
       console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
@@ -391,13 +391,11 @@ export default function ImportExcelPage() {
       console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
       console.log(`📝 Error Index: ${errorIndex}`);
       console.log(`🏥 Hospital ID: ${hospitalId}`);
-      
-      const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log('🏥 Network Hospital IDs:', networkIds);
-      
-      console.log('🔄 Loading coaches from API...');
-      const networkCoaches = await getCoachesWithHospitals(networkIds);
-      
+
+      // ✅ โหลดโค้ชจาก API โดยตรง ด้วย hospital ID เดียวที่เลือก
+      console.log('🔄 Loading coaches from API for selected hospital...');
+      const networkCoaches = await getCoachesWithHospitals([hospitalId]);
+
       console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
       
       if (networkCoaches.length > 0) {
@@ -408,17 +406,16 @@ export default function ImportExcelPage() {
           specialization: c.specialization_th
         })));
       } else {
-        console.warn('⚠️ No coaches found in this network!');
-        console.warn(' Network IDs:', networkIds);
+        console.warn('⚠️ No coaches found for this hospital!');
+        console.warn(' Hospital ID:', hospitalId);
       }
       
       console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-      
+
       setModalCoaches(prev => ({ 
         ...prev, 
         [errorIndex]: networkCoaches 
       }));
-      
     } catch (err) {
       console.error('❌ [loadCoachesForErrorRow] Error:', err);
     }
@@ -428,7 +425,7 @@ export default function ImportExcelPage() {
   useEffect(() => {
     if (importResult && importResult.errors.length > 0) {
       importResult.errors.forEach((err, idx) => {
-        if (!err.hospital_fixed && err.hospital_id && !modalCoaches[idx]) {
+        if (err.hospital_id && !modalCoaches[idx]) {
           console.log('🔄 Auto-loading coaches for error', idx, 'hospital:', err.hospital_id);
           loadCoachesForErrorRow(idx, err.hospital_id);
         }
@@ -1133,6 +1130,7 @@ export default function ImportExcelPage() {
                                 </div>
                               )}
                               
+                              {/* ✅ แก้ไข: เพิ่ม key แบบ dynamic และลบ onLoad */}
                               <select
                                 key={`coach-select-${idx}-${err.coach_id || 'none'}`}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
@@ -1141,8 +1139,10 @@ export default function ImportExcelPage() {
                                   const selectedCoachId = e.target.value;
                                   console.log('🎯 Coach selected:', selectedCoachId);
                                   
+                                  // ✅ อัปเดตค่าใน state ทันที
                                   handleEditInModal(idx, 'coach_id', selectedCoachId);
                                   
+                                  // ✅ หาชื่อโค้ชที่เลือกเพื่ออัปเดต
                                   const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId);
                                   if (selectedCoach) {
                                     console.log('✅ Coach found:', selectedCoach.full_name_th);
