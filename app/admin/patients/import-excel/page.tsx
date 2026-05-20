@@ -76,6 +76,7 @@ const normalizeThaiText = (text: string): string => {
   const abbreviations: Record<string, string> = {
     'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
     'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
+    'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
   };
   Object.entries(abbreviations).forEach(([abbr, full]) => {
     normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
@@ -91,8 +92,8 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   const s2 = normalizeThaiText(str2);
   if (s1 === s2) return 1;
   if (!s1 || !s2) return 0;
-  if (s2.includes(s1)) return 0.8;
-  if (s1.includes(s2)) return 0.7;
+  if (s2.includes(s1)) return 0.85;
+  if (s1.includes(s2)) return 0.75;
   const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
   for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
   for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
@@ -120,12 +121,14 @@ const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
 };
 
+// ✅ ฟังก์ชันตรวจสอบโค้ช (เพิ่ม Logic ตรวจสอบการมีอยู่จริง)
 const findBestCoachMatch = (coachName: string, coaches: any[]) => {
   let bestMatch: any = null;
   let bestScore = 0;
   coaches.forEach(coach => {
     const score = calculateSimilarity(coachName, coach.full_name_th);
-    if (score > 0.6 && score > bestScore) {
+    // ปรับ Threshold ให้สูงขึ้นหน่อยเพื่อลด False Positive
+    if (score > 0.75 && score > bestScore) {
       bestScore = score;
       bestMatch = coach;
     }
@@ -169,7 +172,7 @@ export default function ImportExcelPage() {
       subdistrict?: string;
       original_hospital_name?: string;
       original_coach_name?: string;
-      fixed?: boolean; // ✅ ตัวแปรติดตามว่าแก้ไขแล้วหรือยัง
+      fixed?: boolean;
     }>;
     successRecords: Array<{ row: number; id_card: string; hospital_number: string; first_name: string; last_name: string; }>;
   } | null>(null);
@@ -236,13 +239,16 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
+  // ✅ ฟังก์ชัน Validation ที่ปรับปรุงแล้ว (เพิ่มการเช็คโค้ช)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
       const strVal = String(val ?? '').trim();
+
       if (field.required && strVal === '') { errors.push(`${field.label} เป็นฟิลด์บังคับ`); return; }
       if (strVal === '') return;
+
       if (field.inputType === 'number') {
         if (!/^-?\d+(\.\d+)?$/.test(strVal)) errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น`);
         else {
@@ -265,7 +271,20 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
+      
+      // ✅ NEW: ตรวจสอบชื่อโค้ช (Coach Validation)
+      else if (field.key === 'coach_name') {
+        // เช็คว่ามีโค้ชชื่อใกล้เคียงในฐานข้อมูลหรือไม่
+        const coachMatch = findBestCoachMatch(strVal, coaches);
+        if (!coachMatch) {
+          errors.push(`ไม่พบชื่อโค้ช "${strVal}" ในระบบ (กรุณาตรวจสอบการสะกด)`);
+        } else if (coachMatch.similarity < 0.95) {
+            // ถ้าความเหมือนไม่ถึง 95% ให้เตือนว่าอาจจะพิมพ์ไม่ตรงเป๊ะ
+            errors.push(`ชื่อโค้ชใกล้เคียง "${coachMatch.coach.full_name_th}" หรือไม่? (ความเหมือน ${(coachMatch.similarity*100).toFixed(0)}%)`);
+        }
+      }
     });
+
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
       const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
       if (!addrCheck.valid) errors.push(...addrCheck.errors);
@@ -384,28 +403,23 @@ export default function ImportExcelPage() {
     setImportResult({ ...importResult, errors: updatedErrors });
   };
 
-  // ✅ ฟังก์ชันใหม่: ใช้ข้อมูลที่แก้ไขใน Modal อัปเดตตารางจริง
   const handleApplyModalFix = (errorIndex: number) => {
     if (!importResult) return;
     const currentError = importResult.errors[errorIndex];
     const rowIndex = currentError.row - 1;
 
-    // 1. อัปเดตข้อมูลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
 
-      // อัปเดตโรงพยาบาล
       if (currentError.hospital_id) {
         const hospital = hospitals.find(h => h.id === currentError.hospital_id);
         if (hospital) row.hospital_name = hospital.name;
       }
-      // อัปเดตโค้ช
       if (currentError.coach_id) {
         const coach = coaches.find(c => c.user_id === currentError.coach_id);
         if (coach) row.coach_name = coach.full_name_th;
       }
-      // อัปเดตที่อยู่
       if (currentError.province) row.province = currentError.province;
       if (currentError.district) row.district = currentError.district;
       if (currentError.subdistrict) row.subdistrict = currentError.subdistrict;
@@ -414,25 +428,11 @@ export default function ImportExcelPage() {
       return newData;
     });
 
-    // 2. ตรวจสอบ Validation ใหม่ทันที
-    // ใช้ setTimeout เล็กน้อยเพื่อให้ State อัปเดตเสร็จก่อน (หรือจะคำนวณ error ใหม่จากข้อมูลที่เพิ่ง set ก็ได้)
-    // ในที่นี้เราจะคำนวณ error ใหม่จากข้อมูลล่าสุดของ row นั้น
-    const updatedRow = previewData[rowIndex]; 
-    // หมายเหตุ: previewData ใน closure อาจยังเป็นค่าเก่า ดังนั้นเราคำนวณจากข้อมูลที่เราเพิ่งเตรียมไว้ดีกว่า
-    // แต่เพื่อความชัวร์ เราจะรอ React render รอบหน้าแล้วค่อย runValidation หรือทำ manual check
-    // วิธีที่ง่ายสุดคือเรียก runValidation(previewData) ซึ่งจะได้ค่าล่าสุดถ้า state update ทันที
-    
-    // อัปเดต UI Modal ว่าแก้ไขแล้ว
+    setTimeout(() => runValidation(previewData), 100);
+
     const newErrors = [...importResult.errors];
     newErrors[errorIndex] = { ...newErrors[errorIndex], fixed: true };
     setImportResult({ ...importResult, errors: newErrors });
-    
-    // เรียก validation ใหม่เพื่ออัปเดตสถานะในตาราง Preview ด้านหลัง
-    // เนื่องจาก state update เป็น async เราต้องคำนวณ error ใหม่จากข้อมูลที่ถูกต้อง
-    // หรือใช้ setTimeout
-    setTimeout(() => {
-        runValidation(previewData); 
-    }, 100);
   };
 
   const handleBackToPreview = () => {
@@ -448,10 +448,7 @@ export default function ImportExcelPage() {
 
   const handleRetryFailed = () => {
     if (!importResult || importResult.errors.length === 0) return;
-    // กรองเฉพาะแถวที่ยังแก้ไขไม่สำเร็จ
-    const failedRowIndices = importResult.errors
-        .filter(err => !err.fixed)
-        .map(err => err.row - 1);
+    const failedRowIndices = importResult.errors.filter(err => !err.fixed).map(err => err.row - 1);
     const newSelectedRows = new Set([...selectedRows, ...failedRowIndices]);
     setSelectedRows(newSelectedRows);
     setImportResult(null);
@@ -684,7 +681,6 @@ export default function ImportExcelPage() {
                       const hospitalMatch = err.error.includes('ไม่พบโรงพยาบาล') && err.original_hospital_name ? findBestHospitalMatch(err.original_hospital_name, hospitals) : null;
                       const coachMatch = err.error.includes('ไม่พบโค้ช') && err.original_coach_name ? findBestCoachMatch(err.original_coach_name, coaches) : null;
 
-                      // ✅ ถ้าแก้ไขแล้ว
                       if (err.fixed) {
                         return (
                           <div key={idx} className="bg-green-50 border border-green-200 rounded p-4 flex items-center gap-3">
@@ -697,7 +693,6 @@ export default function ImportExcelPage() {
                         );
                       }
 
-                      // ✅ สถานะยังไม่แก้ไข
                       return (
                         <div key={idx} className="bg-white border border-red-200 rounded p-4">
                           <div className="flex items-start gap-2 mb-3">
@@ -730,59 +725,40 @@ export default function ImportExcelPage() {
                             </div>
                           )}
                           
-                          {/* ✅ แก้ไขโรงพยาบาล */}
                           {err.error.includes('ไม่พบโรงพยาบาล') && (
                             <div className="mt-3 pl-6 space-y-2">
                               <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
                                 <Hospital className="w-3 h-3" /> เลือกโรงพยาบาลใหม่:
                               </label>
-                              <select
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                                value={err.hospital_id || hospitalMatch?.hospital.id || ''}
-                                onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}
-                              >
+                              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={err.hospital_id || hospitalMatch?.hospital.id || ''} onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}>
                                 <option value="">-- เลือกโรงพยาบาล --</option>
                                 {hospitals.map(h => (
                                   <option key={h.id} value={h.id}>{h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}</option>
                                 ))}
                               </select>
-                              {/* ✅ ปุ่มปรับปรุงข้อมูล */}
-                              <button 
-                                onClick={() => handleApplyModalFix(idx)}
-                                className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all"
-                              >
+                              <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all">
                                 <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
                               </button>
                             </div>
                           )}
 
-                          {/* ✅ แก้ไขโค้ช */}
                           {err.error.includes('ไม่พบโค้ช') && (
                             <div className="mt-3 pl-6 space-y-2">
                               <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
                                 <UserCheck className="w-3 h-3" /> เลือกโค้ชใหม่:
                               </label>
-                              <select
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                                value={err.coach_id || coachMatch?.coach.user_id || ''}
-                                onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}
-                              >
+                              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={err.coach_id || coachMatch?.coach.user_id || ''} onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}>
                                 <option value="">-- เลือกโค้ช --</option>
                                 {coaches.map(c => (
                                   <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>
                                 ))}
                               </select>
-                              {/* ✅ ปุ่มปรับปรุงข้อมูล */}
-                              <button 
-                                onClick={() => handleApplyModalFix(idx)}
-                                className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all"
-                              >
+                              <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all">
                                 <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
                               </button>
                             </div>
                           )}
 
-                          {/* ✅ แก้ไขที่อยู่ */}
                           {(err.error.includes('ที่อยู่') || err.error.includes('จังหวัด') || err.error.includes('อำเภอ') || err.error.includes('ตำบล')) && (
                             <div className="mt-3 pl-6 space-y-2">
                               <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
@@ -793,11 +769,7 @@ export default function ImportExcelPage() {
                                 <input type="text" placeholder="อำเภอ" className="px-2 py-1 border border-gray-300 rounded text-sm" value={err.district || ''} onChange={(e) => handleEditInModal(idx, 'district', e.target.value)} />
                                 <input type="text" placeholder="ตำบล" className="px-2 py-1 border border-gray-300 rounded text-sm" value={err.subdistrict || ''} onChange={(e) => handleEditInModal(idx, 'subdistrict', e.target.value)} />
                               </div>
-                              {/* ✅ ปุ่มปรับปรุงข้อมูล */}
-                              <button 
-                                onClick={() => handleApplyModalFix(idx)}
-                                className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all mt-2"
-                              >
+                              <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all mt-2">
                                 <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
                               </button>
                             </div>
