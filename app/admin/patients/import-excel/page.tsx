@@ -178,6 +178,9 @@ export default function ImportExcelPage() {
   
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
+  
+  // ✅ เพิ่ม State สำหรับเก็บโค้ชของแต่ละแถวใน Modal
+  const [modalCoaches, setModalCoaches] = useState<Record<number, any[]>>({});
 
   useEffect(() => {
     const userData = checkSession();
@@ -238,7 +241,7 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation (ลบการเช็คโค้ชออก)
+  // ✅ ฟังก์ชัน Validation (ลบการเช็คโค้ชออก - ไปเช็คที่ Modal แทน)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -336,6 +339,38 @@ export default function ImportExcelPage() {
 
   const hasErrorsInSelected = Array.from(selectedRows).some(idx => previewData[idx]?._errors?.length > 0);
 
+  // ✅ ฟังก์ชันหา Hospital IDs จากเครือข่าย (แม่ข่าย + ลูกข่าย)
+  const getNetworkHospitalIds = (hospitalId: string): string[] => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) return [hospitalId];
+    
+    const networkIds: string[] = [hospitalId];
+    
+    if (hospital.type === 'main') {
+      // ถ้าเป็นแม่ข่าย → เพิ่มลูกข่ายทั้งหมด
+      const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
+      subHospitals.forEach(sub => networkIds.push(sub.id));
+    } else if (hospital.type === 'sub' && hospital.parent_id) {
+      // ถ้าเป็นลูกข่าย → เพิ่มแม่ข่าย
+      networkIds.push(hospital.parent_id);
+    }
+    
+    return networkIds;
+  };
+
+  // ✅ โหลดโค้ชสำหรับแถวที่ Error
+  const loadCoachesForRow = async (errorIndex: number, hospitalId: string) => {
+    if (modalCoaches[errorIndex]) return; // โหลดแล้ว
+    
+    try {
+      const networkIds = getNetworkHospitalIds(hospitalId);
+      const coachesData = await getCoachesWithHospitals(networkIds);
+      setModalCoaches(prev => ({ ...prev, [errorIndex]: coachesData }));
+    } catch (err) {
+      console.error('❌ Error loading coaches:', err);
+    }
+  };
+
   // ✅ ฟังก์ชัน Export ข้อมูลที่แก้ไขแล้วเป็น Excel
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
@@ -343,7 +378,6 @@ export default function ImportExcelPage() {
       return;
     }
 
-    // เตรียมข้อมูลสำหรับ export
     const exportData = previewData.map((row, idx) => {
       const exportRow: any = {
         'ลำดับ': idx + 1,
@@ -381,49 +415,18 @@ export default function ImportExcelPage() {
       return exportRow;
     });
 
-    // สร้าง Worksheet
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // ตั้งค่าความกว้างคอลัมน์
     ws['!cols'] = [
-      { wch: 5 },  // ลำดับ
-      { wch: 15 }, // เลขบัตรประชาชน
-      { wch: 15 }, // ชื่อ
-      { wch: 15 }, // นามสกุล
-      { wch: 15 }, // HN
-      { wch: 15 }, // วันเกิด
-      { wch: 10 }, // เพศ
-      { wch: 30 }, // โรงพยาบาล
-      { wch: 12 }, // เบอร์โทร
-      { wch: 25 }, // อีเมล
-      { wch: 10 }, // น้ำหนัก
-      { wch: 10 }, // ส่วนสูง
-      { wch: 10 }, // รอบเอว
-      { wch: 15 }, // ประเภทเบาหวาน
-      { wch: 12 }, // ค่าน้ำตาล
-      { wch: 10 }, // HbA1c
-      { wch: 30 }, // หมายเหตุ
-      { wch: 15 }, // บ้านเลขที่
-      { wch: 10 }, // หมู่ที่
-      { wch: 20 }, // หมู่บ้าน
-      { wch: 20 }, // ซอย
-      { wch: 20 }, // ถนน
-      { wch: 20 }, // ตำบล
-      { wch: 20 }, // อำเภอ
-      { wch: 20 }, // จังหวัด
-      { wch: 10 }, // รหัสไปรษณีย์
-      { wch: 30 }, // ที่อยู่เพิ่มเติม
-      { wch: 20 }, // ผู้ติดต่อฉุกเฉิน
-      { wch: 15 }, // เบอร์ติดต่อฉุกเฉิน
-      { wch: 15 }, // ความสัมพันธ์
-      { wch: 30 }, // โค้ชผู้ดูแล
+      { wch: 5 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
+      { wch: 10 }, { wch: 30 }, { wch: 12 }, { wch: 25 }, { wch: 10 }, { wch: 10 },
+      { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 15 },
+      { wch: 10 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
+      { wch: 20 }, { wch: 10 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 30 },
     ];
 
-    // สร้าง Workbook
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
 
-    // ดาวน์โหลดไฟล์
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
@@ -496,12 +499,14 @@ export default function ImportExcelPage() {
         const hospital = hospitals.find(h => h.id === currentError.hospital_id);
         if (hospital) row.hospital_name = hospital.name;
       }
+      
       if (currentError.coach_id) {
         const coach = coaches.find(c => c.user_id === currentError.coach_id);
         if (coach) {
           row.coach_name = coach.full_name_th; 
         }
       }
+      
       if (currentError.province) row.province = currentError.province;
       if (currentError.district) row.district = currentError.district;
       if (currentError.subdistrict) row.subdistrict = currentError.subdistrict;
@@ -830,21 +835,50 @@ export default function ImportExcelPage() {
                           {(err.error.includes('ไม่พบโค้ช') || err.error.includes('Coach')) && (
                             <div className="mt-3 pl-6 space-y-2">
                               <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3" /> เลือกโค้ชใหม่:
+                                <UserCheck className="w-3 h-3" /> 
+                                เลือกโค้ชจากเครือข่ายโรงพยาบาล:
                               </label>
-                              <select 
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" 
-                                value={err.coach_id || coachMatch?.coach.user_id || ''} 
-                                onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}
+                              
+                              {!modalCoaches[idx] && err.hospital_id && (
+                                <div className="text-xs text-gray-500 flex items-center gap-2">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  กำลังโหลดรายชื่อโค้ช...
+                                </div>
+                              )}
+                              
+                              <select
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                value={err.coach_id || ''}
+                                onChange={(e) => {
+                                  handleEditInModal(idx, 'coach_id', e.target.value);
+                                  const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === e.target.value);
+                                  if (selectedCoach) {
+                                    handleEditInModal(idx, 'coach_name', selectedCoach.full_name_th);
+                                  }
+                                }}
+                                onLoad={() => err.hospital_id && loadCoachesForRow(idx, err.hospital_id)}
                               >
                                 <option value="">-- เลือกโค้ช --</option>
-                                {coaches.map(c => (
-                                  <option key={c.user_id} value={c.user_id}>
-                                    {c.full_name_th} {c.specialization_th ? `| ${c.specialization_th}` : ''}
-                                  </option>
-                                ))}
+                                {modalCoaches[idx]?.map(coach => {
+                                  const hospitalName = coach.users?.hospitals?.name || 'ไม่มีสังกัด';
+                                  const specialization = coach.specialization_th || 'ไม่ระบุ';
+                                  return (
+                                    <option key={coach.user_id} value={coach.user_id}>
+                                      {coach.full_name_th} | {specialization} | {hospitalName}
+                                    </option>
+                                  );
+                                })}
                               </select>
-                              <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all">
+                              
+                              <p className="text-xs text-gray-500">
+                                💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
+                              </p>
+                              
+                              <button
+                                onClick={() => handleApplyModalFix(idx)}
+                                disabled={!err.coach_id}
+                                className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
                                 <Save className="w-4 h-4" /> ✅ ปรับปรุงข้อมูล
                               </button>
                             </div>
