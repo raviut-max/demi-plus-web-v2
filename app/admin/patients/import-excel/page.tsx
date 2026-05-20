@@ -217,32 +217,13 @@ export default function ImportExcelPage() {
 
   const loadNetworkData = async (userId: string) => {
     try {
-      console.log('🏥 [loadNetworkData] Loading hospitals...');
       const allHospitals = await getHospitalsWithHierarchy();
       setHospitals(allHospitals);
       const hospitalIds = allHospitals.map(h => h.id);
-      
-      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      
-      console.log('✅ [loadNetworkData] Loaded:', {
-        hospitals: allHospitals.length,
-        coaches: allCoaches.length
-      });
-      
-      if (allCoaches.length > 0) {
-        console.log('📋 [loadNetworkData] Sample coach structure:', {
-          id: allCoaches[0].id,
-          full_name_th: allCoaches[0].full_name_th,
-          users: allCoaches[0].users,
-          hospital_id: allCoaches[0].users?.hospital_id,
-          hospital_name: allCoaches[0].users?.hospitals?.name
-        });
-      }
-    } catch (error) { 
-      console.error('❌ [loadNetworkData] Error:', error); 
-    }
+      console.log('✅ [loadNetworkData] Loaded', allCoaches.length, 'coaches');
+    } catch (error) { console.error('❌ [loadNetworkData] Error:', error); }
   };
 
   useEffect(() => {
@@ -394,73 +375,56 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว: โหลดจาก API โดยตรง
-const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-  if (!hospitalId) {
-    console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
-    return;
-  }
-  
-  // ✅ ป้องกันการโหลดซ้ำ
-  if (modalCoaches[errorIndex]) {
-    console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
-    return;
-  }
-
-  try {
-    console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
-    console.log(`📝 Error Index: ${errorIndex}`);
-    console.log(`🏥 Hospital ID: ${hospitalId}`);
-    
-    // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
-    const networkIds = getNetworkHospitalIds(hospitalId);
-    console.log('🏥 Network Hospital IDs:', networkIds);
-    console.log('📊 Total hospitals in network:', networkIds.length);
-    
-    // ✅ โหลดโค้ชจาก API สำหรับทุกโรงพยาบาลในเครือข่าย
-    console.log('🔄 Loading coaches from API for all hospitals in network...');
-    const networkCoaches = await getCoachesWithHospitals(networkIds);
-    
-    console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
-    
-    if (networkCoaches.length > 0) {
-      // ✅ จัดกลุ่มโค้ชตามโรงพยาบาล
-      const coachesByHospital = networkCoaches.reduce((acc, coach) => {
-        const hospName = coach.users?.hospitals?.name || 'ไม่มีสังกัด';
-        if (!acc[hospName]) {
-          acc[hospName] = [];
-        }
-        acc[hospName].push(coach);
-        return acc;
-      }, {} as Record<string, any[]>);
-      
-      console.log('📋 Coaches by Hospital:');
-      Object.entries(coachesByHospital).forEach(([hospName, coaches]) => {
-        console.log(`  ${hospName}: ${coaches.length} coaches`);
-        coaches.forEach(c => {
-          console.log(`    - ${c.full_name_th} (${c.specialization_th || 'ไม่ระบุ'})`);
-        });
-      });
-    } else {
-      console.warn('⚠️ No coaches found in this hospital network!');
-      console.warn(' Network IDs:', networkIds);
+  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว
+  const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
+    if (!hospitalId) {
+      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
+      return;
     }
     
-    console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-    
-    // ✅ อัปเดต state
-    setModalCoaches(prev => ({ 
-      ...prev, 
-      [errorIndex]: networkCoaches 
-    }));
-    
-  } catch (err) {
-    console.error('❌ [loadCoachesForErrorRow] Error:', err);
-  }
-};
+    if (modalCoaches[errorIndex]) {
+      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
+      return;
+    }
 
+    try {
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
+      console.log(`📝 Error Index: ${errorIndex}`);
+      console.log(`🏥 Hospital ID: ${hospitalId}`);
+      
+      const networkIds = getNetworkHospitalIds(hospitalId);
+      console.log('🏥 Network Hospital IDs:', networkIds);
+      
+      console.log('🔄 Loading coaches from API...');
+      const networkCoaches = await getCoachesWithHospitals(networkIds);
+      
+      console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
+      
+      if (networkCoaches.length > 0) {
+        console.log('📋 Coach Details:', networkCoaches.map(c => ({
+          name: c.full_name_th,
+          hospital_id: c.users?.hospital_id,
+          hospital_name: c.users?.hospitals?.name,
+          specialization: c.specialization_th
+        })));
+      } else {
+        console.warn('⚠️ No coaches found in this network!');
+        console.warn(' Network IDs:', networkIds);
+      }
+      
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
+      
+      setModalCoaches(prev => ({ 
+        ...prev, 
+        [errorIndex]: networkCoaches 
+      }));
+      
+    } catch (err) {
+      console.error('❌ [loadCoachesForErrorRow] Error:', err);
+    }
+  };
 
-  // ✅ useEffect โหลดโค้ชอัตโนมัติเมื่อ Modal เปิด
+  // ✅ Auto-load coaches when modal opens
   useEffect(() => {
     if (importResult && importResult.errors.length > 0) {
       importResult.errors.forEach((err, idx) => {
@@ -530,7 +494,6 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
-  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
     const currentError = importResult.errors[errorIndex];
@@ -541,39 +504,28 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
       return;
     }
 
-    console.log('💾 [handleSaveHospitalFix] Saving hospital fix for row:', rowIndex);
-
-    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
       const hospital = hospitals.find(h => h.id === currentError.hospital_id);
       if (hospital) {
         row.hospital_name = hospital.name;
-        console.log('✅ Updated hospital name to:', hospital.name);
       }
       newData[rowIndex] = row;
       return newData;
     });
 
-    // 2. รอให้ Preview อัปเดต
     setTimeout(() => {
       runValidation(previewData);
     }, 100);
 
-    // 3. ตรวจสอบว่ามี error อื่นๆ อีกหรือไม่
     setTimeout(() => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
       
-      console.log('🔍 [handleSaveHospitalFix] Validation errors:', rowErrors);
-      
       if (rowErrors.length === 0) {
-        console.log('✅ No errors - importing single row');
         handleImportSingleRow(rowIndex);
       } else {
-        console.log('⚠️ Still has errors - updating modal');
-        // ⚠️ ยังมี error อื่น - อัปเดต Modal แสดง error ถัดไป
         const newErrors = [...importResult.errors];
         newErrors[errorIndex] = { 
           ...newErrors[errorIndex], 
@@ -586,13 +538,6 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
         if (nextError) {
           setError(`✅ โรงพยาบาลถูกต้องแล้ว แต่พบปัญหา: ${nextError}`);
         }
-        
-        // ✅ ปิด Modal และกลับไปหน้า Preview
-        setTimeout(() => {
-          console.log('🔙 Closing modal and returning to preview');
-          setImportResult(null);
-          setStep('preview');
-        }, 500);
       }
     }, 200);
   };
@@ -1189,17 +1134,22 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
                               )}
                               
                               <select
+                                key={`coach-select-${idx}-${err.coach_id || 'none'}`}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                                 value={err.coach_id || ''}
                                 onChange={(e) => {
-                                  handleEditInModal(idx, 'coach_id', e.target.value);
-                                  const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === e.target.value);
+                                  const selectedCoachId = e.target.value;
+                                  console.log('🎯 Coach selected:', selectedCoachId);
+                                  
+                                  handleEditInModal(idx, 'coach_id', selectedCoachId);
+                                  
+                                  const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId);
                                   if (selectedCoach) {
+                                    console.log('✅ Coach found:', selectedCoach.full_name_th);
                                     handleEditInModal(idx, 'original_coach_name', selectedCoach.full_name_th);
                                   }
                                 }}
                                 disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}
-                                // ✅ ลบ onLoad ออกแล้ว ใช้ useEffect แทน
                               >
                                 <option value="">-- เลือกโค้ช --</option>
                                 {modalCoaches[idx]?.map(coach => {
@@ -1213,8 +1163,8 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
                                 })}
                               </select>
                               
-                              <p className="text-xs text-gray-500">
-                                💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากโรงพยาบาลนี้โดยตรง)
+                              <p className="text-xs text-gray-500 mt-2">
+                                💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
                               </p>
 
                               <button
