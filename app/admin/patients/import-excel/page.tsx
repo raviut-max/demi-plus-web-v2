@@ -470,6 +470,7 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     console.error('❌ [loadCoachesForErrorRow] Error:', err);
   }
 };
+
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
       setError('ไม่มีข้อมูลสำหรับส่งออก');
