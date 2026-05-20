@@ -375,44 +375,57 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-    if (!hospitalId) {
-      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
-      return;
+const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
+  if (!hospitalId) {
+    console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
+    return;
+  }
+  
+  // ✅ ป้องกันการโหลดซ้ำ
+  if (modalCoaches[errorIndex]) {
+    console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
+    return;
+  }
+
+  try {
+    console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
+    console.log(`📝 Error Index: ${errorIndex}`);
+    console.log(`🏥 Hospital ID: ${hospitalId}`);
+    
+    // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
+    const networkIds = getNetworkHospitalIds(hospitalId);
+    console.log('🏥 Network Hospital IDs:', networkIds);
+    
+    // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state)
+    console.log('🔄 Loading coaches from API for network...');
+    const networkCoaches = await getCoachesWithHospitals(networkIds);
+    
+    console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
+    
+    if (networkCoaches.length > 0) {
+      console.log('📋 Coach Details:', networkCoaches.map(c => ({
+        name: c.full_name_th,
+        hospital_id: c.users?.hospital_id,
+        hospital_name: c.users?.hospitals?.name,
+        specialization: c.specialization_th
+      })));
+    } else {
+      console.warn('⚠️ No coaches found in this network!');
+      console.warn(' Network IDs:', networkIds);
     }
     
-    if (modalCoaches[errorIndex]) {
-      console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
-      return;
-    }
-
-    try {
-      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for error ${errorIndex}, hospital: ${hospitalId}`);
-      
-      const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log('🏥 [loadCoachesForErrorRow] Network IDs:', networkIds);
-      
-      const networkCoaches = coaches.filter(coach => {
-        const coachHospitalId = coach.users?.hospital_id;
-        return coachHospitalId && networkIds.includes(coachHospitalId);
-      });
-      
-      console.log(`✅ [loadCoachesForErrorRow] Found ${networkCoaches.length} coaches for this hospital network`);
-      console.log('📋 Coaches:', networkCoaches.map(c => ({
-        name: c.full_name_th,
-        hospital: c.users?.hospitals?.name,
-        hospital_id: c.users?.hospital_id
-      })));
-      
-      setModalCoaches(prev => ({ 
-        ...prev, 
-        [errorIndex]: networkCoaches 
-      }));
-      
-    } catch (err) {
-      console.error('❌ [loadCoachesForErrorRow] Error:', err);
-    }
-  };
+    console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
+    
+    // ✅ อัปเดต state
+    setModalCoaches(prev => ({ 
+      ...prev, 
+      [errorIndex]: networkCoaches 
+    }));
+    
+  } catch (err) {
+    console.error('❌ [loadCoachesForErrorRow] Error:', err);
+  }
+};
 
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
