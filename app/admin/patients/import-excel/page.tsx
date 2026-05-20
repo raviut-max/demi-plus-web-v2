@@ -136,6 +136,19 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
 };
 
 // =====================================================
+// 📅 DATE CONVERSION FUNCTIONS
+// =====================================================
+const convertISOToThaiDate = (isoDate: string): string => {
+  if (!isoDate) return '';
+  if (isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [year, month, day] = isoDate.split('-');
+    const yearBE = parseInt(year) + 543;
+    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
+  }
+  return isoDate;
+};
+
+// =====================================================
 // MAIN COMPONENT
 // =====================================================
 export default function ImportExcelPage() {
@@ -204,13 +217,33 @@ export default function ImportExcelPage() {
 
   const loadNetworkData = async (userId: string) => {
     try {
+      console.log('🏥 [loadNetworkData] Loading hospitals...');
       const allHospitals = await getHospitalsWithHierarchy();
       setHospitals(allHospitals);
       const hospitalIds = allHospitals.map(h => h.id);
+      
+      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('✅ [loadNetworkData] Loaded', allCoaches.length, 'coaches');
-    } catch (error) { console.error('❌ [loadNetworkData] Error:', error); }
+      
+      console.log('✅ [loadNetworkData] Loaded:', {
+        hospitals: allHospitals.length,
+        coaches: allCoaches.length
+      });
+      
+      // ✅ Debug: ตรวจสอบโครงสร้างโค้ช
+      if (allCoaches.length > 0) {
+        console.log('📋 [loadNetworkData] Sample coach structure:', {
+          id: allCoaches[0].id,
+          full_name_th: allCoaches[0].full_name_th,
+          users: allCoaches[0].users,
+          hospital_id: allCoaches[0].users?.hospital_id,
+          hospital_name: allCoaches[0].users?.hospitals?.name
+        });
+      }
+    } catch (error) { 
+      console.error('❌ [loadNetworkData] Error:', error); 
+    }
   };
 
   useEffect(() => {
@@ -234,7 +267,16 @@ export default function ImportExcelPage() {
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
-          newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
+          if (dbKey === 'birth_date' && val) {
+            const cleanVal = String(val).trim();
+            if (cleanVal.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              newRow[dbKey] = convertISOToThaiDate(cleanVal);
+            } else {
+              newRow[dbKey] = cleanVal;
+            }
+          } else {
+            newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
+          }
         }
       });
       return newRow;
@@ -353,7 +395,7 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว
+  // ✅ ฟังก์ชันโหลดโค้ช - เพิ่ม Debug Log แบบละเอียด
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
     if (!hospitalId) {
       console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
@@ -364,26 +406,45 @@ export default function ImportExcelPage() {
       console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
       return;
     }
-    
+
     try {
-      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for error ${errorIndex}, hospital: ${hospitalId}`);
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
+      console.log(`🔍 Error Index: ${errorIndex}`);
+      console.log(`🏥 Hospital ID: ${hospitalId}`);
+      console.log(`📊 Total coaches in state: ${coaches.length}`);
       
       // ✅ หา network hospital IDs
       const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log('🏥 [loadCoachesForErrorRow] Network IDs:', networkIds);
+      console.log('🏥 Network Hospital IDs:', networkIds);
       
-      // ✅ ใช้ coaches ที่โหลดไว้แล้ว กรองตาม hospital_id
-      const networkCoaches = coaches.filter(coach => {
+      // ✅ Filter coaches ที่อยู่ใน network
+      console.log('\n🔍 Starting to filter coaches...');
+      const networkCoaches = coaches.filter((coach, idx) => {
         const coachHospitalId = coach.users?.hospital_id;
-        return coachHospitalId && networkIds.includes(coachHospitalId);
+        const isInNetwork = coachHospitalId && networkIds.includes(coachHospitalId);
+        
+        // Log 5 คนแรกเพื่อดูโครงสร้าง
+        if (idx < 5) {
+          console.log(`\n  Coach ${idx}:`, {
+            name: coach.full_name_th,
+            coach_hospital_id: coachHospitalId,
+            in_network: isInNetwork,
+            users_data: coach.users
+          });
+        }
+        
+        return isInNetwork;
       });
       
-      console.log(`✅ [loadCoachesForErrorRow] Found ${networkCoaches.length} coaches for this hospital network`);
-      console.log('📋 Coaches:', networkCoaches.map(c => ({
+      console.log(`\n✅ Found ${networkCoaches.length} coaches in network`);
+      console.log('📋 Coach Details:', networkCoaches.map(c => ({
         name: c.full_name_th,
-        hospital: c.users?.hospitals?.name,
-        hospital_id: c.users?.hospital_id
+        hospital_id: c.users?.hospital_id,
+        hospital_name: c.users?.hospitals?.name,
+        specialization: c.specialization_th
       })));
+      
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
       
       // ✅ อัปเดต state
       setModalCoaches(prev => ({ 
@@ -454,7 +515,6 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
-  // ✅ ฟังก์ชันบันทึกการแก้ไขโรงพยาบาลและตรวจสอบต่อ
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
     const currentError = importResult.errors[errorIndex];
@@ -465,7 +525,6 @@ export default function ImportExcelPage() {
       return;
     }
 
-    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
@@ -477,21 +536,17 @@ export default function ImportExcelPage() {
       return newData;
     });
 
-    // 2. รอให้ Preview อัปเดต
     setTimeout(() => {
       runValidation(previewData);
     }, 100);
 
-    // 3. ตรวจสอบว่ามี error อื่นๆ อีกหรือไม่
     setTimeout(() => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
       
       if (rowErrors.length === 0) {
-        // ✅ ไม่มี error อื่น - บันทึกข้อมูลลงฐานข้อมูลทันที
         handleImportSingleRow(rowIndex);
       } else {
-        // ⚠️ ยังมี error อื่น - อัปเดต Modal แสดง error ถัดไป
         const newErrors = [...importResult.errors];
         newErrors[errorIndex] = { 
           ...newErrors[errorIndex], 
@@ -508,19 +563,16 @@ export default function ImportExcelPage() {
     }, 200);
   };
 
-  // ✅ ฟังก์ชันนำเข้าข้อมูลแถวเดียว (หลังจากแก้ไขครบแล้ว)
   const handleImportSingleRow = async (rowIndex: number) => {
     const row = previewData[rowIndex];
     
     try {
-      // แปลงวันที่
       const dateParts = row.birth_date.split(/[\/-]/);
       if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
       const [day, month, yearBE] = dateParts;
       const yearAD = parseInt(yearBE) - 543;
       const birthDateISO = `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 
-      // หา coach_id จาก coach_name
       let coachId = null;
       if (row.coach_name) {
         const coachMatch = findBestCoachMatch(row.coach_name, coaches);
@@ -529,7 +581,6 @@ export default function ImportExcelPage() {
         }
       }
 
-      // หา hospital_id
       const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       if (!hospitalMatch) {
         setError('❌ ไม่พบโรงพยาบาลในระบบ');
@@ -1053,7 +1104,6 @@ export default function ImportExcelPage() {
                             </div>
                           </div>
                           
-                          {/* ✅ ขั้นที่ 1: แก้ไขโรงพยาบาล (มีปุ่มบันทึกแยก) */}
                           {isHospitalMissing && (
                             <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
                               <label className="block text-xs font-bold text-red-700 flex items-center gap-1">
@@ -1080,7 +1130,6 @@ export default function ImportExcelPage() {
                             </div>
                           )}
 
-                          {/* ✅ ขั้นที่ 2: แก้ไขโค้ช (หลังจากโรงพยาบาลถูกต้องแล้ว) */}
                           {!isHospitalMissing && (
                             <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
                               <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2">
@@ -1134,7 +1183,6 @@ export default function ImportExcelPage() {
                                 💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
                               </p>
 
-                              {/* ✅ ปุ่มบันทึกการแก้ไขทั้งหมดและนำเข้า */}
                               <button
                                 onClick={() => handleApplyModalFix(idx)}
                                 disabled={!err.coach_id}
