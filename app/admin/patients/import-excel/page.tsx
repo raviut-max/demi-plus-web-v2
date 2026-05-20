@@ -27,7 +27,8 @@ import {
   X,
   Hospital,
   UserCheck,
-  MapPin
+  MapPin,
+  Sparkles
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -65,6 +66,136 @@ const STANDARD_FIELDS = [
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
 
+// =====================================================
+// 🧠 SMART MATCHING FUNCTIONS
+// =====================================================
+
+/**
+ * แปลงข้อความไทยให้เป็นรูปแบบมาตรฐานสำหรับการค้นหา
+ * - ลบช่องว่าง
+ * - ลบวรรณยุกต์
+ * - แปลงเป็นตัวพิมพ์เล็ก
+ * - แปลงคำย่อ
+ */
+const normalizeThaiText = (text: string): string => {
+  if (!text) return '';
+  
+  let normalized = text.trim().toLowerCase();
+  
+  // แปลงคำย่อที่พบบ่อย
+  const abbreviations: Record<string, string> = {
+    'รพ': 'โรงพยาบาล',
+    'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล',
+    'รพช': 'โรงพยาบาลชุมชน',
+    'สสจ': 'สาธารณสุขจังหวัด',
+    'สสอ': 'สาธารณสุขอำเภอ',
+    'อน': 'อนามัย',
+    'ศอ': 'ศูนย์สุขภาพ',
+    'pcu': 'หน่วยบริการปฐมภูมิ',
+  };
+  
+  // แทนที่คำย่อ
+  Object.entries(abbreviations).forEach(([abbr, full]) => {
+    normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
+  });
+  
+  // ลบช่องว่างทั้งหมด
+  normalized = normalized.replace(/\s+/g, '');
+  
+  // ลบวรรณยุกต์ไทย
+  const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
+  normalized = normalized.replace(toneMarks, '');
+  
+  return normalized;
+};
+
+/**
+ * คำนวณความคล้ายคลึงของสองข้อความ (Levenshtein Distance)
+ * @returns ค่าความคล้ายคลึง 0-1 (1 = เหมือนกันสนิท)
+ */
+const calculateSimilarity = (str1: string, str2: string): number => {
+  const s1 = normalizeThaiText(str1);
+  const s2 = normalizeThaiText(str2);
+  
+  if (s1 === s2) return 1;
+  if (!s1 || !s2) return 0;
+  
+  // ตรวจสอบว่า str1 เป็น subset ของ str2 หรือไม่
+  if (s2.includes(s1)) return 0.8;
+  if (s1.includes(s2)) return 0.7;
+  
+  // ใช้ Levenshtein Distance สำหรับกรณีอื่นๆ
+  const track = Array(s2.length + 1).fill(null).map(() =>
+    Array(s1.length + 1).fill(null)
+  );
+  
+  for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
+  for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
+  
+  for (let j = 1; j <= s2.length; j += 1) {
+    for (let i = 1; i <= s1.length; i += 1) {
+      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      track[j][i] = Math.min(
+        track[j][i - 1] + 1,
+        track[j - 1][i] + 1,
+        track[j - 1][i - 1] + indicator
+      );
+    }
+  }
+  
+  const distance = track[s2.length][s1.length];
+  const maxLength = Math.max(s1.length, s2.length);
+  return 1 - (distance / maxLength);
+};
+
+/**
+ * ค้นหาโรงพยาบาลที่ใกล้เคียงที่สุด
+ * @returns { hospital: object, similarity: number } | null
+ */
+const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
+  const normalizedInput = normalizeThaiText(hospitalName);
+  
+  let bestMatch: any = null;
+  let bestScore = 0;
+  
+  hospitals.forEach(hospital => {
+    const score = calculateSimilarity(hospitalName, hospital.name);
+    
+    // ตรวจสอบว่ามีความคล้ายคลึงมากกว่า 60% หรือไม่
+    if (score > 0.6 && score > bestScore) {
+      bestScore = score;
+      bestMatch = hospital;
+    }
+  });
+  
+  return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
+};
+
+/**
+ * ค้นหาโค้ชที่ใกล้เคียงที่สุด
+ */
+const findBestCoachMatch = (coachName: string, coaches: any[]) => {
+  const normalizedInput = normalizeThaiText(coachName);
+  
+  let bestMatch: any = null;
+  let bestScore = 0;
+  
+  coaches.forEach(coach => {
+    const score = calculateSimilarity(coachName, coach.full_name_th);
+    
+    if (score > 0.6 && score > bestScore) {
+      bestScore = score;
+      bestMatch = coach;
+    }
+  });
+  
+  return bestMatch ? { coach: bestMatch, similarity: bestScore } : null;
+};
+
+// =====================================================
+// MAIN COMPONENT
+// =====================================================
+
 export default function ImportExcelPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -101,6 +232,8 @@ export default function ImportExcelPage() {
       province?: string;
       district?: string;
       subdistrict?: string;
+      original_hospital_name?: string;
+      original_coach_name?: string;
     }>;
     successRecords: Array<{
       row: number;
@@ -399,12 +532,59 @@ export default function ImportExcelPage() {
     setImportResult({ ...importResult, errors: updatedErrors });
   };
 
+  // ✅ ฟังก์ชันใหม่: นำค่าที่แก้ไขใน Modal ไปอัปเดตใน Preview
+  const applyModalEditsToPreview = () => {
+    if (!importResult || importResult.errors.length === 0) return;
+
+    setPreviewData(prevData => {
+      const newData = [...prevData];
+      
+      importResult.errors.forEach(error => {
+        const rowIndex = error.row - 1; // แปลงเป็น 0-based index
+        
+        if (newData[rowIndex]) {
+          // อัปเดตโรงพยาบาล (ถ้ามีการเลือก)
+          if (error.hospital_id) {
+            const hospital = hospitals.find(h => h.id === error.hospital_id);
+            if (hospital) {
+              newData[rowIndex].hospital_name = hospital.name;
+            }
+          }
+          
+          // อัปเดตโค้ช (ถ้ามีการเลือก)
+          if (error.coach_id) {
+            const coach = coaches.find(c => c.user_id === error.coach_id);
+            if (coach) {
+              newData[rowIndex].coach_name = coach.full_name_th;
+            }
+          }
+          
+          // อัปเดตที่อยู่ (ถ้ามีการแก้ไข)
+          if (error.province) newData[rowIndex].province = error.province;
+          if (error.district) newData[rowIndex].district = error.district;
+          if (error.subdistrict) newData[rowIndex].subdistrict = error.subdistrict;
+          
+          // Re-validate แถวที่อัปเดต
+          const rowErrors = validateRow(newData[rowIndex]);
+          newData[rowIndex]._errors = rowErrors;
+        }
+      });
+      
+      return newData;
+    });
+    
+    // ล้าง validation errors
+    runValidation(previewData);
+  };
+
   const handleBackToPreview = () => {
+    applyModalEditsToPreview(); // ✅ อัปเดตข้อมูลก่อนย้อนกลับ
     setImportResult(null);
     setStep('preview');
   };
 
   const handleExitImport = () => {
+    applyModalEditsToPreview(); // ✅ อัปเดตข้อมูลก่อนออก
     setImportResult(null);
     setSelectedRows(new Set());
     router.back();
@@ -413,7 +593,6 @@ export default function ImportExcelPage() {
   const handleRetryFailed = () => {
     if (!importResult || importResult.errors.length === 0) return;
     
-    // เพิ่มแถวที่ล้มเหลวกลับเข้าไปใน selectedRows
     const failedRowIndices = importResult.errors.map(err => err.row - 1);
     const newSelectedRows = new Set([...selectedRows, ...failedRowIndices]);
     setSelectedRows(newSelectedRows);
@@ -635,7 +814,6 @@ export default function ImportExcelPage() {
                 </button>
               </div>
 
-              {/* ✅ แสดงรายการที่สำเร็จ */}
               {importResult.successRecords && importResult.successRecords.length > 0 && (
                 <div className="mb-6">
                   <h4 className="font-semibold text-green-700 mb-2 flex items-center gap-2">
@@ -653,7 +831,6 @@ export default function ImportExcelPage() {
                 </div>
               )}
 
-              {/* ✅ แสดงรายการที่ล้มเหลวพร้อมแก้ไข */}
               {importResult.errors.length > 0 && (
                 <div className="mb-4">
                   <h4 className="font-semibold text-red-700 mb-2 flex items-center gap-2">
@@ -661,103 +838,129 @@ export default function ImportExcelPage() {
                     รายการที่ล้มเหลว - สามารถแก้ไขได้: ({importResult.errors.length})
                   </h4>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-96 overflow-auto space-y-3">
-                    {importResult.errors.map((err, idx) => (
-                      <div key={idx} className="bg-white border border-red-200 rounded p-4">
-                        <div className="flex items-start gap-2 mb-3">
-                          <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-red-800">
-                              <strong>แถวที่ {err.row}:</strong> {err.error}
-                            </p>
-                            <p className="text-xs text-gray-600 mt-1">
-                              บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}
-                            </p>
-                          </div>
-                        </div>
-                        
-                        {/* ✅ แก้ไขโรงพยาบาล */}
-                        {err.error.includes('ไม่พบโรงพยาบาล') && (
-                          <div className="mt-3 pl-6 space-y-2">
-                            <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                              <Hospital className="w-3 h-3" />
-                              เลือกโรงพยาบาลใหม่:
-                            </label>
-                            <select
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                              value={err.hospital_id || ''}
-                              onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}
-                              defaultValue=""
-                            >
-                              <option value="">-- เลือกโรงพยาบาล --</option>
-                              {hospitals.map(h => (
-                                <option key={h.id} value={h.id}>
-                                  {h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
+                    {importResult.errors.map((err, idx) => {
+                      // ✅ Smart Matching: ค้นหารพ. ที่ใกล้เคียง
+                      const hospitalMatch = err.error.includes('ไม่พบโรงพยาบาล') && err.original_hospital_name
+                        ? findBestHospitalMatch(err.original_hospital_name, hospitals)
+                        : null;
+                      
+                      // ✅ Smart Matching: ค้นหาโค้ชที่ใกล้เคียง
+                      const coachMatch = err.error.includes('ไม่พบโค้ช') && err.original_coach_name
+                        ? findBestCoachMatch(err.original_coach_name, coaches)
+                        : null;
 
-                        {/* ✅ แก้ไขโค้ช */}
-                        {err.error.includes('ไม่พบโค้ช') && (
-                          <div className="mt-3 pl-6 space-y-2">
-                            <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                              <UserCheck className="w-3 h-3" />
-                              เลือกโค้ชใหม่:
-                            </label>
-                            <select
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                              value={err.coach_id || ''}
-                              onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}
-                              defaultValue=""
-                            >
-                              <option value="">-- เลือกโค้ช --</option>
-                              {coaches.map(c => (
-                                <option key={c.user_id} value={c.user_id}>
-                                  {c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'} | {c.users?.hospitals?.name || 'ไม่มีสังกัด'}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* ✅ แก้ไขที่อยู่ */}
-                        {(err.error.includes('ที่อยู่') || err.error.includes('จังหวัด') || err.error.includes('อำเภอ') || err.error.includes('ตำบล')) && (
-                          <div className="mt-3 pl-6 space-y-2">
-                            <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
-                              <MapPin className="w-3 h-3" />
-                              แก้ไขที่อยู่:
-                            </label>
-                            <div className="grid grid-cols-3 gap-2">
-                              <input
-                                type="text"
-                                placeholder="จังหวัด"
-                                className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                value={err.province || ''}
-                                onChange={(e) => handleEditInModal(idx, 'province', e.target.value)}
-                              />
-                              <input
-                                type="text"
-                                placeholder="อำเภอ"
-                                className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                value={err.district || ''}
-                                onChange={(e) => handleEditInModal(idx, 'district', e.target.value)}
-                              />
-                              <input
-                                type="text"
-                                placeholder="ตำบล"
-                                className="px-2 py-1 border border-gray-300 rounded text-sm"
-                                value={err.subdistrict || ''}
-                                onChange={(e) => handleEditInModal(idx, 'subdistrict', e.target.value)}
-                              />
+                      return (
+                        <div key={idx} className="bg-white border border-red-200 rounded p-4">
+                          <div className="flex items-start gap-2 mb-3">
+                            <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-red-800">
+                                <strong>แถวที่ {err.row}:</strong> {err.error}
+                              </p>
+                              <p className="text-xs text-gray-600 mt-1">
+                                บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}
+                              </p>
                             </div>
-                            <p className="text-xs text-blue-600 mt-1">
-                              💡 พิมพ์ชื่อจังหวัด/อำเภอ/ตำบล ให้ตรงกับในระบบ
-                            </p>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                          
+                          {/* ✅ แสดงคำแนะนำอัตโนมัติ */}
+                          {hospitalMatch && (
+                            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-blue-600" />
+                              <span className="text-sm text-blue-800">
+                                💡 ระบบพบโรงพยาบาลที่ใกล้เคียง: <strong>{hospitalMatch.hospital.name}</strong> (ความคล้ายคลึง {Math.round(hospitalMatch.similarity * 100)}%)
+                              </span>
+                            </div>
+                          )}
+                          
+                          {coachMatch && (
+                            <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded flex items-center gap-2">
+                              <Sparkles className="w-4 h-4 text-blue-600" />
+                              <span className="text-sm text-blue-800">
+                                💡 ระบบพบโค้ชที่ใกล้เคียง: <strong>{coachMatch.coach.full_name_th}</strong> (ความคล้ายคลึง {Math.round(coachMatch.similarity * 100)}%)
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* ✅ แก้ไขโรงพยาบาล */}
+                          {err.error.includes('ไม่พบโรงพยาบาล') && (
+                            <div className="mt-3 pl-6 space-y-2">
+                              <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
+                                <Hospital className="w-3 h-3" />
+                                เลือกโรงพยาบาลใหม่:
+                              </label>
+                              <select
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                value={err.hospital_id || hospitalMatch?.hospital.id || ''}
+                                onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}
+                              >
+                                <option value="">-- เลือกโรงพยาบาล --</option>
+                                {hospitals.map(h => (
+                                  <option key={h.id} value={h.id}>
+                                    {h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {/* ✅ แก้ไขโค้ช */}
+                          {err.error.includes('ไม่พบโค้ช') && (
+                            <div className="mt-3 pl-6 space-y-2">
+                              <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
+                                <UserCheck className="w-3 h-3" />
+                                เลือกโค้ชใหม่:
+                              </label>
+                              <select
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                value={err.coach_id || coachMatch?.coach.user_id || ''}
+                                onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}
+                              >
+                                <option value="">-- เลือกโค้ช --</option>
+                                {coaches.map(c => (
+                                  <option key={c.user_id} value={c.user_id}>
+                                    {c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'} | {c.users?.hospitals?.name || 'ไม่มีสังกัด'}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+
+                          {/* ✅ แก้ไขที่อยู่ */}
+                          {(err.error.includes('ที่อยู่') || err.error.includes('จังหวัด') || err.error.includes('อำเภอ') || err.error.includes('ตำบล')) && (
+                            <div className="mt-3 pl-6 space-y-2">
+                              <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
+                                แก้ไขที่อยู่:
+                              </label>
+                              <div className="grid grid-cols-3 gap-2">
+                                <input
+                                  type="text"
+                                  placeholder="จังหวัด"
+                                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  value={err.province || ''}
+                                  onChange={(e) => handleEditInModal(idx, 'province', e.target.value)}
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="อำเภอ"
+                                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  value={err.district || ''}
+                                  onChange={(e) => handleEditInModal(idx, 'district', e.target.value)}
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="ตำบล"
+                                  className="px-2 py-1 border border-gray-300 rounded text-sm"
+                                  value={err.subdistrict || ''}
+                                  onChange={(e) => handleEditInModal(idx, 'subdistrict', e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
