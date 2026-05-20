@@ -156,6 +156,7 @@ export default function ImportExcelPage() {
   const [validAddresses, setValidAddresses] = useState<Array<{ province: string; district: string; subdistrict: string; postal_code: string; }>>([]);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [success, setSuccess] = useState(false);
   
   const [importResult, setImportResult] = useState<{
     success: number;
@@ -424,6 +425,142 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
+  // ✅ ฟังก์ชันบันทึกการแก้ไขโรงพยาบาลและตรวจสอบต่อ
+  const handleSaveHospitalFix = async (errorIndex: number) => {
+    if (!importResult) return;
+    const currentError = importResult.errors[errorIndex];
+    const rowIndex = currentError.row - 1;
+
+    if (!currentError.hospital_id) {
+      setError('กรุณาเลือกโรงพยาบาลก่อนบันทึก');
+      return;
+    }
+
+    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
+    setPreviewData(prev => {
+      const newData = [...prev];
+      const row = { ...newData[rowIndex] };
+      const hospital = hospitals.find(h => h.id === currentError.hospital_id);
+      if (hospital) {
+        row.hospital_name = hospital.name;
+      }
+      newData[rowIndex] = row;
+      return newData;
+    });
+
+    // 2. รอให้ Preview อัปเดต
+    setTimeout(() => {
+      runValidation(previewData);
+    }, 100);
+
+    // 3. ตรวจสอบว่ามี error อื่นๆ อีกหรือไม่
+    setTimeout(() => {
+      const updatedRow = previewData[rowIndex];
+      const rowErrors = validateRow(updatedRow);
+      
+      if (rowErrors.length === 0) {
+        // ✅ ไม่มี error อื่น - บันทึกข้อมูลลงฐานข้อมูลทันที
+        handleImportSingleRow(rowIndex);
+      } else {
+        // ⚠️ ยังมี error อื่น - อัปเดต Modal แสดง error ถัดไป
+        const newErrors = [...importResult.errors];
+        newErrors[errorIndex] = { 
+          ...newErrors[errorIndex], 
+          hospital_fixed: true,
+          fixed: false
+        };
+        setImportResult({ ...importResult, errors: newErrors });
+        
+        const nextError = rowErrors.find(e => !e.includes('โรงพยาบาล'));
+        if (nextError) {
+          setError(`✅ โรงพยาบาลถูกต้องแล้ว แต่พบปัญหา: ${nextError}`);
+        }
+      }
+    }, 200);
+  };
+
+  // ✅ ฟังก์ชันนำเข้าข้อมูลแถวเดียว (หลังจากแก้ไขครบแล้ว)
+  const handleImportSingleRow = async (rowIndex: number) => {
+    const row = previewData[rowIndex];
+    
+    try {
+      // แปลงวันที่
+      const dateParts = row.birth_date.split(/[\/-]/);
+      if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
+      const [day, month, yearBE] = dateParts;
+      const yearAD = parseInt(yearBE) - 543;
+      const birthDateISO = `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+
+      // หา coach_id จาก coach_name
+      let coachId = null;
+      if (row.coach_name) {
+        const coachMatch = findBestCoachMatch(row.coach_name, coaches);
+        if (coachMatch) {
+          coachId = coachMatch.coach.user_id;
+        }
+      }
+
+      // หา hospital_id
+      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
+      if (!hospitalMatch) {
+        setError('❌ ไม่พบโรงพยาบาลในระบบ');
+        return;
+      }
+
+      const data = {
+        id_card: row.id_card,
+        password: row.birth_date,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        hospital_number: row.hospital_number,
+        birth_date: birthDateISO,
+        gender: row.gender,
+        phone: row.phone || undefined,
+        email: row.email || undefined,
+        current_weight: row.current_weight ? parseFloat(row.current_weight) : undefined,
+        height: row.height ? parseFloat(row.height) : undefined,
+        waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : undefined,
+        coach_id: coachId,
+        diabetes_type: row.diabetes_type || undefined,
+        blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : undefined,
+        hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : undefined,
+        notes: row.notes || undefined,
+        house_number: row.house_number || undefined,
+        address_line1: row.address_line1 || undefined,
+        soi: row.soi || undefined,
+        road: row.road || undefined,
+        village_no: row.village_no || undefined,
+        village_name: row.village_name || undefined,
+        subdistrict: row.subdistrict || undefined,
+        district: row.district || undefined,
+        province: row.province || undefined,
+        postal_code: row.postal_code || undefined,
+        hospital_id: hospitalMatch.hospital.id,
+        emergency_contact_name: row.emergency_contact_name || undefined,
+        emergency_contact_phone: row.emergency_contact_phone || undefined,
+        emergency_contact_relationship: row.emergency_contact_relationship || undefined,
+        pam_level: 'L0',
+        pam_score: 0,
+        zone: 'Zero Zone',
+        created_by: user?.id,
+      };
+
+      const result = await importPatientsBatch([data], user.id);
+      
+      if (result.success > 0) {
+        setSuccess(true);
+        setTimeout(() => {
+          router.push('/admin/patients');
+        }, 2000);
+      } else {
+        setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
+      }
+    } catch (err: any) {
+      console.error('❌ [handleImportSingleRow] Error:', err);
+      setError(`❌ เกิดข้อผิดพลาดในการบันทึก: ${err.message}`);
+    }
+  };
+
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
     if (hasErrorsInSelected) { 
@@ -559,44 +696,6 @@ export default function ImportExcelPage() {
     setImportResult({ ...importResult, errors: updatedErrors });
   };
 
-  // ✅ ฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (แยกต่างหาก)
-  const handleSaveHospitalFix = (errorIndex: number) => {
-    if (!importResult) return;
-    const currentError = importResult.errors[errorIndex];
-    const rowIndex = currentError.row - 1;
-
-    if (!currentError.hospital_id) {
-      setError('กรุณาเลือกโรงพยาบาลก่อนบันทึก');
-      return;
-    }
-
-    // อัปเดตข้อมูลโรงพยาบาลใน previewData
-    setPreviewData(prev => {
-      const newData = [...prev];
-      const row = { ...newData[rowIndex] };
-
-      const hospital = hospitals.find(h => h.id === currentError.hospital_id);
-      if (hospital) {
-        row.hospital_name = hospital.name;
-      }
-
-      newData[rowIndex] = row;
-      return newData;
-    });
-
-    setTimeout(() => runValidation(previewData), 100);
-
-    // ทำเครื่องหมายว่าแก้ไขโรงพยาบาลแล้ว
-    const newErrors = [...importResult.errors];
-    newErrors[errorIndex] = { 
-      ...newErrors[errorIndex], 
-      hospital_fixed: true,
-      fixed: false // ยังไม่เสร็จ ต้องแก้โค้ชต่อ
-    };
-    setImportResult({ ...importResult, errors: newErrors });
-  };
-
-  // ✅ ฟังก์ชันบันทึกการแก้ไขทั้งหมดและนำเข้า
   const handleApplyModalFix = (errorIndex: number) => {
     if (!importResult) return;
     const currentError = importResult.errors[errorIndex];
@@ -654,6 +753,20 @@ export default function ImportExcelPage() {
     setImportResult(null);
     setStep('preview');
   };
+
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-8 h-8 text-green-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">บันทึกข้อมูลสำเร็จ!</h2>
+          <p className="text-gray-600">กำลังไปยังหน้ารายการผู้ป่วย...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -934,7 +1047,7 @@ export default function ImportExcelPage() {
                               >
                                 <Save className="w-4 h-4" /> 💾 บันทึกการแก้ไขโรงพยาบาล
                               </button>
-                              <p className="text-xs text-gray-500 mt-1">📝 เมื่อบันทึกแล้ว ระบบจะตรวจสอบโค้ชต่อไป</p>
+                              <p className="text-xs text-gray-500 mt-1">📝 เมื่อบันทึกแล้ว ระบบจะตรวจสอบฟิลด์อื่นๆ ต่อไป</p>
                             </div>
                           )}
 
