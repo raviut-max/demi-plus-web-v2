@@ -383,7 +383,7 @@ export default function ImportExcelPage() {
     }
     
     if (modalCoaches[errorIndex]) {
-      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
+      console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
       return;
     }
 
@@ -391,11 +391,15 @@ export default function ImportExcelPage() {
       console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
       console.log(`📝 Error Index: ${errorIndex}`);
       console.log(`🏥 Hospital ID: ${hospitalId}`);
-
-      // ✅ โหลดโค้ชจาก API โดยตรง ด้วย hospital ID เดียวที่เลือก
-      console.log('🔄 Loading coaches from API for selected hospital...');
-      const networkCoaches = await getCoachesWithHospitals([hospitalId]);
-
+      
+      // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
+      const networkIds = getNetworkHospitalIds(hospitalId);
+      console.log('🏥 Network Hospital IDs:', networkIds);
+      
+      // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state)
+      console.log('🔄 Loading coaches from API for network...');
+      const networkCoaches = await getCoachesWithHospitals(networkIds);
+      
       console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
       
       if (networkCoaches.length > 0) {
@@ -406,16 +410,18 @@ export default function ImportExcelPage() {
           specialization: c.specialization_th
         })));
       } else {
-        console.warn('⚠️ No coaches found for this hospital!');
-        console.warn(' Hospital ID:', hospitalId);
+        console.warn('⚠️ No coaches found in this network!');
+        console.warn(' Network IDs:', networkIds);
       }
       
       console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-
+      
+      // ✅ อัปเดต state
       setModalCoaches(prev => ({ 
         ...prev, 
         [errorIndex]: networkCoaches 
       }));
+      
     } catch (err) {
       console.error('❌ [loadCoachesForErrorRow] Error:', err);
     }
