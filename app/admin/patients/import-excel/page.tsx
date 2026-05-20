@@ -1,3 +1,15 @@
+/**
+ * ============================================================================
+ * 📄 ไฟล์: page.tsx
+ * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
+ * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
+ * 👥 ผู้พัฒนา: DEMI+ Development Team
+ * 📅 อัปเดตล่าสุด: 21 พฤษภาคม 2569
+ * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อแก้ปัญหาการโหลดรายชื่อโค้ชและการอัปเดตสถานะ
+ * ============================================================================
+ */
+
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -34,7 +46,9 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+// =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
+// =====================================================
 const STANDARD_FIELDS = [
   { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
@@ -222,7 +236,7 @@ export default function ImportExcelPage() {
       setHospitals(allHospitals);
       const hospitalIds = allHospitals.map(h => h.id);
       
-      console.log('👨‍️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
       
@@ -230,16 +244,6 @@ export default function ImportExcelPage() {
         hospitals: allHospitals.length,
         coaches: allCoaches.length
       });
-      
-      if (allCoaches.length > 0) {
-        console.log('📋 [loadNetworkData] Sample coach structure:', {
-          id: allCoaches[0].id,
-          full_name_th: allCoaches[0].full_name_th,
-          users: allCoaches[0].users,
-          hospital_id: allCoaches[0].users?.hospital_id,
-          hospital_name: allCoaches[0].users?.hospitals?.name
-        });
-      }
     } catch (error) { 
       console.error('❌ [loadNetworkData] Error:', error); 
     }
@@ -262,7 +266,7 @@ export default function ImportExcelPage() {
 
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
+      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' }; // เริ่มต้นสถานะเป็น pending
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
@@ -394,7 +398,9 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว: โหลดจาก API โดยตรง
+  // =====================================================
+  // 🚀 ฟังก์ชันโหลดโค้ช (แก้ไขใหม่: โหลดจาก API โดยตรง)
+  // =====================================================
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
     if (!hospitalId) {
       console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
@@ -416,31 +422,19 @@ export default function ImportExcelPage() {
       const networkIds = getNetworkHospitalIds(hospitalId);
       console.log('🏥 Network Hospital IDs:', networkIds);
       
-      // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state)
+      // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state ที่อาจผิดพลาด)
       console.log('🔄 Loading coaches from API for network...');
       const networkCoaches = await getCoachesWithHospitals(networkIds);
       
       console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
-      
-      if (networkCoaches.length > 0) {
-        console.log('📋 Coach Details:', networkCoaches.map(c => ({
-          name: c.full_name_th,
-          hospital_id: c.users?.hospital_id,
-          hospital_name: c.users?.hospitals?.name,
-          specialization: c.specialization_th
-        })));
-      } else {
-        console.warn('⚠️ No coaches found in this network!');
-        console.warn(' Network IDs:', networkIds);
-      }
-      
-      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
       
       // ✅ อัปเดต state
       setModalCoaches(prev => ({ 
         ...prev, 
         [errorIndex]: networkCoaches 
       }));
+
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
       
     } catch (err) {
       console.error('❌ [loadCoachesForErrorRow] Error:', err);
@@ -451,6 +445,7 @@ export default function ImportExcelPage() {
   useEffect(() => {
     if (importResult && importResult.errors.length > 0) {
       importResult.errors.forEach((err, idx) => {
+        // ถ้ามี hospital_id และยังไม่มีข้อมูลโค้ชใน modal ให้โหลด
         if (err.hospital_id && !modalCoaches[idx]) {
           console.log('🔄 Auto-loading coaches for error', idx, 'hospital:', err.hospital_id);
           loadCoachesForErrorRow(idx, err.hospital_id);
@@ -459,62 +454,28 @@ export default function ImportExcelPage() {
     }
   }, [importResult]);
 
-  const handleExportToExcel = () => {
-    if (!previewData || previewData.length === 0) {
-      setError('ไม่มีข้อมูลสำหรับส่งออก');
-      return;
-    }
+  // =====================================================
+  // 📊 ฟังก์ชันบันทึกผลรายงาน (Export Report)
+  // =====================================================
+  const handleExportResults = () => {
+    if (!previewData || previewData.length === 0) return;
 
-    const exportData = previewData.map((row, idx) => {
-      const exportRow: any = {
-        'ลำดับ': idx + 1,
-        'เลขบัตรประชาชน': row.id_card || '',
-        'ชื่อผู้ป่วย': row.first_name || '',
-        'นามสกุลผู้ป่วย': row.last_name || '',
-        'HN': row.hospital_number || '',
-        'วันเกิด': row.birth_date || '',
-        'เพศ': row.gender === 'male' ? 'ชาย' : row.gender === 'female' ? 'หญิง' : row.gender || '',
-        'โรงพยาบาล': row.hospital_name || '',
-        'เบอร์โทรศัพท์': row.phone || '',
-        'อีเมล': row.email || '',
-        'น้ำหนัก(กก.)': row.current_weight || '',
-        'ส่วนสูง(ซม.)': row.height || '',
-        'รอบเอว(ซม.)': row.waist_circumference || '',
-        'ประเภทเบาหวาน': row.diabetes_type || '',
-        'ค่าน้ำตาล': row.blood_sugar || '',
-        'ค่าHbA1c': row.hba1c_level || '',
-        'หมายเหตุ': row.notes || '',
-        'บ้านเลขที่': row.house_number || '',
-        'หมู่ที่': row.village_no || '',
-        'หมู่บ้าน': row.village_name || '',
-        'ซอย': row.soi || '',
-        'ถนน': row.road || '',
-        'ตำบล': row.subdistrict || '',
-        'อำเภอ': row.district || '',
-        'จังหวัด': row.province || '',
-        'รหัสไปรษณีย์': row.postal_code || '',
-        'ที่อยู่เพิ่มเติม': row.address_line1 || '',
-        'ผู้ติดต่อฉุกเฉิน': row.emergency_contact_name || '',
-        'เบอร์ติดต่อฉุกเฉิน': row.emergency_contact_phone || '',
-        'ความสัมพันธ์': row.emergency_contact_relationship || '',
-        'โค้ชผู้ดูแล': row.coach_name || '',
-      };
-      return exportRow;
-    });
+    const reportData = previewData.map((row, idx) => ({
+      'ลำดับ': idx + 1,
+      'สถานะ': row._status === 'success' ? '✅ สำเร็จ' : (row._errors?.length > 0 ? '❌ ผิดพลาด' : '⏳ รอการนำเข้า'),
+      'เลขบัตรประชาชน': row.id_card || '',
+      'HN': row.hospital_number || '',
+      'ชื่อ-นามสกุล': `${row.first_name || ''} ${row.last_name || ''}`,
+      'โรงพยาบาล': row.hospital_name || '',
+      'หมายเหตุ': row._status === 'success' ? 'นำเข้าสำเร็จ' : (row._errors?.map((e:any) => e).join(', ') || '')
+    }));
 
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    ws['!cols'] = [
-      { wch: 5 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
-      { wch: 10 }, { wch: 30 }, { wch: 12 }, { wch: 25 }, { wch: 10 }, { wch: 10 },
-      { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 15 },
-      { wch: 10 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
-      { wch: 20 }, { wch: 10 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 30 },
-    ];
-
+    const ws = XLSX.utils.json_to_sheet(reportData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Import_Report');
+    
+    const timestamp = new Date().toISOString().slice(0, 16).replace(/:/g, '-');
+    XLSX.writeFile(wb, `Import_Report_${timestamp}.xlsx`);
   };
 
   const handleSaveHospitalFix = async (errorIndex: number) => {
@@ -567,7 +528,6 @@ export default function ImportExcelPage() {
 
   const handleImportSingleRow = async (rowIndex: number) => {
     const row = previewData[rowIndex];
-    
     try {
       const dateParts = row.birth_date.split(/[\/-]/);
       if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
@@ -591,7 +551,7 @@ export default function ImportExcelPage() {
 
       const data = {
         id_card: row.id_card,
-        password: row.birth_date,
+        password: row.birth_date, 
         first_name: row.first_name,
         last_name: row.last_name,
         hospital_number: row.hospital_number,
@@ -631,6 +591,13 @@ export default function ImportExcelPage() {
       
       if (result.success > 0) {
         setSuccess(true);
+        // Update status to success
+        setPreviewData(prev => prev.map((r, idx) => idx === rowIndex ? { ...r, _status: 'success', _selected: false } : r));
+        setSelectedRows(prev => {
+          const next = new Set(prev);
+          next.delete(rowIndex);
+          return next;
+        });
         setTimeout(() => {
           router.push('/admin/patients');
         }, 2000);
@@ -760,6 +727,27 @@ export default function ImportExcelPage() {
       });
 
       const result = await importPatientsBatch(selectedData, user.id);
+      
+      // ✅ อัปเดตสถานะแถวที่บันทึกสำเร็จใน previewData
+      if (result.success > 0) {
+        const successIds = new Set(selectedData.filter((_, idx) => idx < result.success).map(d => d.id_card));
+        setPreviewData(prev => prev.map(r => {
+          if (successIds.has(r.id_card)) {
+            return { ...r, _status: 'success', _selected: false };
+          }
+          return r;
+        }));
+        
+        // ล้างการเลือกแถวที่สำเร็จแล้ว
+        setSelectedRows(prev => {
+          const next = new Set(prev);
+          previewData.forEach((r, i) => {
+            if (successIds.has(r.id_card)) next.delete(i);
+          });
+          return next;
+        });
+      }
+
       const finalSuccessRecords = selectedData.filter((_, idx) => idx < result.success).map((data, idx) => ({ row: idx + 1, id_card: data.id_card, hospital_number: data.hospital_number, first_name: data.first_name, last_name: data.last_name }));
       setImportResult({ ...result, successRecords: finalSuccessRecords });
     } catch (err: any) {
@@ -922,8 +910,16 @@ export default function ImportExcelPage() {
             <div className="bg-white rounded-xl shadow p-4 border border-gray-200 flex flex-wrap gap-4 justify-between items-center">
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={selectedRows.size === previewData.length} onChange={e => selectAll(e.target.checked)} className="w-4 h-4" />
-                  <span className="text-sm font-medium">เลือกทั้งหมด ({previewData.length} แถว)</span>
+                  <input 
+                    type="checkbox" 
+                    checked={selectedRows.size === previewData.filter(r => r._status !== 'success').length && previewData.filter(r => r._status !== 'success').length > 0}
+                    onChange={(e) => selectAll(e.target.checked)}
+                    className="w-4 h-4"
+                    disabled={previewData.every(r => r._status === 'success')} 
+                  />
+                  <span className="text-sm font-medium">
+                    เลือกทั้งหมด (เฉพาะที่ยังไม่บันทึก)
+                  </span>
                 </label>
                 <span className="text-sm text-gray-500">✅ ถูกเลือก: {selectedRows.size} แถว</span>
                 <span className={`text-sm font-medium ${hasErrorsInSelected ? 'text-red-600' : 'text-green-600'}`}>
@@ -931,6 +927,9 @@ export default function ImportExcelPage() {
                 </span>
               </div>
               <div className="flex gap-2">
+                <button onClick={handleExportResults} className="px-3 py-1.5 bg-purple-600 text-white rounded hover:bg-purple-700 text-sm flex items-center gap-2">
+                  <Download className="w-4 h-4" /> บันทึกผล
+                </button>
                 <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
                 <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2">
                   <Download className="w-4 h-4" /> นำออก Excel
@@ -969,12 +968,29 @@ export default function ImportExcelPage() {
                   </thead>
                   <tbody>
                     {previewData.map((row, rIdx) => (
-                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors?.length > 0 ? 'bg-red-50/50' : ''}`}>
+                      <tr 
+                        key={rIdx} 
+                        className={`border-b hover:bg-gray-50 ${row._status === 'success' ? 'bg-green-50' : (row._errors?.length > 0 ? 'bg-red-50/50' : '')}`}
+                      >
                         <td className="p-3 text-center sticky left-0 bg-white z-10">
-                          <input type="checkbox" checked={row._selected} onChange={() => toggleSelectRow(rIdx)} className="w-4 h-4" />
+                          <input 
+                            type="checkbox" 
+                            checked={row._selected} 
+                            disabled={row._status === 'success'} 
+                            onChange={() => row._status !== 'success' && toggleSelectRow(rIdx)} 
+                            className={`w-4 h-4 ${row._status === 'success' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          />
                         </td>
                         <td className="p-3 text-center sticky left-10 bg-white z-10">
-                          {row._errors?.length > 0 ? <XCircle className="w-5 h-5 text-red-500 mx-auto" /> : <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />}
+                          {row._status === 'success' ? (
+                            <span className="text-green-600 font-bold flex items-center justify-center gap-1">
+                              <CheckCircle className="w-5 h-5" /> บันทึกแล้ว
+                            </span>
+                          ) : row._errors?.length > 0 ? (
+                            <XCircle className="w-5 h-5 text-red-500 mx-auto" />
+                          ) : (
+                            <CheckCircle className="w-5 h-5 text-gray-300 mx-auto" />
+                          )}
                         </td>
                         {displayFields.map(field => {
                           const isEditing = editingCell?.row === rIdx && editingCell?.key === field.key;
@@ -1000,7 +1016,9 @@ export default function ImportExcelPage() {
                           );
                         })}
                         <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
-                          {row._errors?.length > 0 ? (
+                          {row._status === 'success' ? (
+                            <span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>
+                          ) : row._errors?.length > 0 ? (
                             <div className="space-y-1">
                               {row._errors.map((err, idx) => (
                                 <div key={idx} className="flex items-start gap-1 text-xs text-red-700 bg-red-100 px-2 py-1 rounded">
