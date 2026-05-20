@@ -241,8 +241,8 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation (ลบการเช็คโค้ชออก - ไปเช็คที่ Modal แทน)
-  const validateRow = (row: any) => {
+  // ✅ ฟังก์ชัน Validation (เพิ่มการเช็คโค้ชใน Modal)
+  const validateRow = (row: any, checkCoach: boolean = false) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
@@ -273,7 +273,13 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
-      // ✅ ลบการ validate coach_name ออก (จะไป validate ที่ Modal แทน)
+      // ✅ เพิ่มการตรวจสอบโค้ช (เฉพาะเมื่อ checkCoach = true)
+      else if (field.key === 'coach_name' && checkCoach && strVal) {
+        const coachMatch = findBestCoachMatch(strVal, coaches);
+        if (!coachMatch || coachMatch.similarity < 0.95) {
+          errors.push(`ไม่พบชื่อโค้ช "${strVal}" ในระบบ กรุณาเลือกโค้ชจากรายชื่อที่มี`);
+        }
+      }
     });
 
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
@@ -285,7 +291,7 @@ export default function ImportExcelPage() {
 
   const runValidation = (data: any[]) => {
     const errors: Record<number, string[]> = {};
-    data.forEach((row, idx) => { errors[idx] = validateRow(row); });
+    data.forEach((row, idx) => { errors[idx] = validateRow(row, false); }); // ไม่เช็คโค้ชใน Preview
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
   };
@@ -347,11 +353,9 @@ export default function ImportExcelPage() {
     const networkIds: string[] = [hospitalId];
     
     if (hospital.type === 'main') {
-      // ถ้าเป็นแม่ข่าย → เพิ่มลูกข่ายทั้งหมด
       const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
       subHospitals.forEach(sub => networkIds.push(sub.id));
     } else if (hospital.type === 'sub' && hospital.parent_id) {
-      // ถ้าเป็นลูกข่าย → เพิ่มแม่ข่าย
       networkIds.push(hospital.parent_id);
     }
     
@@ -360,7 +364,7 @@ export default function ImportExcelPage() {
 
   // ✅ โหลดโค้ชสำหรับแถวที่ Error
   const loadCoachesForRow = async (errorIndex: number, hospitalId: string) => {
-    if (modalCoaches[errorIndex]) return; // โหลดแล้ว
+    if (modalCoaches[errorIndex]) return;
     
     try {
       const networkIds = getNetworkHospitalIds(hospitalId);
@@ -431,9 +435,29 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
+  // ✅ ฟังก์ชันนำเข้าข้อมูล (เพิ่มการตรวจสอบโค้ช)
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
+    
+    // ✅ ตรวจสอบโค้ชในแถวที่เลือก (เฉพาะเมื่อมีค่า)
+    const rowsWithCoachErrors: number[] = [];
+    selectedRows.forEach(rowIdx => {
+      const row = previewData[rowIdx];
+      if (row.coach_name && row.coach_name.trim()) {
+        const coachMatch = findBestCoachMatch(row.coach_name, coaches);
+        if (!coachMatch || coachMatch.similarity < 0.95) {
+          rowsWithCoachErrors.push(rowIdx);
+        }
+      }
+    });
+    
+    if (rowsWithCoachErrors.length > 0) {
+      setError(`มี ${rowsWithCoachErrors.length} แถวที่ชื่อโค้ชไม่ถูกต้อง กรุณาแก้ไขก่อนนำเข้า`);
+      return;
+    }
+    
     if (hasErrorsInSelected) { setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบ กรุณาแก้ไขก่อนนำเข้า'); return; }
+    
     setError('');
     setImporting(true);
     setImportProgress({ current: 0, total: selectedRows.size });
@@ -832,6 +856,7 @@ export default function ImportExcelPage() {
                             </div>
                           )}
 
+                          {/* ✅ ส่วนแก้ไขโค้ช (Dropdown + Validation) */}
                           {(err.error.includes('ไม่พบโค้ช') || err.error.includes('Coach')) && (
                             <div className="mt-3 pl-6 space-y-2">
                               <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
@@ -839,6 +864,7 @@ export default function ImportExcelPage() {
                                 เลือกโค้ชจากเครือข่ายโรงพยาบาล:
                               </label>
                               
+                              {/* แสดง Loading ขณะโหลดข้อมูล */}
                               {!modalCoaches[idx] && err.hospital_id && (
                                 <div className="text-xs text-gray-500 flex items-center gap-2">
                                   <Loader2 className="w-3 h-3 animate-spin" />
@@ -846,8 +872,16 @@ export default function ImportExcelPage() {
                                 </div>
                               )}
                               
+                              {/* แสดง Error ถ้าไม่มีโค้ชในเครือข่าย */}
+                              {modalCoaches[idx] && modalCoaches[idx].length === 0 && (
+                                <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">
+                                  ⚠️ ไม่พบโค้ชในเครือข่ายโรงพยาบาลนี้ กรุณาติดต่อผู้ดูแลระบบ
+                                </div>
+                              )}
+                              
+                              {/* Dropdown เลือกโค้ช */}
                               <select
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                                 value={err.coach_id || ''}
                                 onChange={(e) => {
                                   handleEditInModal(idx, 'coach_id', e.target.value);
@@ -856,6 +890,7 @@ export default function ImportExcelPage() {
                                     handleEditInModal(idx, 'coach_name', selectedCoach.full_name_th);
                                   }
                                 }}
+                                disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}
                                 onLoad={() => err.hospital_id && loadCoachesForRow(idx, err.hospital_id)}
                               >
                                 <option value="">-- เลือกโค้ช --</option>
