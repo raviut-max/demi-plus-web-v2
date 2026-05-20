@@ -215,38 +215,35 @@ export default function ImportExcelPage() {
     loadValidAddresses();
   }, []);
 
-const loadNetworkData = async (userId: string) => {
-  try {
-    console.log('🏥 [loadNetworkData] Loading hospitals...');
-    const allHospitals = await getHospitalsWithHierarchy();
-    setHospitals(allHospitals);
-    const hospitalIds = allHospitals.map(h => h.id);
-    
-    console.log('👨‍️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
-    
-    // ✅ ใช้ getCoachesWithHospitals ที่มี join กับ users
-    const allCoaches = await getCoachesWithHospitals(hospitalIds);
-    setCoaches(allCoaches);
-    
-    console.log('✅ [loadNetworkData] Loaded:', {
-      hospitals: allHospitals.length,
-      coaches: allCoaches.length
-    });
-    
-    // ✅ Debug: ตรวจสอบโครงสร้างโค้ช
-    if (allCoaches.length > 0) {
-      console.log('📋 [loadNetworkData] Sample coach structure:', {
-        id: allCoaches[0].id,
-        full_name_th: allCoaches[0].full_name_th,
-        users: allCoaches[0].users,
-        hospital_id: allCoaches[0].users?.hospital_id,
-        hospital_name: allCoaches[0].users?.hospitals?.name
+  const loadNetworkData = async (userId: string) => {
+    try {
+      console.log('🏥 [loadNetworkData] Loading hospitals...');
+      const allHospitals = await getHospitalsWithHierarchy();
+      setHospitals(allHospitals);
+      const hospitalIds = allHospitals.map(h => h.id);
+      
+      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+      const allCoaches = await getCoachesWithHospitals(hospitalIds);
+      setCoaches(allCoaches);
+      
+      console.log('✅ [loadNetworkData] Loaded:', {
+        hospitals: allHospitals.length,
+        coaches: allCoaches.length
       });
+      
+      if (allCoaches.length > 0) {
+        console.log('📋 [loadNetworkData] Sample coach structure:', {
+          id: allCoaches[0].id,
+          full_name_th: allCoaches[0].full_name_th,
+          users: allCoaches[0].users,
+          hospital_id: allCoaches[0].users?.hospital_id,
+          hospital_name: allCoaches[0].users?.hospitals?.name
+        });
+      }
+    } catch (error) { 
+      console.error('❌ [loadNetworkData] Error:', error); 
     }
-  } catch (error) { 
-    console.error('❌ [loadNetworkData] Error:', error); 
-  }
-};
+  };
 
   useEffect(() => {
     if (rawData.length === 0 || excelHeaders.length === 0) return;
@@ -384,92 +381,79 @@ const loadNetworkData = async (userId: string) => {
 
   const hasErrorsInSelected = Array.from(selectedRows).some(idx => previewData[idx]?._errors?.length > 0);
 
-const getNetworkHospitalIds = (hospitalId: string): string[] => {
-  console.log('🔍 [getNetworkHospitalIds] Input hospitalId:', hospitalId);
-  
-  const hospital = hospitals.find(h => h.id === hospitalId);
-  console.log('🏥 Found hospital:', hospital ? {
-    id: hospital.id,
-    name: hospital.name,
-    type: hospital.type,
-    parent_id: hospital.parent_id
-  } : 'NOT FOUND');
-  
-  if (!hospital) {
-    console.warn('⚠️ Hospital not found, returning [hospitalId]');
-    return [hospitalId];
-  }
-  
-  const networkIds: string[] = [hospitalId];
-  
-  if (hospital.type === 'main') {
-    const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
-    console.log('📊 Found', subHospitals.length, 'sub hospitals');
-    subHospitals.forEach(sub => {
-      networkIds.push(sub.id);
-      console.log('  Added sub hospital:', sub.id, sub.name);
-    });
-  } else if (hospital.type === 'sub' && hospital.parent_id) {
-    console.log('📊 Adding parent hospital:', hospital.parent_id);
-    networkIds.push(hospital.parent_id);
-  }
-  
-  console.log('✅ [getNetworkHospitalIds] Final networkIds:', networkIds);
-  return networkIds;
-};
+  const getNetworkHospitalIds = (hospitalId: string): string[] => {
+    const hospital = hospitals.find(h => h.id === hospitalId);
+    if (!hospital) return [hospitalId];
+    const networkIds: string[] = [hospitalId];
+    if (hospital.type === 'main') {
+      const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
+      subHospitals.forEach(sub => networkIds.push(sub.id));
+    } else if (hospital.type === 'sub' && hospital.parent_id) {
+      networkIds.push(hospital.parent_id);
+    }
+    return networkIds;
+  };
 
-const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-  if (!hospitalId) {
-    console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
-    return;
-  }
-  
-  // ✅ ป้องกันการโหลดซ้ำ
-  if (modalCoaches[errorIndex]) {
-    console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
-    return;
-  }
-
-  try {
-    console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
-    console.log(`📝 Error Index: ${errorIndex}`);
-    console.log(`🏥 Hospital ID: ${hospitalId}`);
-    
-    // ✅ หา network hospital IDs
-    const networkIds = getNetworkHospitalIds(hospitalId);
-    console.log('🏥 Network Hospital IDs:', networkIds);
-    
-    // ✅ โหลด coaches ใหม่จาก API (แทนการใช้ state)
-    console.log('🔄 Loading coaches from API...');
-    const networkCoaches = await getCoachesWithHospitals(networkIds);
-    
-    console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
-    
-    if (networkCoaches.length > 0) {
-      console.log('📋 Coach Details:', networkCoaches.map(c => ({
-        name: c.full_name_th,
-        hospital_id: c.users?.hospital_id,
-        hospital_name: c.users?.hospitals?.name,
-        specialization: c.specialization_th
-      })));
-    } else {
-      console.warn('⚠️ No coaches found in this network!');
-      console.warn(' Network IDs:', networkIds);
+  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว: โหลดจาก API โดยตรง
+  const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
+    if (!hospitalId) {
+      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
+      return;
     }
     
-    console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
-    
-    // ✅ อัปเดต state
-    setModalCoaches(prev => ({ 
-      ...prev, 
-      [errorIndex]: networkCoaches 
-    }));
-    
-  } catch (err) {
-    console.error('❌ [loadCoachesForErrorRow] Error:', err);
-  }
-};
+    // ✅ ป้องกันการโหลดซ้ำ
+    if (modalCoaches[errorIndex]) {
+      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
+      return;
+    }
 
+    try {
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
+      console.log(`📝 Error Index: ${errorIndex}`);
+      console.log(`🏥 Hospital ID: ${hospitalId}`);
+      
+      // ✅ โหลดโค้ชจาก API โดยตรง (ไม่ใช้ state)
+      console.log('🔄 Loading coaches from API for hospital:', hospitalId);
+      const networkCoaches = await getCoachesWithHospitals([hospitalId]);
+      
+      console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
+      
+      if (networkCoaches.length > 0) {
+        console.log('📋 Coach Details:', networkCoaches.map(c => ({
+          name: c.full_name_th,
+          hospital_id: c.users?.hospital_id,
+          hospital_name: c.users?.hospitals?.name,
+          specialization: c.specialization_th
+        })));
+      } else {
+        console.warn('⚠️ No coaches found for this hospital!');
+        console.warn(' Hospital ID:', hospitalId);
+      }
+      
+      console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
+      
+      // ✅ อัปเดต state
+      setModalCoaches(prev => ({ 
+        ...prev, 
+        [errorIndex]: networkCoaches 
+      }));
+      
+    } catch (err) {
+      console.error('❌ [loadCoachesForErrorRow] Error:', err);
+    }
+  };
+
+  // ✅ useEffect โหลดโค้ชอัตโนมัติเมื่อ Modal เปิด
+  useEffect(() => {
+    if (importResult && importResult.errors.length > 0) {
+      importResult.errors.forEach((err, idx) => {
+        if (!err.hospital_fixed && err.hospital_id && !modalCoaches[idx]) {
+          console.log('🔄 Auto-loading coaches for error', idx, 'hospital:', err.hospital_id);
+          loadCoachesForErrorRow(idx, err.hospital_id);
+        }
+      });
+    }
+  }, [importResult]);
 
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
@@ -1198,7 +1182,7 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
                                   }
                                 }}
                                 disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}
-                                onLoad={() => err.hospital_id && loadCoachesForErrorRow(idx, err.hospital_id)}
+                                // ✅ ลบ onLoad ออกแล้ว ใช้ useEffect แทน
                               >
                                 <option value="">-- เลือกโค้ช --</option>
                                 {modalCoaches[idx]?.map(coach => {
@@ -1213,7 +1197,7 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
                               </select>
                               
                               <p className="text-xs text-gray-500">
-                                💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
+                                💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากโรงพยาบาลนี้โดยตรง)
                               </p>
 
                               <button
