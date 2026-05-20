@@ -435,44 +435,16 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     console.log(`\n🔍 ========== [loadCoachesForErrorRow] START ==========`);
     console.log(`📝 Error Index: ${errorIndex}`);
     console.log(`🏥 Hospital ID: ${hospitalId}`);
-    console.log(`📊 Total coaches in state: ${coaches.length}`);
     
     // ✅ หา network hospital IDs
     const networkIds = getNetworkHospitalIds(hospitalId);
     console.log('🏥 Network Hospital IDs:', networkIds);
     
-    // ✅ Debug: ตรวจสอบ coaches แต่ละคน
-    console.log('\n📋 Checking all coaches:');
-    coaches.forEach((coach, idx) => {
-      if (idx < 5) { // แสดงแค่ 5 คนแรก
-        console.log(`  Coach ${idx}:`, {
-          name: coach.full_name_th,
-          user_hospital_id: coach.users?.hospital_id,
-          user_hospital_name: coach.users?.hospitals?.name,
-          has_users: !!coach.users,
-          has_hospital_id: !!coach.users?.hospital_id
-        });
-      }
-    });
+    // ✅ โหลด coaches ใหม่จาก API (แทนการใช้ state)
+    console.log('🔄 Loading coaches from API...');
+    const networkCoaches = await getCoachesWithHospitals(networkIds);
     
-    // ✅ Filter coaches ที่อยู่ใน network
-    console.log('\n🔍 Starting to filter coaches...');
-    const networkCoaches = coaches.filter((coach, idx) => {
-      const coachHospitalId = coach.users?.hospital_id;
-      const isInNetwork = coachHospitalId && networkIds.includes(coachHospitalId);
-      
-      if (idx < 5 && coachHospitalId) {
-        console.log(`  Coach ${idx}:`, {
-          hospital_id: coachHospitalId,
-          in_network: isInNetwork,
-          network_has_id: networkIds.includes(coachHospitalId)
-        });
-      }
-      
-      return isInNetwork;
-    });
-    
-    console.log(`\n✅ Found ${networkCoaches.length} coaches in network`);
+    console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
     
     if (networkCoaches.length > 0) {
       console.log('📋 Coach Details:', networkCoaches.map(c => ({
@@ -482,11 +454,9 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
         specialization: c.specialization_th
       })));
     } else {
-      console.warn('⚠️ No coaches found! Possible reasons:');
-      console.warn('  1. coaches array is empty');
-      console.warn('  2. coach.users is undefined');
-      console.warn('  3. coach.users.hospital_id does not match networkIds');
-      console.warn('  4. networkIds is empty or incorrect');
+      console.warn('⚠️ No coaches found in this network!');
+      console.warn(' Network IDs:', networkIds);
+      console.warn('📊 Total coaches in state:', coaches.length);
     }
     
     console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
