@@ -456,7 +456,6 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     } else {
       console.warn('⚠️ No coaches found in this network!');
       console.warn(' Network IDs:', networkIds);
-      console.warn('📊 Total coaches in state:', coaches.length);
     }
     
     console.log(`\n🔍 ========== [loadCoachesForErrorRow] END ==========\n`);
@@ -471,7 +470,6 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     console.error('❌ [loadCoachesForErrorRow] Error:', err);
   }
 };
-
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
       setError('ไม่มีข้อมูลสำหรับส่งออก');
