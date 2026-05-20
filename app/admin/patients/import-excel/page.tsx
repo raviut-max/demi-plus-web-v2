@@ -209,6 +209,7 @@ export default function ImportExcelPage() {
       const hospitalIds = allHospitals.map(h => h.id);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
+      console.log('✅ [loadNetworkData] Loaded', allCoaches.length, 'coaches');
     } catch (error) { console.error('❌ [loadNetworkData] Error:', error); }
   };
 
@@ -352,23 +353,46 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // ✅ ฟังก์ชันโหลดโค้ช - ใช้ getCoachesWithHospitals
+  // ✅ ฟังก์ชันโหลดโค้ช - แก้ไขแล้ว
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-    if (!hospitalId) return;
-    if (modalCoaches[errorIndex]) return;
+    if (!hospitalId) {
+      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
+      return;
+    }
+    
+    if (modalCoaches[errorIndex]) {
+      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
+      return;
+    }
     
     try {
-      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for hospital: ${hospitalId}`);
+      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for error ${errorIndex}, hospital: ${hospitalId}`);
+      
+      // ✅ หา network hospital IDs
       const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log(`🏥 Network IDs:`, networkIds);
+      console.log('🏥 [loadCoachesForErrorRow] Network IDs:', networkIds);
       
-      // ✅ ใช้ getCoachesWithHospitals จาก queries
-      const networkCoaches = await getCoachesWithHospitals(networkIds);
-      console.log(`✅ Loaded ${networkCoaches.length} coaches`);
+      // ✅ ใช้ coaches ที่โหลดไว้แล้ว กรองตาม hospital_id
+      const networkCoaches = coaches.filter(coach => {
+        const coachHospitalId = coach.users?.hospital_id;
+        return coachHospitalId && networkIds.includes(coachHospitalId);
+      });
       
-      setModalCoaches(prev => ({ ...prev, [errorIndex]: networkCoaches }));
+      console.log(`✅ [loadCoachesForErrorRow] Found ${networkCoaches.length} coaches for this hospital network`);
+      console.log('📋 Coaches:', networkCoaches.map(c => ({
+        name: c.full_name_th,
+        hospital: c.users?.hospitals?.name,
+        hospital_id: c.users?.hospital_id
+      })));
+      
+      // ✅ อัปเดต state
+      setModalCoaches(prev => ({ 
+        ...prev, 
+        [errorIndex]: networkCoaches 
+      }));
+      
     } catch (err) {
-      console.error('❌ Error loading coaches:', err);
+      console.error('❌ [loadCoachesForErrorRow] Error:', err);
     }
   };
 

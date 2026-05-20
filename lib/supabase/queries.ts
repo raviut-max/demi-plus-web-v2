@@ -2716,40 +2716,41 @@ export async function getCoachesByHospitals(hospitalIds: string[]) {
     return [];
   }
 }
-
 // ✅ โหลดโค้ชพร้อมข้อมูลโรงพยาบาล (แก้ไขแล้ว)
 export async function getCoachesWithHospitals(hospitalIds?: string[]) {
   try {
     console.log('👨‍⚕️ [getCoachesWithHospitals] Loading coaches...', hospitalIds);
+    
     // ✅ Query ที่ join กับ users และ hospitals
     let query = supabase
       .from('doctors')
       .select(`
-        id,
-        user_id,
-        full_name_th,
-        specialization_th,
-        is_active,
-        is_verified,
-        users (
-          hospital_id,
-          role,
-          admin_type,
-          is_active,
-          hospitals (
-            id,
-            name,
-            code,
-            type,
-            parent_id
-          )
+        id, 
+        user_id, 
+        full_name_th, 
+        specialization_th, 
+        is_active, 
+        is_verified, 
+        users!users_id_fkey ( 
+          hospital_id, 
+          role, 
+          admin_type, 
+          is_active, 
+          hospitals!users_hospital_id_fkey ( 
+            id, 
+            name, 
+            code, 
+            type, 
+            parent_id 
+          ) 
         )
       `)
       .eq('is_active', true)
       .eq('users.is_active', true);
-
+    
     // ✅ กรองตาม hospitalIds ถ้ามี (สำหรับ Hospital Admin)
     if (hospitalIds && hospitalIds.length > 0) {
+      console.log('🔒 [getCoachesWithHospitals] Filtering by hospitalIds:', hospitalIds);
       query = query.in('users.hospital_id', hospitalIds);
     }
 
@@ -2760,12 +2761,18 @@ export async function getCoachesWithHospitals(hospitalIds?: string[]) {
       return [];
     }
 
+    console.log('📊 [getCoachesWithHospitals] Raw data type:', typeof data);
+    console.log('📊 [getCoachesWithHospitals] Is array:', Array.isArray(data));
+    console.log('📊 [getCoachesWithHospitals] First item type:', typeof data?.[0]);
+
     // ✅ กรองเอาเฉพาะ coaches ที่มี hospital_id
     const coachesWithHospitals = (data || []).filter(coach => 
-      coach.users?.hospital_id && coach.users?.hospitals?.name
+      coach?.users?.hospital_id && coach?.users?.hospitals?.name
     );
 
     console.log('✅ [getCoachesWithHospitals] Loaded:', coachesWithHospitals.length, 'coaches');
+    console.log('📋 [getCoachesWithHospitals] Sample coach:', coachesWithHospitals[0]);
+    
     return coachesWithHospitals;
   } catch (err) {
     console.error('❌ [getCoachesWithHospitals] Exception:', err);
