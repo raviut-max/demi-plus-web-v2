@@ -1,1194 +1,2348 @@
-'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { 
-  checkSession, 
-  logout, 
-  validateThaiIdCard,
-  getAllValidAddresses,
-  validateAddress,
-  importPatientsBatch,
-  getCoachesWithHospitals,
-  getHospitalsWithHierarchy
-} from '@/lib/supabase/queries';
-import { 
-  Upload, 
-  FileSpreadsheet, 
-  AlertCircle, 
-  Loader2, 
-  ArrowLeft, 
-  LogOut, 
-  CheckCircle, 
-  XCircle, 
-  Edit3,
-  AlertTriangle,
-  ShieldAlert,
-  RotateCcw,
-  X,
-  Hospital,
-  UserCheck,
-  MapPin,
-  Sparkles,
-  Save,
-  Download
-} from 'lucide-react';
-import * as XLSX from 'xlsx';
-
-// 📋 กำหนดคอลัมน์มาตรฐาน
-const STANDARD_FIELDS = [
-  { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
-  { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
-  { key: 'last_name', label: 'นามสกุลผู้ป่วย', required: true, inputType: 'text' },
-  { key: 'hospital_number', label: 'HN', required: true, inputType: 'text' },
-  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'date' },
-  { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
-  { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text' },
-  { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
-  { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
-  { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
-  { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
-  { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล(มก./ดล.)', inputType: 'number' },
-  { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
-  { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
-  { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
-  { key: 'village_no', label: 'หมู่ที่', inputType: 'text' },
-  { key: 'village_name', label: 'หมู่บ้าน', inputType: 'text' },
-  { key: 'soi', label: 'ซอย', inputType: 'text' },
-  { key: 'road', label: 'ถนน', inputType: 'text' },
-  { key: 'subdistrict', label: 'ตำบล', inputType: 'text' },
-  { key: 'district', label: 'อำเภอ', inputType: 'text' },
-  { key: 'province', label: 'จังหวัด', inputType: 'text' },
-  { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
-  { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text' },
-  { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
-  { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
-];
+// lib/supabase/queries.ts
+// ✅ แก้ไขล่าสุด: 18 พฤษภาคม 2569
+import { supabase } from './client';
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS
+// 🔐 Authentication Functions
 // =====================================================
-const normalizeThaiText = (text: string): string => {
-  if (!text) return '';
-  let normalized = text.trim().toLowerCase();
-  const abbreviations: Record<string, string> = {
-    'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
-    'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
-    'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
-  };
-  Object.entries(abbreviations).forEach(([abbr, full]) => {
-    normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
-  });
-  normalized = normalized.replace(/\s+/g, '');
-  const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
-  normalized = normalized.replace(toneMarks, '');
-  return normalized;
-};
+export async function login(idCard: string, password: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, id_card, password_hash, role, admin_type, is_active, hospital_id')
+      .eq('id_card', idCard)
+      .eq('password_hash', password)
+      .eq('is_active', true)
+      .single();
 
-const calculateSimilarity = (str1: string, str2: string): number => {
-  const s1 = normalizeThaiText(str1);
-  const s2 = normalizeThaiText(str2);
-  if (s1 === s2) return 1;
-  if (!s1 || !s2) return 0;
-  if (s2.includes(s1)) return 0.85;
-  if (s1.includes(s2)) return 0.75;
-  const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
-  for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
-  for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
-  for (let j = 1; j <= s2.length; j += 1) {
-    for (let i = 1; i <= s1.length; i += 1) {
-      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
-      track[j][i] = Math.min(track[j][i - 1] + 1, track[j - 1][i] + 1, track[j - 1][i - 1] + indicator);
+    if (error || !data) {
+      return null;
+    }
+
+    let full_name_th = 'ผู้ใช้';
+    let hospital_number = '';
+    let pam_level = 'L2';
+    let zone = 'Green Zone';
+    let current_step = 'Starter';
+
+    if (['admin', 'doctor', 'helper', 'osm'].includes(data.role)) {
+      const { data: doctor } = await supabase
+        .from('doctors')
+        .select('full_name_th, specialization_th')
+        .eq('user_id', data.id)
+        .single();
+      full_name_th = doctor?.full_name_th || 'ผู้ดูแลระบบ';
+    } else {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('first_name, last_name, hospital_number, pam_level, pam_score, zone, current_step')
+        .eq('id', data.id)
+        .single();
+      full_name_th = profile?.first_name && profile?.last_name 
+        ? `${profile.first_name} ${profile.last_name}` 
+        : 'ผู้ใช้';
+      hospital_number = profile?.hospital_number || '';
+      pam_level = profile?.pam_level || 'L2';
+      zone = profile?.zone || 'Green Zone';
+      current_step = profile?.current_step || 'Starter';
+    }
+
+    return {
+      id: data.id,
+      id_card: data.id_card,
+      full_name_th: full_name_th,
+      hospital_number: hospital_number,
+      pam_level: pam_level,
+      pam_score: 0,
+      zone: zone,
+      current_step: current_step,
+      role: data.role,
+      admin_type: data.admin_type || 'hospital',
+      hospital_id: data.hospital_id,
+    };
+  } catch (err) {
+    console.error('Login error:', err);
+    return null;
+  }
+}
+
+export async function logout() {
+  localStorage.removeItem('user_id');
+  localStorage.removeItem('user_data');
+  localStorage.removeItem('login_time');
+}
+
+export function checkSession() {
+  const userId = localStorage.getItem('user_id');
+  const userData = localStorage.getItem('user_data');
+  const loginTime = localStorage.getItem('login_time');
+  
+  if (!userId || !userData) return null;
+  
+  if (loginTime) {
+    const loginDate = new Date(loginTime);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - loginDate.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays > 7) {
+      logout();
+      return null;
     }
   }
-  const distance = track[s2.length][s1.length];
-  const maxLength = Math.max(s1.length, s2.length);
-  return 1 - (distance / maxLength);
-};
-
-const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
-  let bestMatch: any = null;
-  let bestScore = 0;
-  hospitals.forEach(hospital => {
-    const score = calculateSimilarity(hospitalName, hospital.name);
-    if (score > 0.80 && score > bestScore) {
-      bestScore = score;
-      bestMatch = hospital;
-    }
-  });
-  return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
-};
-
-const findBestCoachMatch = (coachName: string, coaches: any[]) => {
-  let bestMatch: any = null;
-  let bestScore = 0;
-  coaches.forEach(coach => {
-    const score = calculateSimilarity(coachName, coach.full_name_th);
-    if (score > 0.90 && score > bestScore) {
-      bestScore = score;
-      bestMatch = coach;
-    }
-  });
-  return bestMatch ? { coach: bestMatch, similarity: bestScore } : null;
-};
-
-// =====================================================
-// 📅 DATE CONVERSION FUNCTIONS
-// =====================================================
-
-// ✅ แปลงวันที่จาก ISO (YYYY-MM-DD) เป็น DD/MM/YYYY (พ.ศ.)
-const convertISOToThaiDate = (isoDate: string): string => {
-  if (!isoDate) return '';
   
-  // ตรวจสอบว่าเป็น ISO format (YYYY-MM-DD) หรือไม่
-  if (isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    const [year, month, day] = isoDate.split('-');
-    const yearBE = parseInt(year) + 543;
-    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
+  return JSON.parse(userData);
+}
+
+// =====================================================
+// 👤 Super Admin System Functions
+// =====================================================
+export function isSuperAdmin(userData: any): boolean {
+  if (!userData) return false;
+  return userData.admin_type === 'super' || userData.role === 'super_admin';
+}
+
+export function isHospitalAdmin(userData: any): boolean {
+  if (!userData) return false;
+  return userData.admin_type === 'hospital' ||
+    (userData.role === 'admin' && userData.hospital_id);
+}
+
+export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
+  try {
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('role, admin_type, hospital_id')
+      .eq('id', userId)
+      .single();
+
+    if (userError || !userData) return [];
+
+    if (isSuperAdmin(userData)) return [];
+    if (!userData.hospital_id) return [];
+
+    const { data: hospitalData, error: hospitalError } = await supabase
+      .from('hospitals')
+      .select('id, type, parent_id')
+      .eq('id', userData.hospital_id)
+      .single();
+
+    if (hospitalError || !hospitalData) return [];
+
+    if (hospitalData.type === 'main') {
+      const accessibleIds: string[] = [hospitalData.id];
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalData.id)
+        .eq('is_active', true);
+      if (subHospitals && subHospitals.length > 0) {
+        subHospitals.forEach(sub => accessibleIds.push(sub.id));
+      }
+      return accessibleIds;
+    } else if (hospitalData.type === 'sub') {
+      return [hospitalData.id];
+    }
+    return [];
+  } catch (err) {
+    console.error('❌ [getAccessibleHospitalIds] Exception:', err);
+    return [];
   }
-  
-  // ถ้าไม่ใช่ ISO format (เช่น DD/MM/YYYY อยู่แล้ว) ให้คืนค่าเดิม
-  return isoDate;
-};
+}
+
+export async function getUserHospitalInfo(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`hospital_id, hospitals ( id, name, code, type, parent_id, parent_hospital:hospitals!parent_id ( id, name, code ) )`)
+      .eq('id', userId)
+      .single();
+    if (error || !data) return null;
+    return data.hospitals;
+  } catch (err) {
+    console.error('Error fetching user hospital info:', err);
+    return null;
+  }
+}
+
+export function checkAdminPermission(userData: any, requiredType?: 'super' | 'hospital'): boolean {
+  if (!userData) return false;
+  if (!requiredType) {
+    return userData.role === 'admin' ||
+      userData.admin_type === 'super' ||
+      userData.admin_type === 'hospital';
+  }
+  if (requiredType === 'super') return isSuperAdmin(userData);
+  if (requiredType === 'hospital') return isHospitalAdmin(userData);
+  return false;
+}
+
+export async function filterDataByHospitalPermission<T>(
+  userId: string,
+  fetchData: (hospitalIds: string[]) => Promise<T[]>
+): Promise<T[]> {
+  const hospitalIds = await getAccessibleHospitalIds(userId);
+  return fetchData(hospitalIds);
+}
 
 // =====================================================
-// MAIN COMPONENT
+// 👥 Patient Management Functions
 // =====================================================
-export default function ImportExcelPage() {
-  const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [rawData, setRawData] = useState<any[]>([]);
-  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
-  const [headerMapping, setHeaderMapping] = useState<Record<string, string>>({});
-  const [previewData, setPreviewData] = useState<any[]>([]);
-  const [editingCell, setEditingCell] = useState<{ row: number; key: string } | null>(null);
-  const [editValue, setEditValue] = useState<string>('');
-  const [validationErrors, setValidationErrors] = useState<Record<number, string[]>>({});
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
-  const [validAddresses, setValidAddresses] = useState<Array<{ province: string; district: string; subdistrict: string; postal_code: string; }>>([]);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
-  const [success, setSuccess] = useState(false);
-  
-  const [importResult, setImportResult] = useState<{
-    success: number;
-    failed: number;
-    errors: Array<{ 
-      row: number; 
-      id_card: string; 
-      hospital_number: string; 
-      error: string;
-      error_type: 'hospital' | 'coach' | 'other';
-      hospital_id?: string;
-      coach_id?: string;
-      province?: string;
-      district?: string;
-      subdistrict?: string;
-      original_hospital_name?: string;
-      original_coach_name?: string;
-      hospital_fixed?: boolean;
-      fixed?: boolean;
-    }>;
-    successRecords: Array<{ row: number; id_card: string; hospital_number: string; first_name: string; last_name: string; }>;
-  } | null>(null);
-  
-  const [hospitals, setHospitals] = useState<any[]>([]);
-  const [coaches, setCoaches] = useState<any[]>([]);
-  const [modalCoaches, setModalCoaches] = useState<Record<number, any[]>>({});
+export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
+  try {
+    let query = supabase
+      .from('profiles')
+      .select(`*, users!profiles_id_fkey ( id_card, role, is_active, created_at ), hospitals ( id, name, code, type )`)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
 
-  useEffect(() => {
-    const userData = checkSession();
-    if (!userData) { router.push('/admin/login'); return; }
-    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) { router.push('/admin/patients'); return; }
-    setUser(userData);
-    loadNetworkData(userData.id);
-  }, [router]);
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
 
-  useEffect(() => {
-    const loadValidAddresses = async () => {
-      try {
-        const addresses = await getAllValidAddresses();
-        setValidAddresses(addresses || []);
-      } catch (err) { console.warn('⚠️ ไม่สามารถโหลดข้อมูลที่อยู่'); }
+    if (search) {
+      query = query.or(
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+      );
+    }
+
+    if (pamLevel) {
+      query = query.eq('pam_level', pamLevel);
+    }
+
+    const { data, error } = await query;
+    if (error) return [];
+
+    return data?.map(patient => ({
+      ...patient,
+      full_name: patient.first_name && patient.last_name 
+        ? `${patient.first_name} ${patient.last_name}` 
+        : '',
+    })) || [];
+  } catch (err) {
+    console.error('❌ [getPatientList] Exception:', err);
+    return [];
+  }
+}
+
+export async function registerPatient(data: {
+  id_card: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  hospital_number: string;
+  birth_date: string;
+  gender: string;
+  phone?: string;
+  email?: string;
+  current_weight?: number;
+  height?: number;
+  waist_circumference?: number;
+  coach_id?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_contact_relationship?: string;
+  house_number?: string;
+  address_line1?: string;
+  soi?: string;
+  road?: string;
+  village_no?: string;
+  village_name?: string;
+  subdistrict?: string;
+  district?: string;
+  province?: string;
+  postal_code?: string;
+  diabetes_type?: string;
+  blood_sugar?: number;
+  hba1c_level?: number;
+  notes?: string;
+  occupation?: string;
+  education_level?: string;
+  hospital_id?: string;
+  village_id?: string;
+  pam_level?: string;
+  pam_score?: number;
+  zone?: string;
+  created_by: string;
+}) {
+  try {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id_card: data.id_card,
+        password_hash: data.password,
+        role: 'patient',
+        is_active: true,
+        created_by: data.created_by,
+      })
+      .select()
+      .single();
+
+    if (userError) {
+      console.error('Error creating user:', userError);
+      return { success: false, error: userError.message };
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .insert({
+        id: user.id,
+        first_name: data.first_name,
+        last_name: data.last_name,
+        hospital_number: data.hospital_number,
+        birth_date: data.birth_date,
+        gender: data.gender,
+        phone: data.phone,
+        email: data.email,
+        current_weight: data.current_weight,
+        height: data.height,
+        waist_circumference: data.waist_circumference,
+        coach_id: data.coach_id,
+        emergency_contact_name: data.emergency_contact_name,
+        emergency_contact_phone: data.emergency_contact_phone,
+        emergency_contact_relationship: data.emergency_contact_relationship,
+        house_number: data.house_number,
+        address_line1: data.address_line1,
+        soi: data.soi,
+        road: data.road,
+        village_no: data.village_no,
+        village_name: data.village_name,
+        subdistrict: data.subdistrict,
+        district: data.district,
+        province: data.province,
+        postal_code: data.postal_code,
+        diabetes_type: data.diabetes_type,
+        blood_sugar: data.blood_sugar,
+        hba1c_level: data.hba1c_level,
+        notes: data.notes,
+        occupation: data.occupation,
+        education_level: data.education_level,
+        hospital_id: data.hospital_id,
+        village_id: data.village_id,
+        pam_level: data.pam_level || 'L0',
+        pam_score: data.pam_score ?? 0,
+        zone: data.zone || 'Zero Zone',
+        current_step: 'Starter',
+        is_active: true,
+        status: 'active',
+      })
+      .select()
+      .single();
+
+    if (profileError) {
+      console.error('Error creating profile:', profileError);
+      await supabase.from('users').delete().eq('id', user.id);
+      return { success: false, error: profileError.message };
+    }
+
+    return { success: true, user, profile };
+  } catch (err) {
+    console.error('Register patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลงทะเบียน' };
+  }
+}
+
+export async function getPatientDetail(userId: string) {
+  try {
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select(`*, hospitals ( id, name, code, type )`)
+      .eq('id', userId)
+      .single();
+    if (profileError) return null;
+
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id_card, role, is_active, created_at')
+      .eq('id', userId)
+      .single();
+    if (userError) return null;
+
+    return {
+      ...profile,
+      full_name: profile.first_name && profile.last_name 
+        ? `${profile.first_name} ${profile.last_name}` 
+        : '',
+      users: userData
     };
-    loadValidAddresses();
-  }, []);
+  } catch (err) {
+    console.error('❌ Get patient detail error:', err);
+    return null;
+  }
+}
 
-  const loadNetworkData = async (userId: string) => {
-    try {
-      const allHospitals = await getHospitalsWithHierarchy();
-      setHospitals(allHospitals);
-      const hospitalIds = allHospitals.map(h => h.id);
-      const allCoaches = await getCoachesWithHospitals(hospitalIds);
-      setCoaches(allCoaches);
-      console.log('✅ [loadNetworkData] Loaded', allCoaches.length, 'coaches');
-    } catch (error) { console.error('❌ [loadNetworkData] Error:', error); }
-  };
+export async function deletePatient(patientId: string) {
+  try {
+    await supabase.from('profiles').update({ is_active: false, status: 'inactive', updated_at: new Date().toISOString() }).eq('id', patientId);
+    await supabase.from('users').update({ is_active: false }).eq('id', patientId);
+    return { success: true };
+  } catch (err) {
+    console.error('Delete patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วย' };
+  }
+}
 
-  useEffect(() => {
-    if (rawData.length === 0 || excelHeaders.length === 0) return;
-    const autoMap: Record<string, string> = {};
-    excelHeaders.forEach(header => {
-      const cleanHeader = header.replace(/\s+/g, '').toLowerCase().replace(/[()\.\-]/g, '');
-      const match = STANDARD_FIELDS.find(f => {
-        const fClean = f.label.replace(/\s+/g, '').replace(/[()\.\-]/g, '').toLowerCase();
-        return cleanHeader.includes(fClean) || fClean.includes(cleanHeader);
-      });
-      autoMap[header] = match?.key || '';
-    });
-    setHeaderMapping(autoMap);
-    setStep('mapping');
-  }, [rawData, excelHeaders]);
+export async function restorePatient(patientId: string) {
+  try {
+    await supabase.from('profiles').update({ is_active: true, status: 'active', updated_at: new Date().toISOString() }).eq('id', patientId);
+    await supabase.from('users').update({ is_active: true }).eq('id', patientId);
+    return { success: true };
+  } catch (err) {
+    console.error('Restore patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการกู้คืนผู้ป่วย' };
+  }
+}
 
-  const buildPreview = useCallback(() => {
-    const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
-      Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
-        if (dbKey) {
-          const val = row[excelKey];
-          // ✅ แปลงวันที่ถ้าเป็นฟิลด์ birth_date
-          if (dbKey === 'birth_date' && val) {
-            const cleanVal = String(val).trim();
-            // ตรวจสอบว่าเป็น ISO date (YYYY-MM-DD) หรือไม่
-            if (cleanVal.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              newRow[dbKey] = convertISOToThaiDate(cleanVal);
-            } else {
-              newRow[dbKey] = cleanVal;
-            }
-          } else {
-            newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
-          }
-        }
-      });
-      return newRow;
-    });
-    setPreviewData(mapped);
-    setStep('preview');
-    runValidation(mapped);
-  }, [rawData, headerMapping, selectedRows]);
-
-  const validateRow = (row: any) => {
-    const errors: string[] = [];
-    STANDARD_FIELDS.forEach(field => {
-      const val = row[field.key];
-      const strVal = String(val ?? '').trim();
-
-      if (field.required && strVal === '') { errors.push(`${field.label} เป็นฟิลด์บังคับ`); return; }
-      if (strVal === '') return;
-
-      if (field.inputType === 'number') {
-        if (!/^-?\d+(\.\d+)?$/.test(strVal)) errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น`);
-        else {
-          const num = parseFloat(strVal);
-          if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่า ${field.min}`);
-          if (field.max !== undefined && num > field.max) errors.push(`${field.label} มากกว่า ${field.max}`);
-        }
-      } else if (field.inputType === 'date') {
-        // ✅ รองรับทั้ง DD/MM/YYYY และ YYYY-MM-DD
-        const dateRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
-        const match = strVal.match(dateRegex);
-        if (!match) errors.push(`${field.label} รูปแบบต้องเป็น วว/ดด/ปปปป หรือ วว-ดด-ปปปป`);
-        else {
-          const [, d, m, y] = match;
-          if (parseInt(d) < 1 || parseInt(d) > 31) errors.push(`${field.label} วันไม่ถูกต้อง`);
-          if (parseInt(m) < 1 || parseInt(m) > 12) errors.push(`${field.label} เดือนไม่ถูกต้อง`);
-          if (parseInt(y) < 2400 || parseInt(y) > 2569) errors.push(`${field.label} ปี พ.ศ. ไม่ถูกต้อง`);
-        }
-      } else if (field.inputType === 'select') {
-        if (!field.options?.includes(strVal)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
-      } else if (field.key === 'id_card') {
-        if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
-      }
-    });
-
-    if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
-      const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
-      if (!addrCheck.valid) errors.push(...addrCheck.errors);
+export async function permanentlyDeletePatient(patientId: string) {
+  try {
+    const screenings = await supabase.from('screenings').select('id').eq('user_id', patientId);
+    if (screenings.data && screenings.data.length > 0) {
+      await supabase.from('screening_responses').delete().in('screening_id', screenings.data.map((s: any) => s.id));
     }
-    return errors;
-  };
+    await supabase.from('appointment_followups').delete().eq('user_id', patientId);
+    await supabase.from('goals').delete().eq('user_id', patientId);
+    await supabase.from('records').delete().eq('user_id', patientId);
+    await supabase.from('screenings').delete().eq('user_id', patientId);
+    await supabase.from('appointments').delete().eq('user_id', patientId);
+    await supabase.from('profiles').delete().eq('id', patientId);
+    await supabase.from('users').delete().eq('id', patientId);
+    return { success: true };
+  } catch (err) {
+    console.error('Permanent delete patient error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลบผู้ป่วยถาวร' };
+  }
+}
 
-  const runValidation = (data: any[]) => {
-    const errors: Record<number, string[]> = {};
-    data.forEach((row, idx) => { errors[idx] = validateRow(row); });
-    setValidationErrors(errors);
-    setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
-  };
+export async function getDeletedPatients() {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`*, users!profiles_id_fkey ( id_card, role, is_active )`)
+      .eq('is_active', false)
+      .order('updated_at', { ascending: false });
+    if (error) return [];
+    return data?.map(patient => ({
+      ...patient,
+      full_name: patient.first_name && patient.last_name 
+        ? `${patient.first_name} ${patient.last_name}` 
+        : '',
+    })) || [];
+  } catch (err) {
+    console.error('Get deleted patients error:', err);
+    return [];
+  }
+}
 
-  const startEdit = (rIdx: number, key: string) => { setEditingCell({ row: rIdx, key }); setEditValue(previewData[rIdx][key] || ''); };
-  const cancelEdit = () => setEditingCell(null);
-  const saveEdit = () => {
-    if (!editingCell) return;
-    const { row, key } = editingCell;
-    setPreviewData(prev => {
-      const next = [...prev];
-      next[row] = { ...next[row], [key]: editValue.trim() };
-      return next;
-    });
-    runValidation(previewData.map((r, i) => i === row ? { ...r, [key]: editValue.trim() } : r));
-    setEditingCell(null);
-  };
-  const handleCellKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter') saveEdit(); else if (e.key === 'Escape') cancelEdit(); };
+// =====================================================
+// 👨‍⚕️ Staff Management Functions
+// =====================================================
+export async function getStaffList(role?: string) {
+  try {
+    let query = supabase
+      .from('users')
+      .select(`*, doctors ( id, full_name_th, specialization_th, is_active, is_verified ), hospitals ( id, name, code )`)
+      .in('role', ['admin', 'doctor', 'helper', 'osm'])
+      .eq('is_active', true)
+      .order('created_at', { ascending: false });
+    if (role) query = query.eq('role', role);
+    const { data, error } = await query;
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get staff list error:', err);
+    return [];
+  }
+}
 
-  const processFile = (file: File) => {
-    if (!file.name.match(/\.(xlsx|xls)$/i)) { setError('กรุณาเลือกไฟล์ Excel เท่านั้น'); return; }
-    setSelectedFile(file);
-    setError('');
-    setLoading(true);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const wb = XLSX.read(e.target?.result, { type: 'array', cellDates: false });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
-        setRawData(json);
-        if (json.length > 0) setExcelHeaders(Object.keys(json[0]));
-      } catch { setError('❌ ไม่สามารถอ่านไฟล์ได้'); }
-      finally { setLoading(false); }
-    };
-    reader.readAsArrayBuffer(file);
-  };
+export async function getDeactivatedStaff() {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email )`)
+      .in('role', ['admin', 'doctor', 'helper', 'osm'])
+      .eq('is_active', false)
+      .order('created_at', { ascending: false });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get deactivated staff error:', err);
+    return [];
+  }
+}
 
-  const toggleSelectRow = (idx: number) => {
-    const next = new Set(selectedRows);
-    next.has(idx) ? next.delete(idx) : next.add(idx);
-    setSelectedRows(next);
-    setPreviewData(prev => prev.map((r, i) => i === idx ? { ...r, _selected: next.has(i) } : r));
-  };
-
-  const selectAll = (checked: boolean) => {
-    const next = checked ? new Set(previewData.map((_, i) => i)) : new Set();
-    setSelectedRows(next);
-    setPreviewData(prev => prev.map((r, i) => ({ ...r, _selected: next.has(i) })));
-  };
-
-  const hasErrorsInSelected = Array.from(selectedRows).some(idx => previewData[idx]?._errors?.length > 0);
-
-  const getNetworkHospitalIds = (hospitalId: string): string[] => {
-    const hospital = hospitals.find(h => h.id === hospitalId);
-    if (!hospital) return [hospitalId];
-    const networkIds: string[] = [hospitalId];
-    if (hospital.type === 'main') {
-      const subHospitals = hospitals.filter(h => h.parent_id === hospitalId);
-      subHospitals.forEach(sub => networkIds.push(sub.id));
-    } else if (hospital.type === 'sub' && hospital.parent_id) {
-      networkIds.push(hospital.parent_id);
+export async function updateStaff(userId: string, data: {
+  full_name_th?: string;
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;
+  birth_date?: string;
+  password_hash?: string;
+  is_active?: boolean;
+}) {
+  try {
+    const updateUserData: any = {};
+    if (data.birth_date !== undefined) updateUserData.birth_date = data.birth_date;
+    if (data.password_hash !== undefined) updateUserData.password_hash = data.password_hash;
+    if (data.hospital_id !== undefined) updateUserData.hospital_id = data.hospital_id;
+    if (Object.keys(updateUserData).length > 0) {
+      updateUserData.updated_at = new Date().toISOString();
+      const { error: userError } = await supabase.from('users').update(updateUserData).eq('id', userId);
+      if (userError) return { success: false, error: userError.message };
     }
-    return networkIds;
-  };
 
-  const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
-    if (!hospitalId) {
-      console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
-      return;
+    const updateDoctorData: any = { updated_at: new Date().toISOString() };
+    if (data.full_name_th !== undefined) updateDoctorData.full_name_th = data.full_name_th;
+    if (data.specialization_th !== undefined) updateDoctorData.specialization_th = data.specialization_th;
+    if (data.is_active !== undefined) updateDoctorData.is_active = data.is_active;
+
+    const { error } = await supabase.from('doctors').update(updateDoctorData).eq('user_id', userId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    console.error('Update staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการแก้ไขข้อมูล' };
+  }
+}
+
+export async function deactivateStaff(userId: string) {
+  try {
+    await supabase.from('doctors').update({ is_active: false }).eq('user_id', userId);
+    const { error } = await supabase.from('users').update({ is_active: false }).eq('id', userId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    console.error('Deactivate staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการปิดการใช้งาน' };
+  }
+}
+
+export async function restoreStaff(staffId: string) {
+  try {
+    await supabase.from('doctors').update({ is_active: true }).eq('user_id', staffId);
+    const { error } = await supabase.from('users').update({ is_active: true }).eq('id', staffId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    console.error('Restore staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการกู้คืนเจ้าหน้าที่' };
+  }
+}
+
+export async function permanentlyDeleteStaff(staffId: string) {
+  try {
+    await supabase.from('pending_staff').update({ reviewed_by: null, reviewed_at: null, rejection_reason: null }).eq('reviewed_by', staffId);
+    await supabase.from('doctors').delete().eq('user_id', staffId);
+    const { error: userError } = await supabase.from('users').delete().eq('id', staffId);
+    if (userError) return { success: false, error: userError.message };
+    return { success: true };
+  } catch (err) {
+    console.error('Permanent delete staff error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการลบเจ้าหน้าที่ถาวร' };
+  }
+}
+
+export async function getStaffDetail(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select(`*, doctors ( id, full_name_th, specialization_th, phone, email, is_active, is_verified )`)
+      .eq('id', userId)
+      .single();
+    if (error) return null;
+    return data;
+  } catch (err) {
+    console.error('Get staff detail error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// 🏥 Hospital Management Functions
+// =====================================================
+export async function getHospitals() {
+  try {
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select('*')
+      .eq('is_active', true)
+      .order('type', { ascending: true })
+      .order('name', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get hospitals error:', err);
+    return [];
+  }
+}
+
+export async function getHospitalsWithHierarchy() {
+  try {
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select(`*, parent_hospital:hospitals!parent_id ( id, name, code )`)
+      .eq('is_active', true)
+      .order('type', { ascending: true })
+      .order('name', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ Get hospitals with hierarchy error:', err);
+    return [];
+  }
+}
+
+export async function createHospital(data: {
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id?: string;
+  address?: string;
+  phone?: string;
+  province?: string;
+  district?: string;
+  subdistrict?: string;
+}) {
+  try {
+    const { data: hospital, error } = await supabase
+      .from('hospitals')
+      .insert({
+        name: data.name,
+        code: data.code,
+        type: data.type,
+        parent_id: data.parent_id,
+        address: data.address,
+        phone: data.phone,
+        province: data.province,
+        district: data.district,
+        subdistrict: data.subdistrict,
+        is_active: true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return { success: true, hospital };
+  } catch (err) {
+    console.error('Create hospital error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างโรงพยาบาล' };
+  }
+}
+
+// =====================================================
+// 🏘️ Village Management Functions
+// =====================================================
+export async function getVillages(hospitalId?: string) {
+  try {
+    let query = supabase
+      .from('villages')
+      .select(`*, hospitals ( name, type )`)
+      .eq('is_active', true)
+      .order('province', { ascending: true })
+      .order('district', { ascending: true })
+      .order('subdistrict', { ascending: true })
+      .order('village_no', { ascending: true });
+    if (hospitalId) query = query.eq('hospital_id', hospitalId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('Get villages error:', err);
+    return [];
+  }
+}
+
+export async function createVillage(data: {
+  village_no: string;
+  village_name?: string;
+  subdistrict: string;
+  district: string;
+  province: string;
+  postal_code?: string;
+  hospital_id?: string;
+}) {
+  try {
+    const { data: village, error } = await supabase
+      .from('villages')
+      .insert({
+        village_no: data.village_no,
+        village_name: data.village_name,
+        subdistrict: data.subdistrict,
+        district: data.district,
+        province: data.province,
+        postal_code: data.postal_code,
+        hospital_id: data.hospital_id,
+        is_active: true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return { success: true, village };
+  } catch (err) {
+    console.error('Create village error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างหมู่บ้าน' };
+  }
+}
+
+// =====================================================
+// 👩‍⚕️ Volunteer Management Functions
+// =====================================================
+export async function getVolunteerVillages(volunteerId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('volunteer_villages')
+      .select(`*, villages ( village_no, village_name, subdistrict, district, province )`)
+      .eq('volunteer_id', volunteerId)
+      .eq('is_active', true);
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('Get volunteer villages error:', err);
+    return [];
+  }
+}
+
+export async function assignVolunteerVillage(data: { volunteer_id: string; village_id: string; }) {
+  try {
+    const { data: result, error } = await supabase
+      .from('volunteer_villages')
+      .insert({
+        volunteer_id: data.volunteer_id,
+        village_id: data.village_id,
+        is_active: true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return { success: true, data: result };
+  } catch (err) {
+    console.error('Assign volunteer village error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการมอบหมายหมู่บ้าน' };
+  }
+}
+
+// =====================================================
+// 📍 Address Functions
+// =====================================================
+export async function getProvinces() {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('province')
+      .neq('province', null)
+      .order('province', { ascending: true });
+    if (error) return [];
+    const provinces = [...new Set(data?.map(v => v.province) || [])];
+    return provinces;
+  } catch (err) {
+    console.error('Get provinces error:', err);
+    return [];
+  }
+}
+
+export async function getDistricts(province: string) {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('district')
+      .eq('province', province)
+      .neq('district', null)
+      .order('district', { ascending: true });
+    if (error) return [];
+    const districts = [...new Set(data?.map(v => v.district) || [])];
+    return districts;
+  } catch (err) {
+    console.error('Get districts error:', err);
+    return [];
+  }
+}
+
+export async function getSubdistricts(province: string, district: string) {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('subdistrict, postal_code')
+      .eq('province', province)
+      .eq('district', district)
+      .neq('subdistrict', null)
+      .order('subdistrict', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get subdistricts error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 📅 Appointment Functions
+// =====================================================
+export async function getAppointments(patientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`*, doctors:doctor_id ( id, full_name_th, specialization_th )`)
+      .eq('user_id', patientId)
+      .order('appointment_date', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getAppointments] Error:', err);
+    return [];
+  }
+}
+
+export async function createAppointment(data: {
+  user_id: string;
+  doctor_id: string;
+  appointment_type: string;
+  appointment_date: string;
+  duration_minutes?: number;
+  location_type?: string;
+  location_detail?: string;
+  notes?: string;
+  created_by: string;
+}) {
+  try {
+    const { data: appointment, error } = await supabase
+      .from('appointments')
+      .insert({
+        user_id: data.user_id,
+        doctor_id: data.doctor_id,
+        appointment_type: data.appointment_type,
+        appointment_date: data.appointment_date,
+        duration_minutes: data.duration_minutes || 30,
+        location_type: data.location_type || 'clinic',
+        location_detail: data.location_detail,
+        status: 'scheduled',
+        notes: data.notes,
+        created_by: data.created_by,
+      })
+      .select()
+      .single();
+    if (error) return { success: false, error: error.message };
+    return { success: true, appointment };
+  } catch (err) {
+    console.error('Create appointment error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างนัดหมาย' };
+  }
+}
+
+export async function getNextAppointment(userId: string) {
+  try {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const { data, error } = await supabase
+      .from('appointments')
+      .select(`*, doctors ( id, full_name_th, specialization_th )`)
+      .eq('user_id', userId)
+      .in('status', ['scheduled', 'confirmed', 'pending'])
+      .gte('appointment_date', startOfToday.toISOString())
+      .order('appointment_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) return null;
+    return data;
+  } catch (err) {
+    console.error('Appointment error:', err);
+    return null;
+  }
+}
+
+export async function getNextPatientAppointment(patientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('user_id', patientId)
+      .in('status', ['scheduled', 'confirmed'])
+      .gte('appointment_date', new Date().toISOString())
+      .order('appointment_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) return null;
+    return data;
+  } catch (err) {
+    console.error('Get next appointment error:', err);
+    return null;
+  }
+}
+
+// =====================================================
+// 📋 Screening Functions
+// =====================================================
+export async function getScreeningQuestions(questionType: string = 'pam') {
+  try {
+    const { data, error } = await supabase
+      .from('screening_questions')
+      .select('*')
+      .eq('question_type', questionType)
+      .eq('is_active', true)
+      .order('question_number', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get screening questions error:', err);
+    return [];
+  }
+}
+
+export async function saveScreening(data: {
+  user_id: string;
+  screening_type: string;
+  pam_total_score?: number;
+  pam_level_result?: string;
+  proms_q1_score?: number;
+  proms_q2_score?: number;
+  proms_q3_score?: number;
+  proms_q4_score?: number;
+  proms_zone?: string;
+  proms_has_low_score?: boolean;
+  confidence_score?: number;
+  confidence_improvement_plan?: string;
+  conducted_by?: string;
+  responses: Array<{
+    question_id: string;
+    question_number: number;
+    question_type: string;
+    selected_option?: string;
+    score?: number;
+  }>;
+}) {
+  try {
+    const { data: screening, error: screeningError } = await supabase
+      .from('screenings')
+      .insert({
+        user_id: data.user_id,
+        screening_type: data.screening_type,
+        pam_total_score: data.pam_total_score,
+        pam_level_result: data.pam_level_result,
+        proms_q1_score: data.proms_q1_score,
+        proms_q2_score: data.proms_q2_score,
+        proms_q3_score: data.proms_q3_score,
+        proms_q4_score: data.proms_q4_score,
+        proms_zone: data.proms_zone,
+        proms_has_low_score: data.proms_has_low_score,
+        confidence_score: data.confidence_score,
+        confidence_improvement_plan: data.confidence_improvement_plan,
+        conducted_by: data.conducted_by,
+      })
+      .select()
+      .single();
+    if (screeningError) return { success: false, error: screeningError.message };
+
+    const responses = data.responses.map(r => ({
+      screening_id: screening.id,
+      question_id: r.question_id,
+      question_number: r.question_number,
+      question_type: r.question_type,
+      selected_option: r.selected_option,
+      score: r.score,
+    }));
+
+    const { error: responsesError } = await supabase.from('screening_responses').insert(responses);
+    if (responsesError) return { success: false, error: responsesError.message };
+
+    if (data.pam_level_result) {
+      const levelMap: Record<string, string> = { 'Deny': 'L1', 'General': 'L2', 'Intensive': 'L3', 'Champion': 'L4' };
+      const zoneMap: Record<string, string> = { 'Deny': 'Red Zone', 'General': 'Green Zone', 'Intensive': 'Green Zone', 'Champion': 'Green Zone' };
+      await supabase.from('profiles').update({
+        pam_level: levelMap[data.pam_level_result] || 'L1',
+        zone: zoneMap[data.pam_level_result] || 'Green Zone',
+        pam_score: data.pam_total_score,
+      }).eq('id', data.user_id);
     }
+
+    return { success: true, screening };
+  } catch (err) {
+    console.error('Save screening error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการบันทึก screening' };
+  }
+}
+
+export async function getScreeningHistory(patientId: string) {
+  try {
+    const { data: screenings, error } = await supabase
+      .from('screenings')
+      .select(`*, screening_responses ( question_id, question_number, question_type, selected_option, score )`)
+      .eq('user_id', patientId)
+      .order('screening_date', { ascending: false });
+    if (error) return [];
+    return screenings || [];
+  } catch (err) {
+    console.error('Get screening history error:', err);
+    return [];
+  }
+}
+
+export async function getAllScreeningQuestions() {
+  try {
+    const { data, error } = await supabase
+      .from('screening_questions')
+      .select('*')
+      .eq('is_active', true)
+      .order('question_type', { ascending: true })
+      .order('question_number', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get all questions error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 🎯 Goals Functions
+// =====================================================
+export async function createDefaultGoals(userId: string, pamLevel: string, createdBy: string) {
+  try {
+    if (pamLevel === 'L1') return { success: true, message: 'L1 - ไม่สร้างเป้าหมายอัตโนมัติ', count: 0 };
     
-    if (modalCoaches[errorIndex]) {
-      console.log('✅ [loadCoachesForErrorRow] Coaches already loaded for error', errorIndex);
-      return;
-    }
+    const { data: existingGoals, error: checkError } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active');
     
-    try {
-      console.log(`🔍 [loadCoachesForErrorRow] Loading coaches for error ${errorIndex}, hospital: ${hospitalId}`);
+    if (checkError) console.error('Error checking existing goals:', checkError);
+    
+    if (existingGoals && existingGoals.length > 0) {
+      const goalNames = existingGoals.map(g => g.goal_name);
+      const isL4ButHasL2L3Goals = pamLevel === 'L4' && goalNames.some(name => ['stop_sweet', 'reduce_rice', 'protein_vegetable', 'exercise_walk', 'record_weight_sugar'].includes(name));
+      const isL2L3ButHasL4Goals = (pamLevel === 'L2' || pamLevel === 'L3') && goalNames.some(name => ['carb_control', 'protein_intake', 'water_intake', 'stretching', 'cardio', 'strengthening', 'hiit', 'sleep'].includes(name));
       
-      const networkIds = getNetworkHospitalIds(hospitalId);
-      console.log('🏥 [loadCoachesForErrorRow] Network IDs:', networkIds);
-      
-      const networkCoaches = coaches.filter(coach => {
-        const coachHospitalId = coach.users?.hospital_id;
-        return coachHospitalId && networkIds.includes(coachHospitalId);
-      });
-      
-      console.log(`✅ [loadCoachesForErrorRow] Found ${networkCoaches.length} coaches for this hospital network`);
-      console.log('📋 Coaches:', networkCoaches.map(c => ({
-        name: c.full_name_th,
-        hospital: c.users?.hospitals?.name,
-        hospital_id: c.users?.hospital_id
-      })));
-      
-      setModalCoaches(prev => ({ 
-        ...prev, 
-        [errorIndex]: networkCoaches 
-      }));
-      
-    } catch (err) {
-      console.error('❌ [loadCoachesForErrorRow] Error:', err);
-    }
-  };
-
-  const handleExportToExcel = () => {
-    if (!previewData || previewData.length === 0) {
-      setError('ไม่มีข้อมูลสำหรับส่งออก');
-      return;
-    }
-
-    const exportData = previewData.map((row, idx) => {
-      const exportRow: any = {
-        'ลำดับ': idx + 1,
-        'เลขบัตรประชาชน': row.id_card || '',
-        'ชื่อผู้ป่วย': row.first_name || '',
-        'นามสกุลผู้ป่วย': row.last_name || '',
-        'HN': row.hospital_number || '',
-        'วันเกิด': row.birth_date || '',
-        'เพศ': row.gender === 'male' ? 'ชาย' : row.gender === 'female' ? 'หญิง' : row.gender || '',
-        'โรงพยาบาล': row.hospital_name || '',
-        'เบอร์โทรศัพท์': row.phone || '',
-        'อีเมล': row.email || '',
-        'น้ำหนัก(กก.)': row.current_weight || '',
-        'ส่วนสูง(ซม.)': row.height || '',
-        'รอบเอว(ซม.)': row.waist_circumference || '',
-        'ประเภทเบาหวาน': row.diabetes_type || '',
-        'ค่าน้ำตาล': row.blood_sugar || '',
-        'ค่าHbA1c': row.hba1c_level || '',
-        'หมายเหตุ': row.notes || '',
-        'บ้านเลขที่': row.house_number || '',
-        'หมู่ที่': row.village_no || '',
-        'หมู่บ้าน': row.village_name || '',
-        'ซอย': row.soi || '',
-        'ถนน': row.road || '',
-        'ตำบล': row.subdistrict || '',
-        'อำเภอ': row.district || '',
-        'จังหวัด': row.province || '',
-        'รหัสไปรษณีย์': row.postal_code || '',
-        'ที่อยู่เพิ่มเติม': row.address_line1 || '',
-        'ผู้ติดต่อฉุกเฉิน': row.emergency_contact_name || '',
-        'เบอร์ติดต่อฉุกเฉิน': row.emergency_contact_phone || '',
-        'ความสัมพันธ์': row.emergency_contact_relationship || '',
-        'โค้ชผู้ดูแล': row.coach_name || '',
-      };
-      return exportRow;
-    });
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    ws['!cols'] = [
-      { wch: 5 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 },
-      { wch: 10 }, { wch: 30 }, { wch: 12 }, { wch: 25 }, { wch: 10 }, { wch: 10 },
-      { wch: 10 }, { wch: 15 }, { wch: 12 }, { wch: 10 }, { wch: 30 }, { wch: 15 },
-      { wch: 10 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 20 },
-      { wch: 20 }, { wch: 10 }, { wch: 30 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 30 },
-    ];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
-  };
-
-  const handleSaveHospitalFix = async (errorIndex: number) => {
-    if (!importResult) return;
-    const currentError = importResult.errors[errorIndex];
-    const rowIndex = currentError.row - 1;
-
-    if (!currentError.hospital_id) {
-      setError('กรุณาเลือกโรงพยาบาลก่อนบันทึก');
-      return;
-    }
-
-    setPreviewData(prev => {
-      const newData = [...prev];
-      const row = { ...newData[rowIndex] };
-      const hospital = hospitals.find(h => h.id === currentError.hospital_id);
-      if (hospital) {
-        row.hospital_name = hospital.name;
-      }
-      newData[rowIndex] = row;
-      return newData;
-    });
-
-    setTimeout(() => {
-      runValidation(previewData);
-    }, 100);
-
-    setTimeout(() => {
-      const updatedRow = previewData[rowIndex];
-      const rowErrors = validateRow(updatedRow);
-      
-      if (rowErrors.length === 0) {
-        handleImportSingleRow(rowIndex);
+      if (isL4ButHasL2L3Goals || isL2L3ButHasL4Goals) {
+        await supabase.from('goals').update({ status: 'archived', is_current: false, updated_at: new Date().toISOString() }).eq('user_id', userId).eq('goal_type', 'weekly_activity').eq('status', 'active');
       } else {
-        const newErrors = [...importResult.errors];
-        newErrors[errorIndex] = { 
-          ...newErrors[errorIndex], 
-          hospital_fixed: true,
-          fixed: false
-        };
-        setImportResult({ ...importResult, errors: newErrors });
-        
-        const nextError = rowErrors.find(e => !e.includes('โรงพยาบาล'));
-        if (nextError) {
-          setError(`✅ โรงพยาบาลถูกต้องแล้ว แต่พบปัญหา: ${nextError}`);
-        }
+        return { success: true, message: 'มีเป้าหมายอยู่แล้วและตรงกับ PAM Level', count: existingGoals.length, alreadyExists: true };
       }
-    }, 200);
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const goals = [];
+
+    if (pamLevel === 'L2' || pamLevel === 'L3') {
+      const { data: activities, error: activitiesError } = await supabase
+        .from('activities')
+        .select('id, activity_code, activity_name_th, description_th, activity_type')
+        .in('activity_code', ['stop_sweet', 'reduce_rice', 'protein_vegetable', 'exercise_walk', 'record_weight_sugar'])
+        .eq('is_active', true);
+      
+      if (activitiesError) console.error('Error fetching activities:', activitiesError);
+      if (activities && activities.length > 0) {
+        activities.forEach(activity => {
+          let targetValue = null, targetUnit = null;
+          if (activity.activity_code === 'exercise_walk') { targetValue = 15; targetUnit = 'minutes'; }
+          goals.push({
+            user_id: userId,
+            goal_type: 'weekly_activity',
+            goal_name: activity.activity_code,
+            goal_name_th: activity.activity_name_th,
+            description: activity.description_th,
+            description_th: activity.description_th,
+            target_value: targetValue,
+            target_unit: targetUnit,
+            target_days: 5,
+            start_date: today,
+            status: 'active',
+            priority: 1,
+            is_core_goal: true,
+            activity_id: activity.id,
+            created_by: createdBy,
+          });
+        });
+      }
+    }
+
+    if (pamLevel === 'L4') {
+      const { data: activities, error: activitiesError } = await supabase
+        .from('activities')
+        .select('id, activity_code, activity_name_th, description_th, activity_type')
+        .in('activity_code', ['carb_control', 'protein_intake', 'water_intake', 'stretching', 'cardio', 'strengthening', 'hiit', 'sleep'])
+        .eq('is_active', true);
+      
+      if (activitiesError) console.error('Error fetching activities:', activitiesError);
+      if (activities && activities.length > 0) {
+        activities.forEach(activity => {
+          let targetValue = null, targetUnit = null;
+          if (activity.activity_code === 'water_intake') { targetValue = 1; targetUnit = 'liters'; }
+          goals.push({
+            user_id: userId,
+            goal_type: 'weekly_activity',
+            goal_name: activity.activity_code,
+            goal_name_th: activity.activity_name_th,
+            description: activity.description_th,
+            description_th: activity.description_th,
+            target_value: targetValue,
+            target_unit: targetUnit,
+            target_days: 5,
+            start_date: today,
+            status: 'active',
+            priority: 1,
+            is_core_goal: true,
+            activity_id: activity.id,
+            created_by: createdBy,
+          });
+        });
+      }
+    }
+
+    if (goals.length > 0) {
+      const { error } = await supabase.from('goals').insert(goals);
+      if (error) return { success: false, error: error.message };
+      return { success: true, count: goals.length };
+    }
+    return { success: true, count: 0 };
+  } catch (err) {
+    console.error('Create default goals error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการสร้างเป้าหมาย' };
+  }
+}
+
+export async function getPatientGoals(userId: string, roundNumber?: number) {
+  try {
+    let query = supabase
+      .from('goals')
+      .select(`*, activities ( activity_code, activity_name_th, description_th )`)
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active');
+    
+    if (roundNumber) {
+      query = query.eq('round_number', roundNumber);
+    } else {
+      query = query.eq('is_current', true);
+    }
+    query = query.order('priority', { ascending: true });
+    
+    const { data, error } = await query;
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getPatientGoals] Exception:', err);
+    return [];
+  }
+}
+
+export async function getGoalRoundCount(userId: string) {
+  try {
+    const { data } = await supabase.from('goals').select('round_number').eq('user_id', userId).eq('goal_type', 'weekly_activity');
+    if (!data || data.length === 0) return 1;
+    const uniqueRounds = [...new Set(data.map(g => g.round_number))];
+    return Math.max(...uniqueRounds, 1);
+  } catch (err) {
+    console.error('Get goal round count error:', err);
+    return 1;
+  }
+}
+
+export async function getPatientRecords(userId: string, days: number = 30) {
+  try {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    const { data, error } = await supabase
+      .from('records')
+      .select(`*, activities ( activity_code, activity_name_th )`)
+      .eq('user_id', userId)
+      .gte('record_date', startDate.toISOString())
+      .order('record_date', { ascending: false });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getPatientRecords] Exception:', err);
+    return [];
+  }
+}
+
+export async function updateExerciseGoal(userId: string, goalName: string, targetValue: number, targetUnit: string = 'minutes') {
+  try {
+    const { error } = await supabase
+      .from('goals')
+      .update({ target_value: targetValue, target_unit: targetUnit, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('goal_name', goalName)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active');
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    console.error('Update exercise goal error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการอัปเดตเป้าหมาย' };
+  }
+}
+
+export async function getLatestGoalRound(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('goals')
+      .select('round_number, created_at')
+      .eq('user_id', userId)
+      .eq('goal_type', 'weekly_activity')
+      .order('round_number', { ascending: false })
+      .limit(1);
+    if (error) return null;
+    return data?.[0] || null;
+  } catch (err) {
+    console.error('Get latest goal round error:', err);
+    return null;
+  }
+}
+
+export async function saveGoalsNewRound(data: {
+  user_id: string;
+  goals: Array<{
+    goal_name: string;
+    goal_name_th: string;
+    target_days: number;
+    target_value?: number;
+    target_unit?: string;
+    activity_id?: string;
+    primary_goal_note?: string;
+    weekly_goal_note?: string;
+  }>;
+  created_by: string;
+}) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data: existingTodayGoals, error: fetchError } = await supabase
+      .from('goals')
+      .select('id, goal_name, created_at')
+      .eq('user_id', data.user_id)
+      .eq('goal_type', 'weekly_activity')
+      .eq('status', 'active')
+      .gte('created_at', today + 'T00:00:00')
+      .lte('created_at', today + 'T23:59:59');
+    
+    if (fetchError) console.error('Error fetching existing goals:', fetchError);
+    
+    let nextRound: number;
+    if (existingTodayGoals && existingTodayGoals.length > 0) {
+      nextRound = existingTodayGoals[0].round_number || 1;
+      await supabase.from('goals').delete().eq('user_id', data.user_id).eq('goal_type', 'weekly_activity').eq('status', 'active').gte('created_at', today + 'T00:00:00').lte('created_at', today + 'T23:59:59');
+    } else {
+      const { data: goalsToArchive } = await supabase.from('goals').select('id, goal_name').eq('user_id', data.user_id).eq('goal_type', 'weekly_activity').eq('status', 'active');
+      if (goalsToArchive && goalsToArchive.length > 0) {
+        await supabase.from('goals').update({ is_current: false, status: 'archived', updated_at: new Date().toISOString() }).eq('user_id', data.user_id).eq('goal_type', 'weekly_activity').eq('status', 'active');
+      }
+      const { data: allRounds } = await supabase.from('goals').select('round_number').eq('user_id', data.user_id).eq('goal_type', 'weekly_activity');
+      const uniqueRounds = new Set(allRounds?.map(g => g.round_number) || []);
+      nextRound = uniqueRounds.size + 1;
+    }
+
+    const newGoals = data.goals.map(goal => ({
+      user_id: data.user_id,
+      goal_type: 'weekly_activity' as const,
+      goal_name: goal.goal_name,
+      goal_name_th: goal.goal_name_th,
+      target_days: goal.target_days,
+      target_value: goal.target_value || null,
+      target_unit: goal.target_unit || null,
+      activity_id: goal.activity_id || null,
+      status: 'active' as const,
+      is_current: true,
+      round_number: nextRound,
+      start_date: today,
+      priority: 1,
+      is_core_goal: true,
+      created_by: data.created_by,
+      primary_goal_note: goal.primary_goal_note || null,
+      weekly_goal_note: goal.weekly_goal_note || null,
+      last_recorded_date: today,
+    }));
+
+    const { error: insertError, data: insertedData } = await supabase.from('goals').insert(newGoals).select();
+    if (insertError) return { success: false, error: insertError.message };
+    return { success: true, round_number: nextRound, goals_count: newGoals.length };
+  } catch (err) {
+    console.error('❌ [saveGoalsNewRound] Error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการบันทึกเป้าหมาย' };
+  }
+}
+
+// =====================================================
+// 📊 Records Functions
+// =====================================================
+export async function saveRecord(data: {
+  user_id: string;
+  activity_id: string;
+  record_date: string;
+  is_completed: boolean;
+  weight?: number;
+  blood_sugar?: number;
+  sweet_type?: string[];
+  exercise_minutes?: number;
+}) {
+  try {
+    const { data: result, error } = await supabase
+      .from('records')
+      .upsert({
+        user_id: data.user_id,
+        activity_id: data.activity_id,
+        record_date: data.record_date,
+        is_completed: data.is_completed,
+        updated_at: new Date().toISOString(),
+        ...(data.weight !== undefined && { weight: data.weight }),
+        ...(data.blood_sugar !== undefined && { blood_sugar: data.blood_sugar }),
+        ...(data.sweet_type !== undefined && { sweet_type: data.sweet_type }),
+        ...(data.exercise_minutes !== undefined && { exercise_minutes: data.exercise_minutes }),
+      }, { onConflict: 'user_id,activity_id,record_date' })
+      .select();
+    if (error) return null;
+    return result;
+  } catch (err) {
+    console.error('Save record error:', err);
+    return null;
+  }
+}
+
+export async function saveExerciseRecord(data: {
+  user_id: string;
+  activity_id: string;
+  record_date: string;
+  exercise_minutes: number;
+  is_completed: boolean;
+}) {
+  try {
+    const { data: result, error } = await supabase
+      .from('records')
+      .upsert({
+        user_id: data.user_id,
+        activity_id: data.activity_id,
+        record_date: data.record_date,
+        exercise_minutes: data.exercise_minutes,
+        is_completed: data.is_completed,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id,activity_id,record_date' })
+      .select();
+    if (error) return null;
+    return result;
+  } catch (err) {
+    console.error('Save exercise record error:', err);
+    return null;
+  }
+}
+
+export async function getTodayRecords(userId: string) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const { data, error } = await supabase
+      .from('records')
+      .select(`id, activity_id, is_completed, record_date, sweet_type, weight, blood_sugar, exercise_minutes`)
+      .eq('user_id', userId)
+      .eq('record_date', today);
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get today records error:', err);
+    return [];
+  }
+}
+
+export async function getWeeklyGoals(userId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('goals')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'active')
+      .eq('goal_type', 'weekly_activity');
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('Get weekly goals error:', err);
+    return [];
+  }
+}
+
+export async function getProgress(userId: string, days: number = 7) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  const { data, error } = await supabase
+    .from('records')
+    .select(`*, activities ( activity_code, activity_name_th, activity_type )`)
+    .eq('user_id', userId)
+    .gte('record_date', startDate.toISOString())
+    .order('record_date', { ascending: false });
+  if (error) return [];
+  return data;
+}
+
+// =====================================================
+// 📈 Dashboard Functions
+// =====================================================
+export async function getDashboardStats(hospitalIds?: string[]) {
+  try {
+    let patientsQuery = supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true);
+    if (hospitalIds && hospitalIds.length > 0) patientsQuery = patientsQuery.in('hospital_id', hospitalIds);
+    const { count: totalPatients } = await patientsQuery;
+
+    const today = new Date().toISOString().split('T')[0];
+    let recordsQuery = supabase.from('records').select('*', { count: 'exact', head: true }).eq('record_date', today);
+    if (hospitalIds && hospitalIds.length > 0) {
+      const { data: patientIds } = await supabase.from('profiles').select('id').in('hospital_id', hospitalIds).eq('is_active', true);
+      if (patientIds && patientIds.length > 0) {
+        recordsQuery = recordsQuery.in('user_id', patientIds.map(p => p.id));
+      } else {
+        return { totalPatients: 0, todayRecords: 0, todayAppointments: 0, pendingAssessments: 0 };
+      }
+    }
+    const { count: todayRecords } = await recordsQuery;
+
+    let appointmentsQuery = supabase.from('appointments').select('*', { count: 'exact', head: true }).gte('appointment_date', today).lte('appointment_date', today + 'T23:59:59');
+    if (hospitalIds && hospitalIds.length > 0) {
+      const { data: patientIds } = await supabase.from('profiles').select('id').in('hospital_id', hospitalIds).eq('is_active', true);
+      if (patientIds && patientIds.length > 0) {
+        appointmentsQuery = appointmentsQuery.in('user_id', patientIds.map(p => p.id));
+      } else {
+        return { totalPatients: 0, todayRecords: 0, todayAppointments: 0, pendingAssessments: 0 };
+      }
+    }
+    const { count: todayAppointments } = await appointmentsQuery;
+
+    let pendingQuery = supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('pam_level', 'L1').eq('is_active', true);
+    if (hospitalIds && hospitalIds.length > 0) pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
+    const { count: pendingAssessments } = await pendingQuery;
+
+    return {
+      totalPatients: totalPatients || 0,
+      todayRecords: todayRecords || 0,
+      todayAppointments: todayAppointments || 0,
+      pendingAssessments: pendingAssessments || 0,
+    };
+  } catch (err) {
+    console.error('Get dashboard stats error:', err);
+    return { totalPatients: 0, todayRecords: 0, todayAppointments: 0, pendingAssessments: 0 };
+  }
+}
+
+// =====================================================
+// 📚 Knowledge Functions
+// =====================================================
+export async function getKnowledge(pamLevel: string = 'ALL') {
+  try {
+    const { data, error } = await supabase
+      .from('knowledge')
+      .select('*')
+      .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: false });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getKnowledge] Error:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 📋 Appointment Followup Functions
+// =====================================================
+export async function saveAppointmentFollowup(data: {
+  appointment_id: string;
+  user_id: string;
+  followup_date: string;
+  followup_round: number;
+  blood_sugar_dtx?: number;
+  blood_pressure_sys?: number;
+  blood_pressure_dia?: number;
+  pulse?: number;
+  weight?: number;
+  waist_circumference?: number;
+  food_amount_status?: 'completed' | 'not_completed' | 'not_in_plan';
+  food_type_status?: 'completed' | 'not_completed' | 'not_in_plan';
+  movement_status?: 'completed' | 'not_completed' | 'not_in_plan';
+  confidence_score?: number;
+  notes?: string;
+  life_schedule_image_url?: string;
+  followup_status?: 'excellent' | 'good' | 'fair' | 'needs_improvement' | 'monitoring';
+  conducted_by: string;
+}) {
+  try {
+    const { data: followup, error } = await supabase
+      .from('appointment_followups')
+      .upsert({
+        appointment_id: data.appointment_id,
+        user_id: data.user_id,
+        followup_date: data.followup_date,
+        followup_round: data.followup_round,
+        blood_sugar_dtx: data.blood_sugar_dtx,
+        blood_pressure_sys: data.blood_pressure_sys,
+        blood_pressure_dia: data.blood_pressure_dia,
+        pulse: data.pulse,
+        weight: data.weight,
+        waist_circumference: data.waist_circumference,
+        food_amount_status: data.food_amount_status,
+        food_type_status: data.food_type_status,
+        movement_status: data.movement_status,
+        confidence_score: data.confidence_score,
+        notes: data.notes,
+        life_schedule_image_url: data.life_schedule_image_url,
+        followup_status: data.followup_status,
+        conducted_by: data.conducted_by,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'appointment_id,followup_round' })
+      .select()
+      .single();
+    if (error) return { success: false, error: error.message };
+    return { success: true, followup };
+  } catch (err) {
+    console.error('Save followup error:', err);
+    return { success: false, error: 'เกิดข้อผิดพลาดในการบันทึก' };
+  }
+}
+
+export async function saveAppointmentFollowupComplete(data: {
+  appointment_id: string;
+  user_id: string;
+  followup_date: string;
+  followup_round: number;
+  weight?: number | null;
+  waist_circumference?: number | null;
+  blood_pressure_sys?: number | null;
+  blood_pressure_dia?: number | null;
+  blood_sugar_dtx?: number | null;
+  life_schedule_image_url?: string | null;
+  adaptation_summary?: string | null;
+  adaptation_obstacles?: string | null;
+  adaptation_opportunities?: string | null;
+  adaptation_other?: string | null;
+  food_amount_status?: 'completed' | 'not_completed' | 'not_in_plan' | null;
+  food_type_status?: 'completed' | 'not_completed' | 'not_in_plan' | null;
+  movement_status?: 'completed' | 'not_completed' | 'not_in_plan' | null;
+  food_amount_note?: string | null;
+  food_type_note?: string | null;
+  movement_note?: string | null;
+  confidence_score?: number | null;
+  confidence_improvement_plan?: string | null;
+  summary?: string | null;
+  recommendations?: string | null;
+  followup_status?: 'excellent' | 'good' | 'fair' | 'needs_improvement' | 'monitoring' | null;
+  conducted_by: string;
+}) {
+  try {
+    if (!data.conducted_by) throw new Error('conducted_by is required');
+    const { data: followup, error } = await supabase
+      .from('appointment_followups')
+      .insert({
+        appointment_id: data.appointment_id,
+        user_id: data.user_id,
+        followup_date: data.followup_date,
+        followup_round: data.followup_round,
+        weight: data.weight || null,
+        waist_circumference: data.waist_circumference || null,
+        blood_pressure_sys: data.blood_pressure_sys || null,
+        blood_pressure_dia: data.blood_pressure_dia || null,
+        blood_sugar_dtx: data.blood_sugar_dtx || null,
+        life_schedule_image_url: data.life_schedule_image_url || null,
+        adaptation_summary: data.adaptation_summary || null,
+        adaptation_obstacles: data.adaptation_obstacles || null,
+        adaptation_opportunities: data.adaptation_opportunities || null,
+        adaptation_other: data.adaptation_other || null,
+        food_amount_status: data.food_amount_status || null,
+        food_type_status: data.food_type_status || null,
+        movement_status: data.movement_status || null,
+        food_amount_note: data.food_amount_note || null,
+        food_type_note: data.food_type_note || null,
+        movement_note: data.movement_note || null,
+        confidence_score: data.confidence_score || null,
+        confidence_improvement_plan: data.confidence_improvement_plan || null,
+        summary: data.summary || null,
+        recommendations: data.recommendations || null,
+        followup_status: data.followup_status || null,
+        conducted_by: data.conducted_by,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
+    if (error) return { success: false, error: error.message, details: error };
+    return { success: true, followup };
+  } catch (err: any) {
+    console.error('❌ [saveAppointmentFollowupComplete] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getPatientFollowupHistory(userId: string, limit?: number) {
+  try {
+    let query = supabase
+      .from('appointment_followups')
+      .select(`*, appointments ( appointment_date, appointment_type )`)
+      .eq('user_id', userId)
+      .order('followup_date', { ascending: false })
+      .order('followup_round', { ascending: false });
+    if (limit) query = query.limit(limit);
+    const { data, error } = await query;
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ Get followup history error:', err);
+    return [];
+  }
+}
+
+export async function getFollowupByAppointmentId(appointmentId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('appointment_followups')
+      .select('*')
+      .eq('appointment_id', appointmentId)
+      .order('followup_round', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return null;
+    return data;
+  } catch (err) {
+    console.error('Get followup error:', err);
+    return null;
+  }
+}
+
+export async function getFollowupRoundCount(userId: string) {
+  try {
+    const { count, error } = await supabase
+      .from('appointment_followups')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId);
+    if (error) return 1;
+    return (count || 0) + 1;
+  } catch (err) {
+    console.error('Get followup round count error:', err);
+    return 1;
+  }
+}
+
+// =====================================================
+// 👨‍⚕️ Coach Functions
+// =====================================================
+export async function getAllCoaches() {
+  try {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, users ( hospital_id, role, admin_type, is_active, hospitals ( id, name, code, type, parent_id ) )`)
+      .eq('is_active', true)
+      .order('full_name_th', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getAllCoaches] Exception:', err);
+    return [];
+  }
+}
+
+export async function getCoachesByHospital(hospitalId?: string) {
+  try {
+    if (!hospitalId) return await getAllCoaches();
+    
+    const { data: hospitalData, error: hospitalError } = await supabase
+      .from('hospitals')
+      .select('id, type, parent_id')
+      .eq('id', hospitalId)
+      .single();
+    if (hospitalError || !hospitalData) return await getAllCoaches();
+
+    let hospitalIds: string[] = [hospitalId];
+    if (hospitalData.type === 'main') {
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalId)
+        .eq('is_active', true);
+      if (subHospitals && subHospitals.length > 0) {
+        hospitalIds = [...hospitalIds, ...subHospitals.map(h => h.id)];
+      }
+    } else if (hospitalData.type === 'sub' && hospitalData.parent_id) {
+      hospitalIds = [...hospitalIds, hospitalData.parent_id];
+    }
+
+    const { data, error } = await supabase
+      .from('doctors')
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, users ( hospital_id, role, admin_type, is_active, hospitals ( id, name, code, type, parent_id ) )`)
+      .eq('is_active', true)
+      .in('users.hospital_id', hospitalIds)
+      .order('full_name_th', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getCoachesByHospital] Exception:', err);
+    return [];
+  }
+}
+
+export async function getCoaches() {
+  try {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('id, user_id, full_name_th, specialization_th, is_active')
+      .eq('is_active', true)
+      .order('full_name_th', { ascending: true });
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getCoaches] Exception:', err);
+    return [];
+  }
+}
+
+export async function getCoachesByUserHospital(hospitalIds?: string[]) {
+  try {
+    let query = supabase
+      .from('doctors')
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, hospital_id, hospitals ( id, name, code, type )`)
+      .eq('is_active', true)
+      .not('hospital_id', 'is', null);
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query;
+    if (error) return [];
+    
+    const filteredCoaches = (data || []).filter(coach => coach.hospital_id && coach.hospitals?.name);
+    return filteredCoaches;
+  } catch (err) {
+    console.error('❌ [getCoachesByUserHospital] Exception:', err);
+    return [];
+  }
+}
+
+export async function getCoachesByHospitals(hospitalIds: string[]) {
+  try {
+    let query = supabase
+      .from('doctors')
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, users ( hospital_id, role, admin_type, hospitals ( id, name, code, type ) )`)
+      .eq('is_active', true)
+      .in('role', ['doctor', 'helper']);
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query;
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getCoachesByHospitals] Exception:', err);
+    return [];
+  }
+}
+
+export async function getCoachesWithHospitals(hospitalIds?: string[]) {
+  try {
+    let query = supabase
+      .from('doctors')
+      .select(`id, user_id, full_name_th, specialization_th, is_active, is_verified, users ( hospital_id, role, admin_type, is_active, hospitals ( id, name, code, type, parent_id ) )`)
+      .eq('is_active', true)
+      .eq('users.is_active', true);
+    
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('users.hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query.order('full_name_th', { ascending: true });
+    if (error) return [];
+    
+    const coachesWithHospitals = (data || []).filter(coach => coach.users?.hospital_id && coach.users?.hospitals?.name);
+    return coachesWithHospitals;
+  } catch (err) {
+    console.error('❌ [getCoachesWithHospitals] Exception:', err);
+    return [];
+  }
+}
+
+// =====================================================
+// 🆔 ID Card Assignment Functions
+// =====================================================
+export async function assignIdCard(data: { id_card: string; hospital_id: string; assigned_by: string; notes?: string; }) {
+  try {
+    const { data: assignment, error } = await supabase
+      .from('id_card_assignments')
+      .insert({
+        id_card: data.id_card,
+        hospital_id: data.hospital_id,
+        assigned_by: data.assigned_by,
+        notes: data.notes || null,
+        status: 'active',
+      })
+      .select(`*, hospitals ( id, name, code ), assigned_by_user:users!assigned_by ( id, full_name_th )`)
+      .single();
+    if (error) return { success: false, error: error.message };
+    return { success: true, data: assignment };
+  } catch (err: any) {
+    console.error('❌ [assignIdCard] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getIdCardAssignments(hospitalIds?: string[], status?: string) {
+  try {
+    let query = supabase
+      .from('id_card_assignments')
+      .select(`*, hospitals ( id, name, code, type ), assigned_by_user:users!assigned_by ( id, full_name_th )`)
+      .order('assigned_at', { ascending: false });
+    
+    if (hospitalIds && hospitalIds.length > 0) query = query.in('hospital_id', hospitalIds);
+    if (status) query = query.eq('status', status);
+    
+    const { data, error } = await query;
+    if (error) return [];
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getIdCardAssignments] Exception:', err);
+    return [];
+  }
+}
+
+export async function checkIdCardAssignment(idCard: string) {
+  try {
+    const { data, error } = await supabase
+      .from('id_card_assignments')
+      .select(`*, hospitals ( id, name, code )`)
+      .eq('id_card', idCard)
+      .eq('status', 'active')
+      .single();
+    if (error && error.code !== 'PGRST116') return null;
+    return data;
+  } catch (err) {
+    console.error('❌ [checkIdCardAssignment] Exception:', err);
+    return null;
+  }
+}
+
+export async function updateIdCardAssignment(assignmentId: string, data: { status?: string; notes?: string; hospital_id?: string; }) {
+  try {
+    const updateData: any = { updated_at: new Date().toISOString() };
+    if (data.status) updateData.status = data.status;
+    if (data.notes !== undefined) updateData.notes = data.notes;
+    if (data.hospital_id) updateData.hospital_id = data.hospital_id;
+    
+    const { error } = await supabase.from('id_card_assignments').update(updateData).eq('id', assignmentId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ [updateIdCardAssignment] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function cancelIdCardAssignment(assignmentId: string) {
+  try {
+    const { error } = await supabase
+      .from('id_card_assignments')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', assignmentId);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ [cancelIdCardAssignment] Exception:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getIdCardAssignmentStats(hospitalIds?: string[]) {
+  try {
+    let query = supabase.from('id_card_assignments').select('', { count: 'exact', head: true });
+    if (hospitalIds && hospitalIds.length > 0) query = query.in('hospital_id', hospitalIds);
+    const { count: total } = await query;
+
+    let activeQuery = supabase.from('id_card_assignments').select('*', { count: 'exact', head: true }).eq('status', 'active');
+    let completedQuery = supabase.from('id_card_assignments').select('*', { count: 'exact', head: true }).eq('status', 'completed');
+    if (hospitalIds && hospitalIds.length > 0) {
+      activeQuery = activeQuery.in('hospital_id', hospitalIds);
+      completedQuery = completedQuery.in('hospital_id', hospitalIds);
+    }
+    const { count: active } = await activeQuery;
+    const { count: completed } = await completedQuery;
+
+    return {
+      total: total || 0,
+      active: active || 0,
+      completed: completed || 0,
+      pending: (total || 0) - (active || 0) - (completed || 0),
+    };
+  } catch (err) {
+    console.error('❌ [getIdCardAssignmentStats] Error:', err);
+    return { total: 0, active: 0, completed: 0, pending: 0 };
+  }
+}
+
+// =====================================================
+// 🎫 ID Card Sequence & Generator Functions
+// =====================================================
+export async function getIdSequence(sequenceType: 'patient' | 'staff' | 'osm', prefix: string = '1', provinceCode: string = '1000') {
+  try {
+    const { data, error } = await supabase
+      .from('id_sequences')
+      .select('*')
+      .eq('sequence_type', sequenceType)
+      .eq('prefix', prefix)
+      .eq('province_code', provinceCode)
+      .single();
+    if (error) return null;
+    return data;
+  } catch (err) {
+    console.error('❌ [getIdSequence] Exception:', err);
+    return null;
+  }
+}
+
+export async function incrementIdSequence(sequenceType: 'patient' | 'staff' | 'osm', prefix: string = '1', provinceCode: string = '1000', incrementBy: number = 1) {
+  try {
+    const { data, error } = await supabase
+      .from('id_sequences')
+      .update({
+        current_sequence: incrementBy,
+        updated_at: new Date().toISOString()
+      })
+      .eq('sequence_type', sequenceType)
+      .eq('prefix', prefix)
+      .eq('province_code', provinceCode)
+      .select()
+      .single();
+    
+    if (error) {
+      const { data: current } = await supabase
+        .from('id_sequences')
+        .select('current_sequence')
+        .eq('sequence_type', sequenceType)
+        .eq('prefix', prefix)
+        .eq('province_code', provinceCode)
+        .single();
+      if (current) {
+        const newValue = (current.current_sequence || 1) + incrementBy;
+        const { data: updated, error: updateError } = await supabase
+          .from('id_sequences')
+          .update({ current_sequence: newValue, updated_at: new Date().toISOString() })
+          .eq('sequence_type', sequenceType)
+          .eq('prefix', prefix)
+          .eq('province_code', provinceCode)
+          .select()
+          .single();
+        if (updateError) throw updateError;
+        return updated;
+      }
+      throw error;
+    }
+    return data;
+  } catch (err) {
+    console.error('❌ [incrementIdSequence] Error:', err);
+    return null;
+  }
+}
+
+function calculateCheckDigit(first12Digits: string): string {
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(first12Digits[i]) * (13 - i);
+  }
+  const checkDigit = (11 - (sum % 11)) % 10;
+  return checkDigit.toString();
+}
+
+export function generateDummyIdCard(prefix: string = '1', provinceCode: string = '1000', sequenceNum: number): string {
+  if (!/^[1-8]$/.test(prefix)) prefix = '1';
+  const sequenceStr = sequenceNum.toString().padStart(5, '0');
+  const groupCode = Math.floor(sequenceNum / 100000).toString().padStart(2, '0').slice(-2);
+  const first12 = `${prefix}${provinceCode}${sequenceStr}${groupCode}`;
+  const checkDigit = calculateCheckDigit(first12);
+  return `${first12}${checkDigit}`;
+}
+
+export async function generateAndReserveIdCard(sequenceType: 'patient' | 'staff' | 'osm', prefix: string = '1', provinceCode: string = '1000') {
+  try {
+    const sequence = await getIdSequence(sequenceType, prefix, provinceCode);
+    if (!sequence) return { success: false, error: 'ไม่พบข้อมูลลำดับในฐานข้อมูล' };
+    
+    const currentSeq = sequence.current_sequence || 1;
+    const idCard = generateDummyIdCard(prefix, provinceCode, currentSeq);
+    await incrementIdSequence(sequenceType, prefix, provinceCode, 1);
+    
+    return { success: true, idCard, sequenceNumber: currentSeq };
+  } catch (err: any) {
+    console.error('❌ [generateAndReserveIdCard] Error:', err);
+    return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน' };
+  }
+}
+
+export function validateThaiIdCard(idCard: string): boolean {
+  const cleaned = idCard.replace(/[\s-]/g, '');
+  if (!/^\d{13}$/.test(cleaned)) return false;
+  const providedCheck = parseInt(cleaned[12]);
+  const calculatedCheck = parseInt(calculateCheckDigit(cleaned.slice(0, 12)));
+  return providedCheck === calculatedCheck;
+}
+
+export function formatIdCard(idCard: string): string {
+  const cleaned = idCard.replace(/[\s-]/g, '');
+  if (cleaned.length !== 13) return idCard;
+  return `${cleaned[0]}-${cleaned.slice(1,5)}-${cleaned.slice(5,10)}-${cleaned.slice(10,12)}-${cleaned[12]}`;
+}
+
+export async function getPendingIdCards(hospitalIds?: string[]) {
+  try {
+    let pendingQuery = supabase.from('pending_staff').select(`*, hospitals ( id, name, code )`).eq('status', 'pending');
+    if (hospitalIds && hospitalIds.length > 0) pendingQuery = pendingQuery.in('hospital_id', hospitalIds);
+    const { data: pendingData, error: pendingError } = await pendingQuery;
+    if (pendingError) console.error('❌ [getPendingIdCards] Error fetching pending:', pendingError);
+
+    let staffQuery = supabase
+      .from('users')
+      .select(`id, id_card, role, hospital_id, created_at, doctors ( full_name_th, specialization_th ), hospitals ( id, name, code )`)
+      .in('role', ['admin', 'doctor', 'helper', 'osm'])
+      .eq('is_active', true)
+      .not('id_card', 'is', null);
+    if (hospitalIds && hospitalIds.length > 0) staffQuery = staffQuery.in('hospital_id', hospitalIds);
+    const { data: staffData, error: staffError } = await staffQuery;
+    if (staffError) console.error('❌ [getPendingIdCards] Error fetching staff:', staffError);
+
+    const { data: assignments } = await supabase.from('id_card_assignments').select('id_card').eq('status', 'active');
+    const assignedCards = new Set(assignments?.map(a => a.id_card) || []);
+
+    const pendingCards: any[] = [];
+    if (pendingData) {
+      pendingData.forEach(item => {
+        if (!assignedCards.has(item.id_card)) {
+          pendingCards.push({ ...item, source: 'pending', full_name_th: item.full_name_th, hospitals: item.hospitals });
+        }
+      });
+    }
+    if (staffData) {
+      staffData.forEach(staff => {
+        if (staff.id_card && !assignedCards.has(staff.id_card)) {
+          pendingCards.push({
+            id: staff.id,
+            id_card: staff.id_card,
+            full_name_th: staff.doctors?.full_name_th || '-',
+            role: staff.role,
+            hospital_id: staff.hospital_id,
+            hospitals: staff.hospitals,
+            created_at: staff.created_at,
+            specialization_th: staff.doctors?.specialization_th,
+            source: 'approved'
+          });
+        }
+      });
+    }
+    return pendingCards;
+  } catch (err) {
+    console.error('❌ [getPendingIdCards] Exception:', err);
+    return [];
+  }
+}
+
+export async function addStaff(data: {
+  id_card: string;
+  password: string;
+  full_name_th: string;
+  role: 'doctor' | 'helper' | 'osm' | 'admin';
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;
+  birth_date?: string;
+  created_by: string;
+  admin_type?: 'super' | 'hospital' | null;
+}) {
+  try {
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id_card: data.id_card,
+        password_hash: data.password,
+        role: data.role,
+        is_active: true,
+        created_by: data.created_by,
+        hospital_id: data.hospital_id || null,
+        birth_date: data.birth_date || null,
+        admin_type: data.admin_type || null,
+      })
+      .select()
+      .single();
+    if (userError) return { success: false, error: userError.message };
+
+    let doctorData: any = null;
+    if (['doctor', 'helper', 'osm', 'admin'].includes(data.role)) {
+      const specialization = data.specialization_th?.trim() || (
+        data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
+        data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
+        data.role === 'admin' ? 'ผู้ดูแลระบบ' : 'แพทย์'
+      );
+      const { data: doctorDataResult, error: doctorError } = await supabase
+        .from('doctors')
+        .insert({
+          user_id: user.id,
+          full_name: data.full_name_th.trim(),
+          full_name_th: data.full_name_th.trim(),
+          specialization_th: specialization,
+          phone: data.phone || null,
+          email: data.email || null,
+          is_active: true,
+          is_verified: false,
+        })
+        .select()
+        .single();
+      if (doctorError) {
+        await supabase.from('users').delete().eq('id', user.id);
+        return { success: false, error: doctorError.message };
+      }
+      doctorData = doctorDataResult;
+    }
+    return { success: true, user, doctor: doctorData };
+  } catch (err: any) {
+    console.error('❌ [addStaff] Unexpected error:', err);
+    return { success: false, error: err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด' };
+  }
+}
+
+// =====================================================
+// 📥 Import Patients from Excel Functions
+// =====================================================
+export function convertThaiDateToISO(thaiDateStr: string): string | null {
+  if (!thaiDateStr) return null;
+  const dateRegex = /^(\d{2})[/-](\d{2})[/-](\d{4})$/;
+  const match = thaiDateStr.match(dateRegex);
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const yearAD = parseInt(year) - 543;
+  return `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+}
+
+export async function findHospitalByName(hospitalName: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('hospitals')
+      .select('id')
+      .ilike('name', hospitalName.trim())
+      .eq('is_active', true)
+      .single();
+    if (error || !data) return null;
+    return data.id;
+  } catch (err) {
+    console.error('❌ [findHospitalByName] Error:', err);
+    return null;
+  }
+}
+
+export async function findCoachByFullName(coachFullName: string): Promise<string | null> {
+  try {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select('user_id')
+      .ilike('full_name_th', coachFullName.trim())
+      .eq('is_active', true)
+      .single();
+    if (error || !data) return null;
+    return data.user_id;
+  } catch (err) {
+    console.error('❌ [findCoachByFullName] Error:', err);
+    return null;
+  }
+}
+
+export async function importPatientsBatch(
+  rows: Array<{
+    id_card: string;
+    first_name: string;
+    last_name: string;
+    hospital_number: string;
+    birth_date: string;
+    gender: string;
+    hospital_name: string;
+    phone?: string;
+    email?: string;
+    current_weight?: string;
+    height?: string;
+    waist_circumference?: string;
+    diabetes_type?: string;
+    blood_sugar?: string;
+    hba1c_level?: string;
+    notes?: string;
+    house_number?: string;
+    village_no?: string;
+    village_name?: string;
+    soi?: string;
+    road?: string;
+    subdistrict?: string;
+    district?: string;
+    province?: string;
+    postal_code?: string;
+    address_line1?: string;
+    emergency_contact_name?: string;
+    emergency_contact_phone?: string;
+    emergency_contact_relationship?: string;
+    coach_name?: string;
+  }>,
+  createdBy: string
+) {
+  const results = {
+    success: 0,
+    failed: 0,
+    errors: [] as Array<{ row: number; id_card: string; hospital_number: string; error: string }>
   };
 
-  const handleImportSingleRow = async (rowIndex: number) => {
-    const row = previewData[rowIndex];
+  console.log(`📥 [importPatientsBatch] Starting import of ${rows.length} patients...`);
+
+  const { data: allHospitals } = await supabase.from('hospitals').select('id, name').eq('is_active', true);
+  const { data: allCoaches } = await supabase.from('doctors').select('user_id, full_name_th').eq('is_active', true);
+  const { data: existingUsers } = await supabase.from('users').select('id_card');
+  const existingIdCards = new Set(existingUsers?.map(u => u.id_card) || []);
+
+  const hospitalMap = new Map<string, string>();
+  allHospitals?.forEach(h => hospitalMap.set(h.name.toLowerCase().trim(), h.id));
+  
+  const coachMap = new Map<string, string>();
+  allCoaches?.forEach(c => coachMap.set(c.full_name_th.toLowerCase().trim(), c.user_id));
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowIndex = i + 1;
     
     try {
-      const dateParts = row.birth_date.split(/[\/-]/);
-      if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
-      const [day, month, yearBE] = dateParts;
-      const yearAD = parseInt(yearBE) - 543;
-      const birthDateISO = `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-
-      let coachId = null;
-      if (row.coach_name) {
-        const coachMatch = findBestCoachMatch(row.coach_name, coaches);
-        if (coachMatch) {
-          coachId = coachMatch.coach.user_id;
-        }
+      const genderMap: Record<string, string> = { 'ชาย': 'male', 'หญิง': 'female' };
+      const gender = genderMap[row.gender] || row.gender.toLowerCase();
+      
+      const birthDateISO = convertThaiDateToISO(row.birth_date);
+      if (!birthDateISO) throw new Error(`รูปแบบวันเกิดไม่ถูกต้อง: ${row.birth_date}`);
+      
+      const cleanIdCard = row.id_card.replace(/\D/g, '');
+      if (existingIdCards.has(cleanIdCard)) {
+        throw new Error('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
       }
-
-      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
-      if (!hospitalMatch) {
-        setError('❌ ไม่พบโรงพยาบาลในระบบ');
-        return;
+      
+      let hospitalId = hospitalMap.get(row.hospital_name.toLowerCase().trim());
+      if (!hospitalId) hospitalId = await findHospitalByName(row.hospital_name);
+      if (!hospitalId) throw new Error(`ไม่พบโรงพยาบาล: ${row.hospital_name}`);
+      
+      let coachId: string | undefined = undefined;
+      if (row.coach_name && row.coach_name.trim()) {
+        coachId = coachMap.get(row.coach_name.toLowerCase().trim());
+        if (!coachId) coachId = await findCoachByFullName(row.coach_name);
       }
-
-      const data = {
-        id_card: row.id_card,
-        password: row.birth_date,
-        first_name: row.first_name,
-        last_name: row.last_name,
-        hospital_number: row.hospital_number,
+      
+      const password = row.birth_date;
+      
+      const { data: user, error: userError } = await supabase
+        .from('users')
+        .insert({
+          id_card: cleanIdCard,
+          password_hash: password,
+          role: 'patient',
+          is_active: true,
+          created_by: createdBy,
+          hospital_id: hospitalId,
+        })
+        .select()
+        .single();
+      
+      if (userError) {
+        if (userError.code === '23505') throw new Error('เลขบัตรประชาชนซ้ำ (Unique Violation)');
+        throw userError;
+      }
+      
+      const { error: profileError } = await supabase.from('profiles').insert({
+        id: user.id,
+        first_name: row.first_name.trim(),
+        last_name: row.last_name.trim(),
+        hospital_number: row.hospital_number.trim(),
         birth_date: birthDateISO,
-        gender: row.gender,
-        phone: row.phone || undefined,
-        email: row.email || undefined,
-        current_weight: row.current_weight ? parseFloat(row.current_weight) : undefined,
-        height: row.height ? parseFloat(row.height) : undefined,
-        waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : undefined,
-        coach_id: coachId,
-        diabetes_type: row.diabetes_type || undefined,
-        blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : undefined,
-        hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : undefined,
-        notes: row.notes || undefined,
-        house_number: row.house_number || undefined,
-        address_line1: row.address_line1 || undefined,
-        soi: row.soi || undefined,
-        road: row.road || undefined,
-        village_no: row.village_no || undefined,
-        village_name: row.village_name || undefined,
-        subdistrict: row.subdistrict || undefined,
-        district: row.district || undefined,
-        province: row.province || undefined,
-        postal_code: row.postal_code || undefined,
-        hospital_id: hospitalMatch.hospital.id,
-        emergency_contact_name: row.emergency_contact_name || undefined,
-        emergency_contact_phone: row.emergency_contact_phone || undefined,
-        emergency_contact_relationship: row.emergency_contact_relationship || undefined,
+        gender: gender,
+        phone: row.phone?.trim() || null,
+        email: row.email?.trim() || null,
+        current_weight: row.current_weight ? parseFloat(row.current_weight) : null,
+        height: row.height ? parseFloat(row.height) : null,
+        waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : null,
+        diabetes_type: row.diabetes_type?.trim() || null,
+        blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : null,
+        hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : null,
+        notes: row.notes?.trim() || null,
+        house_number: row.house_number?.trim() || null,
+        village_no: row.village_no?.trim() || null,
+        village_name: row.village_name?.trim() || null,
+        soi: row.soi?.trim() || null,
+        road: row.road?.trim() || null,
+        subdistrict: row.subdistrict?.trim() || null,
+        district: row.district?.trim() || null,
+        province: row.province?.trim() || null,
+        postal_code: row.postal_code?.trim() || null,
+        address_line1: row.address_line1?.trim() || null,
+        emergency_contact_name: row.emergency_contact_name?.trim() || null,
+        emergency_contact_phone: row.emergency_contact_phone?.trim() || null,
+        emergency_contact_relationship: row.emergency_contact_relationship?.trim() || null,
+        hospital_id: hospitalId,
+        coach_id: coachId || null,
         pam_level: 'L0',
         pam_score: 0,
         zone: 'Zero Zone',
-        created_by: user?.id,
-      };
-
-      const result = await importPatientsBatch([data], user.id);
-      
-      if (result.success > 0) {
-        setSuccess(true);
-        setTimeout(() => {
-          router.push('/admin/patients');
-        }, 2000);
-      } else {
-        setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
-      }
-    } catch (err: any) {
-      console.error('❌ [handleImportSingleRow] Error:', err);
-      setError(`❌ เกิดข้อผิดพลาดในการบันทึก: ${err.message}`);
-    }
-  };
-
-  const handleImport = async () => {
-    if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
-    if (hasErrorsInSelected) { 
-      setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบพื้นฐาน กรุณาแก้ไขก่อนนำเข้า'); 
-      return; 
-    }
-
-    const errors: typeof importResult.errors = [];
-    const successRecords: typeof importResult.successRecords = [];
-    let successCount = 0;
-
-    selectedRows.forEach(rowIdx => {
-      const row = previewData[rowIdx];
-      const rowNumber = rowIdx + 1;
-      
-      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
-      
-      if (!hospitalMatch) {
-        errors.push({
-          row: rowNumber,
-          id_card: row.id_card,
-          hospital_number: row.hospital_number,
-          error: `ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`,
-          error_type: 'hospital',
-          hospital_id: undefined,
-          original_hospital_name: row.hospital_name,
-          hospital_fixed: false,
-          fixed: false
-        });
-      } else {
-        const hospitalId = hospitalMatch.hospital.id;
-        const networkIds = getNetworkHospitalIds(hospitalId);
-        const networkCoaches = coaches.filter(c => {
-          const cHospId = c.users?.hospital_id;
-          return cHospId && networkIds.includes(cHospId);
-        });
-        
-        const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
-
-        if (row.coach_name && !coachMatch) {
-          errors.push({
-            row: rowNumber,
-            id_card: row.id_card,
-            hospital_number: row.hospital_number,
-            error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`,
-            error_type: 'coach',
-            hospital_id: hospitalId,
-            original_hospital_name: row.hospital_name,
-            original_coach_name: row.coach_name,
-            hospital_fixed: true,
-            fixed: false
-          });
-        } else {
-          successCount++;
-          successRecords.push({
-            row: rowNumber,
-            id_card: row.id_card,
-            hospital_number: row.hospital_number,
-            first_name: row.first_name,
-            last_name: row.last_name
-          });
-        }
-      }
-    });
-
-    if (errors.length > 0) {
-      setImportResult({
-        success: successCount,
-        failed: errors.length,
-        errors: errors,
-        successRecords: successRecords
+        current_step: 'Starter',
+        is_active: true,
+        status: 'active',
       });
-      return;
-    }
-
-    setError('');
-    setImporting(true);
-    setImportProgress({ current: 0, total: selectedRows.size });
-
-    try {
-      const selectedData = previewData.filter(row => row._selected).map(row => {
-        const data: any = { 
-            id_card: row.id_card, 
-            first_name: row.first_name, 
-            last_name: row.last_name, 
-            hospital_number: row.hospital_number, 
-            birth_date: row.birth_date, 
-            gender: row.gender, 
-            hospital_name: row.hospital_name 
-        };
-        if (row.phone) data.phone = row.phone;
-        if (row.email) data.email = row.email;
-        if (row.current_weight) data.current_weight = row.current_weight;
-        if (row.height) data.height = row.height;
-        if (row.waist_circumference) data.waist_circumference = row.waist_circumference;
-        if (row.diabetes_type) data.diabetes_type = row.diabetes_type;
-        if (row.blood_sugar) data.blood_sugar = row.blood_sugar;
-        if (row.hba1c_level) data.hba1c_level = row.hba1c_level;
-        if (row.notes) data.notes = row.notes;
-        if (row.house_number) data.house_number = row.house_number;
-        if (row.village_no) data.village_no = row.village_no;
-        if (row.village_name) data.village_name = row.village_name;
-        if (row.soi) data.soi = row.soi;
-        if (row.road) data.road = row.road;
-        if (row.subdistrict) data.subdistrict = row.subdistrict;
-        if (row.district) data.district = row.district;
-        if (row.province) data.province = row.province;
-        if (row.postal_code) data.postal_code = row.postal_code;
-        if (row.address_line1) data.address_line1 = row.address_line1;
-        if (row.emergency_contact_name) data.emergency_contact_name = row.emergency_contact_name;
-        if (row.emergency_contact_phone) data.emergency_contact_phone = row.emergency_contact_phone;
-        if (row.emergency_contact_relationship) data.emergency_contact_relationship = row.emergency_contact_relationship;
-        if (row.coach_name) data.coach_name = row.coach_name;
-        return data;
+      
+      if (profileError) {
+        if (profileError.code === '23505') throw new Error('HN ซ้ำในโรงพยาบาลนี้');
+        await supabase.from('users').delete().eq('id', user.id);
+        throw profileError;
+      }
+      
+      results.success++;
+    } catch (error: any) {
+      results.failed++;
+      results.errors.push({
+        row: rowIndex,
+        id_card: row.id_card,
+        hospital_number: row.hospital_number,
+        error: error.message || 'เกิดข้อผิดพลาด'
       });
-
-      const result = await importPatientsBatch(selectedData, user.id);
-      const finalSuccessRecords = selectedData.filter((_, idx) => idx < result.success).map((data, idx) => ({ row: idx + 1, id_card: data.id_card, hospital_number: data.hospital_number, first_name: data.first_name, last_name: data.last_name }));
-      setImportResult({ ...result, successRecords: finalSuccessRecords });
-    } catch (err: any) {
-      console.error('❌ [handleImport] Error:', err);
-      setError(`เกิดข้อผิดพลาดในการนำเข้า: ${err.message}`);
-    } finally {
-      setImporting(false);
-      setImportProgress({ current: 0, total: 0 });
+      console.error(`❌ Row ${rowIndex} failed:`, error.message);
     }
-  };
-
-  const handleEditInModal = (errorIndex: number, field: string, value: string) => {
-    if (!importResult) return;
-    const updatedErrors = [...importResult.errors];
-    updatedErrors[errorIndex] = { ...updatedErrors[errorIndex], [field]: value };
-    setImportResult({ ...importResult, errors: updatedErrors });
-  };
-
-  const handleApplyModalFix = (errorIndex: number) => {
-    if (!importResult) return;
-    const currentError = importResult.errors[errorIndex];
-    const rowIndex = currentError.row - 1;
-
-    setPreviewData(prev => {
-      const newData = [...prev];
-      const row = { ...newData[rowIndex] };
-
-      if (currentError.hospital_id) {
-        const hospital = hospitals.find(h => h.id === currentError.hospital_id);
-        if (hospital) {
-          row.hospital_name = hospital.name;
-        }
-      }
-      
-      if (currentError.coach_id) {
-        const coach = coaches.find(c => c.user_id === currentError.coach_id);
-        if (coach) {
-          row.coach_name = coach.full_name_th;
-        }
-      }
-      
-      if (currentError.province) row.province = currentError.province;
-      if (currentError.district) row.district = currentError.district;
-      if (currentError.subdistrict) row.subdistrict = currentError.subdistrict;
-
-      newData[rowIndex] = row;
-      return newData;
-    });
-
-    setTimeout(() => runValidation(previewData), 100);
-
-    const newErrors = [...importResult.errors];
-    newErrors[errorIndex] = { ...newErrors[errorIndex], fixed: true };
-    setImportResult({ ...importResult, errors: newErrors });
-  };
-
-  const handleBackToPreview = () => {
-    setImportResult(null);
-    setStep('preview');
-  };
-
-  const handleExitImport = () => {
-    setImportResult(null);
-    setSelectedRows(new Set());
-    router.back();
-  };
-
-  const handleRetryFailed = () => {
-    if (!importResult || importResult.errors.length === 0) return;
-    const failedRowIndices = importResult.errors.filter(err => !err.fixed).map(err => err.row - 1);
-    const newSelectedRows = new Set([...selectedRows, ...failedRowIndices]);
-    setSelectedRows(newSelectedRows);
-    setImportResult(null);
-    setStep('preview');
-  };
-
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle className="w-8 h-8 text-green-500" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">บันทึกข้อมูลสำเร็จ!</h2>
-          <p className="text-gray-600">กำลังไปยังหน้ารายการผู้ป่วย...</p>
-        </div>
-      </div>
-    );
   }
+  
+  return results;
+}
 
-  if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+// =====================================================
+// 📍 Address Validation Functions
+// =====================================================
+export async function getAllValidAddresses() {
+  try {
+    const { data, error } = await supabase
+      .from('villages')
+      .select('province, district, subdistrict, postal_code')
+      .neq('province', null)
+      .neq('district', null)
+      .neq('subdistrict', null);
+    
+    if (error) return [];
+    
+    const addresses = data?.map(v => ({
+      province: v.province,
+      district: v.district,
+      subdistrict: v.subdistrict,
+      postal_code: v.postal_code,
+    })) || [];
+    
+    return addresses;
+  } catch (err) {
+    console.error('❌ [getAllValidAddresses] Error:', err);
+    return [];
+  }
+}
 
-  const displayFields = STANDARD_FIELDS.filter(f => Object.values(headerMapping).includes(f.key));
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-white shadow-sm border-b border-gray-200 px-4 py-6">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"><ArrowLeft className="w-4 h-4" /> กลับ</button>
-        <h1 className="text-3xl font-bold text-gray-800">📥 นำเข้าข้อมูลผู้ป่วยจาก Excel</h1>
-        <p className="text-gray-600 mt-1">ตรวจสอบ แก้ไข และเลือกข้อมูลก่อนนำเข้าระบบ</p>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
-            <p className="text-sm text-red-700 flex-1">{error}</p>
-            <button onClick={() => setError('')} className="text-red-600">✕</button>
-          </div>
-        )}
-
-        {step === 'upload' && (
-          <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2"><span className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs">1</span> อัปโหลดไฟล์</h2>
-            <div onDrop={(e) => { e.preventDefault(); if(e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); }} onDragOver={e => e.preventDefault()} onClick={() => document.getElementById('file-input')?.click()} className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-500 cursor-pointer bg-gray-50">
-              <input id="file-input" type="file" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} className="hidden" />
-              <Upload className="w-10 h-10 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-700 font-medium">ลากไฟล์มาวาง หรือคลิกเลือก</p>
-              <p className="text-sm text-gray-500">รองรับ .xlsx, .xls</p>
-            </div>
-            {loading && <div className="mt-4 flex justify-center items-center gap-2 text-blue-600"><Loader2 className="w-4 h-4 animate-spin" /> กำลังอ่านไฟล์...</div>}
-          </div>
-        )}
-
-        {step === 'mapping' && (
-          <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2">
-                <span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> 
-                ตรวจสอบการจับคู่คอลัมน์
-              </h2>
-              <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">
-                ถัดไป: Preview & Validation →
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-              {excelHeaders.map(header => {
-                const matchedKey = headerMapping[header];
-                const isMatched = matchedKey && matchedKey !== '';
-                return (
-                  <div key={header} className={`p-4 border rounded-lg transition-all ${isMatched ? 'bg-green-50 border-green-400' : 'bg-gray-50 border-gray-200'}`}>
-                    <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
-                    <p className={`font-semibold truncate mb-2 ${isMatched ? 'text-green-900' : 'text-gray-800'}`}>
-                      {header} {isMatched && <span className="ml-2">✅</span>}
-                    </p>
-                    <select value={headerMapping[header] || ''} onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} className={`w-full px-3 py-2 border rounded-lg text-sm ${isMatched ? 'border-green-400' : 'border-gray-300'}`}>
-                      <option value="">-- ไม่จับคู่ --</option>
-                      {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
-                    </select>
-                    {!isMatched && <p className="text-xs text-red-500 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> ยังไม่ได้จับคู่</p>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {step === 'preview' && previewData.length > 0 && (
-          <>
-            <div className="bg-white rounded-xl shadow p-4 border border-gray-200 flex flex-wrap gap-4 justify-between items-center">
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={selectedRows.size === previewData.length} onChange={e => selectAll(e.target.checked)} className="w-4 h-4" />
-                  <span className="text-sm font-medium">เลือกทั้งหมด ({previewData.length} แถว)</span>
-                </label>
-                <span className="text-sm text-gray-500">✅ ถูกเลือก: {selectedRows.size} แถว</span>
-                <span className={`text-sm font-medium ${hasErrorsInSelected ? 'text-red-600' : 'text-green-600'}`}>
-                  {hasErrorsInSelected ? '⚠️ มีข้อมูลที่เลือกยังไม่ผ่านตรวจสอบ' : '✅ ข้อมูลที่เลือกพร้อมนำเข้า'}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
-                <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2">
-                  <Download className="w-4 h-4" /> นำออก Excel
-                </button>
-                <button onClick={() => setStep('mapping')} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔧 แก้ไขการจับคู่</button>
-                <button 
-                  disabled={selectedRows.size === 0 || hasErrorsInSelected || importing} 
-                  onClick={handleImport}
-                  className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                >
-                  {importing ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> กำลังนำเข้า... ({importProgress.current}/{importProgress.total})</>
-                  ) : hasErrorsInSelected ? (
-                    <><ShieldAlert className="w-4 h-4" /> แก้ไขข้อผิดพลาดก่อนนำเข้า</>
-                  ) : (
-                    <><Upload className="w-4 h-4" /> 🚀 นำเข้าที่เลือก ({selectedRows.size})</>
-                  )}
-                </button>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-100 border-b">
-                    <tr>
-                      <th className="p-3 w-10 text-center sticky left-0 bg-gray-100 z-10">เลือก</th>
-                      <th className="p-3 w-12 text-center sticky left-10 bg-gray-100 z-10">สถานะ</th>
-                      {displayFields.map(field => (
-                        <th key={field.key} className="p-3 min-w-[140px] text-left font-medium text-gray-700 whitespace-nowrap">
-                          {field.label} {field.required && <span className="text-red-500">*</span>}
-                        </th>
-                      ))}
-                      <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">⚠️ ข้อผิดพลาด</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewData.map((row, rIdx) => (
-                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors?.length > 0 ? 'bg-red-50/50' : ''}`}>
-                        <td className="p-3 text-center sticky left-0 bg-white z-10">
-                          <input type="checkbox" checked={row._selected} onChange={() => toggleSelectRow(rIdx)} className="w-4 h-4" />
-                        </td>
-                        <td className="p-3 text-center sticky left-10 bg-white z-10">
-                          {row._errors?.length > 0 ? <XCircle className="w-5 h-5 text-red-500 mx-auto" /> : <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />}
-                        </td>
-                        {displayFields.map(field => {
-                          const isEditing = editingCell?.row === rIdx && editingCell?.key === field.key;
-                          const val = row[field.key] || '';
-                          return (
-                            <td key={field.key} className="p-2 whitespace-nowrap relative">
-                              {isEditing ? (
-                                field.inputType === 'select' ? (
-                                  <select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}>
-                                    <option value="">-- เลือก --</option>
-                                    {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                  </select>
-                                ) : (
-                                  <input autoFocus type={field.inputType === 'number' ? 'number' : 'text'} step={field.inputType === 'number' ? '0.1' : undefined} className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown} placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'} />
-                                )
-                              ) : (
-                                <div onClick={() => startEdit(rIdx, field.key)} className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1 group">
-                                  <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val || 'คลิกเพื่อแก้ไข'}</span>
-                                  <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
-                          {row._errors?.length > 0 ? (
-                            <div className="space-y-1">
-                              {row._errors.map((err, idx) => (
-                                <div key={idx} className="flex items-start gap-1 text-xs text-red-700 bg-red-100 px-2 py-1 rounded">
-                                  <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                                  <span>{err}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ✅ Modal แสดงผลการนำเข้า */}
-      {importResult && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  {importResult.failed === 0 ? (
-                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                      <CheckCircle className="w-6 h-6 text-green-600" />
-                    </div>
-                  ) : (
-                    <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
-                      <AlertCircle className="w-6 h-6 text-yellow-600" />
-                    </div>
-                  )}
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-800">
-                      {importResult.failed === 0 ? '✅ นำเข้าสำเร็จ!' : '⚠️ นำเข้าบางส่วนสำเร็จ'}
-                    </h3>
-                    <p className="text-gray-600">
-                      สำเร็จ: {importResult.success} รายการ | ล้มเหลว: {importResult.failed} รายการ
-                    </p>
-                  </div>
-                </div>
-                <button onClick={() => setImportResult(null)} className="text-gray-400 hover:text-gray-600">
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-
-              {importResult.successRecords && importResult.successRecords.length > 0 && (
-                <div className="mb-6">
-                  <h4 className="font-semibold text-green-700 mb-2 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4" /> รายการที่นำเข้าสำเร็จ ({importResult.successRecords.length}):
-                  </h4>
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 max-h-48 overflow-auto">
-                    {importResult.successRecords.map((record, idx) => (
-                      <div key={idx} className="text-sm text-green-800 mb-1 pb-1 border-b border-green-200 last:border-0 flex items-center gap-2">
-                        <CheckCircle className="w-3 h-3 flex-shrink-0" />
-                        <span><strong>แถว {record.row}:</strong> {record.first_name} {record.last_name} | HN: {record.hospital_number}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {importResult.errors.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="font-semibold text-red-700 mb-2 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4" /> รายการที่ล้มเหลว - สามารถแก้ไขได้: ({importResult.errors.length})
-                  </h4>
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-96 overflow-auto space-y-3">
-                    {importResult.errors.map((err, idx) => {
-                      
-                      if (err.fixed) {
-                        return (
-                          <div key={idx} className="bg-green-50 border border-green-200 rounded p-4 flex items-center gap-3">
-                            <CheckCircle className="w-6 h-6 text-green-600" />
-                            <div>
-                              <p className="text-sm font-bold text-green-800">✅ แถวที่ {err.row} - แก้ไขเรียบร้อย</p>
-                              <p className="text-xs text-green-600">ข้อมูลในตารางถูกอัปเดตแล้ว พร้อมนำเข้าใหม่</p>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      const isHospitalMissing = (err.error_type === 'hospital' || !err.hospital_id);
-                      const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
-
-                      return (
-                        <div key={idx} className="bg-white border border-red-200 rounded p-4">
-                          <div className="flex items-start gap-2 mb-3">
-                            <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1">
-                              <p className="text-sm font-medium text-red-800">
-                                <strong>แถวที่ {err.row}:</strong> {err.error}
-                              </p>
-                              <p className="text-xs text-gray-600 mt-1">
-                                บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          {isHospitalMissing && (
-                            <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
-                              <label className="block text-xs font-bold text-red-700 flex items-center gap-1">
-                                <Hospital className="w-3 h-3" /> 1. เลือกโรงพยาบาลที่ถูกต้องก่อน:
-                              </label>
-                              <select 
-                                className="w-full px-3 py-2 border border-red-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500"
-                                value={err.hospital_id || ''}
-                                onChange={(e) => handleEditInModal(idx, 'hospital_id', e.target.value)}
-                              >
-                                <option value="">-- เลือกโรงพยาบาล --</option>
-                                {hospitals.map(h => (
-                                  <option key={h.id} value={h.id}>{h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}</option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={() => handleSaveHospitalFix(idx)}
-                                disabled={!err.hospital_id}
-                                className="w-full mt-2 flex items-center justify-center gap-2 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Save className="w-4 h-4" /> 💾 บันทึกการแก้ไขโรงพยาบาล
-                              </button>
-                              <p className="text-xs text-gray-500 mt-1">📝 เมื่อบันทึกแล้ว ระบบจะตรวจสอบฟิลด์อื่นๆ ต่อไป</p>
-                            </div>
-                          )}
-
-                          {!isHospitalMissing && (
-                            <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
-                              <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2">
-                                <CheckCircle className="w-4 h-4" />
-                                โรงพยาบาลถูกต้อง: {hospitalMatch?.hospital?.name}
-                              </div>
-
-                              <label className="block text-xs font-bold text-blue-700 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3" /> 2. เลือกโค้ชผู้ดูแล (จากโรงพยาบาล {hospitalMatch?.hospital?.name}):
-                              </label>
-                              
-                              {!modalCoaches[idx] && err.hospital_id && (
-                                <div className="text-xs text-gray-500 flex items-center gap-2">
-                                  <Loader2 className="w-3 h-3 animate-spin" />
-                                  กำลังโหลดรายชื่อโค้ชในเครือข่าย...
-                                </div>
-                              )}
-                              
-                              {modalCoaches[idx] && modalCoaches[idx].length === 0 && (
-                                <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">
-                                  ⚠️ ไม่พบโค้ชในเครือข่ายโรงพยาบาลนี้ กรุณาติดต่อผู้ดูแลระบบ
-                                </div>
-                              )}
-                              
-                              <select
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                                value={err.coach_id || ''}
-                                onChange={(e) => {
-                                  handleEditInModal(idx, 'coach_id', e.target.value);
-                                  const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === e.target.value);
-                                  if (selectedCoach) {
-                                    handleEditInModal(idx, 'original_coach_name', selectedCoach.full_name_th);
-                                  }
-                                }}
-                                disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}
-                                onLoad={() => err.hospital_id && loadCoachesForErrorRow(idx, err.hospital_id)}
-                              >
-                                <option value="">-- เลือกโค้ช --</option>
-                                {modalCoaches[idx]?.map(coach => {
-                                  const hospitalName = coach.users?.hospitals?.name || 'ไม่มีสังกัด';
-                                  const specialization = coach.specialization_th || 'ไม่ระบุ';
-                                  return (
-                                    <option key={coach.user_id} value={coach.user_id}>
-                                      {coach.full_name_th} | {specialization} | {hospitalName}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                              
-                              <p className="text-xs text-gray-500">
-                                💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน (จากเครือข่ายโรงพยาบาล)
-                              </p>
-
-                              <button
-                                onClick={() => handleApplyModalFix(idx)}
-                                disabled={!err.coach_id}
-                                className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                <Save className="w-4 h-4" /> ✅ บันทึกการแก้ไขและนำเข้า
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-3 mt-6 flex-wrap">
-                {importResult.failed > 0 && (
-                  <>
-                    <button onClick={handleBackToPreview} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
-                      <ArrowLeft className="w-4 h-4" /> ย้อนกลับเพื่อแก้ไข
-                    </button>
-                    <button onClick={handleRetryFailed} className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium flex items-center justify-center gap-2">
-                      <RotateCcw className="w-4 h-4" /> นำเข้ารายการที่ล้มเหลวใหม่
-                    </button>
-                    <button onClick={handleExitImport} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium flex items-center justify-center gap-2">
-                      <X className="w-4 h-4" /> ออกจากการนำเข้า
-                    </button>
-                  </>
-                )}
-                {importResult.success > 0 && (
-                  <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">
-                    ไปหน้ารายการผู้ป่วย
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+export function validateAddress(address: { province: string; district: string; subdistrict: string; postal_code: string; }, validAddresses: Array<{ province: string; district: string; subdistrict: string; postal_code: string; }>) {
+  const errors: string[] = [];
+  
+  if (address.province && !validAddresses.some(v => v.province === address.province)) {
+    errors.push('จังหวัดไม่ถูกต้อง');
+  }
+  if (address.district && !validAddresses.some(v => v.district === address.district && v.province === address.province)) {
+    errors.push('อำเภอไม่ถูกต้อง');
+  }
+  if (address.subdistrict && !validAddresses.some(v => v.subdistrict === address.subdistrict && v.district === address.district && v.province === address.province)) {
+    errors.push('ตำบลไม่ถูกต้อง');
+  }
+  
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
 }
