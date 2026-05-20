@@ -222,7 +222,9 @@ const loadNetworkData = async (userId: string) => {
     setHospitals(allHospitals);
     const hospitalIds = allHospitals.map(h => h.id);
     
-    console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+    console.log('👨‍️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+    
+    // ✅ ใช้ getCoachesWithHospitals ที่มี join กับ users
     const allCoaches = await getCoachesWithHospitals(hospitalIds);
     setCoaches(allCoaches);
     
@@ -238,9 +240,7 @@ const loadNetworkData = async (userId: string) => {
         full_name_th: allCoaches[0].full_name_th,
         users: allCoaches[0].users,
         hospital_id: allCoaches[0].users?.hospital_id,
-        hospital_name: allCoaches[0].users?.hospitals?.name,
-        has_users: !!allCoaches[0].users,
-        has_hospital_id: !!allCoaches[0].users?.hospital_id
+        hospital_name: allCoaches[0].users?.hospitals?.name
       });
     }
   } catch (error) { 
@@ -440,12 +440,11 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     // ✅ หา network hospital IDs
     const networkIds = getNetworkHospitalIds(hospitalId);
     console.log('🏥 Network Hospital IDs:', networkIds);
-    console.log('🏥 Network IDs Type:', typeof networkIds, 'Length:', networkIds.length);
     
     // ✅ Debug: ตรวจสอบ coaches แต่ละคน
     console.log('\n📋 Checking all coaches:');
     coaches.forEach((coach, idx) => {
-      if (idx < 3) { // แสดงแค่ 3 คนแรก
+      if (idx < 5) { // แสดงแค่ 5 คนแรก
         console.log(`  Coach ${idx}:`, {
           name: coach.full_name_th,
           user_hospital_id: coach.users?.hospital_id,
@@ -457,9 +456,19 @@ const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) =>
     });
     
     // ✅ Filter coaches ที่อยู่ใน network
-    const networkCoaches = coaches.filter(coach => {
+    console.log('\n🔍 Starting to filter coaches...');
+    const networkCoaches = coaches.filter((coach, idx) => {
       const coachHospitalId = coach.users?.hospital_id;
       const isInNetwork = coachHospitalId && networkIds.includes(coachHospitalId);
+      
+      if (idx < 5 && coachHospitalId) {
+        console.log(`  Coach ${idx}:`, {
+          hospital_id: coachHospitalId,
+          in_network: isInNetwork,
+          network_has_id: networkIds.includes(coachHospitalId)
+        });
+      }
+      
       return isInNetwork;
     });
     
