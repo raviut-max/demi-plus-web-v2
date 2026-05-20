@@ -241,8 +241,8 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation (เพิ่มการเช็คโค้ชใน Modal)
-  const validateRow = (row: any, checkCoach: boolean = false) => {
+  // ✅ ฟังก์ชัน Validation (ไม่เช็คโค้ชใน Preview - ไปเช็คที่ Modal แทน)
+  const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
@@ -273,13 +273,7 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
-      // ✅ เพิ่มการตรวจสอบโค้ช (เฉพาะเมื่อ checkCoach = true)
-      else if (field.key === 'coach_name' && checkCoach && strVal) {
-        const coachMatch = findBestCoachMatch(strVal, coaches);
-        if (!coachMatch || coachMatch.similarity < 0.95) {
-          errors.push(`ไม่พบชื่อโค้ช "${strVal}" ในระบบ กรุณาเลือกโค้ชจากรายชื่อที่มี`);
-        }
-      }
+      // ✅ ไม่เช็คโค้ชใน Preview (จะไปเช็คที่ Modal แทน)
     });
 
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
@@ -291,7 +285,7 @@ export default function ImportExcelPage() {
 
   const runValidation = (data: any[]) => {
     const errors: Record<number, string[]> = {};
-    data.forEach((row, idx) => { errors[idx] = validateRow(row, false); }); // ไม่เช็คโค้ชใน Preview
+    data.forEach((row, idx) => { errors[idx] = validateRow(row); });
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
   };
@@ -435,29 +429,10 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
-  // ✅ ฟังก์ชันนำเข้าข้อมูล (เพิ่มการตรวจสอบโค้ช)
+  // ✅ ฟังก์ชันนำเข้าข้อมูล
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
-    
-    // ✅ ตรวจสอบโค้ชในแถวที่เลือก (เฉพาะเมื่อมีค่า)
-    const rowsWithCoachErrors: number[] = [];
-    selectedRows.forEach(rowIdx => {
-      const row = previewData[rowIdx];
-      if (row.coach_name && row.coach_name.trim()) {
-        const coachMatch = findBestCoachMatch(row.coach_name, coaches);
-        if (!coachMatch || coachMatch.similarity < 0.95) {
-          rowsWithCoachErrors.push(rowIdx);
-        }
-      }
-    });
-    
-    if (rowsWithCoachErrors.length > 0) {
-      setError(`มี ${rowsWithCoachErrors.length} แถวที่ชื่อโค้ชไม่ถูกต้อง กรุณาแก้ไขก่อนนำเข้า`);
-      return;
-    }
-    
     if (hasErrorsInSelected) { setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบ กรุณาแก้ไขก่อนนำเข้า'); return; }
-    
     setError('');
     setImporting(true);
     setImportProgress({ current: 0, total: selectedRows.size });
