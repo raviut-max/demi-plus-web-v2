@@ -241,7 +241,7 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation (ไม่เช็คโค้ชใน Preview - ไปเช็คที่ Modal แทน)
+  // ✅ ฟังก์ชัน Validation (เพิ่มการเช็คโค้ช)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -273,7 +273,13 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
-      // ✅ ไม่เช็คโค้ชใน Preview (จะไปเช็คที่ Modal แทน)
+      // ✅ เพิ่มการตรวจสอบโค้ช
+      else if (field.key === 'coach_name' && strVal) {
+        const coachMatch = findBestCoachMatch(strVal, coaches);
+        if (!coachMatch || coachMatch.similarity < 0.95) {
+          errors.push(`ไม่พบชื่อโค้ช "${strVal}" ในระบบ กรุณาเลือกโค้ชจากรายชื่อที่มี`);
+        }
+      }
     });
 
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
