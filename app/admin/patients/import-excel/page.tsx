@@ -29,7 +29,8 @@ import {
   UserCheck,
   MapPin,
   Sparkles,
-  Save
+  Save,
+  Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -121,13 +122,11 @@ const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
 };
 
-// ✅ ฟังก์ชันตรวจสอบโค้ช (เพิ่ม Logic ตรวจสอบการมีอยู่จริง)
 const findBestCoachMatch = (coachName: string, coaches: any[]) => {
   let bestMatch: any = null;
   let bestScore = 0;
   coaches.forEach(coach => {
     const score = calculateSimilarity(coachName, coach.full_name_th);
-    // ปรับ Threshold ให้สูงขึ้นหน่อยเพื่อลด False Positive
     if (score > 0.75 && score > bestScore) {
       bestScore = score;
       bestMatch = coach;
@@ -239,7 +238,7 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // ✅ ฟังก์ชัน Validation ที่ปรับปรุงแล้ว (เพิ่มการเช็คโค้ช)
+  // ✅ ฟังก์ชัน Validation (ลบการเช็คโค้ชออก)
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -257,7 +256,7 @@ export default function ImportExcelPage() {
           if (field.max !== undefined && num > field.max) errors.push(`${field.label} มากกว่า ${field.max}`);
         }
       } else if (field.inputType === 'date') {
-        const dateRegex = /^(\d{2})[\/-](\d{2})[\/-](\d{4})$/;
+        const dateRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
         const match = strVal.match(dateRegex);
         if (!match) errors.push(`${field.label} รูปแบบต้องเป็น วว/ดด/ปปปป หรือ วว-ดด-ปปปป`);
         else {
@@ -271,18 +270,7 @@ export default function ImportExcelPage() {
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
-      
-      // ✅ NEW: ตรวจสอบชื่อโค้ช (Coach Validation)
-      else if (field.key === 'coach_name') {
-        // เช็คว่ามีโค้ชชื่อใกล้เคียงในฐานข้อมูลหรือไม่
-        const coachMatch = findBestCoachMatch(strVal, coaches);
-        if (!coachMatch) {
-          errors.push(`ไม่พบชื่อโค้ช "${strVal}" ในระบบ (กรุณาตรวจสอบการสะกด)`);
-        } else if (coachMatch.similarity < 0.95) {
-            // ถ้าความเหมือนไม่ถึง 95% ให้เตือนว่าอาจจะพิมพ์ไม่ตรงเป๊ะ
-            errors.push(`ชื่อโค้ชใกล้เคียง "${coachMatch.coach.full_name_th}" หรือไม่? (ความเหมือน ${(coachMatch.similarity*100).toFixed(0)}%)`);
-        }
-      }
+      // ✅ ลบการ validate coach_name ออก (จะไป validate ที่ Modal แทน)
     });
 
     if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
@@ -347,6 +335,98 @@ export default function ImportExcelPage() {
   };
 
   const hasErrorsInSelected = Array.from(selectedRows).some(idx => previewData[idx]?._errors?.length > 0);
+
+  // ✅ ฟังก์ชัน Export ข้อมูลที่แก้ไขแล้วเป็น Excel
+  const handleExportToExcel = () => {
+    if (!previewData || previewData.length === 0) {
+      setError('ไม่มีข้อมูลสำหรับส่งออก');
+      return;
+    }
+
+    // เตรียมข้อมูลสำหรับ export
+    const exportData = previewData.map((row, idx) => {
+      const exportRow: any = {
+        'ลำดับ': idx + 1,
+        'เลขบัตรประชาชน': row.id_card || '',
+        'ชื่อผู้ป่วย': row.first_name || '',
+        'นามสกุลผู้ป่วย': row.last_name || '',
+        'HN': row.hospital_number || '',
+        'วันเกิด': row.birth_date || '',
+        'เพศ': row.gender === 'male' ? 'ชาย' : row.gender === 'female' ? 'หญิง' : row.gender || '',
+        'โรงพยาบาล': row.hospital_name || '',
+        'เบอร์โทรศัพท์': row.phone || '',
+        'อีเมล': row.email || '',
+        'น้ำหนัก(กก.)': row.current_weight || '',
+        'ส่วนสูง(ซม.)': row.height || '',
+        'รอบเอว(ซม.)': row.waist_circumference || '',
+        'ประเภทเบาหวาน': row.diabetes_type || '',
+        'ค่าน้ำตาล': row.blood_sugar || '',
+        'ค่าHbA1c': row.hba1c_level || '',
+        'หมายเหตุ': row.notes || '',
+        'บ้านเลขที่': row.house_number || '',
+        'หมู่ที่': row.village_no || '',
+        'หมู่บ้าน': row.village_name || '',
+        'ซอย': row.soi || '',
+        'ถนน': row.road || '',
+        'ตำบล': row.subdistrict || '',
+        'อำเภอ': row.district || '',
+        'จังหวัด': row.province || '',
+        'รหัสไปรษณีย์': row.postal_code || '',
+        'ที่อยู่เพิ่มเติม': row.address_line1 || '',
+        'ผู้ติดต่อฉุกเฉิน': row.emergency_contact_name || '',
+        'เบอร์ติดต่อฉุกเฉิน': row.emergency_contact_phone || '',
+        'ความสัมพันธ์': row.emergency_contact_relationship || '',
+        'โค้ชผู้ดูแล': row.coach_name || '',
+      };
+      return exportRow;
+    });
+
+    // สร้าง Worksheet
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    
+    // ตั้งค่าความกว้างคอลัมน์
+    ws['!cols'] = [
+      { wch: 5 },  // ลำดับ
+      { wch: 15 }, // เลขบัตรประชาชน
+      { wch: 15 }, // ชื่อ
+      { wch: 15 }, // นามสกุล
+      { wch: 15 }, // HN
+      { wch: 15 }, // วันเกิด
+      { wch: 10 }, // เพศ
+      { wch: 30 }, // โรงพยาบาล
+      { wch: 12 }, // เบอร์โทร
+      { wch: 25 }, // อีเมล
+      { wch: 10 }, // น้ำหนัก
+      { wch: 10 }, // ส่วนสูง
+      { wch: 10 }, // รอบเอว
+      { wch: 15 }, // ประเภทเบาหวาน
+      { wch: 12 }, // ค่าน้ำตาล
+      { wch: 10 }, // HbA1c
+      { wch: 30 }, // หมายเหตุ
+      { wch: 15 }, // บ้านเลขที่
+      { wch: 10 }, // หมู่ที่
+      { wch: 20 }, // หมู่บ้าน
+      { wch: 20 }, // ซอย
+      { wch: 20 }, // ถนน
+      { wch: 20 }, // ตำบล
+      { wch: 20 }, // อำเภอ
+      { wch: 20 }, // จังหวัด
+      { wch: 10 }, // รหัสไปรษณีย์
+      { wch: 30 }, // ที่อยู่เพิ่มเติม
+      { wch: 20 }, // ผู้ติดต่อฉุกเฉิน
+      { wch: 15 }, // เบอร์ติดต่อฉุกเฉิน
+      { wch: 15 }, // ความสัมพันธ์
+      { wch: 30 }, // โค้ชผู้ดูแล
+    ];
+
+    // สร้าง Workbook
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
+
+    // ดาวน์โหลดไฟล์
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
+  };
 
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
@@ -418,7 +498,9 @@ export default function ImportExcelPage() {
       }
       if (currentError.coach_id) {
         const coach = coaches.find(c => c.user_id === currentError.coach_id);
-        if (coach) row.coach_name = coach.full_name_th;
+        if (coach) {
+          row.coach_name = coach.full_name_th; 
+        }
       }
       if (currentError.province) row.province = currentError.province;
       if (currentError.district) row.district = currentError.district;
@@ -537,11 +619,14 @@ export default function ImportExcelPage() {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
+                <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2">
+                  <Download className="w-4 h-4" /> นำออก Excel
+                </button>
                 <button onClick={() => setStep('mapping')} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔧 แก้ไขการจับคู่</button>
                 <button 
                   disabled={selectedRows.size === 0 || hasErrorsInSelected || importing} 
                   onClick={handleImport}
-                  className="px-4 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                  className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
                 >
                   {importing ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> กำลังนำเข้า... ({importProgress.current}/{importProgress.total})</>
@@ -679,7 +764,7 @@ export default function ImportExcelPage() {
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-96 overflow-auto space-y-3">
                     {importResult.errors.map((err, idx) => {
                       const hospitalMatch = err.error.includes('ไม่พบโรงพยาบาล') && err.original_hospital_name ? findBestHospitalMatch(err.original_hospital_name, hospitals) : null;
-                      const coachMatch = err.error.includes('ไม่พบโค้ช') && err.original_coach_name ? findBestCoachMatch(err.original_coach_name, coaches) : null;
+                      const coachMatch = err.error.includes('ไม่พบโค้ช') || err.error.includes('Coach') ? findBestCoachMatch(err.original_coach_name || '', coaches) : null;
 
                       if (err.fixed) {
                         return (
@@ -742,15 +827,21 @@ export default function ImportExcelPage() {
                             </div>
                           )}
 
-                          {err.error.includes('ไม่พบโค้ช') && (
+                          {(err.error.includes('ไม่พบโค้ช') || err.error.includes('Coach')) && (
                             <div className="mt-3 pl-6 space-y-2">
                               <label className="block text-xs font-medium text-gray-700 flex items-center gap-1">
                                 <UserCheck className="w-3 h-3" /> เลือกโค้ชใหม่:
                               </label>
-                              <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={err.coach_id || coachMatch?.coach.user_id || ''} onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}>
+                              <select 
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" 
+                                value={err.coach_id || coachMatch?.coach.user_id || ''} 
+                                onChange={(e) => handleEditInModal(idx, 'coach_id', e.target.value)}
+                              >
                                 <option value="">-- เลือกโค้ช --</option>
                                 {coaches.map(c => (
-                                  <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>
+                                  <option key={c.user_id} value={c.user_id}>
+                                    {c.full_name_th} {c.specialization_th ? `| ${c.specialization_th}` : ''}
+                                  </option>
                                 ))}
                               </select>
                               <button onClick={() => handleApplyModalFix(idx)} className="w-full flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all">
