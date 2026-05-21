@@ -1,15 +1,3 @@
-/**
- * ============================================================================
- * 📄 ไฟล์: page.tsx
- * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
- * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
- * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 21 พฤษภาคม 2569
- * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อแก้ปัญหาการโหลดรายชื่อโค้ชและการอัปเดตสถานะ
- * ============================================================================
- */
-
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -46,9 +34,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
-// =====================================================
 const STANDARD_FIELDS = [
   { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
@@ -236,7 +222,7 @@ export default function ImportExcelPage() {
       setHospitals(allHospitals);
       const hospitalIds = allHospitals.map(h => h.id);
       
-      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
       
@@ -266,7 +252,7 @@ export default function ImportExcelPage() {
 
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' }; // เริ่มต้นสถานะเป็น pending
+      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
@@ -378,7 +364,7 @@ export default function ImportExcelPage() {
   };
 
   const selectAll = (checked: boolean) => {
-    const next = checked ? new Set(previewData.map((_, i) => i)) : new Set();
+    const next = checked ? new Set(previewData.filter(r => r._status !== 'success').length && previewData.filter(r => r._status !== 'success').length > 0 ? previewData.map((_, i) => i).filter(i => previewData[i]._status !== 'success') : []) : new Set();
     setSelectedRows(next);
     setPreviewData(prev => prev.map((r, i) => ({ ...r, _selected: next.has(i) })));
   };
@@ -398,16 +384,12 @@ export default function ImportExcelPage() {
     return networkIds;
   };
 
-  // =====================================================
-  // 🚀 ฟังก์ชันโหลดโค้ช (แก้ไขใหม่: โหลดจาก API โดยตรง)
-  // =====================================================
   const loadCoachesForErrorRow = async (errorIndex: number, hospitalId: string) => {
     if (!hospitalId) {
       console.warn('⚠️ [loadCoachesForErrorRow] No hospital_id provided');
       return;
     }
     
-    // ✅ ป้องกันการโหลดซ้ำ
     if (modalCoaches[errorIndex]) {
       console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
       return;
@@ -418,17 +400,14 @@ export default function ImportExcelPage() {
       console.log(`📝 Error Index: ${errorIndex}`);
       console.log(`🏥 Hospital ID: ${hospitalId}`);
       
-      // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
       const networkIds = getNetworkHospitalIds(hospitalId);
       console.log('🏥 Network Hospital IDs:', networkIds);
       
-      // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state ที่อาจผิดพลาด)
       console.log('🔄 Loading coaches from API for network...');
       const networkCoaches = await getCoachesWithHospitals(networkIds);
       
       console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
       
-      // ✅ อัปเดต state
       setModalCoaches(prev => ({ 
         ...prev, 
         [errorIndex]: networkCoaches 
@@ -441,11 +420,9 @@ export default function ImportExcelPage() {
     }
   };
 
-  // ✅ Auto-load coaches when modal opens
   useEffect(() => {
     if (importResult && importResult.errors.length > 0) {
       importResult.errors.forEach((err, idx) => {
-        // ถ้ามี hospital_id และยังไม่มีข้อมูลโค้ชใน modal ให้โหลด
         if (err.hospital_id && !modalCoaches[idx]) {
           console.log('🔄 Auto-loading coaches for error', idx, 'hospital:', err.hospital_id);
           loadCoachesForErrorRow(idx, err.hospital_id);
@@ -454,9 +431,6 @@ export default function ImportExcelPage() {
     }
   }, [importResult]);
 
-  // =====================================================
-  // 📊 ฟังก์ชันบันทึกผลรายงาน (Export Report)
-  // =====================================================
   const handleExportResults = () => {
     if (!previewData || previewData.length === 0) return;
 
@@ -591,7 +565,6 @@ export default function ImportExcelPage() {
       
       if (result.success > 0) {
         setSuccess(true);
-        // Update status to success
         setPreviewData(prev => prev.map((r, idx) => idx === rowIndex ? { ...r, _status: 'success', _selected: false } : r));
         setSelectedRows(prev => {
           const next = new Set(prev);
@@ -728,7 +701,6 @@ export default function ImportExcelPage() {
 
       const result = await importPatientsBatch(selectedData, user.id);
       
-      // ✅ อัปเดตสถานะแถวที่บันทึกสำเร็จใน previewData
       if (result.success > 0) {
         const successIds = new Set(selectedData.filter((_, idx) => idx < result.success).map(d => d.id_card));
         setPreviewData(prev => prev.map(r => {
@@ -738,7 +710,6 @@ export default function ImportExcelPage() {
           return r;
         }));
         
-        // ล้างการเลือกแถวที่สำเร็จแล้ว
         setSelectedRows(prev => {
           const next = new Set(prev);
           previewData.forEach((r, i) => {
@@ -1041,7 +1012,6 @@ export default function ImportExcelPage() {
         )}
       </div>
 
-      {/* ✅ Modal แสดงผลการนำเข้า */}
       {importResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-auto">
@@ -1174,7 +1144,6 @@ export default function ImportExcelPage() {
                                 </div>
                               )}
                               
-                              {/* ✅ แก้ไข: เพิ่ม key แบบ dynamic และบังคับ re-render */}
                               <select
                                 key={`coach-select-${idx}-${err.coach_id || 'none'}-${modalCoaches[idx]?.length || 0}`}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
@@ -1183,7 +1152,6 @@ export default function ImportExcelPage() {
                                   const selectedCoachId = e.target.value;
                                   console.log('🎯 Coach selected:', selectedCoachId);
                                   
-                                  // ✅ อัปเดตค่าใน state ทันที
                                   const updatedErrors = [...importResult.errors];
                                   updatedErrors[idx] = { 
                                     ...updatedErrors[idx], 
@@ -1191,7 +1159,6 @@ export default function ImportExcelPage() {
                                   };
                                   setImportResult({ ...importResult, errors: updatedErrors });
                                   
-                                  // ✅ หาชื่อโค้ชที่เลือกเพื่ออัปเดต
                                   const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId);
                                   if (selectedCoach) {
                                     console.log('✅ Coach found:', selectedCoach.full_name_th);
