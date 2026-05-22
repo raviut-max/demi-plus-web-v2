@@ -45,7 +45,6 @@ import {
   Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { createClient } from '@/lib/supabase/client';
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
@@ -168,7 +167,6 @@ const convertISOToThaiDate = (isoDate: string): string => {
 // =====================================================
 export default function ImportExcelPage() {
   const router = useRouter();
-  const supabase = createClient();
   const [user, setUser] = useState<any>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [rawData, setRawData] = useState<any[]>([]);
@@ -462,28 +460,6 @@ export default function ImportExcelPage() {
   }, [importResult]);
 
   // =====================================================
-  // ✅ ฟังก์ชันตรวจสอบเลขบัตรประชาชนซ้ำ
-  // =====================================================
-  const checkDuplicateIdCard = async (idCard: string): Promise<boolean> => {
-    try {
-      const { data, error } = await supabase
-        .from('patients')
-        .select('id_card')
-        .eq('id_card', idCard)
-        .single();
-      
-      if (error && error.code !== 'PGRST116') {
-        throw error;
-      }
-      
-      return !!data;
-    } catch (err) {
-      console.error('Error checking duplicate ID:', err);
-      return false;
-    }
-  };
-
-  // =====================================================
   // 📊 ฟังก์ชันบันทึกผลรายงาน (Export Report)
   // =====================================================
   const handleExportResults = () => {
@@ -634,30 +610,11 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ แก้ไขฟังก์ชัน handleImportSingleRow (ตรวจสอบเลขบัตรประชาชนซ้ำ)
+  // ✅ handleImportSingleRow (ลบการตรวจสอบเลขบัตรซ้ำ - ให้ backend จัดการ)
   // =====================================================
   const handleImportSingleRow = async (rowIndex: number) => {
     const row = previewData[rowIndex];
     try {
-      // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำก่อน
-      const isDuplicate = await checkDuplicateIdCard(row.id_card);
-      if (isDuplicate) {
-        setError(`❌ เลขบัตรประชาชน ${row.id_card} มีอยู่ในระบบแล้ว`);
-        
-        // แสดงใน modal ด้วย
-        const newErrors = [...(importResult?.errors || [])];
-        if (newErrors[rowIndex]) {
-          newErrors[rowIndex] = { 
-            ...newErrors[rowIndex], 
-            error: `เลขบัตรประชาชน ${row.id_card} มีอยู่ในระบบแล้ว`,
-            error_type: 'other' as const
-          };
-          setImportResult({ ...importResult!, errors: newErrors });
-        }
-        
-        return;
-      }
-
       const dateParts = row.birth_date.split(/[\/-]/);
       if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
       const [day, month, yearBE] = dateParts;
@@ -730,6 +687,7 @@ export default function ImportExcelPage() {
           router.push('/admin/patients');
         }, 2000);
       } else {
+        // ✅ Backend จะส่ง error กลับมาถ้ามีเลขบัตรซ้ำ
         setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
       }
     } catch (err: any) {
@@ -739,7 +697,7 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ แก้ไขฟังก์ชัน handleImport (ตรวจสอบเลขบัตรประชาชนซ้ำ)
+  // ✅ handleImport (ลบการตรวจสอบเลขบัตรซ้ำ - ให้ backend จัดการ)
   // =====================================================
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
@@ -859,17 +817,8 @@ export default function ImportExcelPage() {
 
       const result = await importPatientsBatch(selectedData, user.id);
       
-      // ✅ ตรวจสอบว่ามี error จากเลขบัตรประชาชนซ้ำหรือไม่
-      if (result.errors && result.errors.length > 0) {
-        const duplicateErrors = result.errors.filter((e: any) => 
-          e.error?.includes('เลขบัตรประชาชน') && e.error?.includes('มีอยู่แล้ว')
-        );
-        
-        if (duplicateErrors.length > 0) {
-          const duplicateMsg = duplicateErrors.map((e: any) => `แถว ${e.row}: ${e.error}`).join(', ');
-          setError(`⚠️ พบเลขบัตรประชาชนซ้ำ: ${duplicateMsg}`);
-        }
-      }
+      // ✅ Backend จะจัดการตรวจสอบเลขบัตรซ้ำผ่าน Unique Constraint
+      // ถ้ามีซ้ำ จะคืน error มาใน result.errors
       
       if (result.success > 0) {
         const successIds = new Set(selectedData.filter((_, idx) => idx < result.success).map(d => d.id_card));
