@@ -1,15 +1,3 @@
-/**
- * ============================================================================
- * 📄 ไฟล์: page.tsx
- * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
- * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
- * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 22 พฤษภาคม 2569
- * ⚠️ คำเตือน: ห้ามแก้ไขโค้ดโดยไม่ได้รับอนุญาต
- * ============================================================================
- */
-
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -236,7 +224,7 @@ export default function ImportExcelPage() {
       setHospitals(allHospitals);
       const hospitalIds = allHospitals.map(h => h.id);
       
-      console.log('👨‍⚕️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
+      console.log('👨‍️ [loadNetworkData] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
       
@@ -483,6 +471,9 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `Import_Report_${timestamp}.xlsx`);
   };
 
+  // =====================================================
+  // 📤 ฟังก์ชัน Export Excel (เดิม)
+  // =====================================================
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
       setError('ไม่มีข้อมูลสำหรับส่งออก');
@@ -541,6 +532,9 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${timestamp}.xlsx`);
   };
 
+  // =====================================================
+  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล
+  // =====================================================
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
     const currentError = importResult.errors[errorIndex];
@@ -551,28 +545,39 @@ export default function ImportExcelPage() {
       return;
     }
 
+    console.log('💾 [handleSaveHospitalFix] Saving hospital fix for row:', rowIndex);
+
+    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
       const hospital = hospitals.find(h => h.id === currentError.hospital_id);
       if (hospital) {
         row.hospital_name = hospital.name;
+        console.log('✅ Updated hospital name to:', hospital.name);
       }
       newData[rowIndex] = row;
       return newData;
     });
 
+    // 2. รอให้ Preview อัปเดต
     setTimeout(() => {
       runValidation(previewData);
     }, 100);
 
+    // 3. ตรวจสอบว่ามี error อื่นๆ อีกหรือไม่
     setTimeout(() => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
       
+      console.log('🔍 [handleSaveHospitalFix] Validation errors:', rowErrors);
+      
       if (rowErrors.length === 0) {
+        console.log('✅ No errors - importing single row');
         handleImportSingleRow(rowIndex);
       } else {
+        console.log('⚠️ Still has errors - updating modal');
+        // ⚠️ ยังมี error อื่น - อัปเดต Modal แสดง error ถัดไป
         const newErrors = [...importResult.errors];
         newErrors[errorIndex] = { 
           ...newErrors[errorIndex], 
@@ -585,6 +590,13 @@ export default function ImportExcelPage() {
         if (nextError) {
           setError(`✅ โรงพยาบาลถูกต้องแล้ว แต่พบปัญหา: ${nextError}`);
         }
+        
+        // ✅ ปิด Modal และกลับไปหน้า Preview ทันที
+        setTimeout(() => {
+          console.log('🔙 Closing modal and returning to preview');
+          setImportResult(null);
+          setStep('preview');
+        }, 500);
       }
     }, 200);
   };
