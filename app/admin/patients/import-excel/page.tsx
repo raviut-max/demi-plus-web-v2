@@ -1300,6 +1300,7 @@ export default function ImportExcelPage() {
                 </div>
               )}
 
+              {/* ✅ ปุ่มควบคุมท้าย Modal */}
               <div className="flex gap-3 mt-6 flex-wrap">
                 {importResult.failed > 0 && (
                   <>
@@ -1314,10 +1315,30 @@ export default function ImportExcelPage() {
                     </button>
                   </>
                 )}
+                
                 {importResult.success > 0 && (
-                  <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">
-                    ไปหน้ารายการผู้ป่วย
-                  </button>
+                  <>
+                    {/* ✅ ปุ่มย้อนกลับไปหน้าพรีวิว - สำหรับนำเข้าต่อ */}
+                    <button 
+                      onClick={() => {
+                        setImportResult(null);
+                        setStep('preview');
+                        // ล้างการเลือกแถวที่สำเร็จแล้ว
+                        setSelectedRows(new Set());
+                      }} 
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2"
+                    >
+                      <ArrowLeft className="w-4 h-4" /> ย้อนกลับไปหน้าพรีวิว (นำเข้าต่อ)
+                    </button>
+                    
+                    {/* ปุ่มไปหน้ารายการผู้ป่วย */}
+                    <button 
+                      onClick={() => router.push('/admin/patients')} 
+                      className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2"
+                    >
+                      <CheckCircle className="w-4 h-4" /> ไปหน้ารายการผู้ป่วย
+                    </button>
+                  </>
                 )}
               </div>
             </div>
