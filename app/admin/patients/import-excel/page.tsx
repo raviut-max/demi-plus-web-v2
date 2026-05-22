@@ -1,15 +1,3 @@
-/**
- * ============================================================================
- * 📄 ไฟล์: page.tsx
- * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
- * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
- * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 22 พฤษภาคม 2569
- * ⚠️ คำเตือน: ห้ามแก้ไขโค้ดโดยไม่ได้รับอนุญาต
- * ============================================================================
- */
-
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -542,7 +530,7 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (ปิดอัตโนมัติ)
+  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที)
   // =====================================================
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
@@ -583,6 +571,7 @@ export default function ImportExcelPage() {
       
       if (rowErrors.length === 0) {
         console.log('✅ No errors - importing single row');
+        // ✅ เรียก import ทันที
         handleImportSingleRow(rowIndex);
       } else {
         console.log('⚠️ Still has errors - updating modal');
@@ -601,7 +590,7 @@ export default function ImportExcelPage() {
         }
       }
       
-      // ✅ ปิด Modal และกลับไปหน้า Preview ทันที (ไม่ต้องค้าง)
+      // ✅ ปิด Modal และกลับไปหน้า Preview หลังจากบันทึก
       setTimeout(() => {
         console.log('🔙 Closing modal and returning to preview');
         setImportResult(null);
