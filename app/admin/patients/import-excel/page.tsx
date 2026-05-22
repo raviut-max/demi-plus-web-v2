@@ -1,3 +1,15 @@
+/**
+ * ============================================================================
+ * 📄 ไฟล์: page.tsx
+ * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
+ * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
+ * 👥 ผู้พัฒนา: DEMI+ Development Team
+ * 📅 อัปเดตล่าสุด: 22 พฤษภาคม 2569
+ * ⚠️ คำเตือน: ห้ามแก้ไขโค้ดโดยไม่ได้รับอนุญาต
+ * ============================================================================
+ */
+
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -33,6 +45,7 @@ import {
   Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
@@ -155,6 +168,7 @@ const convertISOToThaiDate = (isoDate: string): string => {
 // =====================================================
 export default function ImportExcelPage() {
   const router = useRouter();
+  const supabase = createClient();
   const [user, setUser] = useState<any>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [rawData, setRawData] = useState<any[]>([]);
@@ -448,6 +462,28 @@ export default function ImportExcelPage() {
   }, [importResult]);
 
   // =====================================================
+  // ✅ ฟังก์ชันตรวจสอบเลขบัตรประชาชนซ้ำ
+  // =====================================================
+  const checkDuplicateIdCard = async (idCard: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase
+        .from('patients')
+        .select('id_card')
+        .eq('id_card', idCard)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') {
+        throw error;
+      }
+      
+      return !!data;
+    } catch (err) {
+      console.error('Error checking duplicate ID:', err);
+      return false;
+    }
+  };
+
+  // =====================================================
   // 📊 ฟังก์ชันบันทึกผลรายงาน (Export Report)
   // =====================================================
   const handleExportResults = () => {
@@ -530,7 +566,7 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที)
+  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที + ปิดอัตโนมัติ)
   // =====================================================
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
@@ -571,11 +607,9 @@ export default function ImportExcelPage() {
       
       if (rowErrors.length === 0) {
         console.log('✅ No errors - importing single row');
-        // ✅ เรียก import ทันที
         handleImportSingleRow(rowIndex);
       } else {
         console.log('⚠️ Still has errors - updating modal');
-        // ⚠️ ยังมี error อื่น - อัปเดต Modal แสดง error ถัดไป
         const newErrors = [...importResult.errors];
         newErrors[errorIndex] = { 
           ...newErrors[errorIndex], 
@@ -599,9 +633,31 @@ export default function ImportExcelPage() {
     }, 200);
   };
 
+  // =====================================================
+  // ✅ แก้ไขฟังก์ชัน handleImportSingleRow (ตรวจสอบเลขบัตรประชาชนซ้ำ)
+  // =====================================================
   const handleImportSingleRow = async (rowIndex: number) => {
     const row = previewData[rowIndex];
     try {
+      // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำก่อน
+      const isDuplicate = await checkDuplicateIdCard(row.id_card);
+      if (isDuplicate) {
+        setError(`❌ เลขบัตรประชาชน ${row.id_card} มีอยู่ในระบบแล้ว`);
+        
+        // แสดงใน modal ด้วย
+        const newErrors = [...(importResult?.errors || [])];
+        if (newErrors[rowIndex]) {
+          newErrors[rowIndex] = { 
+            ...newErrors[rowIndex], 
+            error: `เลขบัตรประชาชน ${row.id_card} มีอยู่ในระบบแล้ว`,
+            error_type: 'other' as const
+          };
+          setImportResult({ ...importResult!, errors: newErrors });
+        }
+        
+        return;
+      }
+
       const dateParts = row.birth_date.split(/[\/-]/);
       if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
       const [day, month, yearBE] = dateParts;
@@ -664,7 +720,6 @@ export default function ImportExcelPage() {
       
       if (result.success > 0) {
         setSuccess(true);
-        // Update status to success
         setPreviewData(prev => prev.map((r, idx) => idx === rowIndex ? { ...r, _status: 'success', _selected: false } : r));
         setSelectedRows(prev => {
           const next = new Set(prev);
@@ -683,6 +738,9 @@ export default function ImportExcelPage() {
     }
   };
 
+  // =====================================================
+  // ✅ แก้ไขฟังก์ชัน handleImport (ตรวจสอบเลขบัตรประชาชนซ้ำ)
+  // =====================================================
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
     if (hasErrorsInSelected) { 
@@ -801,7 +859,18 @@ export default function ImportExcelPage() {
 
       const result = await importPatientsBatch(selectedData, user.id);
       
-      // ✅ อัปเดตสถานะแถวที่บันทึกสำเร็จใน previewData
+      // ✅ ตรวจสอบว่ามี error จากเลขบัตรประชาชนซ้ำหรือไม่
+      if (result.errors && result.errors.length > 0) {
+        const duplicateErrors = result.errors.filter((e: any) => 
+          e.error?.includes('เลขบัตรประชาชน') && e.error?.includes('มีอยู่แล้ว')
+        );
+        
+        if (duplicateErrors.length > 0) {
+          const duplicateMsg = duplicateErrors.map((e: any) => `แถว ${e.row}: ${e.error}`).join(', ');
+          setError(`⚠️ พบเลขบัตรประชาชนซ้ำ: ${duplicateMsg}`);
+        }
+      }
+      
       if (result.success > 0) {
         const successIds = new Set(selectedData.filter((_, idx) => idx < result.success).map(d => d.id_card));
         setPreviewData(prev => prev.map(r => {
@@ -811,7 +880,6 @@ export default function ImportExcelPage() {
           return r;
         }));
         
-        // ล้างการเลือกแถวที่สำเร็จแล้ว
         setSelectedRows(prev => {
           const next = new Set(prev);
           previewData.forEach((r, i) => {
@@ -1247,7 +1315,6 @@ export default function ImportExcelPage() {
                                 </div>
                               )}
                               
-                              {/* ✅ แก้ไข: เพิ่ม key แบบ dynamic และบังคับ re-render */}
                               <select
                                 key={`coach-select-${idx}-${err.coach_id || 'none'}-${modalCoaches[idx]?.length || 0}`}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
@@ -1256,7 +1323,6 @@ export default function ImportExcelPage() {
                                   const selectedCoachId = e.target.value;
                                   console.log('🎯 Coach selected:', selectedCoachId);
                                    
-                                  // ✅ อัปเดตค่าใน state ทันที
                                   const updatedErrors = [...importResult.errors];
                                   updatedErrors[idx] = { 
                                     ...updatedErrors[idx], 
@@ -1264,7 +1330,6 @@ export default function ImportExcelPage() {
                                   };
                                   setImportResult({ ...importResult, errors: updatedErrors });
                                   
-                                  // ✅ หาชื่อโค้ชที่เลือกเพื่ออัปเดต
                                   const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId);
                                   if (selectedCoach) {
                                     console.log('✅ Coach found:', selectedCoach.full_name_th);
@@ -1333,7 +1398,6 @@ export default function ImportExcelPage() {
                       onClick={() => {
                         setImportResult(null);
                         setStep('preview');
-                        // ล้างการเลือกแถวที่สำเร็จแล้ว
                         setSelectedRows(new Set());
                       }} 
                       className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2"
