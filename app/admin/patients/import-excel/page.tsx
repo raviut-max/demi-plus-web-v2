@@ -83,19 +83,37 @@ const STANDARD_FIELDS = [
 ];
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS
+// 🧠 SMART MATCHING FUNCTIONS (ปรับปรุงแล้ว)
 // =====================================================
+
+// ✅ ปรับปรุง: รองรับ "รพ.", "รพ. ", "รพ.สต" และรูปแบบคำย่อที่มีจุด/ช่องว่าง
 const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
+  
+  // ✅ รองรับรูปแบบคำย่อที่มีจุดและช่องว่าง
   const abbreviations: Record<string, string> = {
-    'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
-    'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
+    'รพ': 'โรงพยาบาล', 'รพ.': 'โรงพยาบาล', 'รพ. ': 'โรงพยาบาล',
+    'รพ สต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพ.สต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล',
+    'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล',
+    'รพช': 'โรงพยาบาลชุมชน', 'รพ.ช': 'โรงพยาบาลชุมชน',
+    'สสจ': 'สาธารณสุขจังหวัด', 'สสจ.': 'สาธารณสุขจังหวัด',
+    'สสอ': 'สาธารณสุขอำเภอ', 'สสอ.': 'สาธารณสุขอำเภอ',
+    'อน': 'อนามัย', 'อสม': 'อาสาสมัครสาธารณสุข',
     'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
   };
+
   Object.entries(abbreviations).forEach(([abbr, full]) => {
-    normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
+    // ✅ ใช้ regex ที่ครอบคลุมทั้งหมด: รพ, รพ., รพ. <space>
+    const abbrRegex = new RegExp(`\\b${abbr}\\b`, 'g');
+    const abbrWithDot = new RegExp(`\\b${abbr.replace('.', '\\.')}`, 'g');
+    const abbrWithDotSpace = new RegExp(`\\b${abbr.replace('.', '\\.')}\\s+`, 'g');
+    
+    normalized = normalized.replace(abbrWithDotSpace, full + ' ');
+    normalized = normalized.replace(abbrWithDot, full);
+    normalized = normalized.replace(abbrRegex, full);
   });
+
   normalized = normalized.replace(/\s+/g, '');
   const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
   normalized = normalized.replace(toneMarks, '');
@@ -123,17 +141,37 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return 1 - (distance / maxLength);
 };
 
+// ✅ ปรับปรุง: แสดงผลลัพธ์การจับคู่ทั้งหมด + log เมื่อไม่พบ
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
-  let bestMatch: any = null;
-  let bestScore = 0;
+  const s1 = normalizeThaiText(hospitalName);
+  const matches: Array<{ hospital: any; similarity: number }> = [];
+
   hospitals.forEach(hospital => {
+    const s2 = normalizeThaiText(hospital.name);
     const score = calculateSimilarity(hospitalName, hospital.name);
-    if (score > 0.80 && score > bestScore) {
-      bestScore = score;
-      bestMatch = hospital;
+    
+    if (score > 0.0) {
+      matches.push({ hospital, similarity: score });
     }
   });
-  return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
+
+  // ✅ บันทึก log ทุกครั้งที่ไม่พบ match
+  if (matches.length === 0) {
+    console.warn(`❌ [findBestHospitalMatch] No match for "${hospitalName}" in ${hospitals.length} hospitals`);
+    console.warn('🔍 Input normalized:', s1);
+    console.warn('🔍 Available hospitals:', hospitals.slice(0, 10).map(h => normalizeThaiText(h.name)));
+  }
+
+  // ✅ แสดงผลลัพธ์การจับคู่ทั้งหมดใน log
+  if (matches.length > 0) {
+    console.log(`🔍 [findBestHospitalMatch] Found ${matches.length} candidates for "${hospitalName}":`);
+    matches.slice(0, 5).forEach((m, i) => {
+      console.log(`  ${i + 1}. "${m.hospital.name}" | Score: ${m.similarity.toFixed(3)} | ID: ${m.hospital.id}`);
+    });
+  }
+
+  const bestMatch = matches.find(m => m.similarity > 0.80);
+  return bestMatch ? { hospital: bestMatch.hospital, similarity: bestMatch.similarity } : null;
 };
 
 const findBestCoachMatch = (coachName: string, coaches: any[]) => {
@@ -160,6 +198,30 @@ const convertISOToThaiDate = (isoDate: string): string => {
     return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
   }
   return isoDate;
+};
+
+// =====================================================
+// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ (ขั้นตอนที่ 4)
+// =====================================================
+const validateProvince = (provinceName: string, validProvinces: string[]): { valid: boolean; errors: string[] } => {
+  if (!provinceName) {
+    return { valid: false, errors: ['จังหวัด เป็นฟิลด์บังคับ'] };
+  }
+  
+  const normalizedInput = normalizeThaiText(provinceName);
+  const found = validProvinces.some(p => 
+    normalizeThaiText(p).includes(normalizedInput) || 
+    normalizedInput.includes(normalizeThaiText(p))
+  );
+  
+  if (!found) {
+    return { 
+      valid: false, 
+      errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง`] 
+    };
+  }
+  
+  return { valid: true, errors: [] };
 };
 
 // =====================================================
@@ -290,7 +352,7 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (แก้ไข: ไม่ validate ที่อยู่)
+  // ✅ ฟังก์ชัน validateRow (ปรับปรุง: ตรวจสอบเฉพาะจังหวัด)
   // =====================================================
   const validateRow = (row: any) => {
     const errors: string[] = [];
@@ -325,11 +387,14 @@ export default function ImportExcelPage() {
       }
     });
 
-    // ✅ ปิดการ validate ที่อยู่ (ตำบล อำเภอ จังหวัด) - ตามคำขอ
-    // if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
-    //   const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
-    //   if (!addrCheck.valid) errors.push(...addrCheck.errors);
-    // }
+    // ✅ ตรวจสอบเฉพาะจังหวัด (ขั้นตอนที่ 4) - ไม่ตรวจสอบอำเภอ/ตำบล
+    if (row.province && validAddresses.length > 0) {
+      const provinces = Array.from(new Set(validAddresses.map(a => a.province)));
+      const provinceCheck = validateProvince(row.province, provinces);
+      if (!provinceCheck.valid) {
+        errors.push(...provinceCheck.errors);
+      }
+    }
 
     return errors;
   };
@@ -412,7 +477,6 @@ export default function ImportExcelPage() {
       return;
     }
     
-    // ✅ ป้องกันการโหลดซ้ำ
     if (modalCoaches[errorIndex]) {
       console.log('✅ [loadCoachesForErrorRow] Already loaded for error', errorIndex);
       return;
@@ -423,17 +487,14 @@ export default function ImportExcelPage() {
       console.log(`📝 Error Index: ${errorIndex}`);
       console.log(`🏥 Hospital ID: ${hospitalId}`);
       
-      // ✅ หา network hospital IDs (แม่ข่าย + ลูกข่าย)
       const networkIds = getNetworkHospitalIds(hospitalId);
       console.log('🏥 Network Hospital IDs:', networkIds);
       
-      // ✅ โหลดโค้ชจาก API โดยตรง (แทนการใช้ state ที่อาจผิดพลาด)
       console.log('🔄 Loading coaches from API for network...');
       const networkCoaches = await getCoachesWithHospitals(networkIds);
       
       console.log(`\n✅ Found ${networkCoaches.length} coaches from API`);
       
-      // ✅ อัปเดต state
       setModalCoaches(prev => ({ 
         ...prev, 
         [errorIndex]: networkCoaches 
@@ -446,11 +507,9 @@ export default function ImportExcelPage() {
     }
   };
 
-  // ✅ Auto-load coaches when modal opens
   useEffect(() => {
     if (importResult && importResult.errors.length > 0) {
       importResult.errors.forEach((err, idx) => {
-        // ถ้ามี hospital_id และยังไม่มีข้อมูลโค้ชใน modal ให้โหลด
         if (err.hospital_id && !modalCoaches[idx]) {
           console.log('🔄 Auto-loading coaches for error', idx, 'hospital:', err.hospital_id);
           loadCoachesForErrorRow(idx, err.hospital_id);
@@ -556,7 +615,6 @@ export default function ImportExcelPage() {
 
     console.log('💾 [handleSaveHospitalFix] Saving hospital fix for row:', rowIndex);
 
-    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
@@ -569,12 +627,10 @@ export default function ImportExcelPage() {
       return newData;
     });
 
-    // 2. รอให้ Preview อัปเดต
     setTimeout(() => {
       runValidation(previewData);
     }, 100);
 
-    // 3. ตรวจสอบและมี error อื่นๆ อีกหรือไม่
     setTimeout(() => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
@@ -600,7 +656,6 @@ export default function ImportExcelPage() {
         }
       }
       
-      // ✅ ปิด Modal และกลับไปหน้า Preview หลังจากบันทึก
       setTimeout(() => {
         console.log('🔙 Closing modal and returning to preview');
         setImportResult(null);
@@ -609,9 +664,6 @@ export default function ImportExcelPage() {
     }, 200);
   };
 
-  // =====================================================
-  // ✅ handleImportSingleRow (ลบการตรวจสอบเลขบัตรซ้ำ - ให้ backend จัดการ)
-  // =====================================================
   const handleImportSingleRow = async (rowIndex: number) => {
     const row = previewData[rowIndex];
     try {
@@ -687,7 +739,6 @@ export default function ImportExcelPage() {
           router.push('/admin/patients');
         }, 2000);
       } else {
-        // ✅ Backend จะส่ง error กลับมาถ้ามีเลขบัตรซ้ำ
         setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
       }
     } catch (err: any) {
@@ -696,9 +747,6 @@ export default function ImportExcelPage() {
     }
   };
 
-  // =====================================================
-  // ✅ handleImport (ลบการตรวจสอบเลขบัตรซ้ำ - ให้ backend จัดการ)
-  // =====================================================
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
     if (hasErrorsInSelected) { 
@@ -816,9 +864,6 @@ export default function ImportExcelPage() {
       });
 
       const result = await importPatientsBatch(selectedData, user.id);
-      
-      // ✅ Backend จะจัดการตรวจสอบเลขบัตรซ้ำผ่าน Unique Constraint
-      // ถ้ามีซ้ำ จะคืน error มาใน result.errors
       
       if (result.success > 0) {
         const successIds = new Set(selectedData.filter((_, idx) => idx < result.success).map(d => d.id_card));
