@@ -45,6 +45,7 @@ import {
   Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
@@ -222,6 +223,29 @@ const validateProvince = (provinceName: string, validProvinces: string[]): { val
   }
   
   return { valid: true, errors: [] };
+};
+
+// =====================================================
+// ✅ ฟังก์ชันตรวจสอบเลขบัตรประชาชนซ้ำ
+// =====================================================
+const checkDuplicateIdCard = async (idCard: string): Promise<boolean> => {
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('patients')
+      .select('id_card')
+      .eq('id_card', idCard)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+    
+    return !!data; // ถ้ามีข้อมูล = ซ้ำ
+  } catch (err) {
+    console.error('Error checking duplicate ID:', err);
+    return false;
+  }
 };
 
 // =====================================================
@@ -601,7 +625,7 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที + ปิดอัตโนมัติ)
+  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที + ตรวจสอบ ID ซ้ำ)
   // =====================================================
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
@@ -615,6 +639,7 @@ export default function ImportExcelPage() {
 
     console.log('💾 [handleSaveHospitalFix] Saving hospital fix for row:', rowIndex);
 
+    // 1. อัปเดตข้อมูลโรงพยาบาลใน previewData
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
@@ -627,17 +652,47 @@ export default function ImportExcelPage() {
       return newData;
     });
 
+    // 2. รอให้ Preview อัปเดต
     setTimeout(() => {
       runValidation(previewData);
     }, 100);
 
-    setTimeout(() => {
+    // 3. ตรวจสอบและมี error อื่นๆ อีกหรือไม่
+    setTimeout(async () => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
       
       console.log('🔍 [handleSaveHospitalFix] Validation errors:', rowErrors);
       
       if (rowErrors.length === 0) {
+        // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำก่อนนำเข้า
+        console.log('🔍 Checking duplicate ID:', updatedRow.id_card);
+        const isDuplicate = await checkDuplicateIdCard(updatedRow.id_card);
+        
+        if (isDuplicate) {
+          console.log('❌ Duplicate ID found:', updatedRow.id_card);
+          setError(`❌ เลขบัตรประชาชน ${updatedRow.id_card} มีอยู่ในระบบแล้ว`);
+          
+          // แสดงใน modal ด้วย
+          const newErrors = [...importResult.errors];
+          newErrors[errorIndex] = { 
+            ...newErrors[errorIndex], 
+            error: `เลขบัตรประชาชน ${updatedRow.id_card} มีอยู่ในระบบแล้ว`,
+            error_type: 'other' as const,
+            hospital_fixed: true,
+            fixed: false
+          };
+          setImportResult({ ...importResult, errors: newErrors });
+          
+          // ปิด modal และกลับไป preview
+          setTimeout(() => {
+            setImportResult(null);
+            setStep('preview');
+          }, 500);
+          
+          return;
+        }
+        
         console.log('✅ No errors - importing single row');
         handleImportSingleRow(rowIndex);
       } else {
@@ -656,6 +711,7 @@ export default function ImportExcelPage() {
         }
       }
       
+      // ✅ ปิด Modal และกลับไปหน้า Preview
       setTimeout(() => {
         console.log('🔙 Closing modal and returning to preview');
         setImportResult(null);
