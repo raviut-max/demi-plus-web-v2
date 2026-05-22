@@ -5,7 +5,7 @@
  * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 21 พฤษภาคม 2569
+ * 📅 อัปเดตล่าสุด: 22 พฤษภาคม 2569
  * ⚠️ คำเตือน: ห้ามแก้ไขโค้ดโดยไม่ได้รับอนุญาต
  * ============================================================================
  */
@@ -289,6 +289,9 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
+  // =====================================================
+  // ✅ ฟังก์ชัน validateRow (แก้ไข: ไม่ validate ที่อยู่)
+  // =====================================================
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -322,10 +325,12 @@ export default function ImportExcelPage() {
       }
     });
 
-    if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
-      const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
-      if (!addrCheck.valid) errors.push(...addrCheck.errors);
-    }
+    // ✅ ปิดการ validate ที่อยู่ (ตำบล อำเภอ จังหวัด) - ตามคำขอ
+    // if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
+    //   const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
+    //   if (!addrCheck.valid) errors.push(...addrCheck.errors);
+    // }
+
     return errors;
   };
 
@@ -478,9 +483,6 @@ export default function ImportExcelPage() {
     XLSX.writeFile(wb, `Import_Report_${timestamp}.xlsx`);
   };
 
-  // =====================================================
-  // 📤 ฟังก์ชัน Export Excel (เดิม)
-  // =====================================================
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) {
       setError('ไม่มีข้อมูลสำหรับส่งออก');
