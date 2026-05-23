@@ -2368,3 +2368,41 @@ export async function checkPatientExists(idCard: string): Promise<boolean> {
     return false;
   }
 }
+
+// ✅ เพิ่มฟังก์ชันนี้ในไฟล์ @/lib/supabase/queries.ts
+
+// 1. ดึงรายชื่อจังหวัดจากตาราง provinces
+export async function getAllValidProvinces(): Promise<string[]> {
+  try {
+    const { data, error } = await supabase
+      .from('provinces')
+      .select('name_th');
+    
+    if (error) {
+      console.error('❌ Error fetching provinces:', error);
+      return [];
+    }
+    
+    console.log('✅ Loaded provinces count:', data?.length);
+    return data ? data.map(p => p.name_th) : [];
+  } catch (err) {
+    console.error('❌ Exception in getAllValidProvinces:', err);
+    return [];
+  }
+}
+
+// 2. ตรวจสอบบัตรประชาชนซ้ำ (แก้ไข error ที่เคยเจอ)
+export async function checkPatientExists(idCard: string): Promise<boolean> {
+  try {
+    const { count, error } = await supabase
+      .from('patients')
+      .select('*', { count: 'exact', head: true })
+      .eq('id_card', idCard);
+
+    if (error) return false;
+    return (count || 0) > 0;
+  } catch (err) {
+    return false;
+  }
+}
+

@@ -1,15 +1,3 @@
-/**
- * ============================================================================
- * 📄 ไฟล์: page.tsx
- * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
- * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
- * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรวจสอบที่หน้า Preview + ตรวจสอบทีละอย่างตามลำดับ
- * ============================================================================
- */
-
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -17,11 +5,11 @@ import {
   checkSession, 
   logout, 
   validateThaiIdCard,
-  getAllValidAddresses,
+  getAllValidProvinces, // ✅ เปลี่ยนเป็นดึงจากตาราง provinces
+  checkPatientExists,   // ✅ เพิ่มฟังก์ชันตรวจสอบบัตรซ้ำ
   importPatientsBatch,
   getCoachesWithHospitals,
-  getHospitalsWithHierarchy,
-  checkPatientExists
+  getHospitalsWithHierarchy
 } from '@/lib/supabase/queries';
 import { 
   Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, 
@@ -121,14 +109,12 @@ const calculateSimilarity = (str1: string, str2: string): number => {
 // ✅ ใช้ชื่อที่ตัดคำนำหน้าแล้วในการเทียบโรงพยาบาล
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   const cleanInput = stripHospitalPrefix(hospitalName);
-  
   let bestMatch: any = null;
   let bestScore = 0;
   
   hospitals.forEach(hospital => {
     const cleanDbName = stripHospitalPrefix(hospital.name);
     const score = calculateSimilarity(cleanInput, cleanDbName);
-    
     if (score > 0.80 && score > bestScore) {
       bestScore = score;
       bestMatch = hospital;
@@ -164,7 +150,7 @@ const convertISOToThaiDate = (isoDate: string): string => {
 };
 
 // =====================================================
-// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ (ไม่ตรวจสอบอำเภอ/ตำบล)
+// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ (ดึงจากตาราง provinces)
 // =====================================================
 const validateProvinceOnly = (provinceName: string, validProvinces: string[]): { valid: boolean; errors: string[] } => {
   if (!provinceName) {
@@ -172,10 +158,10 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
   }
   
   const normalizedInput = normalizeThaiText(provinceName);
-  const found = validProvinces.some(p => 
-    normalizeThaiText(p).includes(normalizedInput) || 
-    normalizedInput.includes(normalizeThaiText(p))
-  );
+  const found = validProvinces.some(p => {
+    const normalizedP = normalizeThaiText(p);
+    return normalizedP.includes(normalizedInput) || normalizedInput.includes(normalizedP);
+  });
   
   if (!found) {
     return { 
@@ -205,13 +191,14 @@ export default function ImportExcelPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
-  const [validAddresses, setValidAddresses] = useState<Array<{ province: string; district: string; subdistrict: string; postal_code: string; }>>([]);
+  
+  // ✅ เปลี่ยนเป็น validProvinces แทน validAddresses
+  const [validProvinces, setValidProvinces] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [success, setSuccess] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   
-  // ✅ เพิ่ม 'duplicate_id' ใน error_type
   const [importResult, setImportResult] = useState<{
     success: number;
     failed: number;
@@ -246,14 +233,16 @@ export default function ImportExcelPage() {
     loadNetworkData(userData.id);
   }, [router]);
 
+  // ✅ ดึงรายชื่อจังหวัดจากตาราง provinces
   useEffect(() => {
-    const loadValidAddresses = async () => {
+    const loadValidProvinces = async () => {
       try {
-        const addresses = await getAllValidAddresses();
-        setValidAddresses(addresses || []);
-      } catch (err) { console.warn('⚠️ ไม่สามารถโหลดข้อมูลที่อยู่'); }
+        const provinces = await getAllValidProvinces();
+        setValidProvinces(provinces || []);
+        console.log('✅ [loadValidProvinces] Loaded', provinces?.length, 'provinces');
+      } catch (err) { console.warn('⚠️ ไม่สามารถโหลดข้อมูลจังหวัด'); }
     };
-    loadValidAddresses();
+    loadValidProvinces();
   }, []);
 
   const loadNetworkData = async (userId: string) => {
@@ -343,10 +332,9 @@ export default function ImportExcelPage() {
       }
     });
 
-    // ✅ ตรวจสอบเฉพาะจังหวัด (ไม่ตรวจสอบอำเภอ/ตำบล)
-    if (row.province && validAddresses.length > 0) {
-      const provinces = Array.from(new Set(validAddresses.map(a => a.province)));
-      const provinceCheck = validateProvinceOnly(row.province, provinces);
+    // ✅ ตรวจสอบเฉพาะจังหวัด (จากตาราง provinces)
+    if (row.province && validProvinces.length > 0) {
+      const provinceCheck = validateProvinceOnly(row.province, validProvinces);
       if (!provinceCheck.valid) {
         errors.push(...provinceCheck.errors);
       }
@@ -570,9 +558,6 @@ export default function ImportExcelPage() {
     }
   };
 
-  // =====================================================
-  // ✅ ฟังก์ชัน Import หลัก (ตรวจสอบทีละอย่างตามลำดับ)
-  // =====================================================
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
     if (hasErrorsInSelected) { setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบพื้นฐาน กรุณาแก้ไขก่อนนำเข้า'); return; }
@@ -581,14 +566,11 @@ export default function ImportExcelPage() {
     const successRecords: typeof importResult.successRecords = [];
     let successCount = 0;
     
-    // ✅ ตรวจสอบทีละอย่างตามลำดับความสำคัญ
     for (const rowIdx of Array.from(selectedRows)) {
       const row = previewData[rowIdx];
       const rowNumber = rowIdx + 1;
       
-      // ✅ ลำดับ 1: ตรวจสอบโรงพยาบาล (ตัดคำนำหน้าแล้วค้นหา)
       const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
-      
       if (!hospitalMatch) {
         errors.push({ 
           row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
@@ -597,10 +579,9 @@ export default function ImportExcelPage() {
           hospital_id: undefined, original_hospital_name: row.hospital_name, 
           hospital_fixed: false, fixed: false 
         });
-        continue; // 🔴 หยุดตรวจสอบแถวนี้ทันที รอแก้โรงพยาบาล
+        continue;
       }
       
-      // ✅ ลำดับ 2: ตรวจสอบโค้ช (หลังจากโรงพยาบาลถูกต้องแล้ว)
       const hospitalId = hospitalMatch.hospital.id;
       const networkIds = getNetworkHospitalIds(hospitalId);
       const networkCoaches = coaches.filter(c => {
@@ -666,27 +647,15 @@ export default function ImportExcelPage() {
       });
 
       const result = await importPatientsBatch(selectedData, user.id);
-      
-      // หากส่งไปแล้ว แล้ว ID ซ้ำ (Backend Error)
       if (result.failed > 0 && result.errors) {
          const backendErrors = result.errors.map((be: any) => {
             const isDup = be.error?.includes('ซ้ำ') || be.error?.includes('exists');
             return {
-               row: be.row || 0, 
-               id_card: be.id_card || '',
-               hospital_number: be.hospital_number || '',
-               error: be.error,
-               error_type: isDup ? 'duplicate_id' : 'other',
-               hospital_id: undefined,
-               fixed: false
+               row: be.row || 0, id_card: be.id_card || '', hospital_number: be.hospital_number || '',
+               error: be.error, error_type: isDup ? 'duplicate_id' : 'other', hospital_id: undefined, fixed: false
             };
          });
-         setImportResult({ 
-            success: result.success, 
-            failed: result.failed, 
-            errors: backendErrors, 
-            successRecords: result.successRecords || [] 
-         });
+         setImportResult({ success: result.success, failed: result.failed, errors: backendErrors, successRecords: result.successRecords || [] });
          return;
       }
 
@@ -950,7 +919,6 @@ export default function ImportExcelPage() {
         )}
       </div>
 
-      {/* ✅ Modal แสดงผลการนำเข้า (แจ้งเตือนทีละเรื่อง ไม่ซ้อนกัน) */}
       {importResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-auto">
@@ -1001,7 +969,6 @@ export default function ImportExcelPage() {
                   </h4>
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-96 overflow-auto space-y-3">
                     {importResult.errors.map((err, idx) => {
-                      
                       if (err.fixed) {
                         return (
                           <div key={idx} className="bg-green-50 border border-green-200 rounded p-4 flex items-center gap-3">
@@ -1014,7 +981,6 @@ export default function ImportExcelPage() {
                         );
                       }
 
-                      // ✅ ตรวจสอบสถานะของแต่ละ Error เพื่อแสดง UI ทีละอย่าง (ไม่ซ้อนกัน)
                       const isDuplicateId = err.error_type === 'duplicate_id';
                       const isHospitalMissing = (err.error_type === 'hospital' || !err.hospital_id);
                       const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
@@ -1029,7 +995,6 @@ export default function ImportExcelPage() {
                             </div>
                           </div>
                           
-                          {/* 🔴 กรณี 1: ID ซ้ำ - แสดงเฉพาะส่วนแจ้งเตือน ID ซ้ำ ซ่อน รพ./โค้ช */}
                           {isDuplicateId && (
                              <div className="pl-6 space-y-2 border-l-4 border-orange-300 bg-orange-50 p-3 rounded">
                                 <div className="flex items-center gap-2 text-sm text-orange-800 font-semibold">
@@ -1044,7 +1009,6 @@ export default function ImportExcelPage() {
                              </div>
                           )}
 
-                          {/* 🟡 กรณี 2: รพ. ไม่ถูก - แสดงเฉพาะส่วนเลือกรพ. ซ่อนโค้ช */}
                           {isHospitalMissing && !isDuplicateId && (
                             <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
                               <label className="block text-xs font-bold text-red-700 flex items-center gap-1">
@@ -1065,14 +1029,12 @@ export default function ImportExcelPage() {
                             </div>
                           )}
 
-                          {/* 🟢 กรณี 3: รพ. ถูกแล้ว - แสดงชื่อ รพ. ที่ถูกต้อง และแสดงส่วนเลือกโค้ช */}
                           {!isHospitalMissing && !isDuplicateId && (
                             <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
                               <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2">
                                 <CheckCircle className="w-4 h-4" /> โรงพยาบาลถูกต้อง: {hospitalMatch?.hospital?.name}
                               </div>
                               
-                              {/* ถ้าเป็น Error Coach จะแสดงส่วนเลือกโค้ช */}
                               {err.error_type === 'coach' && (
                                 <>
                                   <label className="block text-xs font-bold text-blue-700 flex items-center gap-1">
