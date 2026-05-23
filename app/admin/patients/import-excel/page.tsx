@@ -1,3 +1,15 @@
+/**
+ * ============================================================================
+ * 📄 ไฟล์: page.tsx
+ * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
+ * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
+ * 👥 ผู้พัฒนา: DEMI+ Development Team
+ * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
+ * ⚠️ คำเตือน: ตรวจสอบทีละอย่างตามลำดับ: ID → โรงพยาบาล → โค้ช
+ * ============================================================================
+ */
+
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -6,7 +18,6 @@ import {
   logout, 
   validateThaiIdCard,
   getAllValidAddresses,
-  validateAddress,
   importPatientsBatch,
   getCoachesWithHospitals,
   getHospitalsWithHierarchy
@@ -55,14 +66,13 @@ const STANDARD_FIELDS = [
 ];
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS (แก้ไขเพื่อตัดคำนำหน้า รพ.)
+// 🧠 SMART MATCHING FUNCTIONS
 // =====================================================
 
-// ✅ ฟังก์ชันตัดคำนำหน้าโรงพยาบาลออก
+// ✅ ตัดคำว่า "โรงพยาบาล" และ "รพ." ออกก่อนตรวจสอบ (ตรวจสอบเฉพาะชื่อจริง)
 const stripHospitalPrefix = (text: string): string => {
   if (!text) return '';
   let clean = text.trim().toLowerCase();
-  // ลบคำว่า โรงพยาบาล, รพ., รพ
   clean = clean.replace(/โรงพยาบาล/g, '');
   clean = clean.replace(/รพ\./g, '');
   clean = clean.replace(/\bรพ\b/g, '');
@@ -107,7 +117,7 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return 1 - (distance / maxLength);
 };
 
-// ✅ ปรับปรุง: ใช้ชื่อที่ตัดคำนำหน้าแล้วในการเทียบ
+// ✅ ใช้ชื่อที่ตัดคำนำหน้าแล้วในการเทียบโรงพยาบาล
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   const cleanInput = stripHospitalPrefix(hospitalName);
   
@@ -115,7 +125,6 @@ const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   let bestScore = 0;
   
   hospitals.forEach(hospital => {
-    // ตัดคำนำหน้าจากชื่อในฐานข้อมูลด้วย
     const cleanDbName = stripHospitalPrefix(hospital.name);
     const score = calculateSimilarity(cleanInput, cleanDbName);
     
@@ -200,7 +209,7 @@ export default function ImportExcelPage() {
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [success, setSuccess] = useState(false);
   
-  // ✅ เพิ่ม error_type: 'duplicate_id'
+  // ✅ เพิ่ม 'duplicate_id' ใน error_type
   const [importResult, setImportResult] = useState<{
     success: number;
     failed: number;
@@ -426,7 +435,6 @@ export default function ImportExcelPage() {
   useEffect(() => {
     if (importResult && importResult.errors.length > 0) {
       importResult.errors.forEach((err, idx) => {
-        // โหลดโค้ชก็ต่อเมื่อ โรงพยาบาล ถูกต้องแล้ว (มี hospital_id)
         if (err.hospital_id && !modalCoaches[idx]) {
           loadCoachesForErrorRow(idx, err.hospital_id);
         }
@@ -540,7 +548,7 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ ฟังก์ชัน Import หลัก (ตรวจสอบทีละอย่าง)
+  // ✅ ฟังก์ชัน Import หลัก (ตรวจสอบทีละอย่างตามลำดับ)
   // =====================================================
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
@@ -586,7 +594,6 @@ export default function ImportExcelPage() {
           original_hospital_name: row.hospital_name, original_coach_name: row.coach_name, 
           hospital_fixed: true, fixed: false 
         });
-        // ✅ ไม่หยุด (continue) เพื่อให้สามารถเห็น error อื่นๆ ในแถวถัดไป แต่ใน Modal จะแสดงแยกกัน
       } else {
         successCount++;
         successRecords.push({ 
@@ -639,18 +646,15 @@ export default function ImportExcelPage() {
       
       // หากส่งไปแล้ว แล้ว ID ซ้ำ (Backend Error)
       if (result.failed > 0 && result.errors) {
-         // แปลง Error จาก Backend ให้เป็น Format ที่ Modal เข้าใจ
          const backendErrors = result.errors.map((be: any) => {
-            // ตรวจสอบว่า Error เป็นเรื่อง ID ซ้ำ หรือไม่
             const isDup = be.error?.includes('ซ้ำ') || be.error?.includes('exists');
-            
             return {
                row: be.row || 0, 
                id_card: be.id_card || '',
                hospital_number: be.hospital_number || '',
                error: be.error,
                error_type: isDup ? 'duplicate_id' : 'other',
-               hospital_id: undefined, // ถ้า ID ผิด อย่าให้แก้ รพ.
+               hospital_id: undefined,
                fixed: false
             };
          });
@@ -918,7 +922,7 @@ export default function ImportExcelPage() {
         )}
       </div>
 
-      {/* ✅ Modal แสดงผลการนำเข้า (แก้ไขให้แจ้งเตือนทีละเรื่อง) */}
+      {/* ✅ Modal แสดงผลการนำเข้า (แจ้งเตือนทีละเรื่อง ไม่ซ้อนกัน) */}
       {importResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-auto">
@@ -982,7 +986,7 @@ export default function ImportExcelPage() {
                         );
                       }
 
-                      // ✅ ตรวจสอบสถานะของแต่ละ Error เพื่อแสดง UI ทีละอย่าง
+                      // ✅ ตรวจสอบสถานะของแต่ละ Error เพื่อแสดง UI ทีละอย่าง (ไม่ซ้อนกัน)
                       const isDuplicateId = err.error_type === 'duplicate_id';
                       const isHospitalMissing = (err.error_type === 'hospital' || !err.hospital_id);
                       const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
@@ -997,7 +1001,7 @@ export default function ImportExcelPage() {
                             </div>
                           </div>
                           
-                          {/* 1. กรณี ID ซ้ำ: แสดงเฉพาะส่วนแจ้งเตือน ID ซ้ำ ซ่อน รพ./โค้ช */}
+                          {/* 🔴 กรณี 1: ID ซ้ำ - แสดงเฉพาะส่วนแจ้งเตือน ID ซ้ำ ซ่อน รพ./โค้ช */}
                           {isDuplicateId && (
                              <div className="pl-6 space-y-2 border-l-4 border-orange-300 bg-orange-50 p-3 rounded">
                                 <div className="flex items-center gap-2 text-sm text-orange-800 font-semibold">
@@ -1012,7 +1016,7 @@ export default function ImportExcelPage() {
                              </div>
                           )}
 
-                          {/* 2. กรณี รพ. ไม่ถูก: แสดงเฉพาะส่วนเลือกรพ. ซ่อนโค้ช */}
+                          {/* 🟡 กรณี 2: รพ. ไม่ถูก - แสดงเฉพาะส่วนเลือกรพ. ซ่อนโค้ช */}
                           {isHospitalMissing && !isDuplicateId && (
                             <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
                               <label className="block text-xs font-bold text-red-700 flex items-center gap-1">
@@ -1033,14 +1037,14 @@ export default function ImportExcelPage() {
                             </div>
                           )}
 
-                          {/* 3. กรณี รพ. ถูกแล้ว: แสดงชื่อ รพ. ที่ถูกต้อง และแสดงส่วนเลือกโค้ช */}
-                          {!isHospitalMissing && (
+                          {/* 🟢 กรณี 3: รพ. ถูกแล้ว - แสดงชื่อ รพ. ที่ถูกต้อง และแสดงส่วนเลือกโค้ช */}
+                          {!isHospitalMissing && !isDuplicateId && (
                             <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
                               <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2">
                                 <CheckCircle className="w-4 h-4" /> โรงพยาบาลถูกต้อง: {hospitalMatch?.hospital?.name}
                               </div>
                               
-                              {/* ถ้าไม่ใช่ Error Coach (แต่ผ่านหมดแล้ว) จะไม่แสดงส่วนนี้ */}
+                              {/* ถ้าเป็น Error Coach จะแสดงส่วนเลือกโค้ช */}
                               {err.error_type === 'coach' && (
                                 <>
                                   <label className="block text-xs font-bold text-blue-700 flex items-center gap-1">
