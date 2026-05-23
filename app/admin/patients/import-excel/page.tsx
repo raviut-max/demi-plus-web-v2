@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรวจสอบเฉพาะจังหวัดเท่านั้น (ไม่ตรวจสอบอำเภอ/ตำบล)
+ * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อตัดคำนำหน้าโรงพยาบาลและเพิ่ม Debug Log
  * ============================================================================
  */
 
@@ -66,19 +66,36 @@ const STANDARD_FIELDS = [
 ];
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS
+// 🧠 SMART MATCHING FUNCTIONS (ปรับปรุงแล้ว)
 // =====================================================
+
+// ✅ ปรับปรุง: ลบคำว่า "โรงพยาบาล"/"รพ." ออกก่อนทำ matching
 const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
+  
+  // ✅ ลบคำว่า "โรงพยาบาล" และตัวย่อออกก่อน (เพื่อเปรียบเทียบเฉพาะชื่อจริง)
+  normalized = normalized.replace(/โรงพยาบาล/g, '');
+  normalized = normalized.replace(/รพ\./g, '');
+  normalized = normalized.replace(/\bรพ\b/g, '');
+  
+  // แปลงคำย่ออื่นๆ
   const abbreviations: Record<string, string> = {
-    'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
-    'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
-    'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
+    'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 
+    'รพช': 'โรงพยาบาลชุมชน',
+    'สสจ': 'สาธารณสุขจังหวัด', 
+    'สสอ': 'สาธารณสุขอำเภอ', 
+    'อน': 'อนามัย',
+    'นพ': 'นายแพทย์', 
+    'พญ': 'แพทย์หญิง', 
+    'ทพ': 'ทันตแพทย์', 
+    'ภก': 'เภสัชกร',
   };
+
   Object.entries(abbreviations).forEach(([abbr, full]) => {
     normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
   });
+
   normalized = normalized.replace(/\s+/g, '');
   const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
   normalized = normalized.replace(toneMarks, '');
@@ -106,16 +123,86 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return 1 - (distance / maxLength);
 };
 
+// ✅ ปรับปรุง: แสดง Debug Log แบบละเอียดทุกขั้นตอน
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
+  console.group('🔍 ========== [findBestHospitalMatch] START ==========');
+  console.log('📥 Input hospital name:', hospitalName);
+  
+  const s1 = normalizeThaiText(hospitalName);
+  console.log('🔄 Normalized input:', `"${hospitalName}" → "${s1}"`);
+  
+  // ✅ 1. หา exact match ก่อน (หลัง normalize)
+  console.log('🔎 Step 1: Searching for exact match...');
+  const exactMatch = hospitals.find(h => {
+    const s2 = normalizeThaiText(h.name);
+    const isExact = s1 === s2 || s1.includes(s2) || s2.includes(s1);
+    if (isExact) {
+      console.log(`✅ Exact match found!`);
+      console.log(`   DB Name: "${h.name}"`);
+      console.log(`   Normalized: "${s2}"`);
+      console.log(`   Match type: ${s1 === s2 ? 'identical' : (s1.includes(s2) ? 'input contains db' : 'db contains input')}`);
+    }
+    return isExact;
+  });
+  
+  if (exactMatch) {
+    console.log('🎯 Result: Exact match found, returning immediately');
+    console.groupEnd();
+    return { hospital: exactMatch, similarity: 1.0 };
+  }
+  console.log('❌ No exact match found, proceeding to fuzzy match...');
+  
+  // ✅ 2. ถ้าไม่มี exact match ให้ใช้ fuzzy match แต่เพิ่ม threshold เป็น 0.90
+  console.log('🔎 Step 2: Fuzzy matching with threshold 0.90...');
   let bestMatch: any = null;
   let bestScore = 0;
+  const candidates: Array<{ name: string; normalized: string; score: number }> = [];
+  
   hospitals.forEach(hospital => {
+    const s2 = normalizeThaiText(hospital.name);
     const score = calculateSimilarity(hospitalName, hospital.name);
-    if (score > 0.80 && score > bestScore) {
+    
+    if (score > 0.0) {
+      candidates.push({ 
+        name: hospital.name, 
+        normalized: s2, 
+        score 
+      });
+    }
+    
+    if (score > 0.90 && score > bestScore) {
       bestScore = score;
       bestMatch = hospital;
     }
   });
+  
+  // ✅ แสดงผลการจับคู่ทั้งหมด
+  if (candidates.length > 0) {
+    console.log(`📊 Found ${candidates.length} candidates with score > 0:`);
+    candidates
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10)
+      .forEach((c, i) => {
+        console.log(`   ${i + 1}. "${c.name}"`);
+        console.log(`      Normalized: "${c.normalized}"`);
+        console.log(`      Score: ${c.score.toFixed(4)} ${c.score >= 0.90 ? '✅' : '❌'}`);
+      });
+  } else {
+    console.warn('⚠️ No candidates found (all scores = 0)');
+  }
+  
+  // ✅ สรุปผลลัพธ์
+  if (bestMatch) {
+    console.log('🎯 Result: Best match found!');
+    console.log(`   Hospital: "${bestMatch.name}"`);
+    console.log(`   Score: ${bestScore.toFixed(4)}`);
+  } else {
+    console.warn('❌ Result: No match found above threshold 0.90');
+  }
+  
+  console.groupEnd();
+  console.log('============================================\n');
+  
   return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
 };
 
@@ -264,7 +351,7 @@ export default function ImportExcelPage() {
 
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
+      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
