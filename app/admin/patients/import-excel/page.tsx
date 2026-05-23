@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: จัดรูปแบบวันที่อัตโนมัติ + ตรวจสอบทีละอย่างตามลำดับ
+ * ⚠️ คำเตือน: จัดรูปแบบวันที่ - เติม "25" หน้าปี 2 หลัก (พ.ศ.)
  * ============================================================================
  */
 
@@ -70,7 +70,6 @@ const STANDARD_FIELDS = [
 // 🧠 SMART MATCHING FUNCTIONS
 // =====================================================
 
-// ✅ ตัดคำว่า "โรงพยาบาล" และ "รพ." ออกก่อนตรวจสอบ (ตรวจสอบเฉพาะชื่อจริง)
 const stripHospitalPrefix = (text: string): string => {
   if (!text) return '';
   let clean = text.trim().toLowerCase();
@@ -118,7 +117,6 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return 1 - (distance / maxLength);
 };
 
-// ✅ ใช้ชื่อที่ตัดคำนำหน้าแล้วในการเทียบโรงพยาบาล
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   const cleanInput = stripHospitalPrefix(hospitalName);
   let bestMatch: any = null;
@@ -149,10 +147,11 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
 };
 
 // =====================================================
-// 📅 DATE FORMATTING UTILITIES (ใหม่!)
+// 📅 DATE FORMATTING UTILITIES (แก้ไขแล้ว!)
 // =====================================================
 
 // ✅ ฟังก์ชันจัดรูปแบบวันที่: รับค่าใดก็ได้ → ส่งออก วว/ดด/ปปปป (พ.ศ.)
+// ✅ ปี 2 หลัก (เช่น "24") → เติม "25" → "2524" (ไม่ต้องแปลง ค.ศ. เป็น พ.ศ.)
 const formatThaiDate = (input: string | number | Date): string => {
   if (!input) return '';
   
@@ -184,23 +183,26 @@ const formatThaiDate = (input: string | number | Date): string => {
     }
   }
   
-  // ✅ จัดการปี: แปลงเป็น พ.ศ. 4 หลัก
-  let yearNum = parseInt(year);
-  if (yearNum < 100) {
-    // ปี 2 หลัก → สมมติว่าเป็น ค.ศ. (เช่น 24 = 2024)
-    yearNum = yearNum + 2000;
+  // ✅ จัดการปี: ถ้าเป็น 2 หลัก ให้เติม "25" ข้างหน้า (เพราะเป็น พ.ศ. อยู่แล้ว)
+  let formattedYear = year;
+  
+  if (year.length === 2) {
+    // ปี 2 หลัก (เช่น "24") → เติม "25" ข้างหน้า → "2524"
+    formattedYear = `25${year}`;
+  } else if (year.length === 4) {
+    // ปี 4 หลัก (เช่น "2524", "2567") → ใช้ได้เลย
+    formattedYear = year;
+  } else if (year.length === 3) {
+    // ปี 3 หลัก (เช่น "524") → เติม "2" ข้างหน้า → "2524"
+    formattedYear = `2${year}`;
   }
-  if (yearNum < 2500) {
-    // ถ้าเป็น ค.ศ. → แปลงเป็น พ.ศ.
-    yearNum = yearNum + 543;
-  }
+  // ถ้าไม่ตรงรูปแบบใด → ใช้ค่าเดิม
   
   // ✅ เติมเลข 0 หน้าวัน/เดือน ถ้าเป็นหลักเดียว
   const dayNum = parseInt(day) || 1;
   const monthNum = parseInt(month) || 1;
   const formattedDay = String(dayNum).padStart(2, '0');
   const formattedMonth = String(monthNum).padStart(2, '0');
-  const formattedYear = String(yearNum);
   
   return `${formattedDay}/${formattedMonth}/${formattedYear}`;
 };
