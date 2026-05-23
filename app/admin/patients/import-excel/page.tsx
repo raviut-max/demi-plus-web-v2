@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ไฟล์นี้แก้ไข Syntax Errors และ Logic การตรวจสอบลำดับความสำคัญแล้ว
+ * ⚠️ คำเตือน: แก้ไขให้ตรวจสอบทีละอย่างตามลำดับความสำคัญ
  * ============================================================================
  */
 
@@ -18,32 +18,14 @@ import {
   logout, 
   validateThaiIdCard,
   getAllValidAddresses,
-  validateAddress,
   importPatientsBatch,
   getCoachesWithHospitals,
   getHospitalsWithHierarchy
 } from '@/lib/supabase/queries';
 import { 
-  Upload, 
-  FileSpreadsheet, 
-  AlertCircle, 
-  Loader2, 
-  ArrowLeft, 
-  LogOut, 
-  CheckCircle, 
-  XCircle, 
-  Edit3,
-  AlertTriangle,
-  ShieldAlert,
-  RotateCcw,
-  X,
-  Hospital,
-  UserCheck,
-  MapPin,
-  Sparkles,
-  Save,
-  Download,
-  CreditCard
+  Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, 
+  CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X, 
+  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -87,10 +69,9 @@ const STANDARD_FIELDS = [
 // 🧠 SMART MATCHING FUNCTIONS
 // =====================================================
 
-// ✅ ฟังก์ชันทำความสะอาดข้อความสำหรับการเปรียบเทียบ (ตัดคำนำหน้าออก)
+// ✅ ตัดคำว่า "โรงพยาบาล" และ "รพ." ออกก่อนตรวจสอบ
 const stripHospitalPrefix = (text: string): string => {
   if (!text) return '';
-  // ตัดคำว่า โรงพยาบาล, รพ., รพ ออก เพื่อเปรียบเทียบแค่ชื่อ
   let clean = text.trim().toLowerCase();
   clean = clean.replace(/โรงพยาบาล/g, '');
   clean = clean.replace(/รพ\./g, '');
@@ -102,15 +83,9 @@ const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
   const abbreviations: Record<string, string> = {
-    'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 
-    'รพช': 'โรงพยาบาลชุมชน',
-    'สสจ': 'สาธารณสุขจังหวัด', 
-    'สสอ': 'สาธารณสุขอำเภอ', 
-    'อน': 'อนามัย',
-    'นพ': 'นายแพทย์', 
-    'พญ': 'แพทย์หญิง', 
-    'ทพ': 'ทันตแพทย์', 
-    'ภก': 'เภสัชกร',
+    'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
+    'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
+    'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
   };
   Object.entries(abbreviations).forEach(([abbr, full]) => {
     normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
@@ -143,7 +118,6 @@ const calculateSimilarity = (str1: string, str2: string): number => {
 };
 
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
-  // ✅ เปรียบเทียบโดยใช้ชื่อที่ตัดคำนำหน้าออกแล้ว
   const cleanInput = stripHospitalPrefix(hospitalName);
   
   let bestMatch: any = null;
@@ -185,6 +159,30 @@ const convertISOToThaiDate = (isoDate: string): string => {
     return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
   }
   return isoDate;
+};
+
+// =====================================================
+// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ
+// =====================================================
+const validateProvince = (provinceName: string, validProvinces: string[]): { valid: boolean; errors: string[] } => {
+  if (!provinceName) {
+    return { valid: false, errors: ['จังหวัด เป็นฟิลด์บังคับ'] };
+  }
+  
+  const normalizedInput = normalizeThaiText(provinceName);
+  const found = validProvinces.some(p => 
+    normalizeThaiText(p).includes(normalizedInput) || 
+    normalizedInput.includes(normalizeThaiText(p))
+  );
+  
+  if (!found) {
+    return { 
+      valid: false, 
+      errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง`] 
+    };
+  }
+  
+  return { valid: true, errors: [] };
 };
 
 // =====================================================
@@ -306,6 +304,9 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
+  // =====================================================
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบเฉพาะจังหวัด)
+  // =====================================================
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -339,10 +340,15 @@ export default function ImportExcelPage() {
       }
     });
 
-    if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
-      const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
-      if (!addrCheck.valid) errors.push(...addrCheck.errors);
+    // ✅ ตรวจสอบเฉพาะจังหวัด (ไม่ตรวจสอบอำเภอ/ตำบล)
+    if (row.province && validAddresses.length > 0) {
+      const provinces = Array.from(new Set(validAddresses.map(a => a.province)));
+      const provinceCheck = validateProvince(row.province, provinces);
+      if (!provinceCheck.valid) {
+        errors.push(...provinceCheck.errors);
+      }
     }
+
     return errors;
   };
 
