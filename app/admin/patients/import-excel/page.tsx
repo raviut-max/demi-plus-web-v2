@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรรกะปี - เติม "25" หรือ "2" ตามความยาวปี (พ.ศ. เท่านั้น)
+ * ⚠️ คำเตือน: แก้ไขปัญหาแก้ไขวันที่ไม่ได้ (ReferenceError) และตรรกะปีแบบใหม่
  * ============================================================================
  */
 
@@ -147,19 +147,22 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
 };
 
 // =====================================================
-// 📅 DATE FORMATTING UTILITIES (ตรรกะปีแบบใหม่!)
+// 📅 DATE FORMATTING UTILITIES (แก้ไข: เพิ่มฟังก์ชันที่ขาดไป)
 // =====================================================
 
 // ✅ ฟังก์ชันจัดรูปแบบวันที่: รับค่าใดก็ได้ → ส่งออก วว/ดด/ปปปป (พ.ศ.)
-// ✅ ตรรกะปี: 2 หลัก→เติม"25", 3 หลัก→เติม"2", 4 หลัก→ใช้เลย
 const formatThaiDate = (input: string | number | Date): string => {
   if (!input) return '';
   
   let day = '', month = '', year = '';
   const str = String(input).trim();
   
-  // กรณี 1: มี / หรือ - คั่น (เช่น 1/2/24, 01/02/2567, 1-2-24)
-  if (str.match(/^[\d\/\-.]+$/)) {
+  // กรณี 1: ISO Date (YYYY-MM-DD)
+  if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    [year, month, day] = str.split('-');
+  }
+  // กรณี 2: วันที่มี / หรือ - คั่น (เช่น 1/2/24, 01/02/2567, 1-2-24)
+  else if (str.match(/^[\d\/\-.]+$/)) {
     const parts = str.split(/[\/\-.]/).map(p => p.trim());
     if (parts.length >= 3) {
       const [p1, p2, p3] = parts;
@@ -179,17 +182,19 @@ const formatThaiDate = (input: string | number | Date): string => {
     }
   }
   
-  // ✅ จัดการปีตามตรรกะใหม่: เติม "25" หรือ "2" ตามความยาว
+  // ✅ จัดการปี: ถ้าเป็น 2 หลัก ให้เติม "25" ข้างหน้า (เพราะเป็น พ.ศ. อยู่แล้ว)
   let formattedYear = year;
   
   if (year.length === 2) {
     // ปี 2 หลัก (เช่น "24") → เติม "25" ข้างหน้า → "2524"
     formattedYear = `25${year}`;
+  } else if (year.length === 4) {
+    // ปี 4 หลัก (เช่น "2524", "2567") → ใช้ได้เลย
+    formattedYear = year;
   } else if (year.length === 3) {
     // ปี 3 หลัก (เช่น "524") → เติม "2" ข้างหน้า → "2524"
     formattedYear = `2${year}`;
   }
-  // ปี 4 หลัก (เช่น "2524", "2567") → ใช้เลย ไม่ต้องแปลง
   
   // ✅ เติมเลข 0 หน้าวัน/เดือน ถ้าเป็นหลักเดียว
   const dayNum = parseInt(day) || 1;
@@ -211,12 +216,29 @@ const swapDayMonth = (dateStr: string): string => {
   return dateStr;
 };
 
-// ✅ แปลงวันที่ไทยเป็น ISO (สำหรับ input type="date")
+// ✅ แปลงวันที่ไทยเป็น ISO (สำหรับ input type="date" value)
+// ใช้สำหรับแสดงค่าในช่อง input
 const convertThaiDateToISO = (thaiDate: string): string => {
   if (!thaiDate) return '';
-  const [day, month, yearBE] = thaiDate.split('/');
+  const parts = thaiDate.split('/');
+  if (parts.length !== 3) return '';
+  const [day, month, yearBE] = parts;
+  if (!yearBE) return ''; 
   const yearAD = parseInt(yearBE) - 543;
+  if (isNaN(yearAD)) return '';
   return `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+};
+
+// ✅ แปลง ISO เป็นไทย (สำหรับ input type="date" onChange)
+// ใช้สำหรับรับค่าที่ผู้ใช้พิมพ์/เลือก แล้วเก็บลง State
+const convertISOToThaiDate = (isoDate: string): string => {
+  if (!isoDate) return '';
+  if (isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [year, month, day] = isoDate.split('-');
+    const yearBE = parseInt(year) + 543;
+    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
+  }
+  return isoDate;
 };
 
 // =====================================================
@@ -940,6 +962,7 @@ export default function ImportExcelPage() {
                                     value={editValue ? convertThaiDateToISO(editValue) : ''}
                                     onChange={e => {
                                       const isoDate = e.target.value;
+                                      // ✅ ใช้ฟังก์ชันที่ประกาศไว้ด้านบน
                                       setEditValue(isoDate ? convertISOToThaiDate(isoDate) : '');
                                     }}
                                     onBlur={saveEdit}
