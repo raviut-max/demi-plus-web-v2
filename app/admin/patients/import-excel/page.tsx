@@ -1,3 +1,15 @@
+/**
+ * ============================================================================
+ * 📄 ไฟล์: page.tsx
+ * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
+ * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
+ * 👥 ผู้พัฒนา: DEMI+ Development Team
+ * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
+ * ⚠️ คำเตือน: จัดรูปแบบวันที่อัตโนมัติ + ตรวจสอบทีละอย่างตามลำดับ
+ * ============================================================================
+ */
+
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -5,8 +17,8 @@ import {
   checkSession, 
   logout, 
   validateThaiIdCard,
-  getAllValidProvinces, // ✅ เปลี่ยนเป็นดึงจากตาราง provinces
-  checkPatientExists,   // ✅ เพิ่มฟังก์ชันตรวจสอบบัตรซ้ำ
+  getAllValidProvinces,
+  checkPatientExists,
   importPatientsBatch,
   getCoachesWithHospitals,
   getHospitalsWithHierarchy
@@ -137,16 +149,79 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
 };
 
 // =====================================================
-// 📅 DATE CONVERSION FUNCTIONS
+// 📅 DATE FORMATTING UTILITIES (ใหม่!)
 // =====================================================
-const convertISOToThaiDate = (isoDate: string): string => {
-  if (!isoDate) return '';
-  if (isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    const [year, month, day] = isoDate.split('-');
-    const yearBE = parseInt(year) + 543;
-    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
+
+// ✅ ฟังก์ชันจัดรูปแบบวันที่: รับค่าใดก็ได้ → ส่งออก วว/ดด/ปปปป (พ.ศ.)
+const formatThaiDate = (input: string | number | Date): string => {
+  if (!input) return '';
+  
+  let day = '', month = '', year = '';
+  const str = String(input).trim();
+  
+  // กรณี 1: ISO Date (YYYY-MM-DD)
+  if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    [year, month, day] = str.split('-');
   }
-  return isoDate;
+  // กรณี 2: วันที่มี / หรือ - คั่น (เช่น 1/2/24, 01/02/2567, 1-2-24)
+  else if (str.match(/^[\d\/\-.]+$/)) {
+    const parts = str.split(/[\/\-.]/).map(p => p.trim());
+    if (parts.length >= 3) {
+      const [p1, p2, p3] = parts;
+      
+      // ถ้าส่วนแรก > 31 → น่าจะเป็นปี (เช่น 2567/1/1)
+      if (parseInt(p1) > 31) {
+        year = p1; month = p2; day = p3;
+      }
+      // ถ้าส่วนที่สาม > 31 หรือยาว 4 หลัก → น่าจะเป็นปี
+      else if (parseInt(p3) > 31 || p3.length === 4) {
+        day = p1; month = p2; year = p3;
+      }
+      // ถ้าไม่แน่ใจ → สมมติว่าเป็น วัน/เดือน/ปี (รูปแบบไทย)
+      else {
+        day = p1; month = p2; year = p3;
+      }
+    }
+  }
+  
+  // ✅ จัดการปี: แปลงเป็น พ.ศ. 4 หลัก
+  let yearNum = parseInt(year);
+  if (yearNum < 100) {
+    // ปี 2 หลัก → สมมติว่าเป็น ค.ศ. (เช่น 24 = 2024)
+    yearNum = yearNum + 2000;
+  }
+  if (yearNum < 2500) {
+    // ถ้าเป็น ค.ศ. → แปลงเป็น พ.ศ.
+    yearNum = yearNum + 543;
+  }
+  
+  // ✅ เติมเลข 0 หน้าวัน/เดือน ถ้าเป็นหลักเดียว
+  const dayNum = parseInt(day) || 1;
+  const monthNum = parseInt(month) || 1;
+  const formattedDay = String(dayNum).padStart(2, '0');
+  const formattedMonth = String(monthNum).padStart(2, '0');
+  const formattedYear = String(yearNum);
+  
+  return `${formattedDay}/${formattedMonth}/${formattedYear}`;
+};
+
+// ✅ ฟังก์ชันสลับ วัน/เดือน (สำหรับแก้ไขด้วยมือ)
+const swapDayMonth = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('/');
+  if (parts.length >= 2) {
+    [parts[0], parts[1]] = [parts[1], parts[0]];
+    return parts.join('/');
+  }
+  return dateStr;
+};
+
+// ✅ แปลงวันที่ไทยเป็น ISO (สำหรับ input type="date")
+const convertThaiDateToISO = (thaiDate: string): string => {
+  if (!thaiDate) return '';
+  const [day, month, yearBE] = thaiDate.split('/');
+  const yearAD = parseInt(yearBE) - 543;
+  return `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
 };
 
 // =====================================================
@@ -191,8 +266,6 @@ export default function ImportExcelPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
-  
-  // ✅ เปลี่ยนเป็น validProvinces แทน validAddresses
   const [validProvinces, setValidProvinces] = useState<string[]>([]);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
@@ -233,7 +306,6 @@ export default function ImportExcelPage() {
     loadNetworkData(userData.id);
   }, [router]);
 
-  // ✅ ดึงรายชื่อจังหวัดจากตาราง provinces
   useEffect(() => {
     const loadValidProvinces = async () => {
       try {
@@ -271,6 +343,7 @@ export default function ImportExcelPage() {
     setStep('mapping');
   }, [rawData, excelHeaders]);
 
+  // ✅ จัดรูปแบบวันที่อัตโนมัติเมื่อโหลดข้อมูล
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
@@ -278,12 +351,8 @@ export default function ImportExcelPage() {
         if (dbKey) {
           const val = row[excelKey];
           if (dbKey === 'birth_date' && val) {
-            const cleanVal = String(val).trim();
-            if (cleanVal.match(/^\d{4}-\d{2}-\d{2}$/)) {
-              newRow[dbKey] = convertISOToThaiDate(cleanVal);
-            } else {
-              newRow[dbKey] = cleanVal;
-            }
+            // ✅ จัดรูปแบบวันที่อัตโนมัติ
+            newRow[dbKey] = formatThaiDate(val);
           } else {
             newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
           }
@@ -340,7 +409,7 @@ export default function ImportExcelPage() {
       }
     }
 
-    // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำในระบบ (ที่หน้า Preview)
+    // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำในระบบ (จากตาราง users)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
       try {
         setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
@@ -868,7 +937,20 @@ export default function ImportExcelPage() {
                           return (
                             <td key={field.key} className="p-2 whitespace-nowrap relative">
                               {isEditing ? (
-                                field.inputType === 'select' ? (
+                                field.key === 'birth_date' ? (
+                                  <input 
+                                    type="date" 
+                                    autoFocus
+                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
+                                    value={editValue ? convertThaiDateToISO(editValue) : ''}
+                                    onChange={e => {
+                                      const isoDate = e.target.value;
+                                      setEditValue(isoDate ? convertISOToThaiDate(isoDate) : '');
+                                    }}
+                                    onBlur={saveEdit}
+                                    onKeyDown={handleCellKeyDown}
+                                  />
+                                ) : field.inputType === 'select' ? (
                                   <select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
                                     value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}>
                                     <option value="">-- เลือก --</option>
@@ -883,8 +965,41 @@ export default function ImportExcelPage() {
                                 )
                               ) : (
                                 <div onClick={() => startEdit(rIdx, field.key)} className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1 group">
-                                  <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val || 'คลิกเพื่อแก้ไข'}</span>
-                                  <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  {field.key === 'birth_date' ? (
+                                    <>
+                                      <span className={`truncate max-w-[120px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
+                                        {val ? formatThaiDate(val) : 'คลิกเพื่อแก้ไข'}
+                                      </span>
+                                      {val && (
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const swapped = swapDayMonth(String(val));
+                                            setPreviewData(prev => {
+                                              const next = [...prev];
+                                              next[rIdx] = { ...next[rIdx], birth_date: swapped };
+                                              return next;
+                                            });
+                                            runValidation(previewData.map((r, i) => 
+                                              i === rIdx ? { ...r, birth_date: swapped } : r
+                                            ));
+                                          }}
+                                          className="ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                          title="สลับ วัน/เดือน"
+                                        >
+                                          🔁
+                                        </button>
+                                      )}
+                                      <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
+                                        {val || 'คลิกเพื่อแก้ไข'}
+                                      </span>
+                                      <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    </>
+                                  )}
                                 </div>
                               )}
                             </td>
