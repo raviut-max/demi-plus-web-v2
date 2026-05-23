@@ -2371,17 +2371,27 @@ export async function getAllValidProvinces(): Promise<string[]> {
 }
 
 // 2. ตรวจสอบบัตรประชาชนซ้ำ (แก้ไข error ที่เคยเจอ)
+// 2. ตรวจสอบบัตรประชาชนซ้ำ (ตรวจสอบจากตาราง users)
 export async function checkPatientExists(idCard: string): Promise<boolean> {
   try {
+    console.log('🔍 Checking if ID card exists in users table:', idCard);
+    
     const { count, error } = await supabase
-      .from('patients')
+      .from('users')  // ✅ เปลี่ยนจาก 'patients' เป็น 'users'
       .select('*', { count: 'exact', head: true })
       .eq('id_card', idCard);
 
-    if (error) return false;
-    return (count || 0) > 0;
+    if (error) {
+      console.error('❌ Error checking user existence:', error);
+      return false;
+    }
+    
+    const exists = (count || 0) > 0;
+    console.log(exists ? '⚠️ ID card already exists' : '✅ ID card is available');
+    
+    return exists;
   } catch (err) {
+    console.error('❌ Exception in checkPatientExists:', err);
     return false;
   }
 }
-
