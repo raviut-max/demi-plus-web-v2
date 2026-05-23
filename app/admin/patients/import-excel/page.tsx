@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: แก้ไขให้ตรวจสอบทีละอย่าง และตัดคำว่า "โรงพยาบาล"/"รพ." ออก
+ * ⚠️ คำเตือน: ไฟล์นี้แก้ไข Syntax Errors และ Logic การตรวจสอบลำดับความสำคัญแล้ว
  * ============================================================================
  */
 
@@ -18,14 +18,32 @@ import {
   logout, 
   validateThaiIdCard,
   getAllValidAddresses,
+  validateAddress,
   importPatientsBatch,
   getCoachesWithHospitals,
   getHospitalsWithHierarchy
 } from '@/lib/supabase/queries';
 import { 
-  Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, 
-  CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X, 
-  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard
+  Upload, 
+  FileSpreadsheet, 
+  AlertCircle, 
+  Loader2, 
+  ArrowLeft, 
+  LogOut, 
+  CheckCircle, 
+  XCircle, 
+  Edit3,
+  AlertTriangle,
+  ShieldAlert,
+  RotateCcw,
+  X,
+  Hospital,
+  UserCheck,
+  MapPin,
+  Sparkles,
+  Save,
+  Download,
+  CreditCard
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -66,19 +84,23 @@ const STANDARD_FIELDS = [
 ];
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS (แก้ไขแล้ว)
+// 🧠 SMART MATCHING FUNCTIONS
 // =====================================================
 
-// ✅ ตัดคำว่า "โรงพยาบาล" และ "รพ." ออกก่อนตรวจสอบ
+// ✅ ฟังก์ชันทำความสะอาดข้อความสำหรับการเปรียบเทียบ (ตัดคำนำหน้าออก)
+const stripHospitalPrefix = (text: string): string => {
+  if (!text) return '';
+  // ตัดคำว่า โรงพยาบาล, รพ., รพ ออก เพื่อเปรียบเทียบแค่ชื่อ
+  let clean = text.trim().toLowerCase();
+  clean = clean.replace(/โรงพยาบาล/g, '');
+  clean = clean.replace(/รพ\./g, '');
+  clean = clean.replace(/\bรพ\b/g, '');
+  return clean.replace(/\s+/g, '');
+};
+
 const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
-  
-  // ✅ ลบคำว่า "โรงพยาบาล" และ "รพ." ออกก่อน
-  normalized = normalized.replace(/โรงพยาบาล/g, '');
-  normalized = normalized.replace(/รพ\./g, '');
-  normalized = normalized.replace(/\bรพ\b/g, '');
-  
   const abbreviations: Record<string, string> = {
     'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 
     'รพช': 'โรงพยาบาลชุมชน',
@@ -90,11 +112,9 @@ const normalizeThaiText = (text: string): string => {
     'ทพ': 'ทันตแพทย์', 
     'ภก': 'เภสัชกร',
   };
-
   Object.entries(abbreviations).forEach(([abbr, full]) => {
     normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
   });
-
   normalized = normalized.replace(/\s+/g, '');
   const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
   normalized = normalized.replace(toneMarks, '');
@@ -123,32 +143,21 @@ const calculateSimilarity = (str1: string, str2: string): number => {
 };
 
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
-  console.log('🔍 [findBestHospitalMatch] Searching for:', hospitalName);
-  
-  const s1 = normalizeThaiText(hospitalName);
-  console.log('🔄 Normalized input:', `"${hospitalName}" → "${s1}"`);
+  // ✅ เปรียบเทียบโดยใช้ชื่อที่ตัดคำนำหน้าออกแล้ว
+  const cleanInput = stripHospitalPrefix(hospitalName);
   
   let bestMatch: any = null;
   let bestScore = 0;
   
   hospitals.forEach(hospital => {
-    const s2 = normalizeThaiText(hospital.name);
-    const score = calculateSimilarity(hospitalName, hospital.name);
-    
-    console.log(`  📋 "${hospital.name}" → "${s2}" | Score: ${score.toFixed(4)}`);
+    const cleanDbName = stripHospitalPrefix(hospital.name);
+    const score = calculateSimilarity(cleanInput, cleanDbName);
     
     if (score > 0.80 && score > bestScore) {
       bestScore = score;
       bestMatch = hospital;
     }
   });
-  
-  if (bestMatch) {
-    console.log('✅ Match found:', bestMatch.name, '| Score:', bestScore.toFixed(4));
-  } else {
-    console.warn('❌ No match found');
-  }
-  
   return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
 };
 
@@ -176,30 +185,6 @@ const convertISOToThaiDate = (isoDate: string): string => {
     return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
   }
   return isoDate;
-};
-
-// =====================================================
-// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ (ขั้นตอนที่ 4)
-// =====================================================
-const validateProvince = (provinceName: string, validProvinces: string[]): { valid: boolean; errors: string[] } => {
-  if (!provinceName) {
-    return { valid: false, errors: ['จังหวัด เป็นฟิลด์บังคับ'] };
-  }
-  
-  const normalizedInput = normalizeThaiText(provinceName);
-  const found = validProvinces.some(p => 
-    normalizeThaiText(p).includes(normalizedInput) || 
-    normalizedInput.includes(normalizeThaiText(p))
-  );
-  
-  if (!found) {
-    return { 
-      valid: false, 
-      errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง`] 
-    };
-  }
-  
-  return { valid: true, errors: [] };
 };
 
 // =====================================================
@@ -321,9 +306,6 @@ export default function ImportExcelPage() {
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
-  // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบทีละอย่าง)
-  // =====================================================
   const validateRow = (row: any) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
@@ -334,10 +316,8 @@ export default function ImportExcelPage() {
       if (strVal === '') return;
 
       if (field.inputType === 'number') {
-        // ✅ ตรวจสอบว่าเป็นตัวเลขเท่านั้น
-        if (!/^-?\d+(\.\d+)?$/.test(strVal)) {
-          errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น (พบ: "${strVal}")`);
-        } else {
+        if (!/^-?\d+(\.\d+)?$/.test(strVal)) errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น`);
+        else {
           const num = parseFloat(strVal);
           if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่า ${field.min}`);
           if (field.max !== undefined && num > field.max) errors.push(`${field.label} มากกว่า ${field.max}`);
@@ -356,23 +336,13 @@ export default function ImportExcelPage() {
         if (!field.options?.includes(strVal)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
       } else if (field.key === 'id_card') {
         if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
-      } else if (field.inputType === 'text' && field.key !== 'hospital_name' && field.key !== 'coach_name') {
-        // ✅ ตรวจสอบฟิลด์ตัวหนังสือว่าไม่เป็นตัวเลข (ยกเว้น hospital_name และ coach_name)
-        if (/^\d+$/.test(strVal) && strVal.length > 3) {
-          errors.push(`${field.label} ต้องเป็นตัวหนังสือ (พบตัวเลข: "${strVal}")`);
-        }
       }
     });
 
-    // ✅ ตรวจสอบเฉพาะจังหวัด (ขั้นตอนที่ 4) - ไม่ตรวจสอบอำเภอ/ตำบล
-    if (row.province && validAddresses.length > 0) {
-      const provinces = Array.from(new Set(validAddresses.map(a => a.province)));
-      const provinceCheck = validateProvince(row.province, provinces);
-      if (!provinceCheck.valid) {
-        errors.push(...provinceCheck.errors);
-      }
+    if (validAddresses.length > 0 && (row.province || row.district || row.subdistrict)) {
+      const addrCheck = validateAddress({ province: row.province || '', district: row.district || '', subdistrict: row.subdistrict || '', postal_code: row.postal_code || '' }, validAddresses);
+      if (!addrCheck.valid) errors.push(...addrCheck.errors);
     }
-
     return errors;
   };
 
@@ -965,7 +935,9 @@ export default function ImportExcelPage() {
                         );
                       }
 
-                      // ✅ แสดงเฉพาะส่วนที่เกี่ยวข้องกับ error_type นั้นๆ เท่านั้น
+                      // ✅ แสดงเฉพาะส่วนที่เกี่ยวข้องกับ error_type นั้นๆ เท่านั้น (ไม่ซ้อนกัน)
+                      
+                      // 1. กรณี ID ซ้ำ (สำคัญที่สุด)
                       if (err.error_type === 'duplicate_id') {
                         return (
                           <div key={idx} className="bg-white border border-red-200 rounded p-4">
