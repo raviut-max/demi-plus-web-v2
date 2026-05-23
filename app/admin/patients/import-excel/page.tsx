@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ห้ามแก้ไขโค้ดโดยไม่ได้รับอนุญาต
+ * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อแก้ปัญหาการตรวจสอบ ID ซ้ำและการแก้ไขทีละลำดับ
  * ============================================================================
  */
 
@@ -42,7 +42,8 @@ import {
   MapPin,
   Sparkles,
   Save,
-  Download
+  Download,
+  CreditCard
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { createClient } from '@/lib/supabase/client';
@@ -293,7 +294,7 @@ export default function ImportExcelPage() {
       id_card: string; 
       hospital_number: string; 
       error: string;
-      error_type: 'hospital' | 'coach' | 'other';
+      error_type: 'duplicate_id' | 'hospital' | 'coach' | 'other';
       hospital_id?: string;
       coach_id?: string;
       province?: string;
@@ -644,7 +645,7 @@ export default function ImportExcelPage() {
           newErrors[errorIndex] = { 
             ...newErrors[errorIndex], 
             error: `เลขบัตรประชาชน ${updatedRow.id_card} มีอยู่ในระบบแล้ว`,
-            error_type: 'other' as const,
+            error_type: 'duplicate_id' as const,
             hospital_fixed: true,
             fixed: false
           };
@@ -772,40 +773,80 @@ export default function ImportExcelPage() {
     const successRecords: typeof importResult.successRecords = [];
     let successCount = 0;
 
-    selectedRows.forEach(rowIdx => {
+    // ✅ ตรวจสอบทีละแถวตามลำดับความสำคัญ
+    for (const rowIdx of Array.from(selectedRows)) {
       const row = previewData[rowIdx];
       const rowNumber = rowIdx + 1;
-      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       
+      // 1. ตรวจสอบ ID ซ้ำก่อน (สำคัญที่สุด)
+      const isDuplicate = await checkDuplicateIdCard(row.id_card);
+      if (isDuplicate) {
+        errors.push({
+          row: rowNumber,
+          id_card: row.id_card,
+          hospital_number: row.hospital_number,
+          error: `เลขบัตรประชาชน ${row.id_card} มีอยู่ในระบบแล้ว`,
+          error_type: 'duplicate_id',
+          hospital_id: undefined,
+          original_hospital_name: row.hospital_name,
+          hospital_fixed: false,
+          fixed: false
+        });
+        continue; // ข้ามไปแถวถัดไป
+      }
+      
+      // 2. ตรวจสอบโรงพยาบาล
+      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       if (!hospitalMatch) {
         errors.push({
-          row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
+          row: rowNumber,
+          id_card: row.id_card,
+          hospital_number: row.hospital_number,
           error: `ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`,
-          error_type: 'hospital', hospital_id: undefined, original_hospital_name: row.hospital_name,
-          hospital_fixed: false, fixed: false
+          error_type: 'hospital',
+          hospital_id: undefined,
+          original_hospital_name: row.hospital_name,
+          hospital_fixed: false,
+          fixed: false
         });
-      } else {
-        const hospitalId = hospitalMatch.hospital.id;
-        const networkIds = getNetworkHospitalIds(hospitalId);
-        const networkCoaches = coaches.filter(c => {
-          const cHospId = c.users?.hospital_id;
-          return cHospId && networkIds.includes(cHospId);
-        });
-        const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
-
-        if (row.coach_name && !coachMatch) {
-          errors.push({
-            row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
-            error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`,
-            error_type: 'coach', hospital_id: hospitalId, original_hospital_name: row.hospital_name,
-            original_coach_name: row.coach_name, hospital_fixed: true, fixed: false
-          });
-        } else {
-          successCount++;
-          successRecords.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, first_name: row.first_name, last_name: row.last_name });
-        }
+        continue;
       }
-    });
+      
+      // 3. ตรวจสอบโค้ช
+      const hospitalId = hospitalMatch.hospital.id;
+      const networkIds = getNetworkHospitalIds(hospitalId);
+      const networkCoaches = coaches.filter(c => {
+        const cHospId = c.users?.hospital_id;
+        return cHospId && networkIds.includes(cHospId);
+      });
+      const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
+
+      if (row.coach_name && !coachMatch) {
+        errors.push({
+          row: rowNumber,
+          id_card: row.id_card,
+          hospital_number: row.hospital_number,
+          error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`,
+          error_type: 'coach',
+          hospital_id: hospitalId,
+          original_hospital_name: row.hospital_name,
+          original_coach_name: row.coach_name,
+          hospital_fixed: true,
+          fixed: false
+        });
+        continue;
+      }
+      
+      // ผ่านทุกการตรวจสอบ
+      successCount++;
+      successRecords.push({
+        row: rowNumber,
+        id_card: row.id_card,
+        hospital_number: row.hospital_number,
+        first_name: row.first_name,
+        last_name: row.last_name
+      });
+    }
 
     if (errors.length > 0) {
       setImportResult({ success: successCount, failed: errors.length, errors, successRecords });
@@ -1175,6 +1216,8 @@ export default function ImportExcelPage() {
                         );
                       }
 
+                      // ✅ แสดง error ตามลำดับความสำคัญ
+                      const isDuplicateId = err.error_type === 'duplicate_id';
                       const isHospitalMissing = (err.error_type === 'hospital' || !err.hospital_id);
                       const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
 
@@ -1188,9 +1231,34 @@ export default function ImportExcelPage() {
                             </div>
                           </div>
                           
-                          {isHospitalMissing && (
+                          {/* ✅ กรณี ID ซ้ำ - แสดงข้อความแจ้งและให้ข้ามหรือแก้ไข */}
+                          {isDuplicateId && (
+                            <div className="mb-4 pl-6 space-y-2 border-l-4 border-orange-300 bg-orange-50 p-3 rounded">
+                              <div className="flex items-center gap-2 text-sm text-orange-800 font-semibold">
+                                <CreditCard className="w-4 h-4" />
+                                ⚠️ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว
+                              </div>
+                              <p className="text-xs text-gray-600">
+                                กรุณาตรวจสอบข้อมูลใน Excel หรือแก้ไขเลขบัตรประชาชนในฐานข้อมูลก่อนนำเข้า
+                              </p>
+                              <div className="flex gap-2 mt-2">
+                                <button
+                                  onClick={() => {
+                                    const newErrors = [...importResult.errors];
+                                    newErrors[idx] = { ...newErrors[idx], fixed: true };
+                                    setImportResult({ ...importResult, errors: newErrors });
+                                  }}
+                                  className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm"
+                                >
+                                  ข้ามรายการนี้
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* ✅ กรณีโรงพยาบาลไม่ถูกต้อง */}
+                          {isHospitalMissing && !isDuplicateId && (
                             <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
-                              {/* ✅ แสดงชื่อโรงพยาบาลที่ผู้ใช้กรอก */}
                               <div className="mb-2 text-sm">
                                 <span className="text-gray-600">โรงพยาบาลที่กรอก:</span>
                                 <span className="ml-2 font-semibold text-red-700">"{err.original_hospital_name}"</span>
@@ -1220,7 +1288,8 @@ export default function ImportExcelPage() {
                             </div>
                           )}
 
-                          {!isHospitalMissing && (
+                          {/* ✅ กรณีโค้ชไม่ถูกต้อง */}
+                          {!isHospitalMissing && !isDuplicateId && (
                             <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
                               <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2">
                                 <CheckCircle className="w-4 h-4" />
