@@ -5,7 +5,7 @@
  * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 22 พฤษภาคม 2569
+ * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
  * ⚠️ คำเตือน: ห้ามแก้ไขโค้ดโดยไม่ได้รับอนุญาต
  * ============================================================================
  */
@@ -45,6 +45,7 @@ import {
   Download
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { createClient } from '@/lib/supabase/client';
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
@@ -83,15 +84,13 @@ const STANDARD_FIELDS = [
 ];
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS (ปรับปรุงแล้ว)
+// 🧠 SMART MATCHING FUNCTIONS
 // =====================================================
-
-// ✅ ปรับปรุง: ลบคำว่า "โรงพยาบาล" ออกก่อนทำ matching
 const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
   
-  // ✅ ลบคำว่า "โรงพยาบาล" และตัวย่อออกก่อน เพื่อป้องกัน false positive
+  // ✅ ลบคำว่า "โรงพยาบาล" และตัวย่อออกก่อน
   normalized = normalized.replace(/โรงพยาบาล/g, '');
   normalized = normalized.replace(/รพ\./g, '');
   normalized = normalized.replace(/\bรพ\b/g, '');
@@ -137,7 +136,7 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return 1 - (distance / maxLength);
 };
 
-// ✅ ปรับปรุง: ใช้ Exact Match เป็นหลัก + Debug log
+// ✅ ปรับปรุง: แสดงผลลัพธ์การจับคู่ทั้งหมด + Debug log
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   console.log(`🔍 [findBestHospitalMatch] Searching for: "${hospitalName}"`);
   
@@ -238,6 +237,29 @@ const validateProvince = (provinceName: string, validProvinces: string[]): { val
   }
   
   return { valid: true, errors: [] };
+};
+
+// =====================================================
+// ✅ ฟังก์ชันตรวจสอบเลขบัตรประชาชนซ้ำ
+// =====================================================
+const checkDuplicateIdCard = async (idCard: string): Promise<boolean> => {
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('patients')
+      .select('id_card')
+      .eq('id_card', idCard)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+    
+    return !!data; // ถ้ามีข้อมูล = ซ้ำ
+  } catch (err) {
+    console.error('Error checking duplicate ID:', err);
+    return false;
+  }
 };
 
 // =====================================================
@@ -571,7 +593,7 @@ export default function ImportExcelPage() {
   };
 
   // =====================================================
-  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที + Debug)
+  // ✅ แก้ไขฟังก์ชันบันทึกการแก้ไขโรงพยาบาล (นำเข้าทันที + ตรวจสอบ ID ซ้ำ)
   // =====================================================
   const handleSaveHospitalFix = async (errorIndex: number) => {
     if (!importResult) return;
@@ -602,19 +624,51 @@ export default function ImportExcelPage() {
 
     setTimeout(() => { runValidation(previewData); }, 100);
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = validateRow(updatedRow);
       
       console.log('🔍 [handleSaveHospitalFix] Validation errors:', rowErrors);
       
       if (rowErrors.length === 0) {
+        // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำก่อนนำเข้า
+        console.log('🔍 Checking duplicate ID:', updatedRow.id_card);
+        const isDuplicate = await checkDuplicateIdCard(updatedRow.id_card);
+        
+        if (isDuplicate) {
+          console.log('❌ Duplicate ID found:', updatedRow.id_card);
+          setError(`❌ เลขบัตรประชาชน ${updatedRow.id_card} มีอยู่ในระบบแล้ว`);
+          
+          // แสดงใน modal ด้วย
+          const newErrors = [...importResult.errors];
+          newErrors[errorIndex] = { 
+            ...newErrors[errorIndex], 
+            error: `เลขบัตรประชาชน ${updatedRow.id_card} มีอยู่ในระบบแล้ว`,
+            error_type: 'other' as const,
+            hospital_fixed: true,
+            fixed: false
+          };
+          setImportResult({ ...importResult, errors: newErrors });
+          
+          // ปิด modal และกลับไป preview
+          setTimeout(() => {
+            setImportResult(null);
+            setStep('preview');
+          }, 500);
+          
+          return;
+        }
+        
         console.log('✅ No errors - importing single row');
         handleImportSingleRow(rowIndex);
       } else {
         console.log('⚠️ Still has errors - updating modal');
         const newErrors = [...importResult.errors];
-        newErrors[errorIndex] = { ...newErrors[errorIndex], hospital_fixed: true, fixed: false };
+        newErrors[errorIndex] = { 
+          ...newErrors[errorIndex], 
+          hospital_fixed: true,
+          fixed: false
+        };
         setImportResult({ ...importResult, errors: newErrors });
         
         const nextError = rowErrors.find(e => !e.includes('โรงพยาบาล'));
@@ -623,6 +677,7 @@ export default function ImportExcelPage() {
         }
       }
       
+      // ✅ ปิด Modal และกลับไปหน้า Preview
       setTimeout(() => {
         console.log('🔙 Closing modal and returning to preview');
         setImportResult(null);
@@ -832,6 +887,7 @@ export default function ImportExcelPage() {
     setPreviewData(prev => {
       const newData = [...prev];
       const row = { ...newData[rowIndex] };
+
       if (currentError.hospital_id) {
         const hospital = hospitals.find(h => h.id === currentError.hospital_id);
         if (hospital) row.hospital_name = hospital.name;
@@ -1247,9 +1303,12 @@ export default function ImportExcelPage() {
                     <button onClick={handleBackToPreview} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
                       <ArrowLeft className="w-4 h-4" /> ย้อนกลับเพื่อแก้ไข
                     </button>
-                    <button onClick={handleRetryFailed} className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium flex items-center justify-center gap-2">
-                      <RotateCcw className="w-4 h-4" /> นำเข้ารายการที่ล้มเหลวใหม่
-                    </button>
+                    {/* ✅ ซ่อนปุ่มนำเข้าใหม่สำหรับกรณี ID ซ้ำ */}
+                    {!importResult.errors.some(e => e.error.includes('เลขบัตรประชาชน') && e.error.includes('มีอยู่ในระบบแล้ว')) && (
+                      <button onClick={handleRetryFailed} className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium flex items-center justify-center gap-2">
+                        <RotateCcw className="w-4 h-4" /> นำเข้ารายการที่ล้มเหลวใหม่
+                      </button>
+                    )}
                     <button onClick={handleExitImport} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium flex items-center justify-center gap-2">
                       <X className="w-4 h-4" /> ออกจากการนำเข้า
                     </button>
