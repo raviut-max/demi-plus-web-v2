@@ -2346,3 +2346,25 @@ export function validateAddress(address: { province: string; district: string; s
     errors,
   };
 }
+
+// เพิ่มฟังก์ชันนี้ในไฟล์ @/lib/supabase/queries.ts
+
+export async function checkPatientExists(idCard: string): Promise<boolean> {
+  try {
+    // ตรวจสอบในตาราง patients ว่ามี id_card นี้หรือไม่
+    const { count, error } = await supabase
+      .from('patients')
+      .select('*', { count: 'exact', head: true })
+      .eq('id_card', idCard);
+
+    if (error) {
+      console.error('Error checking patient existence:', error);
+      return false;
+    }
+    
+    // ถ้า count มากกว่า 0 แสดงว่ามีซ้ำ
+    return (count || 0) > 0;
+  } catch (err) {
+    return false;
+  }
+}
