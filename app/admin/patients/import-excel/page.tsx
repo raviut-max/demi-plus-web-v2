@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อตัดคำนำหน้าโรงพยาบาลและเพิ่ม Debug Log
+ * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อแสดงเฉพาะส่วนที่เกี่ยวข้องกับ error นั้นๆ
  * ============================================================================
  */
 
@@ -25,7 +25,7 @@ import {
 import { 
   Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, 
   CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X, 
-  Hospital, UserCheck, MapPin, Sparkles, Save, Download
+  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -66,36 +66,19 @@ const STANDARD_FIELDS = [
 ];
 
 // =====================================================
-// 🧠 SMART MATCHING FUNCTIONS (ปรับปรุงแล้ว)
+// 🧠 SMART MATCHING FUNCTIONS
 // =====================================================
-
-// ✅ ปรับปรุง: ลบคำว่า "โรงพยาบาล"/"รพ." ออกก่อนทำ matching
 const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
-  
-  // ✅ ลบคำว่า "โรงพยาบาล" และตัวย่อออกก่อน (เพื่อเปรียบเทียบเฉพาะชื่อจริง)
-  normalized = normalized.replace(/โรงพยาบาล/g, '');
-  normalized = normalized.replace(/รพ\./g, '');
-  normalized = normalized.replace(/\bรพ\b/g, '');
-  
-  // แปลงคำย่ออื่นๆ
   const abbreviations: Record<string, string> = {
-    'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 
-    'รพช': 'โรงพยาบาลชุมชน',
-    'สสจ': 'สาธารณสุขจังหวัด', 
-    'สสอ': 'สาธารณสุขอำเภอ', 
-    'อน': 'อนามัย',
-    'นพ': 'นายแพทย์', 
-    'พญ': 'แพทย์หญิง', 
-    'ทพ': 'ทันตแพทย์', 
-    'ภก': 'เภสัชกร',
+    'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
+    'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
+    'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
   };
-
   Object.entries(abbreviations).forEach(([abbr, full]) => {
     normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
   });
-
   normalized = normalized.replace(/\s+/g, '');
   const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
   normalized = normalized.replace(toneMarks, '');
@@ -123,86 +106,16 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   return 1 - (distance / maxLength);
 };
 
-// ✅ ปรับปรุง: แสดง Debug Log แบบละเอียดทุกขั้นตอน
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
-  console.group('🔍 ========== [findBestHospitalMatch] START ==========');
-  console.log('📥 Input hospital name:', hospitalName);
-  
-  const s1 = normalizeThaiText(hospitalName);
-  console.log('🔄 Normalized input:', `"${hospitalName}" → "${s1}"`);
-  
-  // ✅ 1. หา exact match ก่อน (หลัง normalize)
-  console.log('🔎 Step 1: Searching for exact match...');
-  const exactMatch = hospitals.find(h => {
-    const s2 = normalizeThaiText(h.name);
-    const isExact = s1 === s2 || s1.includes(s2) || s2.includes(s1);
-    if (isExact) {
-      console.log(`✅ Exact match found!`);
-      console.log(`   DB Name: "${h.name}"`);
-      console.log(`   Normalized: "${s2}"`);
-      console.log(`   Match type: ${s1 === s2 ? 'identical' : (s1.includes(s2) ? 'input contains db' : 'db contains input')}`);
-    }
-    return isExact;
-  });
-  
-  if (exactMatch) {
-    console.log('🎯 Result: Exact match found, returning immediately');
-    console.groupEnd();
-    return { hospital: exactMatch, similarity: 1.0 };
-  }
-  console.log('❌ No exact match found, proceeding to fuzzy match...');
-  
-  // ✅ 2. ถ้าไม่มี exact match ให้ใช้ fuzzy match แต่เพิ่ม threshold เป็น 0.90
-  console.log('🔎 Step 2: Fuzzy matching with threshold 0.90...');
   let bestMatch: any = null;
   let bestScore = 0;
-  const candidates: Array<{ name: string; normalized: string; score: number }> = [];
-  
   hospitals.forEach(hospital => {
-    const s2 = normalizeThaiText(hospital.name);
     const score = calculateSimilarity(hospitalName, hospital.name);
-    
-    if (score > 0.0) {
-      candidates.push({ 
-        name: hospital.name, 
-        normalized: s2, 
-        score 
-      });
-    }
-    
-    if (score > 0.90 && score > bestScore) {
+    if (score > 0.80 && score > bestScore) {
       bestScore = score;
       bestMatch = hospital;
     }
   });
-  
-  // ✅ แสดงผลการจับคู่ทั้งหมด
-  if (candidates.length > 0) {
-    console.log(`📊 Found ${candidates.length} candidates with score > 0:`);
-    candidates
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
-      .forEach((c, i) => {
-        console.log(`   ${i + 1}. "${c.name}"`);
-        console.log(`      Normalized: "${c.normalized}"`);
-        console.log(`      Score: ${c.score.toFixed(4)} ${c.score >= 0.90 ? '✅' : '❌'}`);
-      });
-  } else {
-    console.warn('⚠️ No candidates found (all scores = 0)');
-  }
-  
-  // ✅ สรุปผลลัพธ์
-  if (bestMatch) {
-    console.log('🎯 Result: Best match found!');
-    console.log(`   Hospital: "${bestMatch.name}"`);
-    console.log(`   Score: ${bestScore.toFixed(4)}`);
-  } else {
-    console.warn('❌ Result: No match found above threshold 0.90');
-  }
-  
-  console.groupEnd();
-  console.log('============================================\n');
-  
   return bestMatch ? { hospital: bestMatch, similarity: bestScore } : null;
 };
 
@@ -279,6 +192,7 @@ export default function ImportExcelPage() {
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [success, setSuccess] = useState(false);
   
+  // ✅ เพิ่ม 'duplicate_id' ใน error_type
   const [importResult, setImportResult] = useState<{
     success: number;
     failed: number;
@@ -287,7 +201,7 @@ export default function ImportExcelPage() {
       id_card: string; 
       hospital_number: string; 
       error: string;
-      error_type: 'hospital' | 'coach' | 'other';
+      error_type: 'duplicate_id' | 'hospital' | 'coach' | 'other';
       hospital_id?: string;
       coach_id?: string;
       province?: string;
@@ -351,7 +265,7 @@ export default function ImportExcelPage() {
 
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx) };
+      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
@@ -1001,8 +915,42 @@ export default function ImportExcelPage() {
                           </div>
                         );
                       }
+
+                      // ✅ แยกการจัดการตามประเภท error
+                      if (err.error_type === 'duplicate_id') {
+                        return (
+                          <div key={idx} className="bg-white border border-red-200 rounded p-4">
+                            <div className="flex items-start gap-2 mb-3">
+                              <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-red-800">
+                                  <strong>แถวที่ {err.row}:</strong> {err.error}
+                                </p>
+                                <p className="text-xs text-gray-600 mt-1">
+                                  บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* ✅ แสดงเฉพาะส่วนแก้ไข ID */}
+                            <div className="pl-6 space-y-2 border-l-4 border-orange-300 bg-orange-50 p-3 rounded">
+                              <div className="flex items-center gap-2 text-sm text-orange-800 font-semibold">
+                                <CreditCard className="w-4 h-4" />
+                                ⚠️ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว
+                              </div>
+                              <p className="text-xs text-gray-600">
+                                กรุณาตรวจสอบไฟล์ Excel หรือฐานข้อมูล แล้วทำการแก้ไขก่อนนำเข้าใหม่
+                                <br/>
+                                (ไม่สามารถแก้ไขได้ที่นี่ เนื่องจากต้องเปลี่ยนข้อมูลต้นทาง)
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       const isHospitalMissing = (err.error_type === 'hospital' || !err.hospital_id);
                       const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
+
                       return (
                         <div key={idx} className="bg-white border border-red-200 rounded p-4">
                           <div className="flex items-start gap-2 mb-3">
@@ -1012,6 +960,7 @@ export default function ImportExcelPage() {
                               <p className="text-xs text-gray-600 mt-1">บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}</p>
                             </div>
                           </div>
+                          
                           {isHospitalMissing && (
                             <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
                               <label className="block text-xs font-bold text-red-700 flex items-center gap-1">
@@ -1031,6 +980,7 @@ export default function ImportExcelPage() {
                               <p className="text-xs text-gray-500 mt-1">📝 เมื่อบันทึกแล้ว ระบบจะตรวจสอบฟิลด์อื่นๆ ต่อไป</p>
                             </div>
                           )}
+
                           {!isHospitalMissing && (
                             <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
                               <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2">
