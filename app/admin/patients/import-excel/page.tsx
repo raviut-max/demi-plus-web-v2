@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรวจสอบทีละอย่างตามลำดับ: ID → โรงพยาบาล → โค้ช
+ * ⚠️ คำเตือน: ตรวจสอบที่หน้า Preview + ตรวจสอบทีละอย่างตามลำดับ
  * ============================================================================
  */
 
@@ -20,7 +20,8 @@ import {
   getAllValidAddresses,
   importPatientsBatch,
   getCoachesWithHospitals,
-  getHospitalsWithHierarchy
+  getHospitalsWithHierarchy,
+  checkPatientExists
 } from '@/lib/supabase/queries';
 import { 
   Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, 
@@ -208,6 +209,7 @@ export default function ImportExcelPage() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [success, setSuccess] = useState(false);
+  const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   
   // ✅ เพิ่ม 'duplicate_id' ใน error_type
   const [importResult, setImportResult] = useState<{
@@ -306,9 +308,9 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบเฉพาะจังหวัด)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบเฉพาะจังหวัด + ID ซ้ำ)
   // =====================================================
-  const validateRow = (row: any) => {
+  const validateRow = async (row: any, rowIndex: number) => {
     const errors: string[] = [];
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
@@ -350,12 +352,33 @@ export default function ImportExcelPage() {
       }
     }
 
+    // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำในระบบ (ที่หน้า Preview)
+    if (row.id_card && validateThaiIdCard(row.id_card)) {
+      try {
+        setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
+        const exists = await checkPatientExists(row.id_card);
+        if (exists) {
+          errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+        }
+      } catch (err) {
+        console.warn('⚠️ ไม่สามารถตรวจสอบบัตรประชาชนซ้ำ:', err);
+      } finally {
+        setCheckingDuplicates(prev => {
+          const next = new Set(prev);
+          next.delete(rowIndex);
+          return next;
+        });
+      }
+    }
+
     return errors;
   };
 
-  const runValidation = (data: any[]) => {
+  const runValidation = async (data: any[]) => {
     const errors: Record<number, string[]> = {};
-    data.forEach((row, idx) => { errors[idx] = validateRow(row); });
+    for (let idx = 0; idx < data.length; idx++) {
+      errors[idx] = await validateRow(data[idx], idx);
+    }
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
   };
@@ -484,7 +507,7 @@ export default function ImportExcelPage() {
 
     setTimeout(() => {
       const updatedRow = previewData[rowIndex];
-      const rowErrors = validateRow(updatedRow);
+      const rowErrors = validateRow(updatedRow, rowIndex);
       
       if (rowErrors.length === 0) {
         handleImportSingleRow(rowIndex);
@@ -907,6 +930,11 @@ export default function ImportExcelPage() {
                                   <span>{err}</span>
                                 </div>
                               ))}
+                            </div>
+                          ) : checkingDuplicates.has(rIdx) ? (
+                            <div className="flex items-center gap-1 text-xs text-blue-700">
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>ตรวจสอบบัตร...</span>
                             </div>
                           ) : (
                             <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>
