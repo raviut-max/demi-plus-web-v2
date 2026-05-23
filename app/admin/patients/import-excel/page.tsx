@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อแสดงเฉพาะส่วนที่เกี่ยวข้องกับ error นั้นๆ
+ * ⚠️ คำเตือน: ไฟล์นี้ถูกแก้ไขเพื่อแสดงข้อผิดพลาดทีละอย่างตามลำดับความสำคัญ
  * ============================================================================
  */
 
@@ -532,34 +532,43 @@ export default function ImportExcelPage() {
     const errors: typeof importResult.errors = [];
     const successRecords: typeof importResult.successRecords = [];
     let successCount = 0;
-    selectedRows.forEach(rowIdx => {
+    
+    // ✅ ตรวจสอบทีละอย่างตามลำดับความสำคัญ
+    for (const rowIdx of Array.from(selectedRows)) {
       const row = previewData[rowIdx];
       const rowNumber = rowIdx + 1;
+      
+      // ✅ ลำดับ 1: ตรวจสอบโรงพยาบาลก่อน (เพราะต้องใช้หาโค้ช)
       const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       if (!hospitalMatch) {
         errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
           error: `ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`, error_type: 'hospital',
           hospital_id: undefined, original_hospital_name: row.hospital_name, hospital_fixed: false, fixed: false });
-      } else {
-        const hospitalId = hospitalMatch.hospital.id;
-        const networkIds = getNetworkHospitalIds(hospitalId);
-        const networkCoaches = coaches.filter(c => {
-          const cHospId = c.users?.hospital_id;
-          return cHospId && networkIds.includes(cHospId);
-        });
-        const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
-        if (row.coach_name && !coachMatch) {
-          errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
-            error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`,
-            error_type: 'coach', hospital_id: hospitalId, original_hospital_name: row.hospital_name,
-            original_coach_name: row.coach_name, hospital_fixed: true, fixed: false });
-        } else {
-          successCount++;
-          successRecords.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
-            first_name: row.first_name, last_name: row.last_name });
-        }
+        continue; // ข้ามไปตรวจสอบแถวถัดไป
       }
-    });
+      
+      // ✅ ลำดับ 2: ตรวจสอบโค้ช (หลังจากโรงพยาบาลถูกต้องแล้ว)
+      const hospitalId = hospitalMatch.hospital.id;
+      const networkIds = getNetworkHospitalIds(hospitalId);
+      const networkCoaches = coaches.filter(c => {
+        const cHospId = c.users?.hospital_id;
+        return cHospId && networkIds.includes(cHospId);
+      });
+      const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
+      if (row.coach_name && !coachMatch) {
+        errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
+          error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`,
+          error_type: 'coach', hospital_id: hospitalId, original_hospital_name: row.hospital_name,
+          original_coach_name: row.coach_name, hospital_fixed: true, fixed: false });
+        continue;
+      }
+      
+      // ✅ ผ่านทุกการตรวจสอบ
+      successCount++;
+      successRecords.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number,
+        first_name: row.first_name, last_name: row.last_name });
+    }
+    
     if (errors.length > 0) {
       setImportResult({ success: successCount, failed: errors.length, errors, successRecords });
       return;
@@ -916,7 +925,7 @@ export default function ImportExcelPage() {
                         );
                       }
 
-                      // ✅ แยกการจัดการตามประเภท error
+                      // ✅ แสดงเฉพาะส่วนที่เกี่ยวข้องกับ error_type นั้นๆ เท่านั้น
                       if (err.error_type === 'duplicate_id') {
                         return (
                           <div key={idx} className="bg-white border border-red-200 rounded p-4">
