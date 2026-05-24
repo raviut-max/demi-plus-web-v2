@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 23 พฤษภาคม 2569
- * ⚠️ คำเตือน: แก้ไขปัญหาแก้ไขวันที่ไม่ได้ (ReferenceError) และตรรกะปีแบบใหม่
+ * ⚠️ คำเตือน: เพิ่มการตรวจสอบเลขบัตรซ้ำจากข้อมูลที่เพิ่งนำเข้า (Imported IDs)
  * ============================================================================
  */
 
@@ -26,7 +26,7 @@ import {
 import { 
   Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut, 
   CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X, 
-  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard
+  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -38,7 +38,7 @@ const STANDARD_FIELDS = [
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
   { key: 'last_name', label: 'นามสกุลผู้ป่วย', required: true, inputType: 'text' },
   { key: 'hospital_number', label: 'HN', required: true, inputType: 'text' },
-  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'date' },
+  { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
   { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text' },
@@ -147,56 +147,40 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
 };
 
 // =====================================================
-// 📅 DATE FORMATTING UTILITIES (แก้ไข: เพิ่มฟังก์ชันที่ขาดไป)
+// 📅 DATE FORMATTING UTILITIES
 // =====================================================
 
-// ✅ ฟังก์ชันจัดรูปแบบวันที่: รับค่าใดก็ได้ → ส่งออก วว/ดด/ปปปป (พ.ศ.)
 const formatThaiDate = (input: string | number | Date): string => {
   if (!input) return '';
   
   let day = '', month = '', year = '';
   const str = String(input).trim();
   
-  // กรณี 1: ISO Date (YYYY-MM-DD)
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    [year, month, day] = str.split('-');
+    const [y, m, d] = str.split('-');
+    year = String(parseInt(y) + 543);
+    month = m;
+    day = d;
   }
-  // กรณี 2: วันที่มี / หรือ - คั่น (เช่น 1/2/24, 01/02/2567, 1-2-24)
   else if (str.match(/^[\d\/\-.]+$/)) {
     const parts = str.split(/[\/\-.]/).map(p => p.trim());
     if (parts.length >= 3) {
       const [p1, p2, p3] = parts;
-      
-      // ถ้าส่วนแรก > 31 → น่าจะเป็นปี (เช่น 2567/1/1)
       if (parseInt(p1) > 31) {
         year = p1; month = p2; day = p3;
-      }
-      // ถ้าส่วนที่สาม > 31 หรือยาว 4 หลัก → น่าจะเป็นปี
-      else if (parseInt(p3) > 31 || p3.length === 4) {
+      } else if (parseInt(p3) > 31 || p3.length === 4) {
         day = p1; month = p2; year = p3;
-      }
-      // ถ้าไม่แน่ใจ → สมมติว่าเป็น วัน/เดือน/ปี (รูปแบบไทย)
-      else {
+      } else {
         day = p1; month = p2; year = p3;
       }
     }
   }
   
-  // ✅ จัดการปี: ถ้าเป็น 2 หลัก ให้เติม "25" ข้างหน้า (เพราะเป็น พ.ศ. อยู่แล้ว)
   let formattedYear = year;
+  if (year.length === 2) formattedYear = `25${year}`;
+  else if (year.length === 4) formattedYear = year;
+  else if (year.length === 3) formattedYear = `2${year}`;
   
-  if (year.length === 2) {
-    // ปี 2 หลัก (เช่น "24") → เติม "25" ข้างหน้า → "2524"
-    formattedYear = `25${year}`;
-  } else if (year.length === 4) {
-    // ปี 4 หลัก (เช่น "2524", "2567") → ใช้ได้เลย
-    formattedYear = year;
-  } else if (year.length === 3) {
-    // ปี 3 หลัก (เช่น "524") → เติม "2" ข้างหน้า → "2524"
-    formattedYear = `2${year}`;
-  }
-  
-  // ✅ เติมเลข 0 หน้าวัน/เดือน ถ้าเป็นหลักเดียว
   const dayNum = parseInt(day) || 1;
   const monthNum = parseInt(month) || 1;
   const formattedDay = String(dayNum).padStart(2, '0');
@@ -205,7 +189,6 @@ const formatThaiDate = (input: string | number | Date): string => {
   return `${formattedDay}/${formattedMonth}/${formattedYear}`;
 };
 
-// ✅ ฟังก์ชันสลับ วัน/เดือน (สำหรับแก้ไขด้วยมือ)
 const swapDayMonth = (dateStr: string): string => {
   if (!dateStr) return '';
   const parts = dateStr.split('/');
@@ -216,33 +199,8 @@ const swapDayMonth = (dateStr: string): string => {
   return dateStr;
 };
 
-// ✅ แปลงวันที่ไทยเป็น ISO (สำหรับ input type="date" value)
-// ใช้สำหรับแสดงค่าในช่อง input
-const convertThaiDateToISO = (thaiDate: string): string => {
-  if (!thaiDate) return '';
-  const parts = thaiDate.split('/');
-  if (parts.length !== 3) return '';
-  const [day, month, yearBE] = parts;
-  if (!yearBE) return ''; 
-  const yearAD = parseInt(yearBE) - 543;
-  if (isNaN(yearAD)) return '';
-  return `${yearAD}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-};
-
-// ✅ แปลง ISO เป็นไทย (สำหรับ input type="date" onChange)
-// ใช้สำหรับรับค่าที่ผู้ใช้พิมพ์/เลือก แล้วเก็บลง State
-const convertISOToThaiDate = (isoDate: string): string => {
-  if (!isoDate) return '';
-  if (isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    const [year, month, day] = isoDate.split('-');
-    const yearBE = parseInt(year) + 543;
-    return `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${yearBE}`;
-  }
-  return isoDate;
-};
-
 // =====================================================
-// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ (ดึงจากตาราง provinces)
+// ✅ ฟังก์ชันตรวจสอบจังหวัดเฉพาะ
 // =====================================================
 const validateProvinceOnly = (provinceName: string, validProvinces: string[]): { valid: boolean; errors: string[] } => {
   if (!provinceName) {
@@ -289,6 +247,9 @@ export default function ImportExcelPage() {
   const [success, setSuccess] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   
+  // ✅ NEW: เก็บเลขบัตรประชาชนที่เพิ่งนำเข้าสำเร็จใน Session นี้ เพื่อใช้ตรวจสอบซ้ำ
+  const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
+
   const [importResult, setImportResult] = useState<{
     success: number;
     failed: number;
@@ -360,7 +321,6 @@ export default function ImportExcelPage() {
     setStep('mapping');
   }, [rawData, excelHeaders]);
 
-  // ✅ จัดรูปแบบวันที่อัตโนมัติเมื่อโหลดข้อมูล
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
@@ -368,7 +328,6 @@ export default function ImportExcelPage() {
         if (dbKey) {
           const val = row[excelKey];
           if (dbKey === 'birth_date' && val) {
-            // ✅ จัดรูปแบบวันที่อัตโนมัติ
             newRow[dbKey] = formatThaiDate(val);
           } else {
             newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
@@ -383,7 +342,7 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบเฉพาะจังหวัด + ID ซ้ำ)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำจาก DB + Session Imports)
   // =====================================================
   const validateRow = async (row: any, rowIndex: number) => {
     const errors: string[] = [];
@@ -401,24 +360,25 @@ export default function ImportExcelPage() {
           if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่า ${field.min}`);
           if (field.max !== undefined && num > field.max) errors.push(`${field.label} มากกว่า ${field.max}`);
         }
-      } else if (field.inputType === 'date') {
-        const dateRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
-        const match = strVal.match(dateRegex);
-        if (!match) errors.push(`${field.label} รูปแบบต้องเป็น วว/ดด/ปปปป หรือ วว-ดด-ปปปป`);
-        else {
-          const [, d, m, y] = match;
-          if (parseInt(d) < 1 || parseInt(d) > 31) errors.push(`${field.label} วันไม่ถูกต้อง`);
-          if (parseInt(m) < 1 || parseInt(m) > 12) errors.push(`${field.label} เดือนไม่ถูกต้อง`);
-          if (parseInt(y) < 2400 || parseInt(y) > 2569) errors.push(`${field.label} ปี พ.ศ. ไม่ถูกต้อง`);
+      } else if (field.inputType === 'text' || field.key === 'birth_date') {
+        if (field.key === 'id_card') {
+          if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
+        } else if (field.key === 'birth_date') {
+          const dateRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
+          const match = strVal.match(dateRegex);
+          if (!match) errors.push(`${field.label} รูปแบบต้องเป็น วว/ดด/ปปปป หรือ วว-ดด-ปปปป`);
+          else {
+            const [, d, m, y] = match;
+            if (parseInt(d) < 1 || parseInt(d) > 31) errors.push(`${field.label} วันไม่ถูกต้อง`);
+            if (parseInt(m) < 1 || parseInt(m) > 12) errors.push(`${field.label} เดือนไม่ถูกต้อง`);
+            if (parseInt(y) < 2400 || parseInt(y) > 2569) errors.push(`${field.label} ปี พ.ศ. ไม่ถูกต้อง`);
+          }
         }
       } else if (field.inputType === 'select') {
         if (!field.options?.includes(strVal)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
-      } else if (field.key === 'id_card') {
-        if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง');
       }
     });
 
-    // ✅ ตรวจสอบเฉพาะจังหวัด (จากตาราง provinces)
     if (row.province && validProvinces.length > 0) {
       const provinceCheck = validateProvinceOnly(row.province, validProvinces);
       if (!provinceCheck.valid) {
@@ -426,22 +386,34 @@ export default function ImportExcelPage() {
       }
     }
 
-    // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำในระบบ (จากตาราง users)
+    // ✅ ตรวจสอบเลขบัตรประชาชนซ้ำ (DB + Session Imports)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
-      try {
-        setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
-        const exists = await checkPatientExists(row.id_card);
-        if (exists) {
-          errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+      // เช็คว่าแถวนี้ถูกนำเข้าไปแล้วหรือยัง (ถ้าถูกนำเข้าแล้ว ไม่ต้องแจ้งเตือนตัวเอง)
+      const isAlreadyImported = row._status === 'success' || row._imported;
+      
+      if (!isAlreadyImported) {
+        // 1. ตรวจสอบกับเลขที่เพิ่งนำเข้าใน Session นี้ (Local Check)
+        if (importedIds.has(row.id_card)) {
+          errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
+        } 
+        // 2. ตรวจสอบกับฐานข้อมูล (DB Check)
+        else {
+          try {
+            setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
+            const exists = await checkPatientExists(row.id_card);
+            if (exists) {
+              errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+            }
+          } catch (err) {
+            console.warn('⚠️ ไม่สามารถตรวจสอบบัตรประชาชนซ้ำ:', err);
+          } finally {
+            setCheckingDuplicates(prev => {
+              const next = new Set(prev);
+              next.delete(rowIndex);
+              return next;
+            });
+          }
         }
-      } catch (err) {
-        console.warn('⚠️ ไม่สามารถตรวจสอบบัตรประชาชนซ้ำ:', err);
-      } finally {
-        setCheckingDuplicates(prev => {
-          const next = new Set(prev);
-          next.delete(rowIndex);
-          return next;
-        });
       }
     }
 
@@ -462,12 +434,13 @@ export default function ImportExcelPage() {
   const saveEdit = () => {
     if (!editingCell) return;
     const { row, key } = editingCell;
+    const finalValue = key === 'birth_date' ? formatThaiDate(editValue) : editValue.trim();
     setPreviewData(prev => {
       const next = [...prev];
-      next[row] = { ...next[row], [key]: editValue.trim() };
+      next[row] = { ...next[row], [key]: finalValue };
       return next;
     });
-    runValidation(previewData.map((r, i) => i === row ? { ...r, [key]: editValue.trim() } : r));
+    runValidation(previewData.map((r, i) => i === row ? { ...r, [key]: finalValue } : r));
     setEditingCell(null);
   };
   const handleCellKeyDown = (e: React.KeyboardEvent) => { if (e.key === 'Enter') saveEdit(); else if (e.key === 'Escape') cancelEdit(); };
@@ -499,9 +472,17 @@ export default function ImportExcelPage() {
   };
 
   const selectAll = (checked: boolean) => {
-    const next = checked ? new Set(previewData.map((_, i) => i)) : new Set();
-    setSelectedRows(next);
-    setPreviewData(prev => prev.map((r, i) => ({ ...r, _selected: next.has(i) })));
+    const selectableRows = previewData
+      .map((r, i) => i)
+      .filter(i => !previewData[i]._imported && previewData[i]._status !== 'success');
+    
+    if (checked) {
+      setSelectedRows(new Set(selectableRows));
+      setPreviewData(prev => prev.map((r, i) => selectableRows.includes(i) ? { ...r, _selected: true } : r));
+    } else {
+      setSelectedRows(new Set());
+      setPreviewData(prev => prev.map(r => ({ ...r, _selected: false })));
+    }
   };
 
   const hasErrorsInSelected = Array.from(selectedRows).some(idx => previewData[idx]?._errors?.length > 0);
@@ -633,6 +614,9 @@ export default function ImportExcelPage() {
       };
       const result = await importPatientsBatch([data], user.id);
       if (result.success > 0) {
+        // ✅ เพิ่ม ID ที่เพิ่งนำเข้าสำเร็จลงในการตรวจสอบซ้ำ
+        setImportedIds(prev => new Set(prev).add(row.id_card));
+        
         setSuccess(true);
         setTimeout(() => { router.push('/admin/patients'); }, 2000);
       } else {
@@ -733,6 +717,18 @@ export default function ImportExcelPage() {
       });
 
       const result = await importPatientsBatch(selectedData, user.id);
+      
+      // ✅ ถ้ามีการนำเข้าสำเร็จ ให้เพิ่ม ID เหล่านั้นลงในการตรวจสอบซ้ำ
+      if (result.success > 0) {
+        const successfulItems = selectedData.slice(0, result.success);
+        const newIds = successfulItems.map(item => item.id_card);
+        setImportedIds(prev => {
+           const next = new Set(prev);
+           newIds.forEach(id => next.add(id));
+           return next;
+        });
+      }
+
       if (result.failed > 0 && result.errors) {
          const backendErrors = result.errors.map((be: any) => {
             const isDup = be.error?.includes('ซ้ำ') || be.error?.includes('exists');
@@ -800,6 +796,11 @@ export default function ImportExcelPage() {
     const newSelectedRows = new Set([...selectedRows, ...failedRowIndices]);
     setSelectedRows(newSelectedRows);
     setImportResult(null);
+    setStep('preview');
+  };
+
+  const handleBackToPreviewFromSuccess = () => {
+    setImportResult(null); 
     setStep('preview');
   };
 
@@ -896,9 +897,13 @@ export default function ImportExcelPage() {
             <div className="bg-white rounded-xl shadow p-4 border border-gray-200 flex flex-wrap gap-4 justify-between items-center">
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={selectedRows.size === previewData.length}
-                    onChange={e => selectAll(e.target.checked)} className="w-4 h-4" />
-                  <span className="text-sm font-medium">เลือกทั้งหมด ({previewData.length} แถว)</span>
+                  <input type="checkbox" 
+                    checked={previewData.filter(r => !r._imported && r._status !== 'success').length > 0 && selectedRows.size === previewData.filter(r => !r._imported && r._status !== 'success').length}
+                    onChange={(e) => selectAll(e.target.checked)} 
+                    className="w-4 h-4" 
+                    disabled={previewData.filter(r => !r._imported && r._status !== 'success').length === 0}
+                  />
+                  <span className="text-sm font-medium">เลือกทั้งหมด (เฉพาะที่ยังไม่บันทึก)</span>
                 </label>
                 <span className="text-sm text-gray-500">✅ ถูกเลือก: {selectedRows.size} แถว</span>
                 <span className={`text-sm font-medium ${hasErrorsInSelected ? 'text-red-600' : 'text-green-600'}`}>
@@ -940,110 +945,127 @@ export default function ImportExcelPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {previewData.map((row, rIdx) => (
-                      <tr key={rIdx} className={`border-b hover:bg-gray-50 ${row._errors?.length > 0 ? 'bg-red-50/50' : ''}`}>
-                        <td className="p-3 text-center sticky left-0 bg-white z-10">
-                          <input type="checkbox" checked={row._selected} onChange={() => toggleSelectRow(rIdx)} className="w-4 h-4" />
-                        </td>
-                        <td className="p-3 text-center sticky left-10 bg-white z-10">
-                          {row._errors?.length > 0 ? <XCircle className="w-5 h-5 text-red-500 mx-auto" /> : <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />}
-                        </td>
-                        {displayFields.map(field => {
-                          const isEditing = editingCell?.row === rIdx && editingCell?.key === field.key;
-                          const val = row[field.key] || '';
-                          return (
-                            <td key={field.key} className="p-2 whitespace-nowrap relative">
-                              {isEditing ? (
-                                field.key === 'birth_date' ? (
-                                  <input 
-                                    type="date" 
-                                    autoFocus
-                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
-                                    value={editValue ? convertThaiDateToISO(editValue) : ''}
-                                    onChange={e => {
-                                      const isoDate = e.target.value;
-                                      // ✅ ใช้ฟังก์ชันที่ประกาศไว้ด้านบน
-                                      setEditValue(isoDate ? convertISOToThaiDate(isoDate) : '');
-                                    }}
-                                    onBlur={saveEdit}
-                                    onKeyDown={handleCellKeyDown}
-                                  />
-                                ) : field.inputType === 'select' ? (
-                                  <select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
-                                    value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}>
-                                    <option value="">-- เลือก --</option>
-                                    {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                                  </select>
-                                ) : (
-                                  <input autoFocus type={field.inputType === 'number' ? 'number' : 'text'}
-                                    step={field.inputType === 'number' ? '0.1' : undefined}
-                                    className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
-                                    value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}
-                                    placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'} />
-                                )
-                              ) : (
-                                <div onClick={() => startEdit(rIdx, field.key)} className="px-2 py-1 min-h-[32px] cursor-text hover:bg-blue-50 rounded flex items-center gap-1 group">
-                                  {field.key === 'birth_date' ? (
-                                    <>
-                                      <span className={`truncate max-w-[120px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
-                                        {val ? formatThaiDate(val) : 'คลิกเพื่อแก้ไข'}
-                                      </span>
-                                      {val && (
-                                        <button 
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const swapped = swapDayMonth(String(val));
-                                            setPreviewData(prev => {
-                                              const next = [...prev];
-                                              next[rIdx] = { ...next[rIdx], birth_date: swapped };
-                                              return next;
-                                            });
-                                            runValidation(previewData.map((r, i) => 
-                                              i === rIdx ? { ...r, birth_date: swapped } : r
-                                            ));
-                                          }}
-                                          className="ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                                          title="สลับ วัน/เดือน"
-                                        >
-                                          🔁
-                                        </button>
-                                      )}
-                                      <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                                    </>
+                    {previewData.map((row, rIdx) => {
+                      const isImported = row._imported || row._status === 'success';
+                      return (
+                        <tr key={rIdx} className={`border-b hover:bg-gray-50 ${isImported ? 'bg-green-50/50' : (row._errors?.length > 0 ? 'bg-red-50/50' : '')}`}>
+                          <td className="p-3 text-center sticky left-0 bg-white z-10">
+                            <input 
+                              type="checkbox" 
+                              checked={row._selected} 
+                              disabled={isImported} 
+                              onChange={() => !isImported && toggleSelectRow(rIdx)} 
+                              className={`w-4 h-4 ${isImported ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            />
+                          </td>
+                          <td className="p-3 text-center sticky left-10 bg-white z-10">
+                            {isImported ? (
+                              <span className="text-green-600 font-bold flex items-center justify-center gap-1">
+                                <CheckCircle className="w-5 h-5" /> บันทึกแล้ว
+                              </span>
+                            ) : row._errors?.length > 0 ? (
+                              <XCircle className="w-5 h-5 text-red-500 mx-auto" />
+                            ) : (
+                              <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />
+                            )}
+                          </td>
+                          {displayFields.map(field => {
+                            const isEditing = editingCell?.row === rIdx && editingCell?.key === field.key;
+                            const val = row[field.key] || '';
+                            return (
+                              <td key={field.key} className="p-2 whitespace-nowrap relative">
+                                {isEditing ? (
+                                  field.key === 'birth_date' ? (
+                                    <input 
+                                      autoFocus
+                                      type="text"
+                                      placeholder="วว/ดด/ปปปป"
+                                      className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
+                                      value={editValue}
+                                      onChange={e => setEditValue(e.target.value)}
+                                      onBlur={saveEdit}
+                                      onKeyDown={handleCellKeyDown}
+                                    />
+                                  ) : field.inputType === 'select' ? (
+                                    <select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
+                                      value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}>
+                                      <option value="">-- เลือก --</option>
+                                      {field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                                    </select>
                                   ) : (
-                                    <>
-                                      <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
-                                        {val || 'คลิกเพื่อแก้ไข'}
-                                      </span>
-                                      <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
-                                    </>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          );
-                        })}
-                        <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
-                          {row._errors?.length > 0 ? (
-                            <div className="space-y-1">
-                              {row._errors.map((err, idx) => (
-                                <div key={idx} className="flex items-start gap-1 text-xs text-red-700 bg-red-100 px-2 py-1 rounded">
-                                  <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
-                                  <span>{err}</span>
-                                </div>
-                              ))}
-                            </div>
-                          ) : checkingDuplicates.has(rIdx) ? (
-                            <div className="flex items-center gap-1 text-xs text-blue-700">
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>ตรวจสอบบัตร...</span>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                                    <input autoFocus type={field.inputType === 'number' ? 'number' : 'text'}
+                                      step={field.inputType === 'number' ? '0.1' : undefined}
+                                      className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50"
+                                      value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}
+                                      placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'} />
+                                  )
+                                ) : (
+                                  <div onClick={() => !isImported && startEdit(rIdx, field.key)} className={`px-2 py-1 min-h-[32px] rounded flex items-center gap-1 group ${!isImported ? 'cursor-text hover:bg-blue-50' : 'cursor-not-allowed opacity-70'}`}>
+                                    {field.key === 'birth_date' ? (
+                                      <>
+                                        <span className={`truncate max-w-[120px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
+                                          {val ? formatThaiDate(val) : 'คลิกเพื่อแก้ไข'}
+                                        </span>
+                                        {val && (
+                                          <button 
+                                            onClick={(e) => {
+                                              if (isImported) return;
+                                              e.stopPropagation();
+                                              const swapped = swapDayMonth(String(val));
+                                              setPreviewData(prev => {
+                                                const next = [...prev];
+                                                next[rIdx] = { ...next[rIdx], birth_date: swapped };
+                                                return next;
+                                              });
+                                              runValidation(previewData.map((r, i) => 
+                                                i === rIdx ? { ...r, birth_date: swapped } : r
+                                              ));
+                                            }}
+                                            className={`ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded transition-opacity ${isImported ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`}
+                                            title="สลับ วัน/เดือน"
+                                          >
+                                            🔁
+                                          </button>
+                                        )}
+                                        <Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${isImported ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>
+                                          {val || 'คลิกเพื่อแก้ไข'}
+                                        </span>
+                                        <Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${isImported ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} />
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                          <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
+                            {isImported ? (
+                              <span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>
+                            ) : row._errors?.length > 0 ? (
+                              <div className="space-y-1">
+                                {row._errors.map((err, idx) => (
+                                  <div key={idx} className="flex items-start gap-1 text-xs text-red-700 bg-red-100 px-2 py-1 rounded">
+                                    <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                                    <span>{err}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : checkingDuplicates.has(rIdx) ? (
+                              <div className="flex items-center gap-1 text-xs text-blue-700">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <span>ตรวจสอบบัตร...</span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1247,10 +1269,20 @@ export default function ImportExcelPage() {
                     </button>
                   </>
                 )}
+                
                 {importResult.success > 0 && (
-                  <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium">
-                    ไปหน้ารายการผู้ป่วย
-                  </button>
+                  <>
+                    <button 
+                      onClick={handleBackToPreviewFromSuccess} 
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center justify-center gap-2"
+                    >
+                      <ArrowLeft className="w-4 h-4" /> ย้อนกลับหน้าพรีวิว (นำเข้าต่อ)
+                    </button>
+                    
+                    <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2">
+                      <CheckCircle className="w-4 h-4" /> ไปหน้ารายการผู้ป่วย
+                    </button>
+                  </>
                 )}
               </div>
             </div>
