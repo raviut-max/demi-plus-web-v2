@@ -3,10 +3,10 @@
  * 📄 ไฟล์: page.tsx
  * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
  * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel (ปรับปรุงการตรวจสอบซ้ำแบบ Real-time)
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 25 พฤษภาคม 2569
- * ⚠️ คำเตือน: เพิ่มการตรวจสอบบัตรซ้ำทันทีที่ Preview (Before Import)
+ * ⚠️ คำเตือน: มีการปรับปรุงการตรวจสอบ ID ซ้ำ 3 ระดับ (ไฟล์/Session/DB)
  * ============================================================================
  */
 
@@ -340,7 +340,6 @@ export default function ImportExcelPage() {
     }
 
     // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (Internal -> Session -> DB)
-    // ทำงานทันทีเมื่อ Preview โหลด เพื่อแสดง Error ทันที
     if (row.id_card && validateThaiIdCard(row.id_card)) {
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
