@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 25 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรวจสอบบัตรซ้ำที่ Preview (Internal/Session/DB) + ล็อคแถวซ้ำ
+ * ⚠️ คำเตือน: ตรวจสอบบัตรซ้ำกับตาราง users ที่ Preview (ใช้ idx_users_id_card)
  * ============================================================================
  */
 
@@ -221,9 +221,9 @@ export default function ImportExcelPage() {
   const [success, setSuccess] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   
-  // ✅ NEW: เก็บเลขบัตรที่เพิ่งนำเข้าสำเร็จใน Session นี้
+  // ✅ เก็บเลขบัตรที่เพิ่งนำเข้าสำเร็จใน Session นี้ (สำหรับตรวจสอบซ้ำแบบ Real-time)
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
-  // ✅ NEW: เก็บแถวที่แก้ไขเสร็จและพร้อมนำเข้าใน Modal
+  // ✅ เก็บแถวที่แก้ไขเสร็จและพร้อมนำเข้าใน Modal
   const [readyToImportIndex, setReadyToImportIndex] = useState<number | null>(null);
 
   const [importResult, setImportResult] = useState<{
@@ -292,7 +292,7 @@ export default function ImportExcelPage() {
     });
     setPreviewData(mapped);
     setStep('preview');
-    // ✅ เรียกตรวจสอบความถูกต้องทันทีที่โหลด Preview เสร็จ
+    // ✅ เรียกตรวจสอบความถูกต้องทันทีที่โหลด Preview เสร็จ (รวมถึงเช็คบัตรซ้ำกับตาราง users)
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
@@ -339,31 +339,40 @@ export default function ImportExcelPage() {
       if (!pc.valid) errors.push(...pc.errors);
     }
 
-    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (ภายในไฟล์ -> Session -> DB)
+    // 3. ✅ ตรวจสอบเลขบัตรซ้ำกับตาราง users (Internal -> Session -> DB)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
         
-        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (ตรวจสอบแถวแรกพบ)
+        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (Internal Duplicate)
         if (duplicateMap && duplicateMap.has(row.id_card)) {
           const firstIdx = duplicateMap.get(row.id_card);
           if (firstIdx !== undefined && firstIdx !== rowIndex) {
             errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`);
           }
         }
-        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้
+        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้ (Instant Check)
         else if (importedIds.has(row.id_card)) {
           errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
         } 
-        // 3.3 ตรวจสอบกับฐานข้อมูล (ใช้ idx_users_id_card)
+        // 3.3 ✅ ตรวจสอบกับฐานข้อมูลตาราง users (ใช้ idx_users_id_card)
         else {
           try {
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
+            // ✅ เรียก checkPatientExists เพื่อเช็คกับตาราง users โดยตรง
             const exists = await checkPatientExists(row.id_card);
-            if (exists) errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
-          } catch (err) { console.warn('⚠️ DB Check Failed:', err); }
+            if (exists) {
+              errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+            }
+          } catch (err) { 
+            console.warn('⚠️ DB Check Failed:', err); 
+          }
           finally {
-            setCheckingDuplicates(prev => { const next = new Set(prev); next.delete(rowIndex); return next; });
+            setCheckingDuplicates(prev => { 
+              const next = new Set(prev); 
+              next.delete(rowIndex); 
+              return next; 
+            });
           }
         }
       }
@@ -375,7 +384,7 @@ export default function ImportExcelPage() {
   const runValidation = async (data: any[]) => {
     const errors: Record<number, string[]> = {};
     
-    // สร้าง Map เพื่อเก็บตำแหน่งแรกของแต่ละ ID (O(n))
+    // สร้าง Map เพื่อเก็บตำแหน่งแรกของแต่ละ ID (O(n)) สำหรับตรวจสอบซ้ำภายในไฟล์
     const firstOccurrence = new Map<string, number>();
     data.forEach((r, i) => {
         if (r.id_card && validateThaiIdCard(r.id_card)) {
@@ -385,7 +394,7 @@ export default function ImportExcelPage() {
         }
     });
 
-    // ตรวจสอบทุกแถว โดยส่ง duplicateMap เข้าไปด้วย
+    // ✅ ตรวจสอบทุกแถว โดยส่ง duplicateMap เข้าไปด้วย
     for (let idx = 0; idx < data.length; idx++) {
         errors[idx] = await validateRow(data[idx], idx, firstOccurrence);
     }
