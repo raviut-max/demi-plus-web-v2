@@ -3,10 +3,10 @@
  * 📄 ไฟล์: page.tsx
  * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
  * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel (ปรับปรุงการตรวจสอบซ้ำแบบ Real-time)
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 25 พฤษภาคม 2569
- * ⚠️ คำเตือน: มีการปรับปรุงการตรวจสอบ ID ซ้ำ 3 ระดับ (ไฟล์/Session/DB)
+ * ⚠️ คำเตือน: ตรวจสอบบัตรซ้ำที่ Preview (Internal/Session/DB) + ล็อคแถวซ้ำ
  * ============================================================================
  */
 
@@ -297,7 +297,7 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ Real-time: Session + Internal + DB)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ Real-time: Internal + Session + DB)
   // =====================================================
   const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number>) => {
     const errors: string[] = [];
@@ -339,25 +339,23 @@ export default function ImportExcelPage() {
       if (!pc.valid) errors.push(...pc.errors);
     }
 
-    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (Internal -> Session -> DB)
+    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (ภายในไฟล์ -> Session -> DB)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
         
-        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (Internal Duplicate)
+        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (ตรวจสอบแถวแรกพบ)
         if (duplicateMap && duplicateMap.has(row.id_card)) {
           const firstIdx = duplicateMap.get(row.id_card);
           if (firstIdx !== undefined && firstIdx !== rowIndex) {
             errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`);
           }
         }
-
-        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้ (Instant Check)
+        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้
         else if (importedIds.has(row.id_card)) {
           errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
         } 
-        
-        // 3.3 ✅ ตรวจสอบกับฐานข้อมูล (DB Check) - ทำงานตอน Preview
+        // 3.3 ตรวจสอบกับฐานข้อมูล (ใช้ idx_users_id_card)
         else {
           try {
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
@@ -373,11 +371,11 @@ export default function ImportExcelPage() {
     return errors;
   };
 
-  // ✅ ฟังก์ชันรัน Validation ทั้งหมด
+  // ✅ ฟังก์ชันรัน Validation ทั้งหมด (สร้าง duplicateMap แล้วส่งไปให้ validateRow)
   const runValidation = async (data: any[]) => {
     const errors: Record<number, string[]> = {};
     
-    // หาแถวที่ซ้ำกันในไฟล์เพื่อตรวจสอบแบบ O(N)
+    // สร้าง Map เพื่อเก็บตำแหน่งแรกของแต่ละ ID (O(n))
     const firstOccurrence = new Map<string, number>();
     data.forEach((r, i) => {
         if (r.id_card && validateThaiIdCard(r.id_card)) {
@@ -387,7 +385,7 @@ export default function ImportExcelPage() {
         }
     });
 
-    // ✅ ตรวจสอบทุกแถว (รวมถึงการเช็ค DB)
+    // ตรวจสอบทุกแถว โดยส่ง duplicateMap เข้าไปด้วย
     for (let idx = 0; idx < data.length; idx++) {
         errors[idx] = await validateRow(data[idx], idx, firstOccurrence);
     }
