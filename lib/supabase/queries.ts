@@ -2370,37 +2370,26 @@ export async function getAllValidProvinces(): Promise<string[]> {
   }
 }
 
-export async function checkPatientExists(idCard: string): Promise<boolean> {
+// 📁 ไฟล์: @/lib/supabase/queries.ts
+export async function checkPatientExists(idCard: string): Promise<{ exists: boolean; isPatient: boolean }> {
   try {
-    // 1. ทำความสะอาดเลขบัตร (ลบขีดและช่องว่างออกให้หมด)
-    const cleanIdCard = idCard.replace(/[-\s]/g, '');
-
-    console.log(`🔍 [checkPatientExists] กำลังตรวจสอบบัตร: "${cleanIdCard}"`);
-
-    // 2. Query Supabase
-    // ✅ สำคัญ: ลบ 'head: true' ออก เพื่อให้ดึงข้อมูลกลับมาได้
+    const cleanId = idCard.replace(/[-\s]/g, '');
     const { data, error } = await supabase
       .from('users')
-      .select('id', { count: 'exact' }) // เลือกเฉพาะ id ก็พอ เพื่อเช็คว่ามีอยู่ไหม
-      .eq('id_card', cleanIdCard)
+      .select('role')
+      .eq('id_card', cleanId)
       .limit(1)
       .maybeSingle();
 
-    // 3. Debug Log (เพื่อดูว่าแก้แล้วได้ข้อมูลมาไหม)
-    console.log(`📊 [checkPatientExists] ผลลัพธ์:`, {
-      found: data !== null,
-      data: data
-    });
-
-    if (error) {
-      console.error('❌ [checkPatientExists] Error:', error);
-      return false;
-    }
-
-    // 4. ถ้ามี data กลับมา แปลว่าซ้ำ
-    return data !== null;
+    if (error) return { exists: false, isPatient: false };
+    
+    // ✅ คืนค่าว่าพบซ้ำไหม และพบซ้ำกับ role 'patient' หรือไม่
+    return { 
+      exists: !!data, 
+      isPatient: data?.role === 'patient' 
+    };
   } catch (err) {
-    console.error('❌ [checkPatientExists] Exception:', err);
-    return false;
+    console.error('❌ checkPatientExists Error:', err);
+    return { exists: false, isPatient: false };
   }
 }
