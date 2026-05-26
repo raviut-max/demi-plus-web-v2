@@ -1,6 +1,6 @@
 // app/admin/patients/page.tsx
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   checkSession,
@@ -12,15 +12,26 @@ import {
   getDeletedPatients,
   getAccessibleHospitalIds,
   getUserHospitalInfo,
-  isSuperAdmin
+  isSuperAdmin,
+  getHospitalsWithHierarchy,
+  getCoachesWithHospitals
 } from '@/lib/supabase/queries';
 import {
   Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
-  ChevronUp, ChevronDown, ChevronsUpDown
+  ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
+// =====================================================
+// 🔍 DEBUG: ฟังก์ชันช่วยแสดงล็อก (แสดงเฉพาะในโหมดพัฒนา)
+// =====================================================
+const debugLog = (module: string, message: string, data?: any) => {
+  if (process.env.NODE_ENV === 'development') {
+    console.log(`🔍 [${module}] ${message}`, data !== undefined ? JSON.stringify(data, null, 2) : '');
+  }
+};
 
 // =====================================================
 // 🎯 MAIN COMPONENT
@@ -38,35 +49,54 @@ export default function PatientManagementPage() {
   const [userHospital, setUserHospital] = useState<any>(null);
   const [userName, setUserName] = useState<string>('');
   
+  // ✅ ✅ ใหม่: สถานะสำหรับกรองโรงพยาบาลและโค้ช
+  const [selectedHospitalFilter, setSelectedHospitalFilter] = useState<string>('all');
+  const [selectedCoachFilter, setSelectedCoachFilter] = useState<string>('all');
+  const [filterHospitals, setFilterHospitals] = useState<any[]>([]);
+  const [filterCoaches, setFilterCoaches] = useState<any[]>([]);
+  const [loadingFilters, setLoadingFilters] = useState(false);
+  
   // ✅ Sorting State
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // =====================================================
+  // 🔄 useEffect: โหลดข้อมูลเริ่มต้น
+  // =====================================================
   useEffect(() => {
+    debugLog('Init', '🚀 เริ่มต้นโหลดหน้าจัดการผู้ป่วย');
+    
     const userData = checkSession();
     if (!userData) {
+      debugLog('Auth', '❌ ไม่พบเซสชันผู้ใช้, รีไดเรกต์ไปหน้าล็อกอิน');
       router.push('/admin/login');
       return;
     }
     
     // ✅ ตรวจสอบสิทธิ์ - อนุญาตให้ osm เข้าถึงได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
+      debugLog('Auth', `❌ ผู้ใช้ ${userData.role} ไม่มีสิทธิ์เข้าถึง`);
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-    
-    console.log('👤 [PatientManagement] User:', userData);
-    console.log('🏥 [PatientManagement] Role:', userData.role);
-    
+
+    debugLog('Auth', `✅ ผู้ใช้ผ่านตรวจสอบ: ${userData.id} | Role: ${userData.role}`);
     setUser(userData);
-    loadUserHospital(userData.id);
+    
+    // โหลดข้อมูลผู้ใช้แบบขนาน
     loadUserName(userData.id);
+    loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
+    
   }, [router]);
 
+  // =====================================================
+  // 👤 โหลดชื่อผู้ใช้
+  // =====================================================
   const loadUserName = async (userId: string) => {
     try {
+      debugLog('loadUserName', `🔄 โหลดชื่อผู้ใช้จาก doctors table: ${userId}`);
       const { data } = await supabase
         .from('doctors')
         .select('full_name_th')
@@ -75,96 +105,249 @@ export default function PatientManagementPage() {
       
       if (data?.full_name_th) {
         setUserName(data.full_name_th);
+        debugLog('loadUserName', `✅ พบชื่อ: ${data.full_name_th}`);
       } else {
         setUserName('ผู้ดูแลระบบ');
+        debugLog('loadUserName', '⚠️ ไม่พบชื่อใน doctors table, ใช้ค่าเริ่มต้น');
       }
     } catch (error) {
+      debugLog('loadUserName', '❌ เกิดข้อผิดพลาด', error);
       setUserName('ผู้ใช้งาน');
     }
   };
 
+  // =====================================================
+  // 🏥 โหลดข้อมูลโรงพยาบาลของผู้ใช้
+  // =====================================================
   const loadUserHospital = async (userId: string) => {
     try {
+      debugLog('loadUserHospital', `🔄 โหลดข้อมูลโรงพยาบาลของผู้ใช้: ${userId}`);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
+      debugLog('loadUserHospital', `✅ โหลดสำเร็จ:`, hospitalInfo);
     } catch (error) {
-      console.error('❌ [loadUserHospital] Error:', error);
+      debugLog('loadUserHospital', '❌ เกิดข้อผิดพลาด', error);
     }
   };
 
+  // =====================================================
+  // 🔐 โหลดโรงพยาบาลที่ผู้ใช้เข้าถึงได้ + โหลดลิสต์สำหรับกรอง
+  // =====================================================
   const loadAccessibleHospitals = async (userId: string) => {
     try {
+      debugLog('loadAccessibleHospitals', `🔄 เริ่มโหลดโรงพยาบาลที่เข้าถึงได้สำหรับผู้ใช้: ${userId}`);
+      
+      // 1. โหลดโรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับ query ข้อมูลผู้ป่วย)
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
+      debugLog('loadAccessibleHospitals', `✅ accessibleHospitalIds (${ids.length}):`, ids);
+      
+      // 2. ✅ ใหม่: โหลดลิสต์โรงพยาบาลสำหรับแสดงในฟิลเตอร์ (แบ่งแม่ข่าย/ลูกข่าย)
+      await loadFilterHospitals(userId, ids);
+      
+      // 3. ✅ ใหม่: โหลดลิสต์โค้ชสำหรับแสดงในฟิลเตอร์
+      await loadFilterCoaches(ids);
+      
+      // 4. โหลดข้อมูลผู้ป่วยและผู้ป่วยที่ถูกลบ
       await loadPatients(ids);
       await loadDeletedPatients(ids);
+      
     } catch (error) {
-      console.error('❌ [loadAccessibleHospitals] Error:', error);
+      debugLog('loadAccessibleHospitals', '❌ เกิดข้อผิดพลาด', error);
       setAccessibleHospitalIds([]);
+      setFilterHospitals([]);
+      setFilterCoaches([]);
       await loadPatients([]);
       await loadDeletedPatients([]);
     } finally {
       setLoading(false);
+      debugLog('loadAccessibleHospitals', '✅ โหลดข้อมูลเสร็จสิ้น, loading = false');
     }
   };
 
+  // =====================================================
+  // ✅ ใหม่: โหลดลิสต์โรงพยาบาลสำหรับฟิลเตอร์ (แสดงแม่ข่าย/ลูกข่าย + จำนวนผู้ป่วย)
+  // =====================================================
+  const loadFilterHospitals = async (userId: string, accessibleIds: string[]) => {
+    try {
+      setLoadingFilters(true);
+      debugLog('loadFilterHospitals', `🔄 เริ่มโหลดลิสต์โรงพยาบาลสำหรับฟิลเตอร์`);
+      
+      // ✅ ซูเปอร์แอดมิน: โหลดทั้งหมด, คนอื่น: โหลดเฉพาะในเครือข่าย
+      const allHospitals = await getHospitalsWithHierarchy(
+        isSuperAdmin(user) ? undefined : accessibleIds
+      );
+      
+      // ✅ เพิ่มข้อมูลจำนวนผู้ป่วยและประเภท (แม่ข่าย/ลูกข่าย)
+      const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
+        try {
+          const { count } = await supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .eq('hospital_id', h.id)
+            .eq('is_active', true);
+          
+          return {
+            ...h,
+            patientCount: count || 0,
+            typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย'
+          };
+        } catch {
+          return { ...h, patientCount: 0, typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย' };
+        }
+      }));
+      
+      // ✅ เรียง: แม่ข่ายก่อน, แล้วตามด้วยลูกข่าย, เรียงตามชื่อ
+      const sortedHospitals = [...hospitalsWithCount].sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
+        return (a.name || '').localeCompare(b.name || '', 'th');
+      });
+      
+      setFilterHospitals(sortedHospitals);
+      debugLog('loadFilterHospitals', `✅ โหลดโรงพยาบาลสำหรับฟิลเตอร์สำเร็จ: ${sortedHospitals.length} แห่ง`);
+      
+    } catch (error) {
+      debugLog('loadFilterHospitals', '❌ เกิดข้อผิดพลาด', error);
+      setFilterHospitals([]);
+    } finally {
+      setLoadingFilters(false);
+    }
+  };
+
+  // =====================================================
+  // ✅ ใหม่: โหลดลิสต์โค้ชสำหรับฟิลเตอร์ (แสดงจำนวนผู้ป่วยที่ดูแล)
+  // =====================================================
+  const loadFilterCoaches = async (accessibleIds: string[]) => {
+    try {
+      debugLog('loadFilterCoaches', `🔄 เริ่มโหลดลิสต์โค้ชสำหรับฟิลเตอร์`);
+      
+      // ✅ โหลดโค้ชจากโรงพยาบาลที่เข้าถึงได้
+      const allCoaches = await getCoachesWithHospitals(accessibleIds);
+      
+      // ✅ เพิ่มข้อมูลจำนวนผู้ป่วยที่โค้ชดูแล
+      const coachesWithCount = await Promise.all(allCoaches.map(async (c: any) => {
+        try {
+          const { count } = await supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .eq('coach_id', c.user_id)
+            .eq('is_active', true);
+          
+          return {
+            ...c,
+            patientCount: count || 0,
+            hospitalName: c.users?.hospitals?.name || 'ไม่ระบุ'
+          };
+        } catch {
+          return { ...c, patientCount: 0, hospitalName: c.users?.hospitals?.name || 'ไม่ระบุ' };
+        }
+      }));
+      
+      // ✅ เรียงตามชื่อโค้ช
+      const sortedCoaches = [...coachesWithCount].sort((a, b) => 
+        (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
+      );
+      
+      setFilterCoaches(sortedCoaches);
+      debugLog('loadFilterCoaches', `✅ โหลดโค้ชสำหรับฟิลเตอร์สำเร็จ: ${sortedCoaches.length} คน`);
+      
+    } catch (error) {
+      debugLog('loadFilterCoaches', '❌ เกิดข้อผิดพลาด', error);
+      setFilterCoaches([]);
+    }
+  };
+
+  // =====================================================
+  // 👥 โหลดรายการผู้ป่วย (รองรับฟิลเตอร์ใหม่)
+  // =====================================================
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
-      console.log('🔍 [loadPatients] Loading with hospitalIds:', hospitalIds);
+      debugLog('loadPatients', `🔄 โหลดผู้ป่วย | searchTerm: "${searchTerm}" | pamLevel: ${selectedPamLevel} | hospitalFilter: ${selectedHospitalFilter} | coachFilter: ${selectedCoachFilter}`);
+      
       const data = await getPatientList(
         searchTerm,
         selectedPamLevel === 'all' ? undefined : selectedPamLevel,
-        hospitalIds
+        hospitalIds,
+        selectedHospitalFilter === 'all' ? undefined : selectedHospitalFilter, // ✅ ฟิลเตอร์โรงพยาบาล
+        selectedCoachFilter === 'all' ? undefined : selectedCoachFilter          // ✅ ฟิลเตอร์โค้ช
       );
-      console.log('✅ [loadPatients] Loaded:', data.length, 'patients');
+      
+      debugLog('loadPatients', `✅ โหลดผู้ป่วยสำเร็จ: ${data.length} คน`);
       setPatients(data);
     } catch (error) {
-      console.error('❌ [loadPatients] Error:', error);
+      debugLog('loadPatients', '❌ เกิดข้อผิดพลาด', error);
       setPatients([]);
     }
   };
 
+  // =====================================================
+  // 🗑️ โหลดผู้ป่วยที่ถูกลบ
+  // =====================================================
   const loadDeletedPatients = async (hospitalIds?: string[]) => {
     try {
+      debugLog('loadDeletedPatients', `🔄 โหลดผู้ป่วยที่ถูกลบ`);
       const data = await getDeletedPatients();
       
       // ✅ กรองตาม hospitalIds ถ้าไม่ใช่ Super Admin
       let filteredData = data;
       if (!isSuperAdmin(user) && hospitalIds && hospitalIds.length > 0) {
-        filteredData = data.filter(p => 
+        filteredData = data.filter((p: any) => 
           !p.hospital_id || hospitalIds.includes(p.hospital_id)
         );
+        debugLog('loadDeletedPatients', `🔍 กรองตามสิทธิ์: ${data.length} → ${filteredData.length} คน`);
       }
       
       setDeletedPatients(filteredData);
+      debugLog('loadDeletedPatients', `✅ โหลดสำเร็จ: ${filteredData.length} คน`);
     } catch (error) {
-      console.error('❌ [loadDeletedPatients] Error:', error);
+      debugLog('loadDeletedPatients', '❌ เกิดข้อผิดพลาด', error);
       setDeletedPatients([]);
     }
   };
 
+  // =====================================================
+  // 🔄 ฟังก์ชันค้นหา (เรียกเมื่อเปลี่ยนฟิลเตอร์)
+  // =====================================================
+  const handleSearch = useCallback(() => {
+    debugLog('handleSearch', `🔍 ผู้ใช้กดค้นหา | searchTerm: "${searchTerm}" | hospital: ${selectedHospitalFilter} | coach: ${selectedCoachFilter}`);
+    loadPatients(accessibleHospitalIds);
+  }, [searchTerm, selectedPamLevel, selectedHospitalFilter, selectedCoachFilter, accessibleHospitalIds]);
+
+  // ✅ Debounce search เพื่อลดการโหลดบ่อยเกินไป
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all') {
+        handleSearch();
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm, selectedHospitalFilter, selectedCoachFilter, handleSearch]);
+
+  // =====================================================
+  // 🚪 ออกจากระบบ
+  // =====================================================
   const handleLogout = () => {
+    debugLog('handleLogout', '🚪 ผู้ใช้กดออกจากระบบ');
     logout();
     router.push('/admin/login');
   };
 
-  const handleSearch = () => {
-    loadPatients(accessibleHospitalIds);
-  };
-
-  // ✅ Sorting Handler
+  // =====================================================
+  // 📊 Sorting Handler
+  // =====================================================
   const handleSort = (column: string) => {
+    debugLog('handleSort', `📊 เปลี่ยนการเรียง: ${column} | เดิม: ${sortColumn}/${sortDirection}`);
     if (sortColumn === column) {
-      // Toggle direction if same column
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
     } else {
-      // New column, default to ascending
       setSortColumn(column);
       setSortDirection('asc');
     }
   };
 
-  // ✅ Sorted Patients Data
+  // =====================================================
+  // 📋 Sorted Patients Data
+  // =====================================================
   const sortedPatients = [...patients].sort((a, b) => {
     let aValue: any = a[sortColumn];
     let bValue: any = b[sortColumn];
@@ -175,27 +358,32 @@ export default function PatientManagementPage() {
       aValue = a[parent]?.[child];
       bValue = b[parent]?.[child];
     }
-    
+
     // Handle null/undefined values
     if (aValue == null) aValue = '';
     if (bValue == null) bValue = '';
-    
+
     // Compare values
     if (typeof aValue === 'string' && typeof bValue === 'string') {
       return sortDirection === 'asc' 
         ? aValue.localeCompare(bValue, 'th')
         : bValue.localeCompare(aValue, 'th');
     }
-    
+
     if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
     if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
     return 0;
   });
 
-  // ✅ Soft Delete - ลบแบบกู้คืนได้
+  // =====================================================
+  // 🗑️ Soft Delete - ลบแบบกู้คืนได้
+  // =====================================================
   const handleDeletePatient = async (patientId: string, patientName: string) => {
+    debugLog('handleDeletePatient', `🗑️ ขอลบผู้ป่วย: ${patientId} | ${patientName}`);
+    
     // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบ
     if (user?.role === 'osm') {
+      debugLog('handleDeletePatient', '❌ อสม. ไม่มีสิทธิ์ลบ, ยกเลิก');
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
@@ -208,28 +396,38 @@ export default function PatientManagementPage() {
       `คุณสามารถกู้คืนได้ในภายหลัง\n\n` +
       `ต้องการดำเนินการต่อหรือไม่?`
     );
-    
-    if (!confirmDelete) return;
-    
+
+    if (!confirmDelete) {
+      debugLog('handleDeletePatient', '❌ ผู้ใช้ยกเลิกการลบ');
+      return;
+    }
+
     try {
+      debugLog('handleDeletePatient', '🔄 กำลังเรียก deletePatient API...');
       const result = await deletePatient(patientId);
       if (result.success) {
+        debugLog('handleDeletePatient', '✅ ลบสำเร็จ, รีโหลดข้อมูล');
         alert('✅ ลบผู้ป่วยสำเร็จ!\nผู้ป่วยถูกย้ายไปยังถังขยะ');
         await loadPatients(accessibleHospitalIds);
         await loadDeletedPatients(accessibleHospitalIds);
       } else {
+        debugLog('handleDeletePatient', `❌ API คืนค่าไม่สำเร็จ: ${result.error}`);
         alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handleDeletePatient] Error:', error);
+      debugLog('handleDeletePatient', '❌ เกิด exception', error);
       alert('❌ เกิดข้อผิดพลาดในการลบ');
     }
   };
 
-  // ✅ Restore - กู้คืนผู้ป่วย
+  // =====================================================
+  // ♻️ Restore - กู้คืนผู้ป่วย
+  // =====================================================
   const handleRestorePatient = async (patientId: string, patientName: string) => {
-    // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบ (และห้ามกู้คืน)
+    debugLog('handleRestorePatient', `♻️ ขอกู้คืนผู้ป่วย: ${patientId} | ${patientName}`);
+    
     if (user?.role === 'osm') {
+      debugLog('handleRestorePatient', '❌ อสม. ไม่มีสิทธิ์กู้คืน');
       alert('❌ อสม. ไม่มีสิทธิ์กู้คืนข้อมูลผู้ป่วย');
       return;
     }
@@ -239,12 +437,13 @@ export default function PatientManagementPage() {
       `ชื่อ: ${patientName}\n\n` +
       `ต้องการกู้คืนผู้ป่วยนี้กลับมาหรือไม่?`
     );
-    
+
     if (!confirmRestore) return;
-    
+
     try {
       const result = await restorePatient(patientId);
       if (result.success) {
+        debugLog('handleRestorePatient', '✅ กู้คืนสำเร็จ');
         alert('✅ กู้คืนผู้ป่วยสำเร็จ!');
         await loadPatients(accessibleHospitalIds);
         await loadDeletedPatients(accessibleHospitalIds);
@@ -252,14 +451,17 @@ export default function PatientManagementPage() {
         alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handleRestorePatient] Error:', error);
+      debugLog('handleRestorePatient', '❌ เกิดข้อผิดพลาด', error);
       alert('❌ เกิดข้อผิดพลาดในการกู้คืน');
     }
   };
 
-  // ✅ Permanent Delete - ลบถาวร
+  // =====================================================
+  // 💀 Permanent Delete - ลบถาวร
+  // =====================================================
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
-    // ✅ ตรวจสอบว่าเป็น อสม. หรือไม่ - ห้ามลบถาวร
+    debugLog('handlePermanentlyDeletePatient', `💀 ขอลบถาวร: ${patientId} | ${patientName}`);
+    
     if (user?.role === 'osm') {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วยถาวร');
       return;
@@ -267,78 +469,66 @@ export default function PatientManagementPage() {
     
     // ✅ ยืนยัน 2 ชั้น
     const firstConfirm = confirm(
-      `️ ⚠️ คำเตือน: การลบถาวร\n\n` +
+      `⚠️ คำเตือน: การลบถาวร\n\n` +
       `ชื่อ: ${patientName}\n\n` +
       `การกระทำนี้ไม่สามารถย้อนกลับได้!\n` +
       `ข้อมูลผู้ป่วยจะถูกลบออกจากระบบอย่างถาวร\n\n` +
       `คุณต้องการดำเนินการต่อหรือไม่?`
     );
-    
+
     if (!firstConfirm) return;
-    
-    // ✅ ยืนยันครั้งที่ 2 - พิมพ์ YES
+
     const secondConfirm = prompt(
       `⚠️ ยืนยันการลบถาวรครั้งที่ 2\n\n` +
       `พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:`
     );
-    
+
     if (secondConfirm !== 'YES') {
       alert('❌ ยกเลิกการลบถาวร');
       return;
     }
-    
+
     try {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
+        debugLog('handlePermanentlyDeletePatient', '✅ ลบถาวรสำเร็จ');
         alert('✅ ลบผู้ป่วยถาวรสำเร็จ!');
         await loadDeletedPatients(accessibleHospitalIds);
       } else {
         alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
-      console.error('❌ [handlePermanentlyDeletePatient] Error:', error);
+      debugLog('handlePermanentlyDeletePatient', '❌ เกิดข้อผิดพลาด', error);
       alert('❌ เกิดข้อผิดพลาดในการลบถาวร');
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบสิทธิ์การแก้ไข/ลบ
+  // =====================================================
+  // 🔐 ฟังก์ชันตรวจสอบสิทธิ์
+  // =====================================================
   const canDeleteData = () => {
-    return user?.role !== 'osm';
+    const can = user?.role !== 'osm';
+    debugLog('canDeleteData', `🔐 ตรวจสอบสิทธิ์ลบ: ${user?.role} → ${can}`);
+    return can;
   };
 
-  // ✅ ฟังก์ชันแสดง Badge บทบาท
+  // =====================================================
+  // 🏷️ แสดง Badge บทบาท
+  // =====================================================
   const getRoleBadge = () => {
     if (!user) return null;
-    
     const roleConfig: any = {
-      'osm': { 
-        text: '🏘️ อสม.', 
-        bg: 'bg-orange-100', 
-        textCol: 'text-orange-700'
-      },
+      'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
       'admin': { 
         text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', 
         bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100',
         textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700'
       },
-      'doctor': { 
-        text: '👨‍⚕️ แพทย์', 
-        bg: 'bg-green-100', 
-        textCol: 'text-green-700'
-      },
-      'helper': { 
-        text: '👩‍💼 เจ้าหน้าที่', 
-        bg: 'bg-yellow-100', 
-        textCol: 'text-yellow-700'
-      }
+      'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
+      'helper': { text: '👩‍💼 เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
-    
-    const config = roleConfig[user.role] || { 
-      text: user.role, 
-      bg: 'bg-gray-100', 
-      textCol: 'text-gray-700'
-    };
-    
+
+    const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
     return (
       <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
         {config.text}
@@ -346,7 +536,9 @@ export default function PatientManagementPage() {
     );
   };
 
-  // ✅ Get Sort Icon
+  // =====================================================
+  // 📊 Get Sort Icon
+  // =====================================================
   const getSortIcon = (columnName: string) => {
     if (sortColumn !== columnName) {
       return <ChevronsUpDown className="w-4 h-4 ml-1 opacity-30" />;
@@ -356,17 +548,24 @@ export default function PatientManagementPage() {
       : <ChevronDown className="w-4 h-4 ml-1" />;
   };
 
+  // =====================================================
+  // ⏳ Loading State
+  // =====================================================
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <p className="text-gray-600">กำลังโหลดข้อมูล...</p>
+          <p className="text-xs text-gray-400 mt-2">debug: loading={loading.toString()}</p>
         </div>
       </div>
     );
   }
 
+  // =====================================================
+  // 🎨 RENDER UI
+  // =====================================================
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -380,7 +579,7 @@ export default function PatientManagementPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ Dashboard
           </button>
-          
+
           {/* Row 2: Main Header Content */}
           <div className="flex items-center justify-between flex-wrap gap-4">
             {/* Left: Title */}
@@ -526,28 +725,80 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* Search & Filter */}
+        {/* 🔍 Search & Filter Section (อัปเดตใหม่) */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            
+            {/* 1. ค้นหาข้อความ */}
+            <div className="lg:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Search className="w-4 h-4 inline mr-1" />
-                ค้นหา
+                ค้นหา (ชื่อ, นามสกุล, HN)
               </label>
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                placeholder="ชื่อ, นามสกุล, เลข HN"
+                placeholder="พิมพ์เพื่อค้นหา..."
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
             
+            {/* 2. ✅ ใหม่: กรองตามโรงพยาบาล */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Building2 className="w-4 h-4 inline mr-1" />
+                โรงพยาบาล
+              </label>
+              <select
+                value={selectedHospitalFilter}
+                onChange={(e) => {
+                  debugLog('UI', `🏥 เปลี่ยนฟิลเตอร์โรงพยาบาล: ${e.target.value}`);
+                  setSelectedHospitalFilter(e.target.value);
+                }}
+                disabled={loadingFilters}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              >
+                <option value="all">ทั้งหมด ({patients.length})</option>
+                {filterHospitals.map((h: any) => (
+                  <option key={h.id} value={h.id}>
+                    {h.typeLabel} {h.name} ({h.patientCount} คน)
+                  </option>
+                ))}
+              </select>
+              {loadingFilters && <p className="text-xs text-gray-400 mt-1">กำลังโหลด...</p>}
+            </div>
+            
+            {/* 3. ✅ ใหม่: กรองตามโค้ช */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <User className="w-4 h-4 inline mr-1" />
+                โค้ชผู้ดูแล
+              </label>
+              <select
+                value={selectedCoachFilter}
+                onChange={(e) => {
+                  debugLog('UI', `👤 เปลี่ยนฟิลเตอร์โค้ช: ${e.target.value}`);
+                  setSelectedCoachFilter(e.target.value);
+                }}
+                disabled={loadingFilters}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              >
+                <option value="all">ทั้งหมด</option>
+                {filterCoaches.map((c: any) => (
+                  <option key={c.user_id} value={c.user_id}>
+                    {c.full_name_th} | {c.hospitalName} ({c.patientCount} คน)
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            {/* 4. กรองตาม PAM Level */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Filter className="w-4 h-4 inline mr-1" />
-                กรองตาม PAM Level
+                PAM Level
               </label>
               <select
                 value={selectedPamLevel}
@@ -563,16 +814,29 @@ export default function PatientManagementPage() {
               </select>
             </div>
             
+            {/* 5. ปุ่มค้นหา */}
             <div className="flex items-end">
               <button
                 onClick={handleSearch}
-                className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all flex items-center justify-center gap-2"
+                disabled={loadingFilters}
+                className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                <Search className="w-4 h-4" />
+                {loadingFilters ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Search className="w-4 h-4" />
+                )}
                 ค้นหา
               </button>
             </div>
           </div>
+          
+          {/* ✅ Debug Info (แสดงเฉพาะในโหมดพัฒนา) */}
+          {process.env.NODE_ENV === 'development' && (
+            <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
+              <strong>Debug:</strong> hospitalFilter={selectedHospitalFilter} | coachFilter={selectedCoachFilter} | results={patients.length}
+            </div>
+          )}
         </div>
 
         {/* Patients Table */}
@@ -608,9 +872,17 @@ export default function PatientManagementPage() {
                       {getSortIcon('hospitals.name')}
                     </div>
                   </th>
+                  <th 
+                    onClick={() => handleSort('coaches.full_name_th')}
+                    className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                  >
+                    <div className="flex items-center">
+                      โค้ช
+                      {getSortIcon('coaches.full_name_th')}
+                    </div>
+                  </th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ผู้สร้าง</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
                 </tr>
               </thead>
@@ -620,12 +892,26 @@ export default function PatientManagementPage() {
                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
-                      <button
-                        onClick={() => router.push('/admin/patients/new')}
-                        className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                      >
-                        เพิ่มผู้ป่วยคนแรก
-                      </button>
+                      {searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all' ? (
+                        <button
+                          onClick={() => {
+                            setSearchTerm('');
+                            setSelectedHospitalFilter('all');
+                            setSelectedCoachFilter('all');
+                            handleSearch();
+                          }}
+                          className="mt-4 px-4 py-2 text-blue-600 hover:underline"
+                        >
+                          ล้างฟิลเตอร์และค้นหาใหม่
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => router.push('/admin/patients/new')}
+                          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                        >
+                          เพิ่มผู้ป่วยคนแรก
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
@@ -661,6 +947,12 @@ export default function PatientManagementPage() {
                       </td>
                       
                       <td className="px-6 py-4">
+                        <span className="text-sm text-gray-600">
+                          {patient.coaches?.full_name_th || '-'}
+                        </span>
+                      </td>
+                      
+                      <td className="px-6 py-4">
                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                           patient.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
                           patient.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
@@ -680,12 +972,6 @@ export default function PatientManagementPage() {
                           'bg-gray-100 text-gray-700'
                         }`}>
                           {patient.zone || 'Zero Zone'}
-                        </span>
-                      </td>
-                      
-                      <td className="px-6 py-4">
-                        <span className="text-sm text-gray-600">
-                          {patient.created_by_name || '-'}
                         </span>
                       </td>
                       

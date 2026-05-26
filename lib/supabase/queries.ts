@@ -186,37 +186,152 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 // 👥 Patient Management Functions
 // =====================================================
-export async function getPatientList(search?: string, pamLevel?: string, hospitalIds?: string[]) {
+
+/**
+ * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
+ * @param search - คำค้นหา (ชื่อ, นามสกุล, เลขบัตร, HN)
+ * @param pamLevel - กรองตามระดับ PAM (L0-L4) หรือ 'all'
+ * @param accessibleHospitalIds - รายการโรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับกรองสิทธิ์)
+ * @param hospitalId - กรองตามโรงพยาบาลเฉพาะ (แสดงในฟิลเตอร์)
+ * @param coachId - กรองตามโค้ชเฉพาะ (แสดงในฟิลเตอร์)
+ * @returns Promise<Array> - รายการผู้ป่วยพร้อมข้อมูลที่เกี่ยวข้อง
+ */
+export async function getPatientList(
+  search?: string,
+  pamLevel?: string,
+  accessibleHospitalIds?: string[],
+  hospitalId?: string,      // ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกในฟิลเตอร์
+  coachId?: string          // ✅ ใหม่: กรองตามโค้ชที่เลือกในฟิลเตอร์
+) {
   try {
+    console.log(`🔍 [getPatientList] เริ่มค้นหา | search: "${search}" | pamLevel: ${pamLevel} | hospitalId: ${hospitalId} | coachId: ${coachId}`);
+    
+    // ✅ สร้าง query พื้นฐาน
     let query = supabase
       .from('profiles')
-      .select(`*, users!profiles_id_fkey ( id_card, role, is_active, created_at ), hospitals ( id, name, code, type )`)
+      .select(`
+        *,
+        users!profiles_id_fkey (
+          id,
+          id_card,
+          role,
+          is_active,
+          created_at,
+          created_by
+        ),
+        hospitals (
+          id,
+          name,
+          code,
+          type,
+          parent_id
+        ),
+        coaches:doctors!profiles_coach_id_fkey (
+          id,
+          user_id,
+          full_name_th,
+          specialization_th,
+          users (
+            hospital_id,
+            hospitals (
+              id,
+              name,
+              code
+            )
+          )
+        ),
+        creator:users!profiles_created_by_fkey (
+          id,
+          full_name_th
+        )
+      `, { count: 'exact' })
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('hospital_id', hospitalIds);
+    // ✅ 1. กรองตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (สิทธิ์พื้นฐาน)
+    if (accessibleHospitalIds && accessibleHospitalIds.length > 0) {
+      console.log(`🔐 [getPatientList] กรองตาม accessibleHospitalIds (${accessibleHospitalIds.length} แห่ง)`);
+      query = query.in('hospital_id', accessibleHospitalIds);
     }
 
-    if (search) {
+    // ✅ 2. กรองตามโรงพยาบาลที่เลือกในฟิลเตอร์ (เฉพาะเจาะจง)
+    if (hospitalId && hospitalId !== 'all') {
+      console.log(`🏥 [getPatientList] กรองตามโรงพยาบาล: ${hospitalId}`);
+      query = query.eq('hospital_id', hospitalId);
+    }
+
+    // ✅ 3. กรองตามโค้ชที่เลือกในฟิลเตอร์
+    if (coachId && coachId !== 'all') {
+      console.log(`👤 [getPatientList] กรองตามโค้ช: ${coachId}`);
+      query = query.eq('coach_id', coachId);
+    }
+
+    // ✅ 4. กรองตามคำค้นหา (ชื่อ, นามสกุล, เลขบัตร, HN)
+    if (search && search.trim() !== '') {
+      const searchTerm = search.trim();
+      console.log(`🔎 [getPatientList] ค้นหาด้วยคำว่า: "${searchTerm}"`);
       query = query.or(
-        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+        `first_name.ilike.%${searchTerm}%,` +
+        `last_name.ilike.%${searchTerm}%,` +
+        `hospital_number.ilike.%${searchTerm}%`
       );
+      
+      // ✅ ค้นหาเพิ่มเติมจากตาราง users (id_card)
+      // หมายเหตุ: Supabase ไม่สนับสนุน or ข้ามตารางโดยตรง จึงต้องกรองภายหลังถ้าจำเป็น
     }
 
-    if (pamLevel) {
+    // ✅ 5. กรองตาม PAM Level
+    if (pamLevel && pamLevel !== 'all') {
+      console.log(`📊 [getPatientList] กรองตาม PAM Level: ${pamLevel}`);
       query = query.eq('pam_level', pamLevel);
     }
 
-    const { data, error } = await query;
-    if (error) return [];
+    // ✅ รัน query
+    console.log(`🔄 [getPatientList] กำลังเรียก Supabase...`);
+    const { data, error, count } = await query;
 
-    return data?.map(patient => ({
+    if (error) {
+      console.error(`❌ [getPatientList] Supabase Error:`, error);
+      return [];
+    }
+
+    console.log(`✅ [getPatientList] โหลดสำเร็จ: ${data?.length || 0} คน | Total count: ${count}`);
+
+    // ✅ จัดรูปแบบข้อมูลก่อนส่งกลับ
+    const formattedData = (data || []).map(patient => ({
       ...patient,
+      // ✅ รวมชื่อเต็มสำหรับแสดง
       full_name: patient.first_name && patient.last_name 
         ? `${patient.first_name} ${patient.last_name}` 
-        : '',
-    })) || [];
+        : patient.first_name || patient.last_name || '-',
+      // ✅ แสดงชื่อผู้สร้าง (ถ้ามี)
+      created_by_name: patient.creator?.full_name_th || '-',
+      // ✅ แสดงชื่อโค้ช (ถ้ามี)
+      coach_name: patient.coaches?.full_name_th || '-',
+      // ✅ แสดงชื่อโรงพยาบาล
+      hospital_name: patient.hospitals?.name || '-',
+    }));
+
+    // ✅ ถ้ามี searchTerm และค้นหาใน id_card ด้วย (กรองเพิ่มเติมในฝั่ง client)
+    if (search && search.trim() !== '') {
+      const searchTerm = search.trim().toLowerCase();
+      const filteredByIdCard = formattedData.filter(p => 
+        p.users?.id_card?.replace(/[-\s]/g, '').includes(searchTerm.replace(/[-\s]/g, ''))
+      );
+      if (filteredByIdCard.length > 0) {
+        console.log(`🔎 [getPatientList] พบเพิ่มเติมจาก id_card: ${filteredByIdCard.length} คน`);
+        // รวมผลลัพธ์ (ป้องกันซ้ำ)
+        const existingIds = new Set(formattedData.map(p => p.id));
+        filteredByIdCard.forEach(p => {
+          if (!existingIds.has(p.id)) {
+            formattedData.push(p);
+          }
+        });
+      }
+    }
+
+    return formattedData;
+    
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
     return [];
