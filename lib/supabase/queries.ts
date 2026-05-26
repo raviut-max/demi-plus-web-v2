@@ -191,14 +191,12 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 
+// =====================================================
+// 👥 Patient Management Functions
+// =====================================================
+
 /**
  * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
- * @param search - คำค้นหา (ชื่อ, นามสกุล, เลขบัตร, HN)
- * @param pamLevel - กรองตามระดับ PAM (L0-L4) หรือ undefined
- * @param accessibleHospitalIds - รายการโรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับกรองสิทธิ์)
- * @param hospitalId - กรองตามโรงพยาบาลเฉพาะ (แสดงในฟิลเตอร์)
- * @param coachId - กรองตามโค้ชเฉพาะ (แสดงในฟิลเตอร์)
- * @returns Promise<Array> - รายการผู้ป่วยพร้อมข้อมูลที่เกี่ยวข้อง
  */
 export async function getPatientList(
   search?: string,
@@ -210,7 +208,7 @@ export async function getPatientList(
   try {
     console.log(`🔍 [getPatientList] เริ่มค้นหา | search: "${search}" | pamLevel: ${pamLevel} | hospitalId: ${hospitalId} | coachId: ${coachId}`);
     
-    // ✅ สร้าง query พื้นฐาน
+    // ✅ สร้าง query พื้นฐาน - เพิ่ม JOIN กับ coaches
     let query = supabase
       .from('profiles')
       .select(`
