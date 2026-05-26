@@ -3,10 +3,10 @@
  * 📄 ไฟล์: page.tsx
  * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
  * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel + Export รายงานแบบครบถ้วน
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 26 พฤษภาคม 2569
- * ⚠️ คำเตือน: เพิ่ม Export Excel แบบแยกหมวดหมู่ + สรุปผลครบถ้วน
+ * ⚠️ คำเตือน: แก้ไขตรวจสอบบัตรซ้ำที่ Preview (ใช้ Map<string, number[]>)
  * ============================================================================
  */
 
@@ -221,7 +221,7 @@ export default function ImportExcelPage() {
   const [success, setSuccess] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   
-  // ✅ เก็บเลขบัตรที่เพิ่งนำเข้าสำเร็จใน Session นี้ (สำหรับตรวจสอบซ้ำแบบ Real-time)
+  // ✅ เก็บเลขบัตรที่เพิ่งนำเข้าสำเร็จใน Session นี้
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   // ✅ เก็บแถวที่แก้ไขเสร็จและพร้อมนำเข้าใน Modal
   const [readyToImportIndex, setReadyToImportIndex] = useState<number | null>(null);
@@ -280,6 +280,7 @@ export default function ImportExcelPage() {
   }, [rawData, excelHeaders]);
 
   const buildPreview = useCallback(() => {
+    console.log(`\n🚀 [buildPreview] เริ่มสร้าง Preview จาก ${rawData.length} แถว...`);
     const mapped = rawData.map((row, idx) => {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
@@ -292,14 +293,20 @@ export default function ImportExcelPage() {
     });
     setPreviewData(mapped);
     setStep('preview');
+    // ✅ เรียกตรวจสอบความถูกต้องทันทีที่โหลด Preview เสร็จ
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ + Debug)
   // =====================================================
-  const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number>) => {
+  const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number[]>) => {
     const errors: string[] = [];
+    
+    console.log(`\n🔍 [validateRow] เริ่มตรวจสอบแถวที่ ${rowIndex + 1}`);
+    console.log(`   📋 ID Card: "${row.id_card}"`);
+    console.log(`   📋 duplicateMap size: ${duplicateMap?.size || 0}`);
+    console.log(`   📋 importedIds size: ${importedIds.size}`);
     
     // 1. ตรวจสอบความถูกต้องพื้นฐาน
     STANDARD_FIELDS.forEach(field => {
@@ -340,48 +347,119 @@ export default function ImportExcelPage() {
 
     // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (Internal -> Session -> DB)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
+      const cleanId = row.id_card.replace(/[-\s]/g, '');
+      console.log(`   🔐 [validateRow] เริ่มตรวจสอบบัตรซ้ำ: "${cleanId}"`);
+      
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
         
-        // 3.1 ตรวจสอบซ้ำภายในไฟล์
-        if (duplicateMap && duplicateMap.has(row.id_card)) {
-          const firstIdx = duplicateMap.get(row.id_card);
-          if (firstIdx !== undefined && firstIdx !== rowIndex) {
-            errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`);
+        // 3.1 ตรวจสอบซ้ำภายในไฟล์ (ใช้ duplicateMap)
+        console.log(`   📁 [Level 1] ตรวจสอบซ้ำภายในไฟล์...`);
+        if (duplicateMap && duplicateMap.has(cleanId)) {
+          const allIndices = duplicateMap.get(cleanId)!;
+          console.log(`   📊 [Level 1] พบ ID นี้ ${allIndices.length} ครั้ง ที่ index: ${allIndices.join(', ')}`);
+          
+          if (allIndices.length > 1) {
+            const otherIndices = allIndices.filter(i => i !== rowIndex);
+            if (otherIndices.length > 0) {
+              const errorMsg = `เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${otherIndices.map(i => i + 1).join(', ')})`;
+              errors.push(errorMsg);
+              console.log(`   ❌ [Level 1] เพิ่ม error: ${errorMsg}`);
+            }
+          } else {
+            console.log(`   ✅ [Level 1] ไม่พบซ้ำภายในไฟล์ (มีแค่แถวนี้แถวเดียว)`);
           }
+        } else {
+          console.log(`   ✅ [Level 1] ไม่พบ ID นี้ใน duplicateMap`);
         }
+        
         // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session
-        else if (importedIds.has(row.id_card)) {
-          errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
-        } 
+        console.log(`   💾 [Level 2] ตรวจสอบซ้ำใน Session cache...`);
+        if (!errors.length && importedIds.has(cleanId)) {
+          const errorMsg = 'เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)';
+          errors.push(errorMsg);
+          console.log(`   ❌ [Level 2] พบซ้ำใน Session! เพิ่ม error: ${errorMsg}`);
+        } else {
+          console.log(`   ✅ [Level 2] ไม่พบซ้ำใน Session cache`);
+        }
+        
         // 3.3 ตรวจสอบกับฐานข้อมูล
-        else {
+        console.log(`   🗄️  [Level 3] ตรวจสอบซ้ำกับฐานข้อมูล...`);
+        if (!errors.length) {
           try {
+            console.log(`   🔄 [Level 3] เรียก checkPatientExists("${cleanId}")...`);
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
             const exists = await checkPatientExists(row.id_card);
-            if (exists) errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
-          } catch (err) { console.warn('⚠️ DB Check Failed:', err); }
+            console.log(`   📊 [Level 3] ผลลัพธ์: exists = ${exists}`);
+            
+            if (exists) {
+              const errorMsg = 'เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว';
+              errors.push(errorMsg);
+              console.log(`   ❌ [Level 3] พบซ้ำในฐานข้อมูล! เพิ่ม error: ${errorMsg}`);
+            } else {
+              console.log(`   ✅ [Level 3] ไม่พบซ้ำในฐานข้อมูล`);
+            }
+          } catch (err) { 
+            console.error(`   ⚠️ [Level 3] DB Check Failed:`, err);
+          }
           finally {
-            setCheckingDuplicates(prev => { const next = new Set(prev); next.delete(rowIndex); return next; });
+            setCheckingDuplicates(prev => { 
+              const next = new Set(prev); 
+              next.delete(rowIndex); 
+              return next; 
+            });
           }
         }
+      } else {
+        console.log(`   ⏭️  [Skip] ข้ามการตรวจสอบ เพราะแถวนี้ถูกนำเข้าแล้ว`);
       }
+    } else {
+      console.log(`   ⏭️  [Skip] ข้ามการตรวจสอบบัตรซ้ำ เพราะ id_card ไม่ถูกต้องหรือไม่มี`);
     }
+    
+    console.log(`   📋 [validateRow] สรุป error ทั้งหมด:`, errors);
+    console.log(`----------------------------------------\n`);
+    
     return errors;
   };
 
   // ✅ ฟังก์ชันรัน Validation ทั้งหมด
   const runValidation = async (data: any[]) => {
+    console.log(`\n🚀 [runValidation] เริ่มตรวจสอบ ${data.length} แถว...`);
     const errors: Record<number, string[]> = {};
-    const firstOccurrence = new Map<string, number>();
+    
+    // 📊 ขั้นตอนที่ 1: สร้าง Map เพื่อตรวจสอบซ้ำภายในไฟล์
+    console.log(`\n📊 [runValidation] ขั้นตอนที่ 1: สร้าง duplicateMap...`);
+    const duplicateMap = new Map<string, number[]>();
+    
     data.forEach((r, i) => {
       if (r.id_card && validateThaiIdCard(r.id_card)) {
-        if (!firstOccurrence.has(r.id_card)) firstOccurrence.set(r.id_card, i);
+        const cleanId = r.id_card.replace(/[-\s]/g, '');
+        if (!duplicateMap.has(cleanId)) {
+          duplicateMap.set(cleanId, []);
+        }
+        duplicateMap.get(cleanId)!.push(i);
+        console.log(`   ✅ เพิ่ม ID "${cleanId}" ที่ index ${i}`);
       }
     });
+    
+    console.log(`\n📊 [runValidation] duplicateMap มี ${duplicateMap.size} ID`);
+    duplicateMap.forEach((indices, id) => {
+      if (indices.length > 1) {
+        console.log(`   ⚠️ ID "${id}" พบ ${indices.length} ครั้ง ที่แถว: ${indices.map(i => i + 1).join(', ')}`);
+      }
+    });
+
+    // ✅ ขั้นตอนที่ 2: ตรวจสอบทุกแถว
+    console.log(`\n🔍 [runValidation] ขั้นตอนที่ 2: ตรวจสอบแต่ละแถว...`);
     for (let idx = 0; idx < data.length; idx++) {
-      errors[idx] = await validateRow(data[idx], idx, firstOccurrence);
+      console.log(`\n   ━━ แถวที่ ${idx + 1} ━━`);
+      errors[idx] = await validateRow(data[idx], idx, duplicateMap);
     }
+    
+    console.log(`\n✅ [runValidation] เสร็จสิ้นการตรวจสอบทั้งหมด`);
+    console.log(`   จำนวนแถวที่มี error: ${Object.values(errors).filter(e => e.length > 0).length}`);
+    
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
   };
@@ -459,25 +537,15 @@ export default function ImportExcelPage() {
     }
   }, [importResult]);
 
-  // ✅ ฟังก์ชัน Export Excel แบบละเอียด (แยกหมวดหมู่ + สรุปผล)
+  // ✅ ฟังก์ชัน Export Excel แบบละเอียด
   const handleExportToExcel = () => {
-    if (!previewData || previewData.length === 0) { 
-      setError('ไม่มีข้อมูลสำหรับส่งออก'); 
-      return; 
-    }
-
+    if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
     const wb = XLSX.utils.book_new();
-
-    // ============================================
-    // 📋 Sheet 1: ข้อมูลทั้งหมด (เรียงตาม ID Card)
-    // ============================================
     const sortedData = [...previewData].sort((a, b) => {
       const idA = (a.id_card || '').replace(/[-\s]/g, '');
       const idB = (b.id_card || '').replace(/[-\s]/g, '');
       return idA.localeCompare(idB);
     });
-
-    // 🔍 หาแถวที่ซ้ำ
     const duplicateMap = new Map<string, number[]>();
     sortedData.forEach((row, idx) => {
       if (row.id_card) {
@@ -486,140 +554,41 @@ export default function ImportExcelPage() {
         duplicateMap.get(cleanId)!.push(idx);
       }
     });
-
-    // 📝 เตรียมข้อมูลสำหรับ Export
     const exportData = sortedData.map((row, idx) => {
       const cleanId = (row.id_card || '').replace(/[-\s]/g, '');
       const isDuplicate = duplicateMap.has(cleanId) && duplicateMap.get(cleanId)!.length > 1;
       const isImported = row._status === 'success' || row._imported;
       const hasErrors = row._errors?.length > 0;
       const duplicateRows = isDuplicate ? duplicateMap.get(cleanId)!.map(i => i + 2).join(', ') : '';
-
       return {
-        'ลำดับ': idx + 1,
-        'เลขบัตรประชาชน': row.id_card || '',
-        'ชื่อ': row.first_name || '',
-        'นามสกุล': row.last_name || '',
-        'HN': row.hospital_number || '',
-        'วันเกิด': row.birth_date || '',
-        'เพศ': row.gender || '',
-        'โรงพยาบาล': row.hospital_name || '',
-        'เบอร์โทรศัพท์': row.phone || '',
-        'อีเมล': row.email || '',
-        'น้ำหนัก(กก.)': row.current_weight || '',
-        'ส่วนสูง(ซม.)': row.height || '',
-        'รอบเอว(ซม.)': row.waist_circumference || '',
-        'ประเภทเบาหวาน': row.diabetes_type || '',
-        'ค่าน้ำตาล': row.blood_sugar || '',
-        'ค่าHbA1c': row.hba1c_level || '',
-        'หมายเหตุ': row.notes || '',
+        'ลำดับ': idx + 1, 'เลขบัตรประชาชน': row.id_card || '', 'ชื่อ': row.first_name || '',
+        'นามสกุล': row.last_name || '', 'HN': row.hospital_number || '', 'วันเกิด': row.birth_date || '',
+        'เพศ': row.gender || '', 'โรงพยาบาล': row.hospital_name || '', 'เบอร์โทรศัพท์': row.phone || '',
+        'อีเมล': row.email || '', 'น้ำหนัก(กก.)': row.current_weight || '', 'ส่วนสูง(ซม.)': row.height || '',
+        'รอบเอว(ซม.)': row.waist_circumference || '', 'ประเภทเบาหวาน': row.diabetes_type || '',
+        'ค่าน้ำตาล': row.blood_sugar || '', 'ค่าHbA1c': row.hba1c_level || '', 'หมายเหตุ': row.notes || '',
         'สถานะการนำเข้า': isImported ? '✅ สำเร็จ' : (hasErrors ? '❌ มีข้อผิดพลาด' : '⏳ รอนำเข้า'),
-        'ข้อผิดพลาด': hasErrors ? row._errors.join('; ') : '',
-        'ซ้ำกับแถว': isDuplicate ? duplicateRows : '',
+        'ข้อผิดพลาด': hasErrors ? row._errors.join('; ') : '', 'ซ้ำกับแถว': isDuplicate ? duplicateRows : '',
         'คำเตือน': isDuplicate ? '⚠️ ซ้ำ' : ''
       };
     });
-
     const wsAll = XLSX.utils.json_to_sheet(exportData);
-    wsAll['!cols'] = [
-      { wch: 6 }, { wch: 18 }, { wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 },
-      { wch: 8 }, { wch: 25 }, { wch: 15 }, { wch: 25 }, { wch: 10 }, { wch: 8 },
-      { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 30 }, { wch: 15 },
-      { wch: 40 }, { wch: 15 }, { wch: 10 }
-    ];
+    wsAll['!cols'] = [{ wch: 6 }, { wch: 18 }, { wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 25 }, { wch: 15 }, { wch: 25 }, { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 30 }, { wch: 15 }, { wch: 40 }, { wch: 15 }, { wch: 10 }];
     XLSX.utils.book_append_sheet(wb, wsAll, '📋 ข้อมูลทั้งหมด');
-
-    // ============================================
-    // ✅ Sheet 2: นำเข้าสำเร็จ
-    // ============================================
     const successData = exportData.filter(row => row['สถานะการนำเข้า'] === '✅ สำเร็จ');
-    if (successData.length > 0) {
-      const wsSuccess = XLSX.utils.json_to_sheet(successData);
-      wsSuccess['!cols'] = wsAll['!cols'];
-      XLSX.utils.book_append_sheet(wb, wsSuccess, '✅ สำเร็จ');
-    }
-
-    // ============================================
-    // ❌ Sheet 3: มีข้อผิดพลาด
-    // ============================================
+    if (successData.length > 0) { const ws = XLSX.utils.json_to_sheet(successData); ws['!cols'] = wsAll['!cols']; XLSX.utils.book_append_sheet(wb, ws, '✅ สำเร็จ'); }
     const errorData = exportData.filter(row => row['สถานะการนำเข้า'] === '❌ มีข้อผิดพลาด');
-    if (errorData.length > 0) {
-      const wsError = XLSX.utils.json_to_sheet(errorData);
-      wsError['!cols'] = wsAll['!cols'];
-      XLSX.utils.book_append_sheet(wb, wsError, '❌ มีข้อผิดพลาด');
-    }
-
-    // ============================================
-    // ⏳ Sheet 4: รอนำเข้า (ยังไม่ได้นำเข้า)
-    // ============================================
+    if (errorData.length > 0) { const ws = XLSX.utils.json_to_sheet(errorData); ws['!cols'] = wsAll['!cols']; XLSX.utils.book_append_sheet(wb, ws, '❌ มีข้อผิดพลาด'); }
     const pendingData = exportData.filter(row => row['สถานะการนำเข้า'] === '⏳ รอนำเข้า');
-    if (pendingData.length > 0) {
-      const wsPending = XLSX.utils.json_to_sheet(pendingData);
-      wsPending['!cols'] = wsAll['!cols'];
-      XLSX.utils.book_append_sheet(wb, wsPending, '⏳ รอนำเข้า');
-    }
-
-    // ============================================
-    // ⚠️ Sheet 5: ซ้ำ (Duplicate)
-    // ============================================
+    if (pendingData.length > 0) { const ws = XLSX.utils.json_to_sheet(pendingData); ws['!cols'] = wsAll['!cols']; XLSX.utils.book_append_sheet(wb, ws, '⏳ รอนำเข้า'); }
     const duplicateData = exportData.filter(row => row['คำเตือน'] === '⚠️ ซ้ำ');
-    if (duplicateData.length > 0) {
-      const wsDuplicate = XLSX.utils.json_to_sheet(duplicateData);
-      wsDuplicate['!cols'] = wsAll['!cols'];
-      XLSX.utils.book_append_sheet(wb, wsDuplicate, '⚠️ ซ้ำ');
-    }
-
-    // ============================================
-    // 📊 Sheet 6: สรุปผลการนำเข้า
-    // ============================================
-    const summary: any[][] = [
-      ['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'],
-      [''],
-      ['📅 วันที่ส่งออก:', new Date().toLocaleString('th-TH')],
-      [''],
-      ['📈 สถิติรวม:'],
-      ['จำนวนแถวทั้งหมด:', previewData.length],
-      ['จำนวนที่นำเข้าสำเร็จ:', successData.length],
-      ['จำนวนที่มีข้อผิดพลาด:', errorData.length],
-      ['จำนวนที่รอนำเข้า:', pendingData.length],
-      ['จำนวนบัตรซ้ำ:', duplicateData.length],
-      [''],
-      ['📋 รายละเอียดบัตรซ้ำ:'],
-    ];
-
-    duplicateMap.forEach((rows, idCard) => {
-      if (rows.length > 1) {
-        const firstRow = sortedData[rows[0]];
-        summary.push([
-          `บัตร: ${idCard}`,
-          `ชื่อ: ${firstRow?.first_name} ${firstRow?.last_name}`,
-          `พบในแถว: ${rows.map(r => r + 1).join(', ')}`,
-          `จำนวน: ${rows.length} ครั้ง`
-        ]);
-      }
-    });
-
-    summary.push(['']);
-    summary.push(['📋 รายการที่ยังไม่ได้นำเข้า (รอนำเข้า):']);
-    summary.push(['ลำดับ', 'เลขบัตร', 'ชื่อ-นามสกุล', 'HN', 'ข้อผิดพลาด']);
-    
-    pendingData.forEach((row, idx) => {
-      summary.push([
-        idx + 1,
-        row['เลขบัตรประชาชน'],
-        `${row['ชื่อ']} ${row['นามสกุล']}`,
-        row['HN'],
-        row['ข้อผิดพลาด'] || '-'
-      ]);
-    });
-
-    const wsSummary = XLSX.utils.aoa_to_sheet(summary);
-    wsSummary['!cols'] = [{ wch: 50 }, { wch: 50 }, { wch: 50 }, { wch: 50 }, { wch: 50 }];
+    if (duplicateData.length > 0) { const ws = XLSX.utils.json_to_sheet(duplicateData); ws['!cols'] = wsAll['!cols']; XLSX.utils.book_append_sheet(wb, ws, '⚠️ ซ้ำ'); }
+    const summary: any[][] = [['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'], [''], ['📅 วันที่ส่งออก:', new Date().toLocaleString('th-TH')], [''], ['📈 สถิติรวม:'], ['จำนวนแถวทั้งหมด:', previewData.length], ['จำนวนที่นำเข้าสำเร็จ:', successData.length], ['จำนวนที่มีข้อผิดพลาด:', errorData.length], ['จำนวนที่รอนำเข้า:', pendingData.length], ['จำนวนบัตรซ้ำ:', duplicateData.length], [''], ['📋 รายละเอียดบัตรซ้ำ:']];
+    duplicateMap.forEach((rows, idCard) => { if (rows.length > 1) { const firstRow = sortedData[rows[0]]; summary.push([`บัตร: ${idCard}`, `ชื่อ: ${firstRow?.first_name} ${firstRow?.last_name}`, `พบในแถว: ${rows.map(r => r + 1).join(', ')}`, `จำนวน: ${rows.length} ครั้ง`]); } });
+    summary.push([''], ['📋 รายการที่ยังไม่ได้นำเข้า (รอนำเข้า):'], ['ลำดับ', 'เลขบัตร', 'ชื่อ-นามสกุล', 'HN', 'ข้อผิดพลาด']);
+    pendingData.forEach((row, idx) => { summary.push([idx + 1, row['เลขบัตรประชาชน'], `${row['ชื่อ']} ${row['นามสกุล']}`, row['HN'], row['ข้อผิดพลาด'] || '-']); });
+    const wsSummary = XLSX.utils.aoa_to_sheet(summary); wsSummary['!cols'] = [{ wch: 50 }, { wch: 50 }, { wch: 50 }, { wch: 50 }, { wch: 50 }];
     XLSX.utils.book_append_sheet(wb, wsSummary, '📊 สรุปผล');
-
-    // ============================================
-    // 💾 บันทึกไฟล์
-    // ============================================
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     XLSX.writeFile(wb, `รายงานนำเข้าผู้ป่วย_${timestamp}.xlsx`);
   };
@@ -632,32 +601,15 @@ export default function ImportExcelPage() {
       if (dateParts.length !== 3) throw new Error('รูปแบบวันเกิดไม่ถูกต้อง');
       const [day, month, yearBE] = dateParts;
       const birthDateISO = `${parseInt(yearBE) - 543}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-      
       let coachId = null;
       if (row.coach_name) { const cm = findBestCoachMatch(row.coach_name, coaches); if (cm) coachId = cm.coach.user_id; }
       const hm = findBestHospitalMatch(row.hospital_name, hospitals);
       if (!hm) { setError('❌ ไม่พบโรงพยาบาลในระบบ'); return; }
-
-      const data = { id_card: row.id_card, password: row.birth_date, first_name: row.first_name, last_name: row.last_name,
-        hospital_number: row.hospital_number, birth_date: birthDateISO, gender: row.gender, phone: row.phone || undefined,
-        email: row.email || undefined, current_weight: row.current_weight ? parseFloat(row.current_weight) : undefined,
-        height: row.height ? parseFloat(row.height) : undefined, waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : undefined,
-        coach_id: coachId, diabetes_type: row.diabetes_type || undefined, blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : undefined,
-        hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : undefined, notes: row.notes || undefined, house_number: row.house_number || undefined,
-        address_line1: row.address_line1 || undefined, soi: row.soi || undefined, road: row.road || undefined, village_no: row.village_no || undefined,
-        village_name: row.village_name || undefined, subdistrict: row.subdistrict || undefined, district: row.district || undefined,
-        province: row.province || undefined, postal_code: row.postal_code || undefined, hospital_id: hm.hospital.id,
-        emergency_contact_name: row.emergency_contact_name || undefined, emergency_contact_phone: row.emergency_contact_phone || undefined,
-        emergency_contact_relationship: row.emergency_contact_relationship || undefined, pam_level: 'L0', pam_score: 0, zone: 'Zero Zone', created_by: user?.id };
-
+      const data = { id_card: row.id_card, password: row.birth_date, first_name: row.first_name, last_name: row.last_name, hospital_number: row.hospital_number, birth_date: birthDateISO, gender: row.gender, phone: row.phone || undefined, email: row.email || undefined, current_weight: row.current_weight ? parseFloat(row.current_weight) : undefined, height: row.height ? parseFloat(row.height) : undefined, waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : undefined, coach_id: coachId, diabetes_type: row.diabetes_type || undefined, blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : undefined, hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : undefined, notes: row.notes || undefined, house_number: row.house_number || undefined, address_line1: row.address_line1 || undefined, soi: row.soi || undefined, road: row.road || undefined, village_no: row.village_no || undefined, village_name: row.village_name || undefined, subdistrict: row.subdistrict || undefined, district: row.district || undefined, province: row.province || undefined, postal_code: row.postal_code || undefined, hospital_id: hm.hospital.id, emergency_contact_name: row.emergency_contact_name || undefined, emergency_contact_phone: row.emergency_contact_phone || undefined, emergency_contact_relationship: row.emergency_contact_relationship || undefined, pam_level: 'L0', pam_score: 0, zone: 'Zero Zone', created_by: user?.id };
       const result = await importPatientsBatch([data], user.id);
       if (result.success > 0) {
         setImportedIds(prev => new Set(prev).add(row.id_card));
-        setPreviewData(prev => {
-          const next = [...prev];
-          next[rowIndex] = { ...next[rowIndex], _status: 'success', _imported: true, _selected: false };
-          return next;
-        });
+        setPreviewData(prev => { const next = [...prev]; next[rowIndex] = { ...next[rowIndex], _status: 'success', _imported: true, _selected: false }; return next; });
         setSelectedRows(prev => { const next = new Set(prev); next.delete(rowIndex); return next; });
         setSuccess(true);
         setTimeout(() => router.push('/admin/patients'), 2000);
@@ -670,15 +622,7 @@ export default function ImportExcelPage() {
     const currentError = importResult.errors[errorIndex];
     const rowIndex = currentError.row - 1;
     if (!currentError.hospital_id) { setError('กรุณาเลือกโรงพยาบาลก่อนบันทึก'); return; }
-    
-    setPreviewData(prev => {
-      const newData = [...prev];
-      const row = { ...newData[rowIndex] };
-      const hospital = hospitals.find(h => h.id === currentError.hospital_id);
-      if (hospital) row.hospital_name = hospital.name;
-      newData[rowIndex] = row; return newData;
-    });
-
+    setPreviewData(prev => { const newData = [...prev]; const row = { ...newData[rowIndex] }; const hospital = hospitals.find(h => h.id === currentError.hospital_id); if (hospital) row.hospital_name = hospital.name; newData[rowIndex] = row; return newData; });
     setTimeout(() => runValidation(previewData), 100);
     setTimeout(async () => {
       const updatedRow = previewData[rowIndex];
@@ -697,33 +641,22 @@ export default function ImportExcelPage() {
   const handleImport = async () => {
     if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
     if (hasErrorsInSelected) { setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบพื้นฐาน กรุณาแก้ไขก่อนนำเข้า'); return; }
-    
     const errors: typeof importResult.errors = [];
     const successRecords: typeof importResult.successRecords = [];
     let successCount = 0;
-    
     for (const rowIdx of Array.from(selectedRows)) {
       const row = previewData[rowIdx];
       const rowNumber = rowIdx + 1;
       const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
-      if (!hospitalMatch) {
-        errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, error: `ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`, error_type: 'hospital', hospital_id: undefined, original_hospital_name: row.hospital_name, hospital_fixed: false, fixed: false });
-        continue;
-      }
+      if (!hospitalMatch) { errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, error: `ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`, error_type: 'hospital', hospital_id: undefined, original_hospital_name: row.hospital_name, hospital_fixed: false, fixed: false }); continue; }
       const hospitalId = hospitalMatch.hospital.id;
       const networkIds = getNetworkHospitalIds(hospitalId);
       const networkCoaches = coaches.filter(c => { const cHospId = c.users?.hospital_id; return cHospId && networkIds.includes(cHospId); });
       const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
-      if (row.coach_name && !coachMatch) {
-        errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`, error_type: 'coach', hospital_id: hospitalId, original_hospital_name: row.hospital_name, original_coach_name: row.coach_name, hospital_fixed: true, fixed: false });
-      } else {
-        successCount++;
-        successRecords.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, first_name: row.first_name, last_name: row.last_name });
-      }
+      if (row.coach_name && !coachMatch) { errors.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`, error_type: 'coach', hospital_id: hospitalId, original_hospital_name: row.hospital_name, original_coach_name: row.coach_name, hospital_fixed: true, fixed: false }); }
+      else { successCount++; successRecords.push({ row: rowNumber, id_card: row.id_card, hospital_number: row.hospital_number, first_name: row.first_name, last_name: row.last_name }); }
     }
-
     if (errors.length > 0) { setImportResult({ success: successCount, failed: errors.length, errors, successRecords }); return; }
-
     setError(''); setImporting(true); setImportProgress({ current: 0, total: selectedRows.size });
     try {
       const selectedData = previewData.filter(row => row._selected).map(row => {
@@ -744,19 +677,14 @@ export default function ImportExcelPage() {
         if (row.coach_name) data.coach_name = row.coach_name;
         return data;
       });
-
       const result = await importPatientsBatch(selectedData, user.id);
       if (result.success > 0) {
         const successfulItems = selectedData.slice(0, result.success);
         const newIds = successfulItems.map(item => item.id_card);
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
-        setPreviewData(prev => prev.map(r => {
-          if (successRecords.some(s => s.id_card === r.id_card)) return { ...r, _status: 'success', _imported: true, _selected: false };
-          return r;
-        }));
+        setPreviewData(prev => prev.map(r => { if (successRecords.some(s => s.id_card === r.id_card)) return { ...r, _status: 'success', _imported: true, _selected: false }; return r; }));
         setSelectedRows(prev => { const next = new Set(prev); successRecords.forEach(s => next.delete(previewData.findIndex(r => r.id_card === s.id_card))); return next; });
       }
-
       if (result.failed > 0 && result.errors) {
          const backendErrors = result.errors.map((be: any) => ({ row: be.row || 0, id_card: be.id_card || '', hospital_number: be.hospital_number || '', error: be.error, error_type: (be.error?.includes('ซ้ำ') || be.error?.includes('exists')) ? 'duplicate_id' : 'other', hospital_id: undefined, fixed: false }));
          setImportResult({ success: result.success, failed: result.failed, errors: backendErrors, successRecords: result.successRecords || [] });
