@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 25 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรวจสอบบัตรซ้ำกับตาราง users ที่ Preview (ใช้ idx_users_id_card)
+ * ⚠️ คำเตือน: Pre-flight Validation - ตรวจสอบบัตรซ้ำที่ Preview + ล็อคการเลือก
  * ============================================================================
  */
 
@@ -297,7 +297,7 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ Real-time: Internal + Session + DB)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ: Internal -> Session -> DB)
   // =====================================================
   const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number>) => {
     const errors: string[] = [];
@@ -344,14 +344,14 @@ export default function ImportExcelPage() {
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
         
-        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (Internal Duplicate)
+        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (ใช้ Map ที่สร้างไว้)
         if (duplicateMap && duplicateMap.has(row.id_card)) {
           const firstIdx = duplicateMap.get(row.id_card);
           if (firstIdx !== undefined && firstIdx !== rowIndex) {
             errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`);
           }
         }
-        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้ (Instant Check)
+        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้ (Set.has() = O(1))
         else if (importedIds.has(row.id_card)) {
           errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
         } 
@@ -359,7 +359,7 @@ export default function ImportExcelPage() {
         else {
           try {
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
-            // ✅ เรียก checkPatientExists เพื่อเช็คกับตาราง users โดยตรง
+            // ✅ ใช้ checkPatientExists ที่ query ไปยังตาราง users โดยตรง
             const exists = await checkPatientExists(row.id_card);
             if (exists) {
               errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
@@ -746,9 +746,23 @@ export default function ImportExcelPage() {
                   <tbody>
                     {previewData.map((row, rIdx) => {
                       const isImported = row._imported || row._status === 'success';
+                      // ✅ ตรวจสอบว่าเป็นแถวที่มีข้อผิดพลาดเกี่ยวกับ "ซ้ำ" หรือไม่
+                      const isDuplicateError = row._errors?.some(e => 
+                        e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว')
+                      );
+
                       return (
                         <tr key={rIdx} className={`border-b hover:bg-gray-50 ${isImported ? 'bg-green-50/50' : (row._errors?.length > 0 ? 'bg-red-50/50' : '')}`}>
-                          <td className="p-3 text-center sticky left-0 bg-white z-10"><input type="checkbox" checked={row._selected} disabled={isImported} onChange={() => !isImported && toggleSelectRow(rIdx)} className={`w-4 h-4 ${isImported ? 'opacity-50 cursor-not-allowed' : ''}`} /></td>
+                          <td className="p-3 text-center sticky left-0 bg-white z-10">
+                            <input 
+                              type="checkbox" 
+                              checked={row._selected} 
+                              // ✅ ปิดการเลือกถ้าเป็นแถวที่นำเข้าแล้ว หรือ มีข้อผิดพลาดเรื่อง "ซ้ำ"
+                              disabled={isImported || isDuplicateError}
+                              onChange={() => (!isImported && !isDuplicateError) && toggleSelectRow(rIdx)} 
+                              className={`w-4 h-4 ${isImported || isDuplicateError ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                            />
+                          </td>
                           <td className="p-3 text-center sticky left-10 bg-white z-10">
                             {isImported ? (<span className="text-green-600 font-bold flex items-center justify-center gap-1"><CheckCircle className="w-5 h-5" /> บันทึกแล้ว</span>) : row._errors?.length > 0 ? (<XCircle className="w-5 h-5 text-red-500 mx-auto" />) : (<CheckCircle className="w-5 h-5 text-green-500 mx-auto" />)}
                           </td>
@@ -762,16 +776,20 @@ export default function ImportExcelPage() {
                                   : field.inputType === 'select' ? (<select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown}><option value="">-- เลือก --</option>{field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>)
                                   : (<input autoFocus type={field.inputType === 'number' ? 'number' : 'text'} step={field.inputType === 'number' ? '0.1' : undefined} className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown} placeholder={field.required ? 'บังคับกรอก' : 'ไม่บังคับ'} />)
                                 ) : (
-                                  <div onClick={() => !isImported && startEdit(rIdx, field.key)} className={`px-2 py-1 min-h-[32px] rounded flex items-center gap-1 group ${!isImported ? 'cursor-text hover:bg-blue-50' : 'cursor-not-allowed opacity-70'}`}>
-                                    {field.key === 'birth_date' ? (<><span className={`truncate max-w-[120px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val ? formatThaiDate(val) : 'คลิกเพื่อแก้ไข'}</span>{val && (<button onClick={(e) => { if (isImported) return; e.stopPropagation(); const swapped = swapDayMonth(String(val)); setPreviewData(prev => { const next = [...prev]; next[rIdx] = { ...next[rIdx], birth_date: swapped }; return next; }); runValidation(previewData.map((r, i) => i === rIdx ? { ...r, birth_date: swapped } : r)); }} className={`ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded transition-opacity ${isImported ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} title="สลับ วัน/เดือน">🔁</button>)}<Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${isImported ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} /></>)
-                                    : (<><span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val || 'คลิกเพื่อแก้ไข'}</span><Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${isImported ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} /></>)}
+                                  <div onClick={() => (!isImported && !isDuplicateError) && startEdit(rIdx, field.key)} className={`px-2 py-1 min-h-[32px] rounded flex items-center gap-1 group ${(!isImported && !isDuplicateError) ? 'cursor-text hover:bg-blue-50' : 'cursor-not-allowed opacity-70'}`}>
+                                    {field.key === 'birth_date' ? (<><span className={`truncate max-w-[120px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val ? formatThaiDate(val) : 'คลิกเพื่อแก้ไข'}</span>{val && (<button onClick={(e) => { if (isImported || isDuplicateError) return; e.stopPropagation(); const swapped = swapDayMonth(String(val)); setPreviewData(prev => { const next = [...prev]; next[rIdx] = { ...next[rIdx], birth_date: swapped }; return next; }); runValidation(previewData.map((r, i) => i === rIdx ? { ...r, birth_date: swapped } : r)); }} className={`ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded transition-opacity ${(isImported || isDuplicateError) ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} title="สลับ วัน/เดือน">🔁</button>)}<Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${(isImported || isDuplicateError) ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} /></>)
+                                    : (<><span className={`truncate max-w-[150px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val || 'คลิกเพื่อแก้ไข'}</span><Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${(isImported || isDuplicateError) ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`} /></>)}
                                   </div>
                                 )}
                               </td>
                             );
                           })}
                           <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
-                            {isImported ? (<span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>) : row._errors?.length > 0 ? (<div className="space-y-1">{row._errors.map((err, idx) => (<div key={idx} className="flex items-start gap-1 text-xs text-red-700 bg-red-100 px-2 py-1 rounded"><AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /><span>{err}</span></div>))}</div>) : checkingDuplicates.has(rIdx) ? (<div className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="w-3 h-3 animate-spin" /><span>ตรวจสอบบัตร...</span></div>) : (<span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>)}
+                            {isImported ? (<span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>) : row._errors?.length > 0 ? (<div className="space-y-1">{row._errors.map((err, idx) => (
+                              <div key={idx} className={`flex items-start gap-1 text-xs px-2 py-1 rounded ${err.includes('ซ้ำ') || err.includes('มีอยู่ในระบบแล้ว') ? 'text-red-700 bg-red-100' : 'text-orange-700 bg-orange-100'}`}>
+                                <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /><span>{err}</span>
+                              </div>
+                            ))}</div>) : checkingDuplicates.has(rIdx) ? (<div className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="w-3 h-3 animate-spin" /><span>ตรวจสอบบัตร...</span></div>) : (<span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>)}
                           </td>
                         </tr>
                       );
