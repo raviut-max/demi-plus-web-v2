@@ -22,7 +22,7 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Zap
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Zap, Info
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -293,14 +293,13 @@ export default function ImportExcelPage() {
     return otherIndices.length > 0 ? `เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${otherIndices.map(i => i + 1).join(', ')})` : null;
   };
 
+  // ✅ ปรับปรุง validateRow: ตรวจสอบเฉพาะวันที่, ตัวเลข, และบัตรซ้ำ (ไม่ตรวจสอบรพ./โค้ช)
   const validateRow = async (row: any, rowIndex: number, duplicateMap: Map<string, number[]>) => {
     const errors: string[] = [];
     let isPatientDuplicate = false;
     let duplicateDetails: any = null;
-    let hospitalMatch: any = null;
-    let coachMatch: any = null;
 
-    // Validation มาตรฐาน
+    // 1. Validation มาตรฐาน (Format, Required)
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
       const strVal = String(val ?? '').trim();
@@ -340,34 +339,13 @@ export default function ImportExcelPage() {
       }
     });
 
-    // Validate จังหวัด
+    // 2. Validate จังหวัด
     if (row.province && validProvinces.length > 0) {
       const pc = validateProvinceOnly(row.province, validProvinces);
       if (!pc.valid) errors.push(...pc.errors);
     }
 
-    // ตรวจสอบโรงพยาบาล
-    if (row.hospital_name) {
-      hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
-      if (!hospitalMatch) {
-        errors.push(`ไม่พบโรงพยาบาล "${row.hospital_name}" ในระบบ`);
-      }
-    }
-
-    // ตรวจสอบโค้ช
-    if (row.coach_name && hospitalMatch?.hospital) {
-      const networkHospitalId = hospitalMatch.hospital.id;
-      const networkCoaches = coaches.filter(c => {
-        const cHospId = c.users?.hospital_id;
-        return cHospId === networkHospitalId || cHospId === hospitals.find(h => h.id === networkHospitalId)?.parent_hospital_id;
-      });
-      coachMatch = findBestCoachMatch(row.coach_name, networkCoaches);
-      if (!coachMatch && networkCoaches.length > 0) {
-        errors.push(`ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายโรงพยาบาล`);
-      }
-    }
-
-    // ตรวจสอบบัตรประชาชนซ้ำ
+    // 3. ตรวจสอบบัตรประชาชนซ้ำ (File, Session, DB)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
       const cleanId = cleanIdCard(row.id_card);
       const isAlreadyImported = row._status === 'success' || row._imported;
@@ -379,7 +357,7 @@ export default function ImportExcelPage() {
           isPatientDuplicate = true;
           duplicateDetails = {
             type: 'file_duplicate',
-            message: '️ พบเลขบัตรประชาชนซ้ำในไฟล์ที่นำเข้า',
+            message: '⚠️ พบเลขบัตรประชาชนซ้ำในไฟล์ที่นำเข้า',
             action: 'กรุณาลบแถวที่ซ้ำออก หรือแก้ไขเลขบัตรประชาชน'
           };
         } else if (importedIds.has(cleanId)) {
@@ -387,7 +365,7 @@ export default function ImportExcelPage() {
           isPatientDuplicate = true;
           duplicateDetails = {
             type: 'session_duplicate',
-            message: '️ เลขบัตรนี้ถูกนำเข้าในรอบนี้แล้ว',
+            message: '⚠️ เลขบัตรนี้ถูกนำเข้าในรอบนี้แล้ว',
             action: 'กรุณาตรวจสอบว่าต้องการนำเข้าซ้ำหรือไม่'
           };
         } else {
@@ -419,7 +397,7 @@ export default function ImportExcelPage() {
       }
     }
 
-    return { errors, isPatientDuplicate, duplicateDetails, hospitalMatch, coachMatch };
+    return { errors, isPatientDuplicate, duplicateDetails };
   };
 
   const runValidation = async (data: any[]) => {
@@ -441,8 +419,6 @@ export default function ImportExcelPage() {
       updatedData[idx]._errors = result.errors;
       updatedData[idx]._isPatientDuplicate = result.isPatientDuplicate;
       updatedData[idx]._duplicateDetails = result.duplicateDetails;
-      updatedData[idx]._hospitalMatch = result.hospitalMatch;
-      updatedData[idx]._coachMatch = result.coachMatch;
     }
 
     setValidationErrors(errors);
@@ -518,11 +494,17 @@ export default function ImportExcelPage() {
     setPreviewData(prev => prev.map((r, i) => i === idx ? { ...r, _selected: next.has(i) } : r));
   };
   
+  // ✅ แก้ไขฟังก์ชันเลือกทั้งหมด: เลือกเฉพาะแถวที่ไม่มีข้อผิดพลาด (โดยเฉพาะบัตรซ้ำ)
   const selectAll = (checked: boolean) => {
-    const selectable = previewData.map((r, i) => i).filter(i => !previewData[i]._imported && previewData[i]._status !== 'success');
+    const validIndices = previewData.map((r, i) => i).filter(i => 
+      !previewData[i]._imported && 
+      previewData[i]._status !== 'success' && 
+      previewData[i]._errors?.length === 0 // เลือกเฉพาะที่ไม่มี Error
+    );
+    
     if (checked) {
-      setSelectedRows(new Set(selectable));
-      setPreviewData(prev => prev.map((r, i) => selectable.includes(i) ? { ...r, _selected: true } : r));
+      setSelectedRows(new Set(validIndices));
+      setPreviewData(prev => prev.map((r, i) => validIndices.includes(i) ? { ...r, _selected: true } : r));
     } else {
       setSelectedRows(new Set());
       setPreviewData(prev => prev.map(r => ({ ...r, _selected: false })));
@@ -584,7 +566,7 @@ export default function ImportExcelPage() {
         'หมายเหตุ': row.notes || '', 
         'โค้ชผู้ดูแล': coachName, 
         'โรงพยาบาลโค้ช': coachHospital, 
-        'สถานะการนำเข้า': isImported ? '✅ สำเร็จ' : (hasErrors ? '❌ มีข้อผิดพลาด' : '⏳ รอนำเข้า'), 
+        'สถานะการนำเข้า': isImported ? '✅ สำเร็จ' : (hasErrors ? '❌ มีข้อผิดพลาด' : ' รอนำเข้า'), 
         'ข้อผิดพลาด': hasErrors ? row._errors.join('; ') : '', 
         'ซ้ำกับแถว': isDuplicate ? duplicateRows : '', 
         'คำเตือน': isDuplicate ? '⚠️ ซ้ำ' : '' 
@@ -661,7 +643,7 @@ export default function ImportExcelPage() {
         setSuccess(true);
         setTimeout(() => router.push('/admin/patients'), 2000);
       } else { 
-        setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`); 
+        setError(` เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`); 
       }
     } catch (err: any) { 
       console.error('❌ [handleImportSingleRow] Error:', err); 
@@ -669,11 +651,13 @@ export default function ImportExcelPage() {
     }
   };
 
+  // ✅ ปรับปรุง handleImport: ตรวจสอบรพ. และโค้ชนี่ในขั้นตอนนำเข้า
   const handleImport = async () => {
     if (selectedRows.size === 0) { 
       setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); 
       return; 
     }
+    // ตรวจสอบว่าแถวที่เลือกไม่มี Error พื้นฐาน (เช่น บัตรซ้ำ) หรือไม่
     if (hasErrorsInSelected) { 
       setError('มีแถวที่เลือกยังไม่ผ่านตรวจสอบพื้นฐาน กรุณาแก้ไขก่อนนำเข้า'); 
       return; 
@@ -686,7 +670,9 @@ export default function ImportExcelPage() {
       const row = previewData[rowIdx];
       const rowNumber = rowIdx + 1;
       
-      if (!row._hospitalMatch) { 
+      // --- 🏥 ตรวจสอบโรงพยาบาล ---
+      const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
+      if (!hospitalMatch) { 
         errors.push({ 
           row: rowNumber, 
           id_card: row.id_card, 
@@ -700,7 +686,8 @@ export default function ImportExcelPage() {
         continue; 
       }
       
-      const hospitalId = row._hospitalMatch.hospital.id;
+      // --- ‍⚕️ ตรวจสอบโค้ช ---
+      const hospitalId = hospitalMatch.hospital.id;
       const networkIds = [hospitalId];
       const networkCoaches = coaches.filter(c => { 
         const cHospId = c.users?.hospital_id; 
@@ -713,7 +700,7 @@ export default function ImportExcelPage() {
           row: rowNumber, 
           id_card: row.id_card, 
           hospital_number: row.hospital_number, 
-          error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${row._hospitalMatch.hospital.name}`, 
+          error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่ายของ ${hospitalMatch.hospital.name}`, 
           error_type: 'coach', 
           hospital_id: hospitalId, 
           original_hospital_name: row.hospital_name, 
@@ -732,11 +719,13 @@ export default function ImportExcelPage() {
       }
     }
     
+    // หากพบ Error ในการตรวจสอบรพ./โค้ช ให้หยุดและแสดงผลลัพธ์ให้แก้ไข
     if (errors.length > 0) { 
       setImportResult({ success: successRecords.length, failed: errors.length, errors, successRecords }); 
       return; 
     }
     
+    // หากไม่มี Error ให้ดำเนินการนำเข้าจริง
     setError(''); 
     setImporting(true); 
     setImportProgress({ current: 0, total: selectedRows.size });
@@ -836,13 +825,16 @@ export default function ImportExcelPage() {
 
   const displayFields = STANDARD_FIELDS.filter(f => Object.values(headerMapping).includes(f.key));
 
+  // ✅ คำนวณแถวที่ "ควรเลือกได้" (ไม่มี Error) เพื่อใช้เช็กสถานะ Checkbox
+  const validRowsCount = previewData.filter(r => !r._imported && r._status !== 'success' && r._errors?.length === 0).length;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow-sm border-b border-gray-200 px-4 py-6">
         <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
           <ArrowLeft className="w-4 h-4" /> กลับ
         </button>
-        <h1 className="text-3xl font-bold text-gray-800">📥 นำเข้าข้อมูลผู้ป่วยจาก Excel</h1>
+        <h1 className="text-3xl font-bold text-gray-800"> นำเข้าข้อมูลผู้ป่วยจาก Excel</h1>
         <p className="text-gray-600 mt-1">ตรวจสอบ แก้ไข และเลือกข้อมูลก่อนนำเข้าระบบ</p>
       </div>
 
@@ -926,16 +918,17 @@ export default function ImportExcelPage() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input 
                     type="checkbox" 
-                    checked={previewData.filter(r => !r._imported && r._status !== 'success').length > 0 && selectedRows.size === previewData.filter(r => !r._imported && r._status !== 'success').length} 
+                    // ✅ เช็กว่าแถวที่ Valid ทั้งหมดถูกเลือกครบหรือยัง
+                    checked={validRowsCount > 0 && selectedRows.size === validRowsCount} 
                     onChange={(e) => selectAll(e.target.checked)} 
                     className="w-4 h-4" 
-                    disabled={previewData.filter(r => !r._imported && r._status !== 'success').length === 0} 
+                    disabled={validRowsCount === 0} 
                   />
-                  <span className="text-sm font-medium">เลือกทั้งหมด (เฉพาะที่ยังไม่บันทึก)</span>
+                  <span className="text-sm font-medium">เลือกทั้งหมด (เฉพาะที่ผ่านตรวจสอบ)</span>
                 </label>
                 <span className="text-sm text-gray-500">✅ ถูกเลือก: {selectedRows.size} แถว</span>
                 <span className={`text-sm font-medium ${hasErrorsInSelected ? 'text-red-600' : 'text-green-600'}`}>
-                  {hasErrorsInSelected ? '️ มีข้อมูลที่เลือกยังไม่ผ่านตรวจสอบ' : '✅ ข้อมูลที่เลือกพร้อมนำเข้า'}
+                  {hasErrorsInSelected ? '⚠️ มีข้อมูลที่เลือกยังไม่ผ่านตรวจสอบ' : '✅ ข้อมูลที่เลือกพร้อมนำเข้า'}
                 </span>
               </div>
               <div className="flex gap-2">
@@ -997,7 +990,7 @@ export default function ImportExcelPage() {
                       const isImported = row._imported || row._status === 'success';
                       const hasDuplicateError = row._errors?.some(e => e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว'));
                       const isPatientDuplicate = row._isPatientDuplicate;
-                      const shouldDisableCheckbox = isImported || (hasDuplicateError && isPatientDuplicate);
+                      const shouldDisableCheckbox = isImported || (hasDuplicateError && isPatientDuplicate) || row._errors?.length > 0; // ปิดการเลือกถ้ามี Error
                       
                       return (
                         <tr 
@@ -1100,7 +1093,7 @@ export default function ImportExcelPage() {
                                             }`} 
                                             title="สลับ วัน/เดือน"
                                           >
-                                            🔁
+                                            
                                           </button>
                                         )}
                                         <Edit3 className={`w-3 h-3 text-gray-300 ml-auto transition-opacity ${
@@ -1369,7 +1362,7 @@ export default function ImportExcelPage() {
                               </label>
                               {err.original_coach_name && (
                                 <div className="text-xs text-gray-600 mb-1 bg-gray-100 p-1 rounded text-center">
-                                  💡 ค้นหาชื่อ: <strong>{err.original_coach_name}</strong>
+                                   ค้นหาชื่อ: <strong>{err.original_coach_name}</strong>
                                 </div>
                               )}
                               <select 
