@@ -24,7 +24,7 @@ import {
 import {
   Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft, LogOut,
   CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X,
-  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard, Zap
+  Hospital, UserCheck, MapPin, Sparkles, Save, Download, CreditCard, Zap, Info
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -146,13 +146,10 @@ const formatThaiDate = (input: string | number | Date): string => {
   if (!input) return '';
   let day = '', month = '', year = '';
   const str = String(input).trim();
-  
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
     const [y, m, d] = str.split('-');
     year = String(parseInt(y) + 543); month = m; day = d;
-  } 
-  // ✅ แก้ regex: ย้าย - ไปไว้ท้ายสุดของ character class
-  else if (str.match(/^[\d/.\-]+$/)) {
+  } else if (str.match(/^[\d/.\-]+$/)) {
     const parts = str.split(/[/.\-]/).map(p => p.trim());
     if (parts.length >= 3) {
       const [p1, p2, p3] = parts;
@@ -161,12 +158,10 @@ const formatThaiDate = (input: string | number | Date): string => {
       else { day = p1; month = p2; year = p3; }
     }
   }
-  
   let formattedYear = year;
   if (year.length === 2) formattedYear = `25${year}`;
   else if (year.length === 4) formattedYear = year;
   else if (year.length === 3) formattedYear = `2${year}`;
-  
   return `${String(parseInt(day) || 1).padStart(2, '0')}/${String(parseInt(month) || 1).padStart(2, '0')}/${formattedYear}`;
 };
 
@@ -268,7 +263,7 @@ export default function ImportExcelPage() {
 
   const buildPreview = useCallback(() => {
     const mapped = rawData.map((row, idx) => {
-      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending', _isPatientDuplicate: false };
+      const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending', _isPatientDuplicate: false, _duplicateDetails: null };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
@@ -294,6 +289,8 @@ export default function ImportExcelPage() {
   const validateRow = async (row: any, rowIndex: number, duplicateMap: Map<string, number[]>) => {
     const errors: string[] = [];
     let isPatientDuplicate = false;
+    let duplicateDetails: any = null;
+
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
       const strVal = String(val ?? '').trim();
@@ -343,10 +340,18 @@ export default function ImportExcelPage() {
         } else {
           try {
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
-            const { exists, isPatient } = await checkPatientExists(row.id_card);
-            if (exists) {
-              errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
-              isPatientDuplicate = isPatient;
+            const result = await checkPatientExists(row.id_card);
+            if (result.exists) {
+              errors.push('🔍 พบข้อมูลซ้ำในระบบ');
+              isPatientDuplicate = true;
+              duplicateDetails = {
+                type: result.isPatient ? 'patient' : 'other',
+                message: result.isPatient 
+                  ? '👤 พบผู้ป่วยรายนี้ในระบบแล้ว ไม่สามารถนำเข้าซ้ำได้' 
+                  : '📁 พบข้อมูลบัตรนี้ในระบบ (อาจเป็นประวัติการเข้ารักษา/ผู้ใช้)',
+                action: 'กรุณาตรวจสอบที่หน้าจัดการผู้ป่วย หรือแก้ไขเลขบัตรประชาชนในไฟล์ Excel ก่อนนำเข้าใหม่',
+                rawResponse: result
+              };
             }
           } catch (err) { console.warn('⚠️ DB Check Failed:', err); }
           finally {
@@ -355,7 +360,7 @@ export default function ImportExcelPage() {
         }
       }
     }
-    return { errors, isPatientDuplicate };
+    return { errors, isPatientDuplicate, duplicateDetails };
   };
 
   const runValidation = async (data: any[]) => {
@@ -374,6 +379,7 @@ export default function ImportExcelPage() {
       const result = await validateRow(data[idx], idx, duplicateMap);
       errors[idx] = result.errors;
       updatedData[idx]._isPatientDuplicate = result.isPatientDuplicate;
+      updatedData[idx]._duplicateDetails = result.duplicateDetails;
     }
 
     setValidationErrors(errors);
@@ -682,7 +688,6 @@ export default function ImportExcelPage() {
             <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  {/* ✅ แก้ไขส่วนนี้แล้ว: ลบ flex ออกจาก <th> และห่อด้วย <div className="flex ..."> แทน พร้อมใส่ whitespace-nowrap ที่ <tr> */}
                   <thead className="bg-gray-100 border-b">
                     <tr className="whitespace-nowrap">
                       <th className="p-3 w-10 text-center sticky left-0 bg-gray-100 z-10 border-r">เลือก</th>
@@ -703,17 +708,18 @@ export default function ImportExcelPage() {
                           </div>
                         </th>
                       ))}
-                      <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">⚠️ ข้อผิดพลาด</th>
+                      <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">⚠️ ข้อผิดพลาด / คำเตือน</th>
                     </tr>
                   </thead>
                   <tbody>
                     {previewData.map((row, rIdx) => {
                       const isImported = row._imported || row._status === 'success';
                       const hasDuplicateError = row._errors?.some(e => e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว'));
-                      const shouldDisableCheckbox = isImported || (hasDuplicateError && row._isPatientDuplicate);
+                      const isPatientDuplicate = row._isPatientDuplicate;
+                      const shouldDisableCheckbox = isImported || (hasDuplicateError && isPatientDuplicate);
                       
                       return (
-                        <tr key={rIdx} className={`border-b hover:bg-gray-50 ${isImported ? 'bg-green-50/50' : (row._errors?.length > 0 ? 'bg-red-50/50' : '')}`}>
+                        <tr key={rIdx} className={`border-b hover:bg-gray-50 transition-colors ${isImported ? 'bg-green-50/50' : (isPatientDuplicate ? 'bg-orange-50/70 border-l-4 border-orange-500' : (row._errors?.length > 0 ? 'bg-red-50/50 border-l-4 border-red-400' : ''))}`}>
                           <td className="p-3 text-center sticky left-0 bg-white z-10">
                             <input type="checkbox" checked={row._selected} disabled={shouldDisableCheckbox} onChange={() => !shouldDisableCheckbox && toggleSelectRow(rIdx)} className={`w-4 h-4 ${shouldDisableCheckbox ? 'opacity-50 cursor-not-allowed' : ''}`} />
                           </td>
@@ -744,16 +750,31 @@ export default function ImportExcelPage() {
                               </td>
                             );
                           })}
-                          <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
-                            {isImported ? (<span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>) : row._errors?.length > 0 ? (
-                              <div className="space-y-1">{row._errors.map((err, idx) => (
-                                <div key={idx} className={`flex items-start gap-1 text-xs px-2 py-1 rounded ${err.includes('ซ้ำ') || err.includes('มีอยู่ในระบบแล้ว') ? 'text-red-700 bg-red-100' : 'text-orange-700 bg-orange-100'}`}>
-                                  <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /><span>{err}</span>
-                                </div>
-                              ))}</div>
+                          <td className="p-3 align-top sticky right-0 bg-white z-10 border-l min-w-[240px]">
+                            {isImported ? (
+                              <span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>
+                            ) : row._errors?.length > 0 ? (
+                              <div className="space-y-2">
+                                {row._errors.map((err, idx) => (
+                                  <div key={idx} className={`flex items-start gap-1.5 text-xs px-2.5 py-2 rounded-lg border ${err.includes('ซ้ำ') || err.includes('มีอยู่ในระบบแล้ว') ? 'text-orange-800 bg-orange-100 border-orange-300' : 'text-red-700 bg-red-50 border-red-200'}`}>
+                                    {err.includes('ซ้ำ') || err.includes('มีอยู่ในระบบแล้ว') ? <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-orange-600" /> : <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-red-500" />}
+                                    <div className="flex-1">
+                                      <p className="font-semibold mb-0.5">{err}</p>
+                                      {row._duplicateDetails && (
+                                        <div className="mt-1.5 pt-1.5 border-t border-orange-200/60 text-[11px] space-y-1">
+                                          <p className="text-orange-700"><Info className="w-3 h-3 inline mr-1" />{row._duplicateDetails.message}</p>
+                                          <p className="text-gray-600 italic">{row._duplicateDetails.action}</p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             ) : checkingDuplicates.has(rIdx) ? (
                               <div className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="w-3 h-3 animate-spin" /><span>ตรวจสอบบัตร...</span></div>
-                            ) : (<span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>)}
+                            ) : (
+                              <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>
+                            )}
                           </td>
                         </tr>
                       );
