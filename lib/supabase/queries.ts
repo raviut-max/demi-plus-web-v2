@@ -207,24 +207,27 @@ export async function filterDataByHospitalPermission<T>(
 
 // lib/supabase/queries.ts
 
-// =====================================================
-// 👥 Patient Management Functions (Updated)
-// =====================================================
+// lib/supabase/queries.ts
+
+/**
+ * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
+ * @param search - คำค้นหา (ชื่อ, นามสกุล, HN)
+ * @param pamLevel - ระดับ PAM ที่ต้องการกรอง
+ * @param hospitalIds - โรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับกรองสิทธิ์)
+ * @param hospitalId - โรงพยาบาลที่เลือกจากฟิลเตอร์ (สำหรับกรองแสดงผล)
+ * @param coachId - โค้ชที่เลือกจากฟิลเตอร์ (สำหรับกรองแสดงผล)
+ */
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
-  hospitalIds?: string[],      // สิทธิ์พื้นฐาน (IDs ที่ผู้ใช้มีสิทธิ์ดู)
-  hospitalId?: string,         // ฟิลเตอร์: โรงพยาบาลที่เลือกจาก Dropdown
-  coachId?: string             // ฟิลเตอร์: โค้ชที่เลือกจาก Dropdown
+  hospitalIds?: string[],      // สำหรับกรองสิทธิ์การเข้าถึง (เดิม)
+  hospitalId?: string,         // ใหม่: กรองตามโรงพยาบาลที่เลือกในฟิลเตอร์
+  coachId?: string             // ใหม่: กรองตามโค้ชที่เลือกในฟิลเตอร์
 ) {
   try {
     console.log('🔍 [getPatientList] params:', { search, pamLevel, hospitalIds, hospitalId, coachId });
     
-    // ✅ แก้ไข: ระบุชื่อ FK (!foreign_key_name) เพื่อแก้ปัญหา Ambiguity
-    // profiles_id_fkey = ผู้ป่วย
-    // profiles_coach_id_fkey = โค้ช
-    // profiles_created_by_fkey = ผู้สร้าง
-    // profiles_hospital_id_fkey = โรงพยาบาล
+    // ✅ แก้ไข: ระบุ foreign key name ให้ชัดเจนทุกจุด
     let query = supabase
       .from('profiles')
       .select(`
@@ -237,29 +240,29 @@ export async function getPatientList(
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    // 1. กรองตามสิทธิ์ (Base Permission)
+    // 1. กรองตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (สิทธิ์พื้นฐาน - ไม่แสดงใน UI)
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
-    // 2. กรองตามโรงพยาบาลที่เลือกใน UI (Filter)
+    // 2. ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกจากฟิลเตอร์ (แสดงผล)
     if (hospitalId && hospitalId !== 'all') {
       query = query.eq('hospital_id', hospitalId);
     }
 
-    // 3. กรองตามโค้ชที่เลือกใน UI (Filter)
+    // 3. ✅ ใหม่: กรองตามโค้ชที่เลือกจากฟิลเตอร์
     if (coachId && coachId !== 'all') {
       query = query.eq('coach_id', coachId);
     }
 
-    // 4. กรองคำค้นหา
+    // 4. กรองตามคำค้นหา
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
-    // 5. กรอง PAM Level
+    // 5. กรองตาม PAM Level
     if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }
@@ -273,14 +276,17 @@ export async function getPatientList(
 
     console.log('✅ [getPatientList] Loaded:', data?.length || 0, 'patients');
 
-    // จัดรูปแบบข้อมูลก่อนส่งกลับไป
+    // ✅ จัดรูปแบบข้อมูลให้พร้อมใช้งานใน UI
     return data?.map(patient => ({
       ...patient,
+      // สร้าง full_name จาก first_name + last_name
       full_name: patient.first_name && patient.last_name
         ? `${patient.first_name} ${patient.last_name}`
         : '',
+      // ชื่อผู้สร้างบันทึก
       created_by_name: patient.creator?.full_name_th || '-',
-      coach_name: patient.coaches?.full_name_th || null, // ดึงชื่อโค้ชจาก alias 'coaches'
+      // ✅ ชื่อโค้ช (จาก alias 'coaches' ที่ join ไว้)
+      coach_name: patient.coaches?.full_name_th || null,
     })) || [];
     
   } catch (err) {
