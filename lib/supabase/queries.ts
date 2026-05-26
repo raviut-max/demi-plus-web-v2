@@ -197,76 +197,66 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 
+// =====================================================
+// 👥 Patient Management Functions
+// =====================================================
+
 /**
  * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
- * แก้ไขให้ถูกต้องตาม FK: profiles.coach_id -> users.id -> doctors.user_id
  */
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
-  hospitalIds?: string[],
-  filterHospitalId?: string,      // ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกใน Dropdown
-  filterCoachId?: string          // ✅ ใหม่: กรองตามโค้ชที่เลือกใน Dropdown
+  hospitalIds?: string[]
 ) {
   try {
+    console.log('🔍 [getPatientList] params:', { search, pamLevel, hospitalIds });
+    
+    // ✅ แก้ไข: ใช้ explicit join โดยไม่ใช้ alias ที่ซับซ้อน
     let query = supabase
       .from('profiles')
       .select(`
         *,
-        user_info:users!profiles_id_fkey ( id_card, role, is_active, created_at ),
-        hospitals:hospitals!profiles_hospital_id_fkey ( id, name, code, type ),
-        coaches:users!profiles_coach_id_fkey (
-          id,
-          doctors:doctors!doctors_user_id_fkey ( full_name_th )
-        ),
-        creator:users!users_created_by_fkey (
-          id,
-          doctors:doctors!doctors_user_id_fkey ( full_name_th )
-        )
+        users ( id_card, role, is_active, created_at ),
+        hospitals ( id, name, code, type ),
+        creator:users!profiles_created_by_fkey ( id, full_name_th )
       `, { count: 'exact' })
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    // 1. กรองตามสิทธิ์การเข้าถึงโรงพยาบาล (Permissions)
+    // 1. กรองตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (สิทธิ์พื้นฐาน)
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
-    // 2. กรองตามโรงพยาบาลที่เลือกใน Dropdown UI
-    if (filterHospitalId) {
-      query = query.eq('hospital_id', filterHospitalId);
-    }
-
-    // 3. กรองตามโค้ชที่เลือกใน Dropdown UI
-    if (filterCoachId) {
-      query = query.eq('coach_id', filterCoachId);
-    }
-
-    // 4. กรองตามคำค้นหา
+    // 2. กรองตามคำค้นหา
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
-    // 5. กรองตาม PAM Level
+    // 3. กรองตาม PAM Level
     if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      console.error('❌ [getPatientList] Supabase Error:', error);
+      return [];
+    }
 
-    // ✅ จัดรูปแบบข้อมูลให้ใช้งานง่ายใน UI
+    console.log('✅ [getPatientList] Loaded:', data?.length || 0, 'patients');
+
+    // ✅ จัดรูปแบบข้อมูล
     return data?.map(patient => ({
       ...patient,
       full_name: patient.first_name && patient.last_name 
         ? `${patient.first_name} ${patient.last_name}` 
-        : patient.first_name || patient.last_name || '',
-      // ดึงชื่อโค้ชจาก Nested Object (users -> doctors)
-      coach_name: patient.coaches?.doctors?.full_name_th || '-',
-      // ดึงชื่อผู้สร้างจาก Nested Object
-      created_by_name: patient.creator?.doctors?.full_name_th || '-',
+        : '',
+      created_by_name: patient.creator?.full_name_th || '-',
+      // ✅ coach_id ชี้ไปที่ users.id ดังนั้นต้อง join แยกถ้าต้องการชื่อโค้ช
     })) || [];
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
@@ -2442,5 +2432,19 @@ export async function checkPatientExists(idCard: string): Promise<{ exists: bool
   } catch (err) {
     console.error('❌ checkPatientExists Error:', err);
     return { exists: false, isPatient: false };
+  }
+}
+
+// เพิ่มฟังก์ชันนี้ใน queries.ts
+export async function getCoachName(coachId: string) {
+  try {
+    const { data } = await supabase
+      .from('doctors')
+      .select('full_name_th')
+      .eq('user_id', coachId)
+      .single();
+    return data?.full_name_th || '-';
+  } catch {
+    return '-';
   }
 }
