@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 25 พฤษภาคม 2569
- * ⚠️ คำเตือน: Pre-flight Validation - ตรวจสอบบัตรซ้ำที่ Preview + ล็อคการเลือก
+ * ⚠️ คำเตือน: Pre-flight Validation + Debug Log สำหรับตรวจสอบบัตรซ้ำ
  * ============================================================================
  */
 
@@ -280,6 +280,7 @@ export default function ImportExcelPage() {
   }, [rawData, excelHeaders]);
 
   const buildPreview = useCallback(() => {
+    console.log(`\n🚀 [buildPreview] เริ่มสร้าง Preview จาก ${rawData.length} แถว...`);
     const mapped = rawData.map((row, idx) => {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
@@ -297,10 +298,15 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ: Internal -> Session -> DB)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ + Debug)
   // =====================================================
   const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number>) => {
     const errors: string[] = [];
+    
+    console.log(`\n🔍 [validateRow] เริ่มตรวจสอบแถวที่ ${rowIndex + 1}`);
+    console.log(`   📋 ID Card: "${row.id_card}"`);
+    console.log(`   📋 duplicateMap size: ${duplicateMap?.size || 0}`);
+    console.log(`   📋 importedIds size: ${importedIds.size}`);
     
     // 1. ตรวจสอบความถูกต้องพื้นฐาน (Required fields, formats)
     STANDARD_FIELDS.forEach(field => {
@@ -341,31 +347,55 @@ export default function ImportExcelPage() {
 
     // 3. ✅ ตรวจสอบเลขบัตรซ้ำกับตาราง users (Internal -> Session -> DB)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
+      console.log(`   🔐 [validateRow] เริ่มตรวจสอบบัตรซ้ำ: "${row.id_card}"`);
+      
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
         
         // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (ใช้ Map ที่สร้างไว้)
+        console.log(`   📁 [Level 1] ตรวจสอบซ้ำภายในไฟล์...`);
         if (duplicateMap && duplicateMap.has(row.id_card)) {
           const firstIdx = duplicateMap.get(row.id_card);
+          console.log(`   ⚠️ [Level 1] พบซ้ำในไฟล์! แถวแรกอยู่ที่ index: ${firstIdx}`);
           if (firstIdx !== undefined && firstIdx !== rowIndex) {
-            errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`);
+            const errorMsg = `เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`;
+            errors.push(errorMsg);
+            console.log(`   ❌ [Level 1] เพิ่ม error: ${errorMsg}`);
           }
+        } else {
+          console.log(`   ✅ [Level 1] ไม่พบซ้ำภายในไฟล์`);
         }
+        
         // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้ (Set.has() = O(1))
-        else if (importedIds.has(row.id_card)) {
-          errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
-        } 
+        console.log(`   💾 [Level 2] ตรวจสอบซ้ำใน Session cache...`);
+        if (!errors.length && importedIds.has(row.id_card)) {
+          const errorMsg = 'เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)';
+          errors.push(errorMsg);
+          console.log(`   ❌ [Level 2] พบซ้ำใน Session! เพิ่ม error: ${errorMsg}`);
+        } else {
+          console.log(`   ✅ [Level 2] ไม่พบซ้ำใน Session cache`);
+        }
+        
         // 3.3 ✅ ตรวจสอบกับฐานข้อมูลตาราง users (ใช้ idx_users_id_card)
-        else {
+        console.log(`   🗄️  [Level 3] ตรวจสอบซ้ำกับฐานข้อมูล...`);
+        if (!errors.length) {
           try {
+            console.log(`   🔄 [Level 3] เรียก checkPatientExists("${row.id_card}")...`);
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
+            
             // ✅ ใช้ checkPatientExists ที่ query ไปยังตาราง users โดยตรง
             const exists = await checkPatientExists(row.id_card);
+            console.log(`   📊 [Level 3] ผลลัพธ์: exists = ${exists}`);
+            
             if (exists) {
-              errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+              const errorMsg = 'เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว';
+              errors.push(errorMsg);
+              console.log(`   ❌ [Level 3] พบซ้ำในฐานข้อมูล! เพิ่ม error: ${errorMsg}`);
+            } else {
+              console.log(`   ✅ [Level 3] ไม่พบซ้ำในฐานข้อมูล`);
             }
           } catch (err) { 
-            console.warn('⚠️ DB Check Failed:', err); 
+            console.error(`   ⚠️ [Level 3] DB Check Failed:`, err);
           }
           finally {
             setCheckingDuplicates(prev => { 
@@ -375,29 +405,52 @@ export default function ImportExcelPage() {
             });
           }
         }
+      } else {
+        console.log(`   ⏭️  [Skip] ข้ามการตรวจสอบ เพราะแถวนี้ถูกนำเข้าแล้ว`);
       }
+    } else {
+      console.log(`   ⏭️  [Skip] ข้ามการตรวจสอบบัตรซ้ำ เพราะ id_card ไม่ถูกต้องหรือไม่มี`);
     }
+    
+    console.log(`   📋 [validateRow] สรุป error ทั้งหมด:`, errors);
+    console.log(`----------------------------------------\n`);
+    
     return errors;
   };
 
-  // ✅ ฟังก์ชันรัน Validation ทั้งหมด (สร้าง duplicateMap แล้วส่งไปให้ validateRow)
+  // ✅ ฟังก์ชันรัน Validation ทั้งหมด (สร้าง duplicateMap + Debug)
   const runValidation = async (data: any[]) => {
+    console.log(`\n🚀 [runValidation] เริ่มตรวจสอบ ${data.length} แถว...`);
     const errors: Record<number, string[]> = {};
     
     // สร้าง Map เพื่อเก็บตำแหน่งแรกของแต่ละ ID (O(n)) สำหรับตรวจสอบซ้ำภายในไฟล์
+    console.log(`\n📊 [runValidation] ขั้นตอนที่ 1: สร้าง firstOccurrence Map...`);
     const firstOccurrence = new Map<string, number>();
+    
     data.forEach((r, i) => {
-        if (r.id_card && validateThaiIdCard(r.id_card)) {
-            if (!firstOccurrence.has(r.id_card)) {
-                firstOccurrence.set(r.id_card, i);
-            }
+      if (r.id_card && validateThaiIdCard(r.id_card)) {
+        if (!firstOccurrence.has(r.id_card)) {
+          firstOccurrence.set(r.id_card, i);
+          console.log(`   ✅ เพิ่ม ID "${r.id_card}" ที่ index ${i} (ครั้งแรก)`);
+        } else {
+          const firstIdx = firstOccurrence.get(r.id_card);
+          console.log(`   ⚠️ พบ ID ซ้ำ "${r.id_card}" ที่ index ${i} (ซ้ำกับ index ${firstIdx})`);
         }
+      }
     });
+    
+    console.log(`\n📊 [runValidation] firstOccurrence Map มี ${firstOccurrence.size} รายการ`);
+    console.log(`   Map contents:`, Object.fromEntries(firstOccurrence));
 
     // ✅ ตรวจสอบทุกแถว โดยส่ง duplicateMap เข้าไปด้วย
+    console.log(`\n🔍 [runValidation] ขั้นตอนที่ 2: ตรวจสอบแต่ละแถว...`);
     for (let idx = 0; idx < data.length; idx++) {
-        errors[idx] = await validateRow(data[idx], idx, firstOccurrence);
+      console.log(`\n   ━━ แถวที่ ${idx + 1} ━━`);
+      errors[idx] = await validateRow(data[idx], idx, firstOccurrence);
     }
+    
+    console.log(`\n✅ [runValidation] เสร็จสิ้นการตรวจสอบทั้งหมด`);
+    console.log(`   จำนวนแถวที่มี error: ${Object.values(errors).filter(e => e.length > 0).length}`);
     
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
@@ -512,6 +565,7 @@ export default function ImportExcelPage() {
       const result = await importPatientsBatch([data], user.id);
       if (result.success > 0) {
         // ✅ อัปเดต ImportedIds และล็อคแถว
+        console.log(`✅ [handleImportSingleRow] นำเข้าสำเร็จ! เพิ่ม ID "${row.id_card}" ลง importedIds`);
         setImportedIds(prev => new Set(prev).add(row.id_card));
         setPreviewData(prev => {
           const next = [...prev];
@@ -610,6 +664,7 @@ export default function ImportExcelPage() {
       if (result.success > 0) {
         const successfulItems = selectedData.slice(0, result.success);
         const newIds = successfulItems.map(item => item.id_card);
+        console.log(`✅ [handleImport] นำเข้าสำเร็จ ${result.success} รายการ! เพิ่ม ${newIds.length} ID ลง importedIds`);
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
         
         setPreviewData(prev => prev.map(r => {
