@@ -1,18 +1,16 @@
 /**
  * ============================================================================
- * 📄 ไฟล์: page.tsx (สมบูรณ์ final)
- * - ตัดคำนำหน้าโรงพยาบาล/รพ. ออกก่อนจับคู่
- * - error โรงพยาบาลแจ้งทั้งชื่อเดิมและชื่อที่ clean แล้ว
- * - แสดงเฉพาะแถวซ้ำได้, error ละเอียดทุกฟิลด์
- * - เพิ่ม dropdown เลือกโรงพยาบาลและโค้ชใน modal เมื่อไม่พบข้อมูล
- * - โค้ชจะถูกกรองตามเครือข่ายโรงพยาบาลที่เลือก (แม่ข่าย+ลูกข่าย)
+ * 📄 ไฟล์: page.tsx (Final - Fixed Build Error)
+ * - แก้ไข syntax error ที่เกิดจาก JSX ที่ไม่ถูกต้อง
+ * - เพิ่ม dropdown เลือกโรงพยาบาลและโค้ชเมื่อไม่พบข้อมูล
+ * - โค้ชจะถูกกรองตามเครือข่ายโรงพยาบาล (แม่ข่าย+ลูกข่าย)
  * ============================================================================
  */
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { 
-  checkSession, 
+import {
+  checkSession,
   validateThaiIdCard,
   getAllValidProvinces,
   checkPatientExists,
@@ -20,9 +18,9 @@ import {
   getCoachesWithHospitals,
   getHospitalsWithHierarchy
 } from '@/lib/supabase/queries';
-import { 
-  Upload, AlertCircle, Loader2, ArrowLeft, 
-  CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X, 
+import {
+  Upload, AlertCircle, Loader2, ArrowLeft,
+  CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X,
   Hospital, UserCheck, Save, Download, CreditCard, Zap
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -154,7 +152,6 @@ const validateProvinceOnly = (province: string, validProvinces: string[]) => {
   return { valid: false, errors: [`จังหวัด "${province}" ไม่ถูกต้อง${suggestionText}`] };
 };
 
-// Helper เอา network hospital ids (รวมแม่+ลูก)
 const getNetworkHospitalIds = (hospitalId: string, hospitals: any[]): string[] => {
   const hospital = hospitals.find(h => h.id === hospitalId);
   if (!hospital) return [hospitalId];
@@ -186,13 +183,11 @@ export default function ImportExcelPage() {
   const [success, setSuccess] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
-  const [readyToImportIndex, setReadyToImportIndex] = useState<number | null>(null);
   const [importResult, setImportResult] = useState<any>(null);
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [modalCoaches, setModalCoaches] = useState<Record<number, any[]>>({});
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
-  // สำหรับเก็บค่าที่เลือกใน modal (ชั่วคราว)
   const [tempHospitalId, setTempHospitalId] = useState<Record<number, string>>({});
   const [tempCoachId, setTempCoachId] = useState<Record<number, string>>({});
 
@@ -201,8 +196,10 @@ export default function ImportExcelPage() {
     if (!userData) router.push('/admin/login');
     else if (!['admin','doctor','helper','osm'].includes(userData.role)) router.push('/admin/patients');
     else { setUser(userData); loadNetworkData(userData.id); }
-  }, []);
+  }, [router]);
+
   useEffect(() => { getAllValidProvinces().then(setValidProvinces); }, []);
+
   const loadNetworkData = async (userId: string) => {
     try {
       const allHospitals = await getHospitalsWithHierarchy();
@@ -211,6 +208,7 @@ export default function ImportExcelPage() {
       setCoaches(allCoaches);
     } catch (err) { console.error(err); }
   };
+
   useEffect(() => {
     if (rawData.length && excelHeaders.length) {
       const autoMap: Record<string,string> = {};
@@ -429,7 +427,6 @@ export default function ImportExcelPage() {
         else setError(`นำเข้าได้ ${result.success} จาก ${selectedData.length} รายการ`);
       }
       if (result.errors?.length) {
-        // แปลง backend errors ให้อยู่ในรูปแบบเดียวกับ frontend
         const mappedErrors = result.errors.map((err: any, idx: number) => ({
           row: err.row,
           id_card: err.id_card,
@@ -443,7 +440,6 @@ export default function ImportExcelPage() {
           fixed: false
         }));
         setImportResult({ success: result.success, failed: result.failed, errors: mappedErrors, successRecords: result.successRecords || [] });
-        // ตั้งค่าเริ่มต้น tempHospitalId, tempCoachId
         const initialTempHosp: Record<number,string> = {};
         const initialTempCoach: Record<number,string> = {};
         mappedErrors.forEach((err: any, idx: number) => {
@@ -457,7 +453,6 @@ export default function ImportExcelPage() {
     finally { setImporting(false); }
   };
 
-  // ฟังก์ชันสำหรับบันทึกการแก้ไขใน modal
   const handleFixHospital = (errorIdx: number) => {
     const selectedHospId = tempHospitalId[errorIdx];
     if (!selectedHospId) {
@@ -466,7 +461,6 @@ export default function ImportExcelPage() {
     }
     const hospital = hospitals.find(h => h.id === selectedHospId);
     if (!hospital) return;
-    // อัปเดต previewData
     const errorItem = importResult.errors[errorIdx];
     const rowIndex = errorItem.row - 1;
     setPreviewData(prev => {
@@ -474,20 +468,16 @@ export default function ImportExcelPage() {
       newData[rowIndex] = { ...newData[rowIndex], hospital_name: hospital.name };
       return newData;
     });
-    // รัน validation ใหม่
     setTimeout(() => runValidation(previewData), 100);
-    // อัปเดต importResult ว่า fixed แล้ว แต่ยังไม่สมบูรณ์ (อาจต้องเลือก coach ต่อ)
     const newErrors = [...importResult.errors];
     newErrors[errorIdx] = { ...newErrors[errorIdx], hospital_id: selectedHospId, fixed: false };
     setImportResult({ ...importResult, errors: newErrors });
-    // โหลดโค้ชสำหรับโรงพยาบาลนี้ (เครือข่าย)
     const networkIds = getNetworkHospitalIds(selectedHospId, hospitals);
     const networkCoaches = coaches.filter(c => {
       const coachHospId = c.users?.hospital_id;
       return coachHospId && networkIds.includes(coachHospId);
     });
     setModalCoaches(prev => ({ ...prev, [errorIdx]: networkCoaches }));
-    // เคลียร์ coach ที่เลือกไว้
     setTempCoachId(prev => ({ ...prev, [errorIdx]: '' }));
   };
 
@@ -536,7 +526,6 @@ export default function ImportExcelPage() {
         setImportedIds(prev => new Set(prev).add(cleanIdCard(row.id_card)));
         setPreviewData(prev => { const next = [...prev]; next[rowIndex] = { ...next[rowIndex], _status: 'success', _imported: true, _selected: false }; return next; });
         setSelectedRows(prev => { const next = new Set(prev); next.delete(rowIndex); return next; });
-        // ลบ error นี้จาก importResult
         const newErrors = importResult.errors.filter((_: any, i: number) => i !== errorIdx);
         setImportResult({ ...importResult, errors: newErrors, success: importResult.success + 1, failed: importResult.failed - 1 });
         if (newErrors.length === 0) setImportResult(null);
@@ -550,7 +539,7 @@ export default function ImportExcelPage() {
     }
   };
 
-  const handleBackToPreview = () => { setImportResult(null); setStep('preview'); setReadyToImportIndex(null); };
+  const handleBackToPreview = () => { setImportResult(null); setStep('preview'); };
   const handleExitImport = () => { setImportResult(null); setSelectedRows(new Set()); router.back(); };
   const handleRetryFailed = () => {
     if (!importResult || importResult.errors.length === 0) return;
@@ -559,8 +548,24 @@ export default function ImportExcelPage() {
     setImportResult(null); setStep('preview');
   };
 
-  if (success) return <div className="min-h-screen flex items-center justify-center"><CheckCircle className="w-16 h-16 text-green-500" /><p className="ml-2">บันทึกสำเร็จ กำลังไป...</p></div>;
-  if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
+  if (success) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+          <p className="text-lg">บันทึกสำเร็จ กำลังไปยังรายการผู้ป่วย...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin w-8 h-8 text-blue-500" />
+      </div>
+    );
+  }
 
   const displayFields = STANDARD_FIELDS.filter(f => Object.values(headerMapping).includes(f.key));
   const filteredData = getFilteredPreviewData();
@@ -568,26 +573,41 @@ export default function ImportExcelPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow px-4 py-6">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 mb-4"><ArrowLeft size={16}/> กลับ</button>
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 mb-4">
+          <ArrowLeft size={16} /> กลับ
+        </button>
         <h1 className="text-2xl font-bold">📥 นำเข้าผู้ป่วยจาก Excel</h1>
       </div>
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {error && <div className="bg-red-50 p-3 rounded flex justify-between"><span>{error}</span><button onClick={()=>setError('')}>✕</button></div>}
+        {error && (
+          <div className="bg-red-50 p-3 rounded flex justify-between items-center">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="text-red-600">✕</button>
+          </div>
+        )}
         {step === 'upload' && (
           <div className="bg-white rounded-xl p-6 border">
-            <div className="border-dashed border-2 p-8 text-center cursor-pointer" onClick={()=>document.getElementById('file')?.click()}>
-              <input id="file" type="file" accept=".xlsx,.xls" className="hidden" onChange={e=>e.target.files?.[0] && processFile(e.target.files[0])} />
-              <Upload className="mx-auto mb-2 text-gray-400" size={40}/>
+            <div
+              className="border-dashed border-2 p-8 text-center cursor-pointer hover:border-blue-500 transition"
+              onClick={() => document.getElementById('file')?.click()}
+            >
+              <input id="file" type="file" accept=".xlsx,.xls" className="hidden" onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} />
+              <Upload className="mx-auto mb-2 text-gray-400" size={40} />
               <p>คลิกหรือลากไฟล์ Excel มาที่นี่</p>
             </div>
-            {loading && <Loader2 className="animate-spin mx-auto mt-4"/>}
+            {loading && <Loader2 className="animate-spin mx-auto mt-4" />}
           </div>
         )}
         {step === 'mapping' && (
           <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> ตรวจสอบการจับคู่คอลัมน์</h2>
-              <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">ถัดไป: Preview & Validation →</button>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span>
+                ตรวจสอบการจับคู่คอลัมน์
+              </h2>
+              <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">
+                ถัดไป: Preview & Validation →
+              </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
               {excelHeaders.map(header => {
@@ -622,59 +642,127 @@ export default function ImportExcelPage() {
           <>
             <div className="bg-white p-4 rounded shadow flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={previewData.filter(isRowSelectable).length>0 && selectedRows.size === previewData.filter(isRowSelectable).length} onChange={e=>selectAll(e.target.checked)} disabled={!previewData.filter(isRowSelectable).length}/> เลือกทั้งหมด (ไม่รวมแถวซ้ำ/error)</label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={previewData.filter(isRowSelectable).length > 0 && selectedRows.size === previewData.filter(isRowSelectable).length}
+                    onChange={e => selectAll(e.target.checked)}
+                    disabled={!previewData.filter(isRowSelectable).length}
+                  />
+                  เลือกทั้งหมด (ไม่รวมแถวซ้ำ/error)
+                </label>
                 <span>เลือก {selectedRows.size} แถว</span>
-                <button onClick={()=>setShowOnlyDuplicates(!showOnlyDuplicates)} className={`px-3 py-1 rounded text-sm ${showOnlyDuplicates ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-100 border'}`}>
-                  <AlertTriangle className="inline w-4 h-4 mr-1"/>{showOnlyDuplicates ? 'แสดงทั้งหมด' : 'แสดงเฉพาะแถวที่ซ้ำ'}
+                <button
+                  onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
+                  className={`px-3 py-1 rounded text-sm ${showOnlyDuplicates ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-100 border'}`}
+                >
+                  <AlertTriangle className="inline w-4 h-4 mr-1" />
+                  {showOnlyDuplicates ? 'แสดงทั้งหมด' : 'แสดงเฉพาะแถวที่ซ้ำ'}
                 </button>
               </div>
               <div className="flex gap-2">
-                <button onClick={()=>runValidation(previewData)} className="border px-3 py-1 rounded">ตรวจสอบใหม่</button>
+                <button onClick={() => runValidation(previewData)} className="border px-3 py-1 rounded">ตรวจสอบใหม่</button>
                 <button onClick={handleExportToExcel} className="bg-green-600 text-white px-3 py-1 rounded">📥 ส่งออก Excel</button>
-                <button onClick={()=>setStep('mapping')} className="border px-3 py-1 rounded">แก้ไขการจับคู่</button>
-                <button disabled={!selectedRows.size || hasErrorsInSelected || importing} onClick={handleImport} className="bg-blue-600 text-white px-4 py-1 rounded disabled:opacity-50">🚀 นำเข้า ({selectedRows.size})</button>
+                <button onClick={() => setStep('mapping')} className="border px-3 py-1 rounded">แก้ไขการจับคู่</button>
+                <button disabled={!selectedRows.size || hasErrorsInSelected || importing} onClick={handleImport} className="bg-blue-600 text-white px-4 py-1 rounded disabled:opacity-50">
+                  🚀 นำเข้า ({selectedRows.size})
+                </button>
               </div>
             </div>
             <div className="bg-white rounded shadow overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-100">
                   <tr>
-                    <th className="p-2 sticky left-0 bg-gray-100">เลือก</th><th className="p-2 sticky left-10 bg-gray-100">สถานะ</th>
-                    {displayFields.map(f=><th key={f.key} className="p-2 min-w-[140px]">{f.label}{f.required&&'*'}{f.key==='birth_date'&&<button onClick={swapAllBirthDates} className="ml-2 text-[10px] bg-blue-100 px-1 rounded" title="สลับวัน/เดือนทั้งคอลัมน์">สลับวัน</button>}</th>)}
+                    <th className="p-2 sticky left-0 bg-gray-100">เลือก</th>
+                    <th className="p-2 sticky left-10 bg-gray-100">สถานะ</th>
+                    {displayFields.map(f => (
+                      <th key={f.key} className="p-2 min-w-[140px]">
+                        {f.label}{f.required && '*'}
+                        {f.key === 'birth_date' && (
+                          <button onClick={swapAllBirthDates} className="ml-2 text-[10px] bg-blue-100 px-1 rounded" title="สลับวัน/เดือนทั้งคอลัมน์">
+                            สลับวัน
+                          </button>
+                        )}
+                      </th>
+                    ))}
                     <th className="p-2 min-w-[200px] text-red-600">ข้อผิดพลาด (รายละเอียด)</th>
-                 </tr>
+                  </tr>
                 </thead>
                 <tbody>
-                  {filteredData.map((row, idx) => {
+                  {filteredData.map((row) => {
                     const originalIndex = previewData.findIndex(r => r._rowIndex === row._rowIndex);
                     const isImported = row._imported || row._status === 'success';
                     const selectable = isRowSelectable(row);
                     return (
-                      <tr key={originalIndex} className={`border-b ${isImported?'bg-green-50':(row._errors?.length?'bg-red-50':'')}`}>
-                        <td className="p-2 text-center sticky left-0 bg-white"><input type="checkbox" checked={row._selected} disabled={!selectable} onChange={()=>selectable && toggleSelectRow(originalIndex)}/></td>
-                        <td className="p-2 text-center sticky left-10 bg-white">{isImported?<CheckCircle className="text-green-600"/>:(row._errors?.length?<XCircle className="text-red-500"/>:<CheckCircle className="text-green-500"/>)}</td>
-                        {displayFields.map(field=>{
+                      <tr key={originalIndex} className={`border-b ${isImported ? 'bg-green-50' : (row._errors?.length ? 'bg-red-50' : '')}`}>
+                        <td className="p-2 text-center sticky left-0 bg-white">
+                          <input type="checkbox" checked={row._selected} disabled={!selectable} onChange={() => selectable && toggleSelectRow(originalIndex)} />
+                        </td>
+                        <td className="p-2 text-center sticky left-10 bg-white">
+                          {isImported ? <CheckCircle className="text-green-600" /> : (row._errors?.length ? <XCircle className="text-red-500" /> : <CheckCircle className="text-green-500" />)}
+                        </td>
+                        {displayFields.map(field => {
                           const isEditing = editingCell?.row === originalIndex && editingCell?.key === field.key;
                           const val = row[field.key] || '';
                           return (
                             <td key={field.key} className="p-1 relative">
                               {isEditing ? (
-                                field.key==='birth_date'?<input autoFocus value={editValue} onChange={e=>setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown} className="border-2 border-blue-400 rounded px-1"/>:
-                                field.inputType==='select'?<select autoFocus value={editValue} onChange={e=>setEditValue(e.target.value)} onBlur={saveEdit}><option value="">--</option>{field.options?.map(o=><option key={o}>{o}</option>)}</select>:
-                                <input autoFocus type={field.inputType==='number'?'number':'text'} value={editValue} onChange={e=>setEditValue(e.target.value)} onBlur={saveEdit} className="border-2 border-blue-400 rounded px-1"/>
+                                field.key === 'birth_date' ? (
+                                  <input autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={handleCellKeyDown} className="border-2 border-blue-400 rounded px-1" />
+                                ) : field.inputType === 'select' ? (
+                                  <select autoFocus value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit}>
+                                    <option value="">--</option>
+                                    {field.options?.map(o => <option key={o}>{o}</option>)}
+                                  </select>
+                                ) : (
+                                  <input autoFocus type={field.inputType === 'number' ? 'number' : 'text'} value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} className="border-2 border-blue-400 rounded px-1" />
+                                )
                               ) : (
-                                <div onClick={()=>selectable && startEdit(originalIndex, field.key)} className={`px-1 py-1 rounded flex items-center gap-1 ${selectable?'cursor-text hover:bg-blue-50':''}`}>
-                                  {field.key==='birth_date'?<><span className={!val?'text-gray-400':''}>{val||'คลิกแก้ไข'}</span>{val&&<button onClick={e=>{e.stopPropagation(); const swapped = swapDayMonth(String(val)); setPreviewData(p=>{const n=[...p]; n[originalIndex]={...n[originalIndex], birth_date:swapped}; runValidation(n); return n;});}} className="ml-1 text-blue-500 text-xs">🔁</button>}</>:<span className={!val?'text-gray-400':''}>{val||'คลิกแก้ไข'}</span>}
-                                  <Edit3 size={12} className="text-gray-300 ml-auto"/>
+                                <div onClick={() => selectable && startEdit(originalIndex, field.key)} className={`px-1 py-1 rounded flex items-center gap-1 ${selectable ? 'cursor-text hover:bg-blue-50' : ''}`}>
+                                  {field.key === 'birth_date' ? (
+                                    <>
+                                      <span className={!val ? 'text-gray-400' : ''}>{val || 'คลิกแก้ไข'}</span>
+                                      {val && (
+                                        <button
+                                          onClick={e => {
+                                            e.stopPropagation();
+                                            const swapped = swapDayMonth(String(val));
+                                            setPreviewData(p => {
+                                              const n = [...p];
+                                              n[originalIndex] = { ...n[originalIndex], birth_date: swapped };
+                                              runValidation(n);
+                                              return n;
+                                            });
+                                          }}
+                                          className="ml-1 text-blue-500 text-xs"
+                                        >
+                                          🔁
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <span className={!val ? 'text-gray-400' : ''}>{val || 'คลิกแก้ไข'}</span>
+                                  )}
+                                  <Edit3 size={12} className="text-gray-300 ml-auto" />
                                 </div>
                               )}
-                            </table>
+                            </td>
                           );
                         })}
                         <td className="p-2 align-top bg-white sticky right-0 border-l">
-                          {isImported?'✓ สำเร็จ':(row._errors?.length?row._errors.map((e:string,i)=>(
-                            <div key={i} className={`text-xs p-1 rounded mb-1 ${e.includes('มีอยู่ในระบบแล้ว')||e.includes('ซ้ำ')?'bg-red-100 text-red-700':'bg-orange-100'}`}><AlertTriangle size={12} className="inline mr-1"/>{e}</div>
-                          )):(checkingDuplicates.has(originalIndex)?<Loader2 className="animate-spin text-blue-500"/>:'✓ ผ่าน'))}
+                          {isImported ? (
+                            '✓ สำเร็จ'
+                          ) : row._errors?.length ? (
+                            row._errors.map((e: string, i: number) => (
+                              <div key={i} className={`text-xs p-1 rounded mb-1 ${e.includes('มีอยู่ในระบบแล้ว') || e.includes('ซ้ำ') ? 'bg-red-100 text-red-700' : 'bg-orange-100'}`}>
+                                <AlertTriangle size={12} className="inline mr-1" /> {e}
+                              </div>
+                            ))
+                          ) : checkingDuplicates.has(originalIndex) ? (
+                            <Loader2 className="animate-spin text-blue-500" />
+                          ) : (
+                            '✓ ผ่าน'
+                          )}
                         </td>
                       </tr>
                     );
@@ -690,7 +778,9 @@ export default function ImportExcelPage() {
           <div className="bg-white rounded-xl max-w-3xl w-full p-6 max-h-[90vh] overflow-auto">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-xl font-bold">⚠️ แก้ไขข้อมูลก่อนนำเข้า</h3>
-              <button onClick={()=>setImportResult(null)} className="text-gray-500 hover:text-gray-700"><X size={24}/></button>
+              <button onClick={() => setImportResult(null)} className="text-gray-500 hover:text-gray-700">
+                <X size={24} />
+              </button>
             </div>
             <p className="mb-4 text-gray-600">ไม่พบโรงพยาบาลหรือโค้ชในระบบ กรุณาเลือกข้อมูลที่ถูกต้องด้านล่าง</p>
             <div className="space-y-6">
@@ -738,7 +828,7 @@ export default function ImportExcelPage() {
                         disabled={!tempCoachId[idx]}
                         className="mt-2 bg-green-600 text-white px-4 py-2 rounded disabled:opacity-50"
                       >
-                        บันทึกโค้ชและนำเข้า
+                        บันทึกโค้ช
                       </button>
                       {!modalCoaches[idx] && err.hospital_id && (
                         <button
