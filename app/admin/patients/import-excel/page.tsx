@@ -1,9 +1,11 @@
 /**
  * ============================================================================
- * 📄 ไฟล์: page.tsx (Final - Fixed Build Error)
- * - แก้ไข syntax error ที่เกิดจาก JSX ที่ไม่ถูกต้อง
+ * 📄 ไฟล์: page.tsx (Final - Full Version)
+ * - ตัดคำนำหน้า "โรงพยาบาล", "รพ", "รพ." ออกจากทั้งชื่อใน Excel และฐานข้อมูลก่อนจับคู่
  * - เพิ่ม dropdown เลือกโรงพยาบาลและโค้ชเมื่อไม่พบข้อมูล
- * - โค้ชจะถูกกรองตามเครือข่ายโรงพยาบาล (แม่ข่าย+ลูกข่าย)
+ * - โค้ชจะถูกกรองตามเครือข่ายโรงพยาบาล (แม่ข่าย+ลูกข่าย) ที่เลือก
+ * - แสดง error ละเอียดทุกฟิลด์
+ * - ปุ่มแสดงเฉพาะแถวที่ซ้ำ
  * ============================================================================
  */
 'use client';
@@ -20,7 +22,7 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft,
-  CheckCircle, XCircle, Edit3, AlertTriangle, ShieldAlert, RotateCcw, X,
+  CheckCircle, XCircle, Edit3, AlertTriangle, X,
   Hospital, UserCheck, Save, Download, CreditCard, Zap
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -59,12 +61,11 @@ const STANDARD_FIELDS = [
 ];
 
 // ========== Helper functions ==========
+// ฟังก์ชันตัดคำนำหน้าโรงพยาบาล (ใช้ทั้งกับข้อมูลใน Excel และชื่อใน DB)
 const stripHospitalPrefix = (text: string): string => {
   if (!text) return '';
   let clean = text.trim().toLowerCase();
-  clean = clean.replace(/โรงพยาบาล/g, '');
-  clean = clean.replace(/รพ\.?/g, '');
-  clean = clean.replace(/รพสต\.?/g, '');
+  clean = clean.replace(/^(โรงพยาบาล|รพ\.?|รพสต\.?)/g, '');
   clean = clean.replace(/\s+/g, ' ');
   return clean.trim();
 };
@@ -96,9 +97,13 @@ const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
   const cleanInput = stripHospitalPrefix(hospitalName);
   let bestMatch = null, bestScore = 0;
   hospitals.forEach(h => {
+    // ตัดคำนำหน้าชื่อโรงพยาบาลในฐานข้อมูลด้วย
     const cleanDb = stripHospitalPrefix(h.name);
     const score = calculateSimilarity(cleanInput, cleanDb);
-    if (score > 0.8 && score > bestScore) { bestScore = score; bestMatch = h; }
+    if (score > 0.75 && score > bestScore) {
+      bestScore = score;
+      bestMatch = h;
+    }
   });
   return bestMatch ? { hospital: bestMatch, similarity: bestScore, cleanedName: cleanInput } : null;
 };
@@ -143,12 +148,12 @@ const swapDayMonth = (dateStr: string): string => {
 const cleanIdCard = (id: string): string => (id || '').replace(/[-\s]/g, '');
 
 const validateProvinceOnly = (province: string, validProvinces: string[]) => {
-  if (!province) return { valid: false, errors: ['จังหวัดเป็นฟิลด์บังคับ กรุณากรอกชื่อจังหวัด'] };
+  if (!province) return { valid: false, errors: ['จังหวัดเป็นฟิลด์บังคับ'] };
   const normInput = normalizeThaiText(province);
   const matched = validProvinces.find(p => normalizeThaiText(p).includes(normInput) || normInput.includes(normalizeThaiText(p)));
   if (matched) return { valid: true, errors: [] };
   const suggestions = validProvinces.filter(p => normalizeThaiText(p).includes(normInput.slice(0,3))).slice(0,3);
-  const suggestionText = suggestions.length ? ` เช่น ${suggestions.join(', ')}` : ' โปรดตรวจสอบชื่อจังหวัดให้ถูกต้อง';
+  const suggestionText = suggestions.length ? ` เช่น ${suggestions.join(', ')}` : '';
   return { valid: false, errors: [`จังหวัด "${province}" ไม่ถูกต้อง${suggestionText}`] };
 };
 
@@ -248,33 +253,32 @@ export default function ImportExcelPage() {
       const val = row[field.key];
       const strVal = String(val ?? '').trim();
       if (field.required && !strVal) {
-        errors.push(`${field.label} เป็นฟิลด์บังคับ (ต้องมีข้อมูล)`);
+        errors.push(`${field.label} เป็นฟิลด์บังคับ`);
         continue;
       }
       if (!strVal) continue;
       if (field.inputType === 'number') {
         const num = parseFloat(strVal);
-        if (isNaN(num)) errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น (พบ "${strVal}")`);
-        else if (field.min !== undefined && num < field.min) errors.push(`${field.label} ${num} น้อยกว่า ${field.min} ${field.label==='น้ำหนัก(กก.)'?'กก.':field.label==='ส่วนสูง(ซม.)'?'ซม.':''} (ค่าต้องอยู่ระหว่าง ${field.min}-${field.max})`);
-        else if (field.max !== undefined && num > field.max) errors.push(`${field.label} ${num} มากกว่า ${field.max} ${field.label==='น้ำหนัก(กก.)'?'กก.':''} (ค่าต้องอยู่ระหว่าง ${field.min}-${field.max})`);
+        if (isNaN(num)) errors.push(`${field.label} ต้องเป็นตัวเลข (พบ "${strVal}")`);
+        else if (field.min !== undefined && num < field.min) errors.push(`${field.label} ${num} น้อยกว่า ${field.min} (ต้องอยู่ระหว่าง ${field.min}-${field.max})`);
+        else if (field.max !== undefined && num > field.max) errors.push(`${field.label} ${num} มากกว่า ${field.max} (ต้องอยู่ระหว่าง ${field.min}-${field.max})`);
       } else if (field.key === 'birth_date') {
         const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
         if (!dateRegex.test(strVal)) {
           errors.push(`รูปแบบวันเกิดไม่ถูกต้อง (ต้องเป็น วว/ดด/ปปปป เช่น 01/01/2568) พบ "${strVal}"`);
         } else {
           const [_, d, m, y] = strVal.match(dateRegex)!;
-          if (parseInt(d)<1 || parseInt(d)>31) errors.push(`วันเกิด: วันไม่ถูกต้อง (${d}) ต้องอยู่ระหว่าง 1-31`);
-          if (parseInt(m)<1 || parseInt(m)>12) errors.push(`วันเกิด: เดือนไม่ถูกต้อง (${m}) ต้องอยู่ระหว่าง 1-12`);
+          if (parseInt(d)<1 || parseInt(d)>31) errors.push(`วันเกิด: วันไม่ถูกต้อง (${d})`);
+          if (parseInt(m)<1 || parseInt(m)>12) errors.push(`วันเกิด: เดือนไม่ถูกต้อง (${m})`);
           if (parseInt(y)<2400 || parseInt(y)>2569) errors.push(`วันเกิด: ปี พ.ศ. ไม่ถูกต้อง (${y}) ต้องอยู่ระหว่าง 2400-2569`);
         }
       } else if (field.inputType === 'select') {
         if (!field.options?.includes(strVal)) {
-          errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')} เท่านั้น (พบ "${strVal}")`);
+          errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')} (พบ "${strVal}")`);
         }
       } else if (field.key === 'id_card') {
-        const isValid = validateThaiIdCard(strVal);
-        if (!isValid) {
-          errors.push(`เลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก และ checksum ตรงกัน) พบ "${strVal}"`);
+        if (!validateThaiIdCard(strVal)) {
+          errors.push(`เลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก) พบ "${strVal}"`);
         }
       }
     }
@@ -290,19 +294,16 @@ export default function ImportExcelPage() {
       if (!isImported) {
         const dupInFile = duplicateMap.get(cleanId)?.filter(i => i !== rowIndex);
         if (dupInFile && dupInFile.length) {
-          errors.push(`เลขบัตรประชาชน ${cleanId} ซ้ำในไฟล์นี้ (แถวที่ ${dupInFile.map(i=>i+1).join(', ')})`);
+          errors.push(`เลขบัตร ${cleanId} ซ้ำในไฟล์ (แถว ${dupInFile.map(i=>i+1).join(',')})`);
         } else if (importedIds.has(cleanId)) {
-          errors.push(`เลขบัตรประชาชน ${cleanId} เพิ่งถูกนำเข้าไปแล้วในรอบนี้ (ไม่สามารถนำเข้าซ้ำได้)`);
+          errors.push(`เลขบัตร ${cleanId} เพิ่งนำเข้าไปแล้ว`);
         } else {
           try {
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
             const { exists, isPatient } = await checkPatientExists(row.id_card);
             if (exists) {
-              if (isPatient) {
-                errors.push(`เลขบัตรประชาชน ${cleanId} มีอยู่ในระบบแล้ว (เป็นผู้ป่วยเดิม ไม่สามารถนำเข้าซ้ำได้)`);
-              } else {
-                errors.push(`เลขบัตรประชาชน ${cleanId} มีอยู่ในระบบแล้ว (เป็นบุคลากร ไม่ใช่ผู้ป่วย)`);
-              }
+              if (isPatient) errors.push(`เลขบัตร ${cleanId} มีในระบบแล้ว (เป็นผู้ป่วยเดิม)`);
+              else errors.push(`เลขบัตร ${cleanId} มีในระบบแล้ว (เป็นบุคลากร)`);
               isPatientDuplicate = isPatient;
             }
           } catch (err) { console.warn(err); }
@@ -380,7 +381,7 @@ export default function ImportExcelPage() {
 
   const isRowSelectable = (row: any) => {
     if (row._imported || row._status === 'success') return false;
-    const dupError = row._errors?.some((e: string) => e.includes('มีอยู่ในระบบแล้ว') || e.includes('ซ้ำในไฟล์') || e.includes('นำเข้าไปแล้ว'));
+    const dupError = row._errors?.some((e: string) => e.includes('มีในระบบแล้ว') || e.includes('ซ้ำในไฟล์'));
     if (dupError && row._isPatientDuplicate) return false;
     return true;
   };
@@ -395,7 +396,7 @@ export default function ImportExcelPage() {
 
   const getFilteredPreviewData = useCallback(() => {
     if (!showOnlyDuplicates) return previewData;
-    return previewData.filter(row => row._errors?.some((e: string) => e.includes('มีอยู่ในระบบแล้ว') || e.includes('ซ้ำในไฟล์')));
+    return previewData.filter(row => row._errors?.some((e: string) => e.includes('มีในระบบแล้ว') || e.includes('ซ้ำในไฟล์')));
   }, [previewData, showOnlyDuplicates]);
 
   const handleExportToExcel = () => {
@@ -412,8 +413,8 @@ export default function ImportExcelPage() {
   };
 
   const handleImport = async () => {
-    if (!selectedRows.size) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
-    if (hasErrorsInSelected) { setError('แถวที่เลือกมีข้อผิดพลาด (ไม่สามารถนำเข้าได้) กรุณาแก้ไขให้ถูกต้องก่อน'); return; }
+    if (!selectedRows.size) { setError('กรุณาเลือกแถว'); return; }
+    if (hasErrorsInSelected) { setError('แถวที่เลือกมีข้อผิดพลาด กรุณาแก้ไข'); return; }
     setImporting(true);
     try {
       const selectedData = previewData.filter((_, i) => selectedRows.has(i)).map(r => ({ ...r, password: r.birth_date }));
@@ -455,10 +456,7 @@ export default function ImportExcelPage() {
 
   const handleFixHospital = (errorIdx: number) => {
     const selectedHospId = tempHospitalId[errorIdx];
-    if (!selectedHospId) {
-      setError('กรุณาเลือกโรงพยาบาล');
-      return;
-    }
+    if (!selectedHospId) { setError('กรุณาเลือกโรงพยาบาล'); return; }
     const hospital = hospitals.find(h => h.id === selectedHospId);
     if (!hospital) return;
     const errorItem = importResult.errors[errorIdx];
@@ -483,10 +481,7 @@ export default function ImportExcelPage() {
 
   const handleFixCoach = (errorIdx: number) => {
     const selectedCoachId = tempCoachId[errorIdx];
-    if (!selectedCoachId) {
-      setError('กรุณาเลือกโค้ช');
-      return;
-    }
+    if (!selectedCoachId) { setError('กรุณาเลือกโค้ช'); return; }
     const coach = coaches.find(c => c.user_id === selectedCoachId);
     if (!coach) return;
     const errorItem = importResult.errors[errorIdx];
@@ -532,21 +527,12 @@ export default function ImportExcelPage() {
       } else {
         setError(`นำเข้าไม่สำเร็จ: ${result.errors[0]?.error}`);
       }
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setImporting(false);
-    }
+    } catch (err: any) { setError(err.message); }
+    finally { setImporting(false); }
   };
 
   const handleBackToPreview = () => { setImportResult(null); setStep('preview'); };
   const handleExitImport = () => { setImportResult(null); setSelectedRows(new Set()); router.back(); };
-  const handleRetryFailed = () => {
-    if (!importResult || importResult.errors.length === 0) return;
-    const failedRowIndices = importResult.errors.filter((err: any) => !err.fixed).map((err: any) => err.row - 1);
-    setSelectedRows(new Set([...selectedRows, ...failedRowIndices]));
-    setImportResult(null); setStep('preview');
-  };
 
   if (success) {
     return (
@@ -649,7 +635,7 @@ export default function ImportExcelPage() {
                     onChange={e => selectAll(e.target.checked)}
                     disabled={!previewData.filter(isRowSelectable).length}
                   />
-                  เลือกทั้งหมด (ไม่รวมแถวซ้ำ/error)
+                  เลือกทั้งหมด (ไม่รวมซ้ำ/error)
                 </label>
                 <span>เลือก {selectedRows.size} แถว</span>
                 <button
@@ -754,7 +740,7 @@ export default function ImportExcelPage() {
                             '✓ สำเร็จ'
                           ) : row._errors?.length ? (
                             row._errors.map((e: string, i: number) => (
-                              <div key={i} className={`text-xs p-1 rounded mb-1 ${e.includes('มีอยู่ในระบบแล้ว') || e.includes('ซ้ำ') ? 'bg-red-100 text-red-700' : 'bg-orange-100'}`}>
+                              <div key={i} className={`text-xs p-1 rounded mb-1 ${e.includes('มีในระบบแล้ว') || e.includes('ซ้ำ') ? 'bg-red-100 text-red-700' : 'bg-orange-100'}`}>
                                 <AlertTriangle size={12} className="inline mr-1" /> {e}
                               </div>
                             ))
