@@ -1,9 +1,6 @@
 /**
  * ============================================================================
- * 📄 ไฟล์: page.tsx
- * 📂 app/admin/patients/import-excel/page.tsx
- * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 นำเข้าข้อมูลผู้ป่วยจาก Excel พร้อมตรวจสอบซ้ำและตัวกรองแสดงเฉพาะแถวที่มีปัญหา
+ * 📄 ไฟล์: page.tsx (สมบูรณ์ พร้อมสี Mapping + ตัวกรองแถวซ้ำ)
  * ============================================================================
  */
 'use client';
@@ -139,7 +136,6 @@ const validateProvinceOnly = (province: string, validProvinces: string[]) => {
 export default function ImportExcelPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [rawData, setRawData] = useState<any[]>([]);
   const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
   const [headerMapping, setHeaderMapping] = useState<Record<string, string>>({});
@@ -161,7 +157,7 @@ export default function ImportExcelPage() {
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
   const [modalCoaches, setModalCoaches] = useState<Record<number, any[]>>({});
-  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false); // ตัวกรองใหม่
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
 
   useEffect(() => {
     const userData = checkSession();
@@ -309,7 +305,7 @@ export default function ImportExcelPage() {
 
   const processFile = (file: File) => {
     if (!/\.(xlsx|xls)$/i.test(file.name)) { setError('ต้องเป็นไฟล์ Excel เท่านั้น'); return; }
-    setSelectedFile(file); setLoading(true);
+    setLoading(true);
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -346,13 +342,11 @@ export default function ImportExcelPage() {
 
   const hasErrorsInSelected = Array.from(selectedRows).some(i => previewData[i]?._errors?.length && !previewData[i]._imported && previewData[i]._status !== 'success');
 
-  // ตัวกรองแสดงเฉพาะแถวที่มี error ซ้ำ
   const getFilteredPreviewData = useCallback(() => {
     if (!showOnlyDuplicates) return previewData;
     return previewData.filter(row => row._errors?.some((e: string) => e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว')));
   }, [previewData, showOnlyDuplicates]);
 
-  // ส่งออก Excel
   const handleExportToExcel = () => {
     if (!previewData.length) { setError('ไม่มีข้อมูล'); return; }
     const wb = XLSX.utils.book_new();
@@ -411,18 +405,37 @@ export default function ImportExcelPage() {
           </div>
         )}
         {step === 'mapping' && (
-          <div className="bg-white rounded-xl p-6">
-            <div className="flex justify-between mb-4"><h2>จับคู่คอลัมน์</h2><button onClick={buildPreview} className="bg-blue-600 text-white px-4 py-2 rounded">ถัดไป →</button></div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {excelHeaders.map(h => (
-                <div key={h} className="border p-3 rounded">
-                  <p className="font-bold">{h}</p>
-                  <select className="w-full mt-2 border rounded p-1" value={headerMapping[h]||''} onChange={e=>setHeaderMapping(p=>({...p,[h]:e.target.value}))}>
-                    <option value="">-- ไม่จับคู่ --</option>
-                    {STANDARD_FIELDS.map(f=><option key={f.key} value={f.key}>{f.label}</option>)}
-                  </select>
-                </div>
-              ))}
+          <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2"><span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> ตรวจสอบการจับคู่คอลัมน์</h2>
+              <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">ถัดไป: Preview & Validation →</button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+              {excelHeaders.map(header => {
+                const matchedKey = headerMapping[header];
+                const isMatched = matchedKey && matchedKey !== '';
+                return (
+                  <div key={header} className={`p-4 border rounded-lg transition-all ${isMatched ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-300'}`}>
+                    <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
+                    <p className={`font-semibold truncate mb-2 ${isMatched ? 'text-green-900' : 'text-red-800'}`}>
+                      {header} {isMatched && <span className="ml-2">✅</span>}
+                    </p>
+                    <select
+                      value={matchedKey || ''}
+                      onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))}
+                      className={`w-full px-3 py-2 border rounded-lg text-sm ${isMatched ? 'border-green-400 bg-white' : 'border-red-400 bg-white'}`}
+                    >
+                      <option value="">-- ไม่จับคู่ --</option>
+                      {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </select>
+                    {!isMatched && (
+                      <p className="text-xs text-red-600 mt-2 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" /> ยังไม่ได้จับคู่
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -493,7 +506,6 @@ export default function ImportExcelPage() {
           </>
         )}
       </div>
-      {/* Modal แสดงผลการนำเข้า (คงเดิม) */}
       {importResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[80vh] overflow-auto">
