@@ -749,16 +749,26 @@ export default function ImportExcelPage() {
                       <th className="p-3 w-10 text-center sticky left-0 bg-gray-100 z-10">เลือก</th>
                       <th className="p-3 w-12 text-center sticky left-10 bg-gray-100 z-10">สถานะ</th>
                       {displayFields.map(field => (
-                        <th key={field.key} className="p-3 min-w-[140px] text-left font-medium text-gray-700 whitespace-nowrap flex items-center justify-between">
-                          <span>{field.label} {field.required && <span className="text-red-500">*</span>}</span>
-                          {field.key === 'birth_date' && (
-                            <button onClick={swapAllBirthDates} className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200 transition-colors whitespace-nowrap" title="สลับ วัน/เดือน ทั้งคอลัมน์">
-                              🔄 สลับทั้งคอลัมน์
-                            </button>
-                          )}
+                        <th key={field.key} className="p-3 min-w-[140px] text-left font-medium text-gray-700 whitespace-nowrap">
+                          <div className="flex items-center justify-between">
+                            <span>
+                              {field.label} {field.required && <span className="text-red-500">*</span>}
+                            </span>
+                            {field.key === 'birth_date' && (
+                              <button
+                                onClick={swapAllBirthDates}
+                                className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200 transition-colors whitespace-nowrap"
+                                title="สลับ วัน/เดือน ทั้งคอลัมน์"
+                              >
+                                🔄 สลับทั้งคอลัมน์
+                              </button>
+                            )}
+                          </div>
                         </th>
                       ))}
-                      <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">⚠️ ข้อผิดพลาด</th>
+                      <th className="p-3 min-w-[220px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">
+                        ⚠️ ข้อผิดพลาด
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
