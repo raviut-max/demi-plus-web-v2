@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * 📄 ไฟล์: page.tsx (สมบูรณ์ พร้อมสี Mapping + ตัวกรองแถวซ้ำ)
+ * 📄 ไฟล์: page.tsx (สมบูรณ์ พร้อม error message รายละเอียดสูง)
  * ============================================================================
  */
 'use client';
@@ -127,10 +127,14 @@ const swapDayMonth = (dateStr: string): string => {
 const cleanIdCard = (id: string): string => (id || '').replace(/[-\s]/g, '');
 
 const validateProvinceOnly = (province: string, validProvinces: string[]) => {
-  if (!province) return { valid: false, errors: ['จังหวัดเป็นฟิลด์บังคับ'] };
+  if (!province) return { valid: false, errors: ['จังหวัดเป็นฟิลด์บังคับ กรุณากรอกชื่อจังหวัด'] };
   const normInput = normalizeThaiText(province);
-  const found = validProvinces.some(p => normalizeThaiText(p).includes(normInput) || normInput.includes(normalizeThaiText(p)));
-  return found ? { valid: true, errors: [] } : { valid: false, errors: [`จังหวัด "${province}" ไม่ถูกต้อง`] };
+  const matched = validProvinces.find(p => normalizeThaiText(p).includes(normInput) || normInput.includes(normalizeThaiText(p)));
+  if (matched) return { valid: true, errors: [] };
+  // หาตัวอย่างชื่อจังหวัดที่ใกล้เคียง (ถ้ามี)
+  const suggestions = validProvinces.filter(p => normalizeThaiText(p).includes(normInput.slice(0,3))).slice(0,3);
+  const suggestionText = suggestions.length ? ` เช่น ${suggestions.join(', ')}` : ' โปรดตรวจสอบชื่อจังหวัดให้ถูกต้อง';
+  return { valid: false, errors: [`จังหวัด "${province}" ไม่ถูกต้อง${suggestionText}`] };
 };
 
 export default function ImportExcelPage() {
@@ -212,25 +216,35 @@ export default function ImportExcelPage() {
     for (const field of STANDARD_FIELDS) {
       const val = row[field.key];
       const strVal = String(val ?? '').trim();
-      if (field.required && !strVal) { errors.push(`${field.label} เป็นฟิลด์บังคับ`); continue; }
+      if (field.required && !strVal) {
+        errors.push(`${field.label} เป็นฟิลด์บังคับ (ต้องมีข้อมูล)`);
+        continue;
+      }
       if (!strVal) continue;
       if (field.inputType === 'number') {
         const num = parseFloat(strVal);
-        if (isNaN(num)) errors.push(`${field.label} ต้องเป็นตัวเลข`);
-        else if (field.min !== undefined && num < field.min) errors.push(`${field.label} น้อยกว่า ${field.min}`);
-        else if (field.max !== undefined && num > field.max) errors.push(`${field.label} มากกว่า ${field.max}`);
+        if (isNaN(num)) errors.push(`${field.label} ต้องเป็นตัวเลขเท่านั้น (พบ "${strVal}")`);
+        else if (field.min !== undefined && num < field.min) errors.push(`${field.label} ${num} น้อยกว่า ${field.min} ${field.label==='น้ำหนัก(กก.)'?'กก.':field.label==='ส่วนสูง(ซม.)'?'ซม.':''} (ค่าต้องอยู่ระหว่าง ${field.min}-${field.max})`);
+        else if (field.max !== undefined && num > field.max) errors.push(`${field.label} ${num} มากกว่า ${field.max} ${field.label==='น้ำหนัก(กก.)'?'กก.':''} (ค่าต้องอยู่ระหว่าง ${field.min}-${field.max})`);
       } else if (field.key === 'birth_date') {
-        if (!/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.test(strVal)) errors.push('รูปแบบวันเกิดต้องเป็น วว/ดด/ปปปป');
-        else {
-          const [_, d, m, y] = strVal.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)!;
-          if (parseInt(d)<1 || parseInt(d)>31) errors.push('วันไม่ถูกต้อง');
-          if (parseInt(m)<1 || parseInt(m)>12) errors.push('เดือนไม่ถูกต้อง');
-          if (parseInt(y)<2400 || parseInt(y)>2569) errors.push('ปี พ.ศ. ไม่ถูกต้อง (2400-2569)');
+        const dateRegex = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
+        if (!dateRegex.test(strVal)) {
+          errors.push(`รูปแบบวันเกิดไม่ถูกต้อง (ต้องเป็น วว/ดด/ปปปป เช่น 01/01/2568) พบ "${strVal}"`);
+        } else {
+          const [_, d, m, y] = strVal.match(dateRegex)!;
+          if (parseInt(d)<1 || parseInt(d)>31) errors.push(`วันเกิด: วันไม่ถูกต้อง (${d}) ต้องอยู่ระหว่าง 1-31`);
+          if (parseInt(m)<1 || parseInt(m)>12) errors.push(`วันเกิด: เดือนไม่ถูกต้อง (${m}) ต้องอยู่ระหว่าง 1-12`);
+          if (parseInt(y)<2400 || parseInt(y)>2569) errors.push(`วันเกิด: ปี พ.ศ. ไม่ถูกต้อง (${y}) ต้องอยู่ระหว่าง 2400-2569`);
         }
       } else if (field.inputType === 'select') {
-        if (!field.options?.includes(strVal)) errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')}`);
+        if (!field.options?.includes(strVal)) {
+          errors.push(`${field.label} ต้องเป็น ${field.options?.join(' หรือ ')} เท่านั้น (พบ "${strVal}")`);
+        }
       } else if (field.key === 'id_card') {
-        if (!validateThaiIdCard(strVal)) errors.push('เลขบัตรประชาชนไม่ถูกต้อง (13 หลัก)');
+        const isValid = validateThaiIdCard(strVal);
+        if (!isValid) {
+          errors.push(`เลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก และ checksum ตรงกัน) พบ "${strVal}"`);
+        }
       }
     }
 
@@ -244,14 +258,20 @@ export default function ImportExcelPage() {
       const isImported = row._status === 'success' || row._imported;
       if (!isImported) {
         const dupInFile = duplicateMap.get(cleanId)?.filter(i => i !== rowIndex);
-        if (dupInFile && dupInFile.length) errors.push(`เลขบัตรประชาชนซ้ำในไฟล์ (แถว ${dupInFile.map(i=>i+1).join(',')})`);
-        else if (importedIds.has(cleanId)) errors.push('เลขบัตรนี้เพิ่งนำเข้าไปแล้ว (ซ้ำ)');
-        else {
+        if (dupInFile && dupInFile.length) {
+          errors.push(`เลขบัตรประชาชน ${cleanId} ซ้ำในไฟล์นี้ (แถวที่ ${dupInFile.map(i=>i+1).join(', ')})`);
+        } else if (importedIds.has(cleanId)) {
+          errors.push(`เลขบัตรประชาชน ${cleanId} เพิ่งถูกนำเข้าไปแล้วในรอบนี้ (ไม่สามารถนำเข้าซ้ำได้)`);
+        } else {
           try {
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
             const { exists, isPatient } = await checkPatientExists(row.id_card);
             if (exists) {
-              errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+              if (isPatient) {
+                errors.push(`เลขบัตรประชาชน ${cleanId} มีอยู่ในระบบแล้ว (เป็นผู้ป่วยเดิม ไม่สามารถนำเข้าซ้ำได้)`);
+              } else {
+                errors.push(`เลขบัตรประชาชน ${cleanId} มีอยู่ในระบบแล้ว (เป็นบุคลากร ไม่ใช่ผู้ป่วย)`);
+              }
               isPatientDuplicate = isPatient;
             }
           } catch (err) { console.warn(err); }
@@ -329,7 +349,7 @@ export default function ImportExcelPage() {
 
   const isRowSelectable = (row: any) => {
     if (row._imported || row._status === 'success') return false;
-    const dupError = row._errors?.some((e: string) => e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว'));
+    const dupError = row._errors?.some((e: string) => e.includes('มีอยู่ในระบบแล้ว') || e.includes('ซ้ำในไฟล์') || e.includes('นำเข้าไปแล้ว'));
     if (dupError && row._isPatientDuplicate) return false;
     return true;
   };
@@ -344,7 +364,7 @@ export default function ImportExcelPage() {
 
   const getFilteredPreviewData = useCallback(() => {
     if (!showOnlyDuplicates) return previewData;
-    return previewData.filter(row => row._errors?.some((e: string) => e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว')));
+    return previewData.filter(row => row._errors?.some((e: string) => e.includes('มีอยู่ในระบบแล้ว') || e.includes('ซ้ำในไฟล์')));
   }, [previewData, showOnlyDuplicates]);
 
   const handleExportToExcel = () => {
@@ -361,8 +381,8 @@ export default function ImportExcelPage() {
   };
 
   const handleImport = async () => {
-    if (!selectedRows.size) { setError('กรุณาเลือกแถว'); return; }
-    if (hasErrorsInSelected) { setError('แถวที่เลือกมีข้อผิดพลาด'); return; }
+    if (!selectedRows.size) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
+    if (hasErrorsInSelected) { setError('แถวที่เลือกมีข้อผิดพลาด (ไม่สามารถนำเข้าได้) กรุณาแก้ไขให้ถูกต้องก่อน'); return; }
     setImporting(true);
     try {
       const selectedData = previewData.filter((_, i) => selectedRows.has(i)).map(r => ({ ...r, password: r.birth_date }));
@@ -372,6 +392,8 @@ export default function ImportExcelPage() {
         setImportedIds(prev => new Set([...prev, ...newIds]));
         setPreviewData(prev => prev.map(r => newIds.includes(cleanIdCard(r.id_card)) ? { ...r, _status: 'success', _imported: true, _selected: false } : r));
         setSelectedRows(new Set());
+        if (result.success === selectedData.length) setSuccess(true);
+        else setError(`นำเข้าได้ ${result.success} จาก ${selectedData.length} รายการ`);
       }
       if (result.errors?.length) {
         setImportResult({ success: result.success, failed: result.failed, errors: result.errors, successRecords: result.successRecords || [] });
@@ -443,7 +465,7 @@ export default function ImportExcelPage() {
           <>
             <div className="bg-white p-4 rounded shadow flex flex-wrap justify-between items-center gap-2">
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2"><input type="checkbox" checked={previewData.filter(isRowSelectable).length>0 && selectedRows.size === previewData.filter(isRowSelectable).length} onChange={e=>selectAll(e.target.checked)} disabled={!previewData.filter(isRowSelectable).length}/> เลือกทั้งหมด (ไม่รวมซ้ำ)</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={previewData.filter(isRowSelectable).length>0 && selectedRows.size === previewData.filter(isRowSelectable).length} onChange={e=>selectAll(e.target.checked)} disabled={!previewData.filter(isRowSelectable).length}/> เลือกทั้งหมด (ไม่รวมแถวซ้ำ/error)</label>
                 <span>เลือก {selectedRows.size} แถว</span>
                 <button onClick={()=>setShowOnlyDuplicates(!showOnlyDuplicates)} className={`px-3 py-1 rounded text-sm ${showOnlyDuplicates ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-100 border'}`}>
                   <AlertTriangle className="inline w-4 h-4 mr-1"/>{showOnlyDuplicates ? 'แสดงทั้งหมด' : 'แสดงเฉพาะแถวที่ซ้ำ'}
@@ -461,8 +483,8 @@ export default function ImportExcelPage() {
                 <thead className="bg-gray-100">
                   <tr>
                     <th className="p-2 sticky left-0 bg-gray-100">เลือก</th><th className="p-2 sticky left-10 bg-gray-100">สถานะ</th>
-                    {displayFields.map(f=><th key={f.key} className="p-2 min-w-[140px]">{f.label}{f.required&&'*'}{f.key==='birth_date'&&<button onClick={swapAllBirthDates} className="ml-2 text-[10px] bg-blue-100 px-1 rounded">สลับวัน</button>}</th>)}
-                    <th className="p-2 min-w-[200px] text-red-600">ข้อผิดพลาด</th>
+                    {displayFields.map(f=><th key={f.key} className="p-2 min-w-[140px]">{f.label}{f.required&&'*'}{f.key==='birth_date'&&<button onClick={swapAllBirthDates} className="ml-2 text-[10px] bg-blue-100 px-1 rounded" title="สลับวัน/เดือนทั้งคอลัมน์">สลับวัน</button>}</th>)}
+                    <th className="p-2 min-w-[200px] text-red-600">ข้อผิดพลาด (รายละเอียด)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -494,7 +516,7 @@ export default function ImportExcelPage() {
                         })}
                         <td className="p-2 align-top bg-white sticky right-0 border-l">
                           {isImported?'✓ สำเร็จ':(row._errors?.length?row._errors.map((e:string,i)=>(
-                            <div key={i} className={`text-xs p-1 rounded mb-1 ${e.includes('ซ้ำ')?'bg-red-100 text-red-700':'bg-orange-100'}`}><AlertTriangle size={12} className="inline mr-1"/>{e}</div>
+                            <div key={i} className={`text-xs p-1 rounded mb-1 ${e.includes('มีอยู่ในระบบแล้ว')||e.includes('ซ้ำ')?'bg-red-100 text-red-700':'bg-orange-100'}`}><AlertTriangle size={12} className="inline mr-1"/>{e}</div>
                           )):(checkingDuplicates.has(originalIndex)?<Loader2 className="animate-spin text-blue-500"/>:'✓ ผ่าน'))}
                         </td>
                       </tr>
