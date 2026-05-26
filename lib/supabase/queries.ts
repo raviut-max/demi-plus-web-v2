@@ -2062,10 +2062,15 @@ export async function generateAndReserveIdCard(sequenceType: 'patient' | 'staff'
 }
 
 export function validateThaiIdCard(idCard: string): boolean {
-  const cleaned = idCard.replace(/[\s-]/g, '');
+  // ทำความสะอาดเลขบัตรก่อนตรวจ
+  const cleaned = idCard.replace(/[-\s]/g, '');
   if (!/^\d{13}$/.test(cleaned)) return false;
   const providedCheck = parseInt(cleaned[12]);
-  const calculatedCheck = parseInt(calculateCheckDigit(cleaned.slice(0, 12)));
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(cleaned[i]) * (13 - i);
+  }
+  const calculatedCheck = (11 - (sum % 11)) % 10;
   return providedCheck === calculatedCheck;
 }
 
@@ -2453,21 +2458,18 @@ export async function getAllValidProvinces(): Promise<string[]> {
     const { data, error } = await supabase
       .from('provinces')
       .select('name_th');
-    
     if (error) {
       console.error('❌ Error fetching provinces:', error);
       return [];
     }
-    
-    console.log('✅ Loaded provinces count:', data?.length);
     return data ? data.map(p => p.name_th) : [];
   } catch (err) {
-    console.error('❌ Exception in getAllValidProvinces:', err);
+    console.error('❌ getAllValidProvinces exception:', err);
     return [];
   }
 }
 
-// 📁 ไฟล์: @/lib/supabase/queries.ts
+
 export async function checkPatientExists(idCard: string): Promise<{ exists: boolean; isPatient: boolean }> {
   try {
     const cleanId = idCard.replace(/[-\s]/g, '');
@@ -2475,21 +2477,22 @@ export async function checkPatientExists(idCard: string): Promise<{ exists: bool
       .from('users')
       .select('role')
       .eq('id_card', cleanId)
-      .limit(1)
       .maybeSingle();
 
-    if (error) return { exists: false, isPatient: false };
-    
-    // ✅ คืนค่าว่าพบซ้ำไหม และพบซ้ำกับ role 'patient' หรือไม่
+    if (error) {
+      console.error('❌ checkPatientExists Supabase error:', error);
+      return { exists: false, isPatient: false };
+    }
     return { 
       exists: !!data, 
       isPatient: data?.role === 'patient' 
     };
   } catch (err) {
-    console.error('❌ checkPatientExists Error:', err);
+    console.error('❌ checkPatientExists Exception:', err);
     return { exists: false, isPatient: false };
   }
 }
+
 
 // เพิ่มฟังก์ชันนี้ใน queries.ts
 export async function getCoachName(coachId: string) {
