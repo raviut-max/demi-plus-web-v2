@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 26 พฤษภาคม 2569
- * ⚠️ คำเตือน: เพิ่มคอลัมน์โค้ชในไฟล์ Excel Export
+ * ⚠️ คำเตือน: ตรวจสอบบัตรซ้ำที่ Preview + Excel Export มีรายงานโค้ช
  * ============================================================================
  */
 
@@ -292,11 +292,12 @@ export default function ImportExcelPage() {
     });
     setPreviewData(mapped);
     setStep('preview');
+    // ✅ เรียกตรวจสอบความถูกต้องทันทีที่โหลด Preview เสร็จ
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ: Internal -> Session -> DB)
   // =====================================================
   const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number[]>) => {
     const errors: string[] = [];
@@ -338,13 +339,13 @@ export default function ImportExcelPage() {
       if (!pc.valid) errors.push(...pc.errors);
     }
 
-    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (Internal -> Session -> DB)
+    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (3 ระดับ)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
       const cleanId = row.id_card.replace(/[-\s]/g, '');
       const isAlreadyImported = row._status === 'success' || row._imported;
+      
       if (!isAlreadyImported) {
-        
-        // 3.1 ตรวจสอบซ้ำภายในไฟล์
+        // 3.1 ตรวจสอบซ้ำภายในไฟล์ (ใช้ duplicateMap)
         if (duplicateMap && duplicateMap.has(cleanId)) {
           const allIndices = duplicateMap.get(cleanId)!;
           if (allIndices.length > 1) {
@@ -378,6 +379,8 @@ export default function ImportExcelPage() {
   const runValidation = async (data: any[]) => {
     const errors: Record<number, string[]> = {};
     const duplicateMap = new Map<string, number[]>();
+    
+    // สร้าง Map เพื่อเก็บทุกแถวที่มี ID เดียวกัน
     data.forEach((r, i) => {
       if (r.id_card && validateThaiIdCard(r.id_card)) {
         const cleanId = r.id_card.replace(/[-\s]/g, '');
@@ -385,9 +388,12 @@ export default function ImportExcelPage() {
         duplicateMap.get(cleanId)!.push(i);
       }
     });
+    
+    // ตรวจสอบทุกแถว
     for (let idx = 0; idx < data.length; idx++) {
       errors[idx] = await validateRow(data[idx], idx, duplicateMap);
     }
+    
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
   };
@@ -506,14 +512,12 @@ export default function ImportExcelPage() {
       let coachHospital = '-';
       
       if (row.coach_id) {
-        // หาจาก coach_id (กรณีที่มีการจับคู่แล้ว)
         const coach = coaches.find(c => c.user_id === row.coach_id);
         if (coach) {
           coachName = coach.full_name_th || coach.full_name_en || '-';
           coachHospital = coach.users?.hospitals?.name || '-';
         }
       } else if (row.coach_name) {
-        // หาจาก coach_name (กรณียังไม่มีการจับคู่)
         const coach = coaches.find(c => 
           c.full_name_th?.toLowerCase().includes(row.coach_name.toLowerCase()) ||
           c.full_name_en?.toLowerCase().includes(row.coach_name.toLowerCase())
