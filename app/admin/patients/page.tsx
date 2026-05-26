@@ -2,6 +2,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import * as XLSX from 'xlsx'; // ✅ เพิ่มสำหรับ Export Excel
 import {
   checkSession,
   logout,
@@ -20,7 +21,8 @@ import {
   Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
-  ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2
+  ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
+  FileSpreadsheet  // ✅ ไอคอนสำหรับ Export
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -52,9 +54,7 @@ export default function PatientManagementPage() {
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  // --------------------------------------------------------------
   // Helper: รับ hospital ids สำหรับ filter ตาม network
-  // --------------------------------------------------------------
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
     if (hospitalIdFilter === 'all') {
       return accessibleHospitalIds;
@@ -78,9 +78,7 @@ export default function PatientManagementPage() {
     }
   }, [accessibleHospitalIds]);
 
-  // --------------------------------------------------------------
   // โหลดรายชื่อโค้ชตามโรงพยาบาลที่เลือก
-  // --------------------------------------------------------------
   const loadFilterCoachesByHospital = useCallback(async (hospitalIdFilter: string) => {
     try {
       setLoadingFilters(true);
@@ -116,18 +114,14 @@ export default function PatientManagementPage() {
     }
   }, [getHospitalIdsForFilter]);
 
-  // --------------------------------------------------------------
-  // useEffect: เมื่อเปลี่ยนโรงพยาบาล filter ให้โหลดโค้ชใหม่และรีเซ็ต coach filter
-  // --------------------------------------------------------------
+  // เมื่อเปลี่ยนโรงพยาบาล filter ให้โหลดโค้ชใหม่และรีเซ็ต coach filter
   useEffect(() => {
     if (!user) return;
     setSelectedCoachFilter('all');
     loadFilterCoachesByHospital(selectedHospitalFilter);
   }, [selectedHospitalFilter, user, loadFilterCoachesByHospital]);
 
-  // --------------------------------------------------------------
   // โหลดข้อมูลเริ่มต้น
-  // --------------------------------------------------------------
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -303,6 +297,64 @@ export default function PatientManagementPage() {
     return 0;
   });
 
+  // ✅ ฟังก์ชัน Export to Excel
+  const exportToExcel = () => {
+    const exportData = sortedPatients.map((patient, idx) => {
+      // แปลงเพศ
+      let genderThai = '';
+      if (patient.gender === 'male') genderThai = 'ชาย';
+      else if (patient.gender === 'female') genderThai = 'หญิง';
+      
+      // จัดรูปแบบวันเกิด
+      let birthDateStr = '';
+      if (patient.birth_date) {
+        const date = new Date(patient.birth_date);
+        if (!isNaN(date.getTime())) {
+          birthDateStr = date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+        }
+      }
+      
+      return {
+        'ลำดับ': idx + 1,
+        'ชื่อ-นามสกุล': `${patient.first_name || ''} ${patient.last_name || ''}`.trim(),
+        'HN': patient.hospital_number || '',
+        'เลขบัตรประชาชน': patient.users?.id_card || '',
+        'วันเกิด': birthDateStr,
+        'อายุ': patient.age ?? '',
+        'เพศ': genderThai,
+        'โทรศัพท์': patient.phone || '',
+        'อีเมล': patient.email || '',
+        'โรงพยาบาล': patient.hospitals?.name || '',
+        'โค้ช': patient.coach_name || '',
+        'PAM Level': patient.pam_level || '',
+        'Zone': patient.zone || '',
+      };
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    // กำหนดความกว้างคอลัมน์ (optional)
+    ws['!cols'] = [
+      { wch: 8 },   // ลำดับ
+      { wch: 25 },  // ชื่อ-นามสกุล
+      { wch: 15 },  // HN
+      { wch: 18 },  // เลขบัตรประชาชน
+      { wch: 15 },  // วันเกิด
+      { wch: 8 },   // อายุ
+      { wch: 8 },   // เพศ
+      { wch: 15 },  // โทรศัพท์
+      { wch: 20 },  // อีเมล
+      { wch: 25 },  // โรงพยาบาล
+      { wch: 20 },  // โค้ช
+      { wch: 10 },  // PAM Level
+      { wch: 12 }   // Zone
+    ];
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'ผู้ป่วย');
+    const fileName = `patients_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+  };
+
   const handleDeletePatient = async (patientId: string, patientName: string) => {
     if (user?.role === 'osm') {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
@@ -407,7 +459,7 @@ export default function PatientManagementPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header (เหมือนเดิม) */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -472,7 +524,7 @@ export default function PatientManagementPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards (เหมือนเดิม) */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
@@ -501,7 +553,7 @@ export default function PatientManagementPage() {
         </div>
 
         {/* Filters */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border">
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2"><Search className="w-4 h-4 inline mr-1" /> ค้นหา (ชื่อ, นามสกุล, HN)</label>
@@ -538,6 +590,17 @@ export default function PatientManagementPage() {
               </button>
             </div>
           </div>
+        </div>
+
+        {/* ✅ ปุ่ม Export Excel */}
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={exportToExcel}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Export Excel
+          </button>
         </div>
 
         {/* Patient Table */}
