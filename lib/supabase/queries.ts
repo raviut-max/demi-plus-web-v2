@@ -193,76 +193,80 @@ export async function filterDataByHospitalPermission<T>(
 
 // =====================================================
 // 👥 Patient Management Functions
+// =====================================================// =====================================================
+// 👥 Patient Management Functions
 // =====================================================
 
+/**
+ * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
+ * แก้ไขให้ถูกต้องตาม FK: profiles.coach_id -> users.id -> doctors.user_id
+ */
 export async function getPatientList(
-  search?: string, 
-  pamLevel?: string, 
-  hospitalIds?: string[]
+  search?: string,
+  pamLevel?: string,
+  hospitalIds?: string[],
+  filterHospitalId?: string,      // ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกใน Dropdown
+  filterCoachId?: string          // ✅ ใหม่: กรองตามโค้ชที่เลือกใน Dropdown
 ) {
   try {
-    console.log('🔍 [getPatientList] เริ่มค้นหา | search:', search, '| pamLevel:', pamLevel, '| hospitalIds:', hospitalIds);
-    
     let query = supabase
       .from('profiles')
       .select(`
         *,
-        users!profiles_id_fkey (
-          id_card,
-          role,
-          is_active,
-          created_at
-        ),
-        hospitals (
+        user_info:users!profiles_id_fkey ( id_card, role, is_active, created_at ),
+        hospitals:hospitals!profiles_hospital_id_fkey ( id, name, code, type ),
+        coaches:users!profiles_coach_id_fkey (
           id,
-          name,
-          code,
-          type
+          doctors:doctors!doctors_user_id_fkey ( full_name_th )
         ),
-        coaches:doctors!profiles_coach_id_fkey (
+        creator:users!users_created_by_fkey (
           id,
-          user_id,
-          full_name_th,
-          specialization_th
-        ),
-        creator:users!profiles_created_by_fkey (
-          id,
-          full_name_th
+          doctors:doctors!doctors_user_id_fkey ( full_name_th )
         )
       `, { count: 'exact' })
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
+    // 1. กรองตามสิทธิ์การเข้าถึงโรงพยาบาล (Permissions)
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
+    // 2. กรองตามโรงพยาบาลที่เลือกใน Dropdown UI
+    if (filterHospitalId) {
+      query = query.eq('hospital_id', filterHospitalId);
+    }
+
+    // 3. กรองตามโค้ชที่เลือกใน Dropdown UI
+    if (filterCoachId) {
+      query = query.eq('coach_id', filterCoachId);
+    }
+
+    // 4. กรองตามคำค้นหา
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
+    // 5. กรองตาม PAM Level
     if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }
 
     const { data, error } = await query;
-    
-    if (error) {
-      console.error('❌ [getPatientList] Supabase Error:', error);
-      return [];
-    }
+    if (error) throw error;
 
-    console.log('✅ [getPatientList] โหลดสำเร็จ:', data?.length || 0, 'คน');
-
+    // ✅ จัดรูปแบบข้อมูลให้ใช้งานง่ายใน UI
     return data?.map(patient => ({
       ...patient,
       full_name: patient.first_name && patient.last_name 
         ? `${patient.first_name} ${patient.last_name}` 
-        : '',
-      coach_name: patient.coaches?.full_name_th || '-',
-      created_by_name: patient.creator?.full_name_th || '-',
+        : patient.first_name || patient.last_name || '',
+      // ดึงชื่อโค้ชจาก Nested Object (users -> doctors)
+      coach_name: patient.coaches?.doctors?.full_name_th || '-',
+      // ดึงชื่อผู้สร้างจาก Nested Object
+      created_by_name: patient.creator?.doctors?.full_name_th || '-',
     })) || [];
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
