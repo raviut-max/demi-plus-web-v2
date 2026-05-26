@@ -146,11 +146,14 @@ const formatThaiDate = (input: string | number | Date): string => {
   if (!input) return '';
   let day = '', month = '', year = '';
   const str = String(input).trim();
+  
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
     const [y, m, d] = str.split('-');
     year = String(parseInt(y) + 543); month = m; day = d;
-  } else if (str.match(/^[\d/-.]+$/)) {
-    const parts = str.split(/[/-.]/).map(p => p.trim());
+  } 
+  // ✅ แก้ regex: ย้าย - ไปไว้ท้ายสุดของ character class
+  else if (str.match(/^[\d/.\-]+$/)) {
+    const parts = str.split(/[/.\-]/).map(p => p.trim());
     if (parts.length >= 3) {
       const [p1, p2, p3] = parts;
       if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; }
@@ -158,10 +161,12 @@ const formatThaiDate = (input: string | number | Date): string => {
       else { day = p1; month = p2; year = p3; }
     }
   }
+  
   let formattedYear = year;
   if (year.length === 2) formattedYear = `25${year}`;
   else if (year.length === 4) formattedYear = year;
   else if (year.length === 3) formattedYear = `2${year}`;
+  
   return `${String(parseInt(day) || 1).padStart(2, '0')}/${String(parseInt(month) || 1).padStart(2, '0')}/${formattedYear}`;
 };
 
