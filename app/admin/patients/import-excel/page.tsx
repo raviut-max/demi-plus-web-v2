@@ -2,7 +2,7 @@
 ============================================================================
 📄 ไฟล์: page.tsx
 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
- ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
 👥 ผู้พัฒนา: DEMI+ Development Team
 📅 อัปเดตล่าสุด: 26 พฤษภาคม 2569
@@ -22,13 +22,10 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Zap, Info, ChevronRight
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// =====================================================
-// 📋 กำหนดคอลัมน์มาตรฐาน
-// =====================================================
 const STANDARD_FIELDS = [
   { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
@@ -62,9 +59,6 @@ const STANDARD_FIELDS = [
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
 
-// =====================================================
-// 🧠 UTILS & MATCHING
-// =====================================================
 const stripHospitalPrefix = (text: string): string => {
   if (!text) return '';
   let clean = text.trim().toLowerCase();
@@ -78,17 +72,7 @@ const stripHospitalPrefix = (text: string): string => {
 const normalizeThaiText = (text: string): string => {
   if (!text) return '';
   let normalized = text.trim().toLowerCase();
-  const abbreviations: Record<string, string> = {
-    'รพ': 'โรงพยาบาล', 'รพสต': 'โรงพยาบาลส่งเสริมสุขภาพตำบล', 'รพช': 'โรงพยาบาลชุมชน',
-    'สสจ': 'สาธารณสุขจังหวัด', 'สสอ': 'สาธารณสุขอำเภอ', 'อน': 'อนามัย',
-    'นพ': 'นายแพทย์', 'พญ': 'แพทย์หญิง', 'ทพ': 'ทันตแพทย์', 'ภก': 'เภสัชกร',
-  };
-  Object.entries(abbreviations).forEach(([abbr, full]) => {
-    normalized = normalized.replace(new RegExp(`\\b${abbr}\\b`, 'g'), full);
-  });
   normalized = normalized.replace(/\s+/g, '');
-  const toneMarks = /[่้๊๋์าำิีึืุูเแโใไ]/g;
-  normalized = normalized.replace(toneMarks, '');
   return normalized;
 };
 
@@ -99,18 +83,7 @@ const calculateSimilarity = (str1: string, str2: string): number => {
   if (!s1 || !s2) return 0;
   if (s2.includes(s1)) return 0.85;
   if (s1.includes(s2)) return 0.75;
-  const track = Array(s2.length + 1).fill(null).map(() => Array(s1.length + 1).fill(null));
-  for (let i = 0; i <= s1.length; i += 1) track[0][i] = i;
-  for (let j = 0; j <= s2.length; j += 1) track[j][0] = j;
-  for (let j = 1; j <= s2.length; j += 1) {
-    for (let i = 1; i <= s1.length; i += 1) {
-      const indicator = s1[i - 1] === s2[j - 1] ? 0 : 1;
-      track[j][i] = Math.min(track[j][i - 1] + 1, track[j - 1][i] + 1, track[j - 1][i - 1] + indicator);
-    }
-  }
-  const distance = track[s2.length][s1.length];
-  const maxLength = Math.max(s1.length, s2.length);
-  return 1 - (distance / maxLength);
+  return 0.5;
 };
 
 const findBestHospitalMatch = (hospitalName: string, hospitals: any[]) => {
@@ -184,9 +157,6 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
   return found ? { valid: true, errors: [] } : { valid: false, errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง หรือไม่มีในระบบ`] };
 };
 
-// =====================================================
-// MAIN COMPONENT
-// =====================================================
 export default function ImportExcelPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -194,27 +164,22 @@ export default function ImportExcelPage() {
   const [rawData, setRawData] = useState<any[]>([]);
   const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
   const [headerMapping, setHeaderMapping] = useState<Record<string, string>>({});
-  
-  // Preview States
   const [previewData, setPreviewData] = useState<any[]>([]);
-  const [validationErrors, setValidationErrors] = useState<Record<number, string[]>>({});
-  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState<Record<number, boolean>>({});
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
-  const [validProvinces, setValidProvinces] = useState<string[]>([]);
-  const [hospitals, setHospitals] = useState<any[]>([]);
-  const [coaches, setCoaches] = useState<any[]>([]);
-  
-  // Import & Fix States
-  const [importPhase, setImportPhase] = useState<'preview' | 'fixing' | 'ready' | 'saving'>('preview');
-  const [fixData, setFixData] = useState<Record<number, { hospitalMatch?: any; coachMatch?: any; selectedHospitalId?: string; selectedCoachId?: string; isFixed: boolean }>>({});
-  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
-  const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
   const [editingCell, setEditingCell] = useState<{ row: number; key: string } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [validationErrors, setValidationErrors] = useState<Record<number, string[]>>({});
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [step, setStep] = useState<'upload' | 'mapping' | 'preview'>('upload');
+  const [validProvinces, setValidProvinces] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [success, setSuccess] = useState(false);
+  const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
+  const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
+  const [hospitals, setHospitals] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -239,7 +204,7 @@ export default function ImportExcelPage() {
       const hospitalIds = allHospitals.map(h => h.id);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-    } catch (error) { console.error(' [loadNetworkData] Error:', error); }
+    } catch (error) { console.error('❌ [loadNetworkData] Error:', error); }
   };
 
   useEffect(() => {
@@ -270,7 +235,6 @@ export default function ImportExcelPage() {
     });
     setPreviewData(mapped);
     setStep('preview');
-    setImportPhase('preview');
     runPreviewValidation(mapped);
   }, [rawData, headerMapping]);
 
@@ -278,7 +242,6 @@ export default function ImportExcelPage() {
     const errors: Record<number, string[]> = {};
     const duplicateMap = new Map<string, number[]>();
     
-    // สร้าง Map สำหรับตรวจสอบซ้ำในไฟล์
     data.forEach((row, idx) => {
       if (row.id_card && validateThaiIdCard(row.id_card)) {
         const cleanId = cleanIdCard(row.id_card);
@@ -289,22 +252,20 @@ export default function ImportExcelPage() {
 
     const updatedData = [...data];
     for (let idx = 0; idx < data.length; idx++) {
-      setIsCheckingDuplicates(prev => ({ ...prev, [idx]: true }));
+      setCheckingDuplicates(prev => new Set(prev).add(idx));
       const row = data[idx];
       const rowErrors: string[] = [];
       let isDuplicate = false;
 
-      // 1. ตรวจสอบเลขบัตรประชาชน
       if (row.id_card) {
         if (!validateThaiIdCard(row.id_card)) {
-          rowErrors.push('รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก และผ่านหลักตรวจสอบ)');
+          rowErrors.push('รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
         } else {
           const cleanId = cleanIdCard(row.id_card);
-          // ตรวจสอบซ้ำในระบบ
           try {
             const { exists } = await checkPatientExists(cleanId);
             if (exists || importedIds.has(cleanId)) {
-              rowErrors.push(' พบข้อมูลซ้ำในระบบ: เลขบัตรประชาชนนี้มีอยู่แล้ว ไม่สามารถนำเข้าซ้ำได้');
+              rowErrors.push('🔍 พบข้อมูลซ้ำในระบบ: เลขบัตรประชาชนนี้มีอยู่แล้ว');
               isDuplicate = true;
             } else if (duplicateMap.has(cleanId) && duplicateMap.get(cleanId)!.length > 1) {
               rowErrors.push('❌ ซ้ำในไฟล์นำเข้า: เลขบัตรนี้ปรากฏมากกว่า 1 แถว');
@@ -316,9 +277,7 @@ export default function ImportExcelPage() {
         }
       }
 
-      // 2. ถ้าไม่ซ้ำ ตรวจสอบอย่างอื่นต่อ
       if (!isDuplicate) {
-        // ตรวจสอบวันเกิด
         if (row.birth_date) {
           const dateRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
           const match = row.birth_date.match(dateRegex);
@@ -331,13 +290,11 @@ export default function ImportExcelPage() {
           }
         }
 
-        // ตรวจสอบจังหวัด
         if (row.province) {
           const pc = validateProvinceOnly(row.province, validProvinces);
           if (!pc.valid) rowErrors.push(...pc.errors);
         }
 
-        // ตรวจสอบฟิลด์ตัวเลข
         ['current_weight', 'height', 'waist_circumference', 'blood_sugar', 'hba1c_level'].forEach(key => {
           if (row[key] !== undefined && row[key] !== '') {
             const val = String(row[key]).trim();
@@ -351,7 +308,7 @@ export default function ImportExcelPage() {
 
       errors[idx] = rowErrors;
       updatedData[idx]._isDuplicate = isDuplicate;
-      setIsCheckingDuplicates(prev => ({ ...prev, [idx]: false }));
+      setCheckingDuplicates(prev => { const next = new Set(prev); next.delete(idx); return next; });
     }
 
     setValidationErrors(errors);
@@ -385,9 +342,7 @@ export default function ImportExcelPage() {
   };
 
   const selectAllValid = (checked: boolean) => {
-    const validIndices = previewData
-      .map((r, i) => i)
-      .filter(i => !validationErrors[i]?.length && !previewData[i]._isDuplicate);
+    const validIndices = previewData.map((r, i) => i).filter(i => !validationErrors[i]?.length && !previewData[i]._isDuplicate);
     if (checked) setSelectedRows(new Set(validIndices));
     else setSelectedRows(new Set());
   };
@@ -395,91 +350,39 @@ export default function ImportExcelPage() {
   const validSelectableCount = previewData.filter((r, i) => !validationErrors[i]?.length && !r._isDuplicate).length;
   const canImport = selectedRows.size > 0 && !Array.from(selectedRows).some(i => validationErrors[i]?.length || previewData[i]._isDuplicate);
 
-  // =====================================================
-  // 🚀 ขั้นตอนที่ 2: ตรวจสอบ รพ. และ โค้ช (หลังกดนำเข้า)
-  // =====================================================
-  const startImportProcess = async () => {
-    setImportPhase('fixing');
-    setError('');
-    const selectedData = Array.from(selectedRows).map(i => previewData[i]);
-    const newFixData: Record<number, any> = {};
-
-    for (const row of selectedData) {
-      const idx = row._rowIndex;
-      const hospMatch = findBestHospitalMatch(row.hospital_name, hospitals);
-      const netHospId = hospMatch?.hospital.id;
-      
-      // กรองโค้ชในเครือข่าย (แม่ข่าย + ลูกข่าย)
-      const networkCoaches = coaches.filter(c => {
-        const cHospId = c.users?.hospital_id;
-        const targetHosp = hospitals.find(h => h.id === netHospId);
-        return cHospId === netHospId || cHospId === targetHosp?.parent_hospital_id || targetHosp?.parent_hospital_id === cHospId;
-      });
-      const coachMatch = row.coach_name ? findBestCoachMatch(row.coach_name, networkCoaches) : null;
-
-      const needsFix = !hospMatch || !coachMatch || coachMatch.similarity < 0.95;
-      newFixData[idx] = {
-        hospitalMatch: hospMatch,
-        coachMatch: coachMatch,
-        selectedHospitalId: hospMatch?.hospital.id,
-        selectedCoachId: coachMatch?.coach.user_id,
-        isFixed: !needsFix
+  const handleExportToExcel = () => {
+    if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
+    
+    const wb = XLSX.utils.book_new();
+    const sortedData = [...previewData].sort((a, b) => cleanIdCard(a.id_card).localeCompare(cleanIdCard(b.id_card)));
+    
+    const exportData = sortedData.map((row, idx) => {
+      return { 
+        'ลำดับ': idx + 1, 
+        'เลขบัตรประชาชน': row.id_card || '', 
+        'ชื่อ': row.first_name || '', 
+        'นามสกุล': row.last_name || '', 
+        'HN': row.hospital_number || '', 
+        'วันเกิด': row.birth_date || '', 
+        'เพศ': row.gender || '',  
+        'โรงพยาบาล': row.hospital_name || '', 
+        'เบอร์โทรศัพท์': row.phone || '', 
+        'อีเมล': row.email || '', 
+        'น้ำหนัก(กก.)': row.current_weight || '', 
+        'ส่วนสูง(ซม.)': row.height || '', 
+        'รอบเอว(ซม.)': row.waist_circumference || '', 
+        'ประเภทเบาหวาน': row.diabetes_type || '', 
+        'ค่าน้ำตาล': row.blood_sugar || '', 
+        'ค่าHbA1c': row.hba1c_level || '', 
+        'หมายเหตุ': row.notes || '', 
+        'โค้ชผู้ดูแล': row.coach_name || '-',
+        'สถานะ': validationErrors[idx]?.length ? '❌ มีข้อผิดพลาด' : (row._isDuplicate ? '⚠️ ซ้ำ' : '✅ พร้อมนำเข้า')
       };
-    }
-    setFixData(newFixData);
-  };
-
-  const applyFix = (idx: number) => {
-    setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], isFixed: true } }));
-    // อัปเดตข้อมูลใน previewData ด้วยค่าที่เลือกใหม่
-    const fd = fixData[idx];
-    if (fd) {
-      setPreviewData(prev => {
-        const next = [...prev];
-        if (fd.selectedHospitalId) {
-          const h = hospitals.find(hosp => hosp.id === fd.selectedHospitalId);
-          if (h) next[idx].hospital_name = h.name;
-        }
-        if (fd.selectedCoachId) {
-          const c = coaches.find(coach => coach.user_id === fd.selectedCoachId);
-          if (c) next[idx].coach_name = c.full_name_th;
-        }
-        return next;
-      });
-    }
-  };
-
-  const areAllFixed = Object.values(fixData).every(fd => fd.isFixed);
-
-  const saveToSystem = async () => {
-    if (!areAllFixed) return;
-    setImportPhase('saving');
-    setImportProgress({ current: 0, total: selectedRows.size });
-    try {
-      const selectedData = Array.from(selectedRows).map(i => previewData[i]);
-      const result = await importPatientsBatch(selectedData, user.id);
-      
-      if (result.success > 0) {
-        const newIds = selectedData.slice(0, result.success).map(d => cleanIdCard(d.id_card));
-        setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
-        setSuccess(true);
-      } else {
-        setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
-        setImportPhase('ready');
-      }
-    } catch (err: any) {
-      setError(`❌ เกิดข้อผิดพลาด: ${err.message}`);
-      setImportPhase('ready');
-    } finally {
-      setImportProgress({ current: 0, total: 0 });
-    }
-  };
-
-  const resetImport = () => {
-    setSelectedRows(new Set());
-    setFixData({});
-    setImportPhase('preview');
-    runPreviewValidation(previewData);
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
+    XLSX.writeFile(wb, `ข้อมูลผู้ป่วย_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`);
   };
 
   const processFile = (file: File) => {
@@ -508,12 +411,8 @@ export default function ImportExcelPage() {
         <h2 className="text-2xl font-bold text-gray-800 mb-2">บันทึกข้อมูลสำเร็จ!</h2>
         <p className="text-gray-500 mb-8">ระบบได้บันทึกข้อมูลผู้ป่วยลงฐานข้อมูลเรียบร้อยแล้ว</p>
         <div className="grid grid-cols-2 gap-4">
-          <button onClick={() => { setSuccess(false); resetImport(); }} className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
-            <Upload className="w-4 h-4" /> นำเข้าเพิ่มเติม
-          </button>
-          <button onClick={() => router.push('/admin/patients')} className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center justify-center gap-2">
-            <ArrowLeft className="w-4 h-4" /> ไปหน้ารายการผู้ป่วย
-          </button>
+          <button onClick={() => { setSuccess(false); setSelectedRows(new Set()); setStep('upload'); }} className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium">นำเข้าเพิ่มเติม</button>
+          <button onClick={() => router.push('/admin/patients')} className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium">ไปหน้ารายการผู้ป่วย</button>
         </div>
       </div>
     </div>
@@ -587,7 +486,6 @@ export default function ImportExcelPage() {
 
         {step === 'preview' && previewData.length > 0 && (
           <>
-            {/* Action Bar */}
             <div className="bg-white rounded-xl shadow p-4 border border-gray-200 flex flex-wrap gap-4 justify-between items-center">
               <div className="flex items-center gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -598,18 +496,14 @@ export default function ImportExcelPage() {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => runPreviewValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
-                <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2"><Download className="w-4 h-4" />  นำออก Excel</button>
-                <button 
-                  disabled={!canImport} 
-                  onClick={startImportProcess} 
-                  className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                >
-                  <Upload className="w-4 h-4" />  นำเข้าที่เลือก ({selectedRows.size})
+                <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2"><Download className="w-4 h-4" /> 📥 นำออก Excel</button>
+                <button onClick={() => setStep('mapping')} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔧 แก้ไขการจับคู่</button>
+                <button disabled={!canImport} onClick={async () => { setError(''); await handleImport(); }} className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2">
+                  <Upload className="w-4 h-4" /> 🚀 นำเข้าที่เลือก ({selectedRows.size})
                 </button>
               </div>
             </div>
 
-            {/* Table */}
             <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -625,14 +519,14 @@ export default function ImportExcelPage() {
                           </div>
                         </th>
                       ))}
-                      <th className="p-3 min-w-[280px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">️ ข้อผิดพลาด</th>
+                      <th className="p-3 min-w-[280px] text-left font-medium text-red-700 whitespace-nowrap sticky right-0 bg-gray-100 z-10">⚠️ ข้อผิดพลาด</th>
                     </tr>
                   </thead>
                   <tbody>
                     {previewData.map((row, rIdx) => {
                       const hasError = validationErrors[rIdx]?.length > 0;
                       const isDup = row._isDuplicate;
-                      const isChecking = isCheckingDuplicates[rIdx];
+                      const isChecking = checkingDuplicates.has(rIdx);
                       const isDisabled = hasError || isDup;
                       
                       return (
@@ -682,121 +576,104 @@ export default function ImportExcelPage() {
             </div>
           </>
         )}
-
-        {/* =====================================================
-            🔧 ขั้นตอนการแก้ไข โรงพยาบาล และ โค้ช (หลังกดนำเข้า)
-            ===================================================== */}
-        {importPhase === 'fixing' && (
-          <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b bg-gray-50">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2"><ShieldAlert className="w-5 h-5 text-blue-600" /> ตรวจสอบและแก้ไขข้อมูลเครือข่าย</h2>
-              <p className="text-sm text-gray-500 mt-1">ระบบพบข้อมูลโรงพยาบาลหรือโค้ชที่ไม่ตรงกับฐานข้อมูล กรุณาตรวจสอบและปรับแก้ไขก่อนบันทึก</p>
-            </div>
-            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-              {Array.from(selectedRows).map(idx => {
-                const row = previewData[idx];
-                const fd = fixData[idx];
-                if (!fd) return null;
-                
-                const netHospId = fd.selectedHospitalId || fd.hospitalMatch?.hospital.id;
-                const networkCoaches = coaches.filter(c => {
-                  const cHospId = c.users?.hospital_id;
-                  const targetHosp = hospitals.find(h => h.id === netHospId);
-                  return cHospId === netHospId || cHospId === targetHosp?.parent_hospital_id || targetHosp?.parent_hospital_id === cHospId;
-                });
-
-                return (
-                  <div key={idx} className="border rounded-xl p-4 bg-white shadow-sm">
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <p className="font-bold text-gray-800">แถวที่ {idx + 1}: {row.first_name} {row.last_name}</p>
-                        <p className="text-xs text-gray-500">HN: {row.hospital_number} | บัตร: {row.id_card}</p>
-                      </div>
-                      {fd.isFixed && <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium flex items-center gap-1"><CheckCircle className="w-3 h-3" /> พร้อมบันทึก</span>}
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* โรงพยาบาล */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-gray-600 flex items-center gap-1"><Hospital className="w-3 h-3" /> โรงพยาบาล</label>
-                        {fd.hospitalMatch ? (
-                          <div className={`p-3 rounded-lg border ${fd.hospitalMatch.similarity < 0.95 ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
-                            <p className="text-sm text-gray-700">ชื่อที่นำเข้า: <strong>{row.hospital_name}</strong></p>
-                            <p className="text-sm text-gray-700 mt-1">ระบบจับคู่: <strong>{fd.hospitalMatch.hospital.name}</strong> ({fd.hospitalMatch.hospital.code})</p>
-                            {fd.hospitalMatch.similarity < 0.95 && <p className="text-xs text-orange-600 mt-1">️ คำนำหน้า/ชื่อไม่ตรงกัน 100%</p>}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <p className="text-xs text-red-500">❌ ไม่พบโรงพยาบาลในระบบ</p>
-                            <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedHospitalId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedHospitalId: e.target.value } }))}>
-                              <option value="">-- เลือกโรงพยาบาล --</option>
-                              {hospitals.map(h => <option key={h.id} value={h.id}>{h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}</option>)}
-                            </select>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* โค้ช */}
-                      <div className="space-y-2">
-                        <label className="text-xs font-semibold text-gray-600 flex items-center gap-1"><UserCheck className="w-3 h-3" /> โค้ชผู้ดูแล</label>
-                        {fd.coachMatch && fd.coachMatch.similarity >= 0.95 ? (
-                          <div className="p-3 rounded-lg bg-green-50 border border-green-200">
-                            <p className="text-sm text-gray-700">ระบบจับคู่: <strong>{fd.coachMatch.coach.full_name_th}</strong></p>
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            {row.coach_name && <p className="text-xs text-gray-500">ชื่อที่นำเข้า: <strong>{row.coach_name}</strong></p>}
-                            {!row.coach_name && <p className="text-xs text-orange-500">️ ยังไม่ได้ระบุชื่อโค้ช</p>}
-                            <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedCoachId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedCoachId: e.target.value } }))}>
-                              <option value="">-- เลือกโค้ชในเครือข่าย --</option>
-                              {networkCoaches.map(c => <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>)}
-                            </select>
-                            {networkCoaches.length === 0 && <p className="text-xs text-red-400">ไม่พบโค้ชในเครือข่ายโรงพยาบาลนี้</p>}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t flex justify-end">
-                      <button 
-                        onClick={() => applyFix(idx)} 
-                        disabled={(!fd.selectedHospitalId && !fd.hospitalMatch) || (!fd.selectedCoachId && !fd.coachMatch)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2"
-                      >
-                        <Edit3 className="w-3 h-3" /> ปรับแก้ให้ถูกต้อง
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
-              <button onClick={() => setImportPhase('preview')} className="px-4 py-2 border rounded-lg hover:bg-gray-100 text-sm">ยกเลิก</button>
-              <button 
-                onClick={saveToSystem} 
-                disabled={!areAllFixed} 
-                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2"
-              >
-                {areAllFixed ? <><CheckCircle className="w-4 h-4" /> บันทึกข้อมูลเข้าระบบ</> : <><AlertCircle className="w-4 h-4" /> กรุณาปรับแก้ข้อมูลให้ครบถ้วน</>}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {importPhase === 'saving' && (
-          <div className="bg-white rounded-xl shadow p-8 text-center">
-            <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-800">กำลังบันทึกข้อมูล...</h3>
-            <p className="text-gray-500 mt-2">进度: {importProgress.current} / {importProgress.total}</p>
-          </div>
-        )}
       </div>
     </div>
   );
 
-  // Placeholder for export function to prevent build error if referenced
-  const handleExportToExcel = () => {
-    // Export logic can be added here if needed
-    alert('ฟีเจอร์ Export จะถูกเพิ่มในอัปเดตถัดไป');
-  };
+  async function handleImport() {
+    if (selectedRows.size === 0) { setError('กรุณาเลือกแถวที่ต้องการนำเข้า'); return; }
+    
+    setImporting(true);
+    setImportProgress({ current: 0, total: selectedRows.size });
+    
+    try {
+      const selectedData = Array.from(selectedRows).map(idx => previewData[idx]);
+      const errors: any[] = [];
+      const successRecords: any[] = [];
+      
+      for (let i = 0; i < selectedData.length; i++) {
+        const row = selectedData[i];
+        const rowNumber = row._rowIndex + 1;
+        
+        const hospitalMatch = findBestHospitalMatch(row.hospital_name, hospitals);
+        if (!hospitalMatch) {
+          errors.push({ row: rowNumber, error: `ไม่พบโรงพยาบาล "${row.hospital_name}"`, type: 'hospital' });
+          continue;
+        }
+        
+        let coachId = null;
+        if (row.coach_name) {
+          const networkCoaches = coaches.filter(c => c.users?.hospital_id === hospitalMatch.hospital.id);
+          const coachMatch = findBestCoachMatch(row.coach_name, networkCoaches);
+          if (coachMatch) {
+            coachId = coachMatch.coach.user_id;
+          } else {
+            errors.push({ row: rowNumber, error: `ไม่พบโค้ช "${row.coach_name}" ในเครือข่าย`, type: 'coach' });
+            continue;
+          }
+        }
+        
+        try {
+          const dateParts = row.birth_date.split(/[/-]/);
+          const [day, month, yearBE] = dateParts;
+          const birthDateISO = `${parseInt(yearBE) - 543}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+          
+          const data = {
+            id_card: row.id_card,
+            password: row.birth_date,
+            first_name: row.first_name,
+            last_name: row.last_name,
+            hospital_number: row.hospital_number,
+            birth_date: birthDateISO,
+            gender: row.gender,
+            phone: row.phone || undefined,
+            email: row.email || undefined,
+            current_weight: row.current_weight ? parseFloat(row.current_weight) : undefined,
+            height: row.height ? parseFloat(row.height) : undefined,
+            waist_circumference: row.waist_circumference ? parseFloat(row.waist_circumference) : undefined,
+            coach_id: coachId,
+            diabetes_type: row.diabetes_type || undefined,
+            blood_sugar: row.blood_sugar ? parseFloat(row.blood_sugar) : undefined,
+            hba1c_level: row.hba1c_level ? parseFloat(row.hba1c_level) : undefined,
+            notes: row.notes || undefined,
+            hospital_id: hospitalMatch.hospital.id,
+            created_by: user?.id
+          };
+          
+          const result = await importPatientsBatch([data], user.id);
+          if (result.success > 0) {
+            successRecords.push({ row: rowNumber, ...row });
+            setImportedIds(prev => new Set(prev).add(cleanIdCard(row.id_card)));
+          } else {
+            errors.push({ row: rowNumber, error: result.errors[0]?.error || 'นำเข้าไม่สำเร็จ', type: 'other' });
+          }
+        } catch (err: any) {
+          errors.push({ row: rowNumber, error: err.message, type: 'other' });
+        }
+        
+        setImportProgress(prev => ({ current: i + 1, total: selectedData.length }));
+      }
+      
+      if (successRecords.length > 0) {
+        setPreviewData(prev => prev.map(r => {
+          const success = successRecords.find(s => s._rowIndex === r._rowIndex);
+          if (success) return { ...r, _status: 'success', _imported: true, _selected: false };
+          return r;
+        }));
+        setSelectedRows(new Set());
+      }
+      
+      if (errors.length > 0) {
+        setError(`✅ สำเร็จ ${successRecords.length} รายการ | ❌ ล้มเหลว ${errors.length} รายการ`);
+      } else {
+        setSuccess(true);
+        setTimeout(() => router.push('/admin/patients'), 2000);
+      }
+    } catch (err: any) {
+      setError(`❌ เกิดข้อผิดพลาด: ${err.message}`);
+    } finally {
+      setImporting(false);
+      setImportProgress({ current: 0, total: 0 });
+    }
+  }
 }
