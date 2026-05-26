@@ -2370,33 +2370,37 @@ export async function getAllValidProvinces(): Promise<string[]> {
   }
 }
 
-export const checkPatientExists = async (idCard: string): Promise<boolean> => {
+export async function checkPatientExists(idCard: string): Promise<boolean> {
   try {
-    // ✅ ลบขีดและช่องว่างออกให้หมด
-    const cleanIdCard = idCard.replace(/-/g, '').replace(/\s/g, '');
-    
-    console.log(`🔍 [checkPatientExists] Checking ID: "${cleanIdCard}"`);
-    
-    const { data, error, count } = await supabase
+    // 1. ทำความสะอาดเลขบัตร (ลบขีดและช่องว่างออกให้หมด)
+    const cleanIdCard = idCard.replace(/[-\s]/g, '');
+
+    console.log(`🔍 [checkPatientExists] กำลังตรวจสอบบัตร: "${cleanIdCard}"`);
+
+    // 2. Query Supabase
+    // ✅ สำคัญ: ลบ 'head: true' ออก เพื่อให้ดึงข้อมูลกลับมาได้
+    const { data, error } = await supabase
       .from('users')
-      .select('*', { count: 'exact', head: true })
+      .select('id', { count: 'exact' }) // เลือกเฉพาะ id ก็พอ เพื่อเช็คว่ามีอยู่ไหม
       .eq('id_card', cleanIdCard)
+      .limit(1)
       .maybeSingle();
-    
+
+    // 3. Debug Log (เพื่อดูว่าแก้แล้วได้ข้อมูลมาไหม)
+    console.log(`📊 [checkPatientExists] ผลลัพธ์:`, {
+      found: data !== null,
+      data: data
+    });
+
     if (error) {
       console.error('❌ [checkPatientExists] Error:', error);
       return false;
     }
-    
-    // ✅ Debug: แสดงผลลัพธ์
-    console.log(`📊 [checkPatientExists] Result:`);
-    console.log(`   - Found: ${data !== null}`);
-    console.log(`   - Count: ${count}`);
-    console.log(`   - Data:`, data);
-    
+
+    // 4. ถ้ามี data กลับมา แปลว่าซ้ำ
     return data !== null;
   } catch (err) {
     console.error('❌ [checkPatientExists] Exception:', err);
     return false;
   }
-};
+}
