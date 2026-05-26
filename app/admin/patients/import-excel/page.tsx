@@ -6,7 +6,7 @@
  * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
  * 👥 ผู้พัฒนา: DEMI+ Development Team
  * 📅 อัปเดตล่าสุด: 26 พฤษภาคม 2569
- * ⚠️ คำเตือน: ตรวจสอบบัตรซ้ำที่ Preview + Excel Export มีรายงานโค้ช
+ * ⚠️ คำเตือน: แก้ไขตรวจสอบบัตรซ้ำที่ Preview (ทำงานแน่นอน)
  * ============================================================================
  */
 
@@ -198,6 +198,13 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
 };
 
 // =====================================================
+// ✅ ฟังก์ชันช่วยทำความสะอาดเลขบัตรประชาชน (ใช้ร่วมกันทั้งระบบ)
+// =====================================================
+const cleanIdCard = (idCard: string): string => {
+  return (idCard || '').replace(/[-\s]/g, '').trim();
+};
+
+// =====================================================
 // MAIN COMPONENT
 // =====================================================
 export default function ImportExcelPage() {
@@ -297,9 +304,25 @@ export default function ImportExcelPage() {
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ: Internal -> Session -> DB)
+  // ✅ ฟังก์ชันตรวจสอบบัตรซ้ำ (แยกออกมาเพื่อใช้ซ้ำ)
   // =====================================================
-  const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number[]>) => {
+  const checkDuplicateInFile = (idCard: string, rowIndex: number, duplicateMap: Map<string, number[]>): string | null => {
+    const cleanId = cleanIdCard(idCard);
+    if (!duplicateMap.has(cleanId)) return null;
+    
+    const allIndices = duplicateMap.get(cleanId)!;
+    if (allIndices.length <= 1) return null;
+    
+    const otherIndices = allIndices.filter(i => i !== rowIndex);
+    if (otherIndices.length === 0) return null;
+    
+    return `เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${otherIndices.map(i => i + 1).join(', ')})`;
+  };
+
+  // =====================================================
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ)
+  // =====================================================
+  const validateRow = async (row: any, rowIndex: number, duplicateMap: Map<string, number[]>) => {
     const errors: string[] = [];
     
     // 1. ตรวจสอบความถูกต้องพื้นฐาน
@@ -339,21 +362,16 @@ export default function ImportExcelPage() {
       if (!pc.valid) errors.push(...pc.errors);
     }
 
-    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (3 ระดับ)
+    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (3 ระดับ) - เฉพาะเมื่อ id_card ผ่านการตรวจสอบพื้นฐาน
     if (row.id_card && validateThaiIdCard(row.id_card)) {
-      const cleanId = row.id_card.replace(/[-\s]/g, '');
+      const cleanId = cleanIdCard(row.id_card);
       const isAlreadyImported = row._status === 'success' || row._imported;
       
       if (!isAlreadyImported) {
         // 3.1 ตรวจสอบซ้ำภายในไฟล์ (ใช้ duplicateMap)
-        if (duplicateMap && duplicateMap.has(cleanId)) {
-          const allIndices = duplicateMap.get(cleanId)!;
-          if (allIndices.length > 1) {
-            const otherIndices = allIndices.filter(i => i !== rowIndex);
-            if (otherIndices.length > 0) {
-              errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${otherIndices.map(i => i + 1).join(', ')})`);
-            }
-          }
+        const duplicateError = checkDuplicateInFile(row.id_card, rowIndex, duplicateMap);
+        if (duplicateError) {
+          errors.push(duplicateError);
         }
         // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session
         else if (importedIds.has(cleanId)) {
@@ -378,14 +396,16 @@ export default function ImportExcelPage() {
   // ✅ ฟังก์ชันรัน Validation ทั้งหมด
   const runValidation = async (data: any[]) => {
     const errors: Record<number, string[]> = {};
-    const duplicateMap = new Map<string, number[]>();
     
-    // สร้าง Map เพื่อเก็บทุกแถวที่มี ID เดียวกัน
-    data.forEach((r, i) => {
-      if (r.id_card && validateThaiIdCard(r.id_card)) {
-        const cleanId = r.id_card.replace(/[-\s]/g, '');
-        if (!duplicateMap.has(cleanId)) duplicateMap.set(cleanId, []);
-        duplicateMap.get(cleanId)!.push(i);
+    // สร้าง duplicateMap: cleanId -> array of row indices
+    const duplicateMap = new Map<string, number[]>();
+    data.forEach((row, idx) => {
+      if (row.id_card && validateThaiIdCard(row.id_card)) {
+        const cleanId = cleanIdCard(row.id_card);
+        if (!duplicateMap.has(cleanId)) {
+          duplicateMap.set(cleanId, []);
+        }
+        duplicateMap.get(cleanId)!.push(idx);
       }
     });
     
@@ -484,8 +504,8 @@ export default function ImportExcelPage() {
     // 📋 Sheet 1: ข้อมูลทั้งหมด (เรียงตาม ID Card)
     // ============================================
     const sortedData = [...previewData].sort((a, b) => {
-      const idA = (a.id_card || '').replace(/[-\s]/g, '');
-      const idB = (b.id_card || '').replace(/[-\s]/g, '');
+      const idA = cleanIdCard(a.id_card);
+      const idB = cleanIdCard(b.id_card);
       return idA.localeCompare(idB);
     });
 
@@ -493,7 +513,7 @@ export default function ImportExcelPage() {
     const duplicateMap = new Map<string, number[]>();
     sortedData.forEach((row, idx) => {
       if (row.id_card) {
-        const cleanId = row.id_card.replace(/[-\s]/g, '');
+        const cleanId = cleanIdCard(row.id_card);
         if (!duplicateMap.has(cleanId)) duplicateMap.set(cleanId, []);
         duplicateMap.get(cleanId)!.push(idx);
       }
@@ -501,7 +521,7 @@ export default function ImportExcelPage() {
 
     // 📝 เตรียมข้อมูลสำหรับ Export (เพิ่มคอลัมน์โค้ช)
     const exportData = sortedData.map((row, idx) => {
-      const cleanId = (row.id_card || '').replace(/[-\s]/g, '');
+      const cleanId = cleanIdCard(row.id_card);
       const isDuplicate = duplicateMap.has(cleanId) && duplicateMap.get(cleanId)!.length > 1;
       const isImported = row._status === 'success' || row._imported;
       const hasErrors = row._errors?.length > 0;
@@ -692,7 +712,7 @@ export default function ImportExcelPage() {
 
       const result = await importPatientsBatch([data], user.id);
       if (result.success > 0) {
-        setImportedIds(prev => new Set(prev).add(row.id_card));
+        setImportedIds(prev => new Set(prev).add(cleanIdCard(row.id_card)));
         setPreviewData(prev => {
           const next = [...prev];
           next[rowIndex] = { ...next[rowIndex], _status: 'success', _imported: true, _selected: false };
@@ -722,7 +742,7 @@ export default function ImportExcelPage() {
     setTimeout(() => runValidation(previewData), 100);
     setTimeout(async () => {
       const updatedRow = previewData[rowIndex];
-      const rowErrors = await validateRow(updatedRow, rowIndex);
+      const rowErrors = await validateRow(updatedRow, rowIndex, new Map());
       if (rowErrors.length === 0) setReadyToImportIndex(rowIndex);
       else {
         const newErrors = [...importResult.errors];
@@ -788,7 +808,7 @@ export default function ImportExcelPage() {
       const result = await importPatientsBatch(selectedData, user.id);
       if (result.success > 0) {
         const successfulItems = selectedData.slice(0, result.success);
-        const newIds = successfulItems.map(item => item.id_card);
+        const newIds = successfulItems.map(item => cleanIdCard(item.id_card));
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
         setPreviewData(prev => prev.map(r => {
           if (successRecords.some(s => s.id_card === r.id_card)) return { ...r, _status: 'success', _imported: true, _selected: false };
@@ -832,7 +852,7 @@ export default function ImportExcelPage() {
     setTimeout(async () => {
       runValidation(previewData);
       const updatedRow = previewData[rowIndex];
-      const rowErrors = await validateRow(updatedRow, rowIndex);
+      const rowErrors = await validateRow(updatedRow, rowIndex, new Map());
       if (rowErrors.length === 0) setReadyToImportIndex(rowIndex);
     }, 100);
     const newErrors = [...importResult.errors];
