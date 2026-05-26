@@ -49,7 +49,7 @@ export default function PatientManagementPage() {
   const [userHospital, setUserHospital] = useState<any>(null);
   const [userName, setUserName] = useState<string>('');
   
-  // ✅ ✅ ใหม่: สถานะสำหรับกรองโรงพยาบาลและโค้ช
+  // ✅ ใหม่: สถานะสำหรับกรองโรงพยาบาลและโค้ช
   const [selectedHospitalFilter, setSelectedHospitalFilter] = useState<string>('all');
   const [selectedCoachFilter, setSelectedCoachFilter] = useState<string>('all');
   const [filterHospitals, setFilterHospitals] = useState<any[]>([]);
@@ -65,14 +65,14 @@ export default function PatientManagementPage() {
   // =====================================================
   useEffect(() => {
     debugLog('Init', '🚀 เริ่มต้นโหลดหน้าจัดการผู้ป่วย');
-    
     const userData = checkSession();
+    
     if (!userData) {
       debugLog('Auth', '❌ ไม่พบเซสชันผู้ใช้, รีไดเรกต์ไปหน้าล็อกอิน');
       router.push('/admin/login');
       return;
     }
-    
+
     // ✅ ตรวจสอบสิทธิ์ - อนุญาตให้ osm เข้าถึงได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       debugLog('Auth', `❌ ผู้ใช้ ${userData.role} ไม่มีสิทธิ์เข้าถึง`);
@@ -83,12 +83,11 @@ export default function PatientManagementPage() {
 
     debugLog('Auth', `✅ ผู้ใช้ผ่านตรวจสอบ: ${userData.id} | Role: ${userData.role}`);
     setUser(userData);
-    
+
     // โหลดข้อมูลผู้ใช้แบบขนาน
     loadUserName(userData.id);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
-    
   }, [router]);
 
   // =====================================================
@@ -352,7 +351,7 @@ export default function PatientManagementPage() {
     let aValue: any = a[sortColumn];
     let bValue: any = b[sortColumn];
     
-    // Handle nested properties (e.g., hospitals.name)
+    // Handle nested properties (e.g., hospitals.name, coaches.full_name_th)
     if (sortColumn.includes('.')) {
       const [parent, child] = sortColumn.split('.');
       aValue = a[parent]?.[child];
@@ -387,7 +386,7 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
-    
+
     // ✅ แสดง Modal ยืนยันการลบ
     const confirmDelete = confirm(
       `⚠️ ยืนยันการลบผู้ป่วย\n\n` +
@@ -431,7 +430,7 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์กู้คืนข้อมูลผู้ป่วย');
       return;
     }
-    
+
     const confirmRestore = confirm(
       `♻️ ยืนยันการกู้คืนผู้ป่วย\n\n` +
       `ชื่อ: ${patientName}\n\n` +
@@ -466,7 +465,7 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วยถาวร');
       return;
     }
-    
+
     // ✅ ยืนยัน 2 ชั้น
     const firstConfirm = confirm(
       `⚠️ คำเตือน: การลบถาวร\n\n` +
@@ -517,18 +516,20 @@ export default function PatientManagementPage() {
   // =====================================================
   const getRoleBadge = () => {
     if (!user) return null;
+    
     const roleConfig: any = {
       'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
-      'admin': { 
-        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', 
+      'admin': {
+        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin',
         bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100',
         textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700'
       },
       'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
       'helper': { text: '👩‍💼 เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
-
+    
     const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
+    
     return (
       <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
         {config.text}
@@ -834,7 +835,7 @@ export default function PatientManagementPage() {
           {/* ✅ Debug Info (แสดงเฉพาะในโหมดพัฒนา) */}
           {process.env.NODE_ENV === 'development' && (
             <div className="mt-4 p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
-              <strong>Debug:</strong> hospitalFilter={selectedHospitalFilter} | coachFilter={selectedCoachFilter} | results={patients.length}
+              <strong>Debug: </strong> hospitalFilter={selectedHospitalFilter} | coachFilter={selectedCoachFilter} | results={patients.length}
             </div>
           )}
         </div>

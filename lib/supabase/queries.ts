@@ -201,47 +201,70 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 
+// =====================================================
+// 👥 Patient Management Functions
+// =====================================================
+
 /**
  * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
+ * @param search - คำค้นหา (ชื่อ, นามสกุล, HN)
+ * @param pamLevel - ระดับ PAM ที่ต้องการกรอง
+ * @param hospitalIds - โรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับกรองสิทธิ์)
+ * @param hospitalId - โรงพยาบาลที่เลือกจากฟิลเตอร์ (สำหรับกรองแสดงผล)
+ * @param coachId - โค้ชที่เลือกจากฟิลเตอร์ (สำหรับกรองแสดงผล)
  */
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
-  hospitalIds?: string[]
+  hospitalIds?: string[],      // ✅ สำหรับกรองสิทธิ์การเข้าถึง (เดิม)
+  hospitalId?: string,         // ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกในฟิลเตอร์
+  coachId?: string             // ✅ ใหม่: กรองตามโค้ชที่เลือกในฟิลเตอร์
 ) {
   try {
-    console.log('🔍 [getPatientList] params:', { search, pamLevel, hospitalIds });
+    console.log('🔍 [getPatientList] params:', { search, pamLevel, hospitalIds, hospitalId, coachId });
     
-    // ✅ แก้ไข: ใช้ explicit join โดยไม่ใช้ alias ที่ซับซ้อน
+    // ✅ แก้ไข: ใช้ explicit join โดยเพิ่ม coaches relation ด้วย alias 'coaches'
     let query = supabase
       .from('profiles')
       .select(`
-        *,
-        users ( id_card, role, is_active, created_at ),
-        hospitals ( id, name, code, type ),
-        creator:users!profiles_created_by_fkey ( id, full_name_th )
+        *, 
+        users ( id_card, role, is_active, created_at ), 
+        hospitals ( id, name, code, type ), 
+        creator:users!profiles_created_by_fkey ( id, full_name_th ),
+        coaches:users!profiles_coach_id_fkey ( id, full_name_th )
       `, { count: 'exact' })
       .eq('is_active', true)
       .order('created_at', { ascending: false });
 
-    // 1. กรองตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (สิทธิ์พื้นฐาน)
+    // 1. กรองตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (สิทธิ์พื้นฐาน - ไม่แสดงใน UI)
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
-    // 2. กรองตามคำค้นหา
+    // 2. ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกจากฟิลเตอร์ (แสดงผล)
+    if (hospitalId && hospitalId !== 'all') {
+      query = query.eq('hospital_id', hospitalId);
+    }
+
+    // 3. ✅ ใหม่: กรองตามโค้ชที่เลือกจากฟิลเตอร์
+    if (coachId && coachId !== 'all') {
+      query = query.eq('coach_id', coachId);
+    }
+
+    // 4. กรองตามคำค้นหา
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
-    // 3. กรองตาม PAM Level
+    // 5. กรองตาม PAM Level
     if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }
 
     const { data, error } = await query;
+    
     if (error) {
       console.error('❌ [getPatientList] Supabase Error:', error);
       return [];
@@ -249,20 +272,25 @@ export async function getPatientList(
 
     console.log('✅ [getPatientList] Loaded:', data?.length || 0, 'patients');
 
-    // ✅ จัดรูปแบบข้อมูล
+    // ✅ จัดรูปแบบข้อมูลให้พร้อมใช้งานใน UI
     return data?.map(patient => ({
       ...patient,
-      full_name: patient.first_name && patient.last_name 
-        ? `${patient.first_name} ${patient.last_name}` 
+      // สร้าง full_name จาก first_name + last_name
+      full_name: patient.first_name && patient.last_name
+        ? `${patient.first_name} ${patient.last_name}`
         : '',
+      // ชื่อผู้สร้างบันทึก
       created_by_name: patient.creator?.full_name_th || '-',
-      // ✅ coach_id ชี้ไปที่ users.id ดังนั้นต้อง join แยกถ้าต้องการชื่อโค้ช
+      // ✅ ชื่อโค้ช (จาก alias 'coaches' ที่ join ไว้)
+      coach_name: patient.coaches?.full_name_th || null,
     })) || [];
+    
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
     return [];
   }
 }
+
 
 export async function registerPatient(data: {
   id_card: string;
