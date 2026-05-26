@@ -204,93 +204,136 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 // 👥 Patient Management Functions
 // =====================================================
-
 // lib/supabase/queries.ts
 
-// lib/supabase/queries.ts
-
-/**
- * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
- * @param search - คำค้นหา (ชื่อ, นามสกุล, HN)
- * @param pamLevel - ระดับ PAM ที่ต้องการกรอง
- * @param hospitalIds - โรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับกรองสิทธิ์)
- * @param hospitalId - โรงพยาบาลที่เลือกจากฟิลเตอร์ (สำหรับกรองแสดงผล)
- * @param coachId - โค้ชที่เลือกจากฟิลเตอร์ (สำหรับกรองแสดงผล)
- */
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
-  hospitalIds?: string[],      // สำหรับกรองสิทธิ์การเข้าถึง (เดิม)
-  hospitalId?: string,         // ใหม่: กรองตามโรงพยาบาลที่เลือกในฟิลเตอร์
-  coachId?: string             // ใหม่: กรองตามโค้ชที่เลือกในฟิลเตอร์
+  hospitalIds?: string[],
+  hospitalId?: string,
+  coachId?: string
 ) {
   try {
     console.log('🔍 [getPatientList] params:', { search, pamLevel, hospitalIds, hospitalId, coachId });
-    
-    // ✅ แก้ไข: ระบุ foreign key name ให้ชัดเจนทุกจุด
+
     let query = supabase
       .from('profiles')
       .select(`
-        *, 
-        users!profiles_id_fkey ( id_card, role, is_active, created_at ), 
-        hospitals!profiles_hospital_id_fkey ( id, name, code, type ), 
-        creator:users!profiles_created_by_fkey ( id, full_name_th ),
-        coaches:users!profiles_coach_id_fkey ( id, full_name_th )
-      `, { count: 'exact' })
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
+        *,
+        hospitals:profiles_hospital_id_fkey (
+          id, name, code, type
+        )
+      `)
+      .eq('is_active', true);
 
-    // 1. กรองตามโรงพยาบาลที่ผู้ใช้เข้าถึงได้ (สิทธิ์พื้นฐาน - ไม่แสดงใน UI)
+    // 1. สิทธิ์การเข้าถึงโรงพยาบาล
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
-    // 2. ✅ ใหม่: กรองตามโรงพยาบาลที่เลือกจากฟิลเตอร์ (แสดงผล)
+    // 2. กรองตามโรงพยาบาล (ฟิลเตอร์)
     if (hospitalId && hospitalId !== 'all') {
       query = query.eq('hospital_id', hospitalId);
     }
 
-    // 3. ✅ ใหม่: กรองตามโค้ชที่เลือกจากฟิลเตอร์
+    // 3. กรองตามโค้ช
     if (coachId && coachId !== 'all') {
       query = query.eq('coach_id', coachId);
     }
 
-    // 4. กรองตามคำค้นหา
+    // 4. กรองตาม PAM level
+    if (pamLevel) {
+      query = query.eq('pam_level', pamLevel);
+    }
+
+    // 5. ค้นหาด้วยชื่อหรือ HN
     if (search) {
       query = query.or(
         `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
-    // 5. กรองตาม PAM Level
-    if (pamLevel) {
-      query = query.eq('pam_level', pamLevel);
-    }
-
-    const { data, error } = await query;
-    
+    const { data: profiles, error } = await query;
     if (error) {
       console.error('❌ [getPatientList] Supabase Error:', error);
       return [];
     }
 
-    console.log('✅ [getPatientList] Loaded:', data?.length || 0, 'patients');
+    if (!profiles || profiles.length === 0) return [];
 
-    // ✅ จัดรูปแบบข้อมูลให้พร้อมใช้งานใน UI
-    return data?.map(patient => ({
-      ...patient,
-      // สร้าง full_name จาก first_name + last_name
-      full_name: patient.first_name && patient.last_name
-        ? `${patient.first_name} ${patient.last_name}`
-        : '',
-      // ชื่อผู้สร้างบันทึก
-      created_by_name: patient.creator?.full_name_th || '-',
-      // ✅ ชื่อโค้ช (จาก alias 'coaches' ที่ join ไว้)
-      coach_name: patient.coaches?.full_name_th || null,
-    })) || [];
-    
+    // ดึงข้อมูล users (id_card, role, is_active, created_at) สำหรับผู้ป่วยทั้งหมด
+    const userIds = profiles.map(p => p.id);
+    const { data: usersData, error: usersError } = await supabase
+      .from('users')
+      .select('id, id_card, role, is_active, created_at')
+      .in('id', userIds);
+    if (usersError) {
+      console.error('❌ [getPatientList] Users Error:', usersError);
+    }
+    const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
+
+    // ดึงชื่อโค้ชจาก doctors table (coach_id -> users.id -> doctors.user_id)
+    const coachIds = profiles.map(p => p.coach_id).filter(Boolean);
+    let coachesMap = new Map();
+    if (coachIds.length > 0) {
+      const { data: doctorsData, error: doctorsError } = await supabase
+        .from('doctors')
+        .select('user_id, full_name_th')
+        .in('user_id', coachIds);
+      if (!doctorsError && doctorsData) {
+        coachesMap = new Map(doctorsData.map(d => [d.user_id, d.full_name_th]));
+      }
+    }
+
+    // รวมข้อมูล
+    const patients = profiles.map(profile => ({
+      ...profile,
+      users: usersMap.get(profile.id) || null,
+      coach_name: coachesMap.get(profile.coach_id) || null,
+      full_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
+    }));
+
+    console.log('✅ [getPatientList] Loaded:', patients.length, 'patients');
+    return patients;
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
+    return [];
+  }
+}
+
+export async function getDeletedPatients() {
+  try {
+    // ดึงข้อมูล profiles ที่ถูกลบ
+    const { data: profiles, error } = await supabase
+      .from('profiles')
+      .select(`
+        *,
+        hospitals:profiles_hospital_id_fkey (
+          id, name, code, type
+        )
+      `)
+      .eq('is_active', false)
+      .order('updated_at', { ascending: false });
+
+    if (error) return [];
+
+    if (!profiles || profiles.length === 0) return [];
+
+    // ดึงข้อมูล users
+    const userIds = profiles.map(p => p.id);
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('id, id_card, role, is_active')
+      .in('id', userIds);
+    const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
+
+    return profiles.map(profile => ({
+      ...profile,
+      users: usersMap.get(profile.id) || null,
+      full_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
+    }));
+  } catch (err) {
+    console.error('❌ [getDeletedPatients] Exception:', err);
     return [];
   }
 }
@@ -483,25 +526,7 @@ export async function permanentlyDeletePatient(patientId: string) {
   }
 }
 
-export async function getDeletedPatients() {
-  try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(`*, users!profiles_id_fkey ( id_card, role, is_active )`)
-      .eq('is_active', false)
-      .order('updated_at', { ascending: false });
-    if (error) return [];
-    return data?.map(patient => ({
-      ...patient,
-      full_name: patient.first_name && patient.last_name 
-        ? `${patient.first_name} ${patient.last_name}` 
-        : '',
-    })) || [];
-  } catch (err) {
-    console.error('Get deleted patients error:', err);
-    return [];
-  }
-}
+
 
 // =====================================================
 // 👨‍⚕️ Staff Management Functions
