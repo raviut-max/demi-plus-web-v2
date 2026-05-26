@@ -315,12 +315,12 @@ export default function PatientManagementPage() {
   // ✅ Debounce search เพื่อลดการโหลดบ่อยเกินไป
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all') {
+      if (searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all' || selectedPamLevel !== 'all') {
         handleSearch();
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [searchTerm, selectedHospitalFilter, selectedCoachFilter, handleSearch]);
+  }, [searchTerm, selectedHospitalFilter, selectedCoachFilter, selectedPamLevel, handleSearch]);
 
   // =====================================================
   // 🚪 ออกจากระบบ
