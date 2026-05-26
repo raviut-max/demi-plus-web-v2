@@ -187,10 +187,14 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 
+// =====================================================
+// 👥 Patient Management Functions
+// =====================================================
+
 /**
  * 📋 ฟังก์ชันดึงรายการผู้ป่วย พร้อมฟิลเตอร์ครบถ้วน
  * @param search - คำค้นหา (ชื่อ, นามสกุล, เลขบัตร, HN)
- * @param pamLevel - กรองตามระดับ PAM (L0-L4) หรือ 'all'
+ * @param pamLevel - กรองตามระดับ PAM (L0-L4) หรือ undefined
  * @param accessibleHospitalIds - รายการโรงพยาบาลที่ผู้ใช้มีสิทธิ์เข้าถึง (สำหรับกรองสิทธิ์)
  * @param hospitalId - กรองตามโรงพยาบาลเฉพาะ (แสดงในฟิลเตอร์)
  * @param coachId - กรองตามโค้ชเฉพาะ (แสดงในฟิลเตอร์)
@@ -212,7 +216,6 @@ export async function getPatientList(
       .select(`
         *,
         users!profiles_id_fkey (
-          id,
           id_card,
           role,
           is_active,
@@ -275,9 +278,6 @@ export async function getPatientList(
         `last_name.ilike.%${searchTerm}%,` +
         `hospital_number.ilike.%${searchTerm}%`
       );
-      
-      // ✅ ค้นหาเพิ่มเติมจากตาราง users (id_card)
-      // หมายเหตุ: Supabase ไม่สนับสนุน or ข้ามตารางโดยตรง จึงต้องกรองภายหลังถ้าจำเป็น
     }
 
     // ✅ 5. กรองตาม PAM Level
@@ -311,24 +311,6 @@ export async function getPatientList(
       // ✅ แสดงชื่อโรงพยาบาล
       hospital_name: patient.hospitals?.name || '-',
     }));
-
-    // ✅ ถ้ามี searchTerm และค้นหาใน id_card ด้วย (กรองเพิ่มเติมในฝั่ง client)
-    if (search && search.trim() !== '') {
-      const searchTerm = search.trim().toLowerCase();
-      const filteredByIdCard = formattedData.filter(p => 
-        p.users?.id_card?.replace(/[-\s]/g, '').includes(searchTerm.replace(/[-\s]/g, ''))
-      );
-      if (filteredByIdCard.length > 0) {
-        console.log(`🔎 [getPatientList] พบเพิ่มเติมจาก id_card: ${filteredByIdCard.length} คน`);
-        // รวมผลลัพธ์ (ป้องกันซ้ำ)
-        const existingIds = new Set(formattedData.map(p => p.id));
-        filteredByIdCard.forEach(p => {
-          if (!existingIds.has(p.id)) {
-            formattedData.push(p);
-          }
-        });
-      }
-    }
 
     return formattedData;
     
