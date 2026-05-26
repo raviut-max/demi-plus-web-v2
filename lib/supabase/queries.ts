@@ -2370,28 +2370,33 @@ export async function getAllValidProvinces(): Promise<string[]> {
   }
 }
 
-// 2. ตรวจสอบบัตรประชาชนซ้ำ (แก้ไข error ที่เคยเจอ)
-// 2. ตรวจสอบบัตรประชาชนซ้ำ (ตรวจสอบจากตาราง users)
-export async function checkPatientExists(idCard: string): Promise<boolean> {
+export const checkPatientExists = async (idCard: string): Promise<boolean> => {
   try {
-    console.log('🔍 Checking if ID card exists in users table:', idCard);
+    // ✅ ลบขีดและช่องว่างออกให้หมด
+    const cleanIdCard = idCard.replace(/-/g, '').replace(/\s/g, '');
     
-    const { count, error } = await supabase
-      .from('users')  // ✅ เปลี่ยนจาก 'patients' เป็น 'users'
+    console.log(`🔍 [checkPatientExists] Checking ID: "${cleanIdCard}"`);
+    
+    const { data, error, count } = await supabase
+      .from('users')
       .select('*', { count: 'exact', head: true })
-      .eq('id_card', idCard);
-
+      .eq('id_card', cleanIdCard)
+      .maybeSingle();
+    
     if (error) {
-      console.error('❌ Error checking user existence:', error);
+      console.error('❌ [checkPatientExists] Error:', error);
       return false;
     }
     
-    const exists = (count || 0) > 0;
-    console.log(exists ? '⚠️ ID card already exists' : '✅ ID card is available');
+    // ✅ Debug: แสดงผลลัพธ์
+    console.log(`📊 [checkPatientExists] Result:`);
+    console.log(`   - Found: ${data !== null}`);
+    console.log(`   - Count: ${count}`);
+    console.log(`   - Data:`, data);
     
-    return exists;
+    return data !== null;
   } catch (err) {
-    console.error('❌ Exception in checkPatientExists:', err);
+    console.error('❌ [checkPatientExists] Exception:', err);
     return false;
   }
-}
+};
