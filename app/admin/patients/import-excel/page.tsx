@@ -3,10 +3,10 @@
  * 📄 ไฟล์: page.tsx
  * 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
  * 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
- * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
+ * 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel + Export รายงานแบบครบถ้วน
  * 👥 ผู้พัฒนา: DEMI+ Development Team
- * 📅 อัปเดตล่าสุด: 25 พฤษภาคม 2569
- * ⚠️ คำเตือน: Pre-flight Validation + Debug Log สำหรับตรวจสอบบัตรซ้ำ
+ * 📅 อัปเดตล่าสุด: 26 พฤษภาคม 2569
+ * ⚠️ คำเตือน: เพิ่ม Export Excel แบบแยกหมวดหมู่ + สรุปผลครบถ้วน
  * ============================================================================
  */
 
@@ -280,7 +280,6 @@ export default function ImportExcelPage() {
   }, [rawData, excelHeaders]);
 
   const buildPreview = useCallback(() => {
-    console.log(`\n🚀 [buildPreview] เริ่มสร้าง Preview จาก ${rawData.length} แถว...`);
     const mapped = rawData.map((row, idx) => {
       const newRow: any = { _rowIndex: idx, _selected: selectedRows.has(idx), _status: 'pending' };
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
@@ -293,22 +292,16 @@ export default function ImportExcelPage() {
     });
     setPreviewData(mapped);
     setStep('preview');
-    // ✅ เรียกตรวจสอบความถูกต้องทันทีที่โหลด Preview เสร็จ (รวมถึงเช็คบัตรซ้ำกับตาราง users)
     runValidation(mapped);
   }, [rawData, headerMapping, selectedRows]);
 
   // =====================================================
-  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ + Debug)
+  // ✅ ฟังก์ชัน validateRow (ตรวจสอบซ้ำแบบ 3 ระดับ)
   // =====================================================
   const validateRow = async (row: any, rowIndex: number, duplicateMap?: Map<string, number>) => {
     const errors: string[] = [];
     
-    console.log(`\n🔍 [validateRow] เริ่มตรวจสอบแถวที่ ${rowIndex + 1}`);
-    console.log(`   📋 ID Card: "${row.id_card}"`);
-    console.log(`   📋 duplicateMap size: ${duplicateMap?.size || 0}`);
-    console.log(`   📋 importedIds size: ${importedIds.size}`);
-    
-    // 1. ตรวจสอบความถูกต้องพื้นฐาน (Required fields, formats)
+    // 1. ตรวจสอบความถูกต้องพื้นฐาน
     STANDARD_FIELDS.forEach(field => {
       const val = row[field.key];
       const strVal = String(val ?? '').trim();
@@ -345,113 +338,50 @@ export default function ImportExcelPage() {
       if (!pc.valid) errors.push(...pc.errors);
     }
 
-    // 3. ✅ ตรวจสอบเลขบัตรซ้ำกับตาราง users (Internal -> Session -> DB)
+    // 3. ✅ ตรวจสอบเลขบัตรซ้ำ (Internal -> Session -> DB)
     if (row.id_card && validateThaiIdCard(row.id_card)) {
-      console.log(`   🔐 [validateRow] เริ่มตรวจสอบบัตรซ้ำ: "${row.id_card}"`);
-      
       const isAlreadyImported = row._status === 'success' || row._imported;
       if (!isAlreadyImported) {
         
-        // 3.1 ตรวจสอบซ้ำภายในไฟล์ Excel เอง (ใช้ Map ที่สร้างไว้)
-        console.log(`   📁 [Level 1] ตรวจสอบซ้ำภายในไฟล์...`);
+        // 3.1 ตรวจสอบซ้ำภายในไฟล์
         if (duplicateMap && duplicateMap.has(row.id_card)) {
           const firstIdx = duplicateMap.get(row.id_card);
-          console.log(`   ⚠️ [Level 1] พบซ้ำในไฟล์! แถวแรกอยู่ที่ index: ${firstIdx}`);
           if (firstIdx !== undefined && firstIdx !== rowIndex) {
-            const errorMsg = `เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`;
-            errors.push(errorMsg);
-            console.log(`   ❌ [Level 1] เพิ่ม error: ${errorMsg}`);
+            errors.push(`เลขบัตรประชาชนซ้ำกันในรายการ (ซ้ำกับแถวที่ ${firstIdx + 1})`);
           }
-        } else {
-          console.log(`   ✅ [Level 1] ไม่พบซ้ำภายในไฟล์`);
         }
-        
-        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session นี้ (Set.has() = O(1))
-        console.log(`   💾 [Level 2] ตรวจสอบซ้ำใน Session cache...`);
-        if (!errors.length && importedIds.has(row.id_card)) {
-          const errorMsg = 'เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)';
-          errors.push(errorMsg);
-          console.log(`   ❌ [Level 2] พบซ้ำใน Session! เพิ่ม error: ${errorMsg}`);
-        } else {
-          console.log(`   ✅ [Level 2] ไม่พบซ้ำใน Session cache`);
-        }
-        
-        // 3.3 ✅ ตรวจสอบกับฐานข้อมูลตาราง users (ใช้ idx_users_id_card)
-        console.log(`   🗄️  [Level 3] ตรวจสอบซ้ำกับฐานข้อมูล...`);
-        if (!errors.length) {
+        // 3.2 ตรวจสอบกับรายการที่เพิ่งนำเข้าใน Session
+        else if (importedIds.has(row.id_card)) {
+          errors.push('เลขบัตรประชาชนนี้มีอยู่ในรายการที่เพิ่งนำเข้า (ซ้ำ)');
+        } 
+        // 3.3 ตรวจสอบกับฐานข้อมูล
+        else {
           try {
-            console.log(`   🔄 [Level 3] เรียก checkPatientExists("${row.id_card}")...`);
             setCheckingDuplicates(prev => new Set(prev).add(rowIndex));
-            
-            // ✅ ใช้ checkPatientExists ที่ query ไปยังตาราง users โดยตรง
             const exists = await checkPatientExists(row.id_card);
-            console.log(`   📊 [Level 3] ผลลัพธ์: exists = ${exists}`);
-            
-            if (exists) {
-              const errorMsg = 'เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว';
-              errors.push(errorMsg);
-              console.log(`   ❌ [Level 3] พบซ้ำในฐานข้อมูล! เพิ่ม error: ${errorMsg}`);
-            } else {
-              console.log(`   ✅ [Level 3] ไม่พบซ้ำในฐานข้อมูล`);
-            }
-          } catch (err) { 
-            console.error(`   ⚠️ [Level 3] DB Check Failed:`, err);
-          }
+            if (exists) errors.push('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+          } catch (err) { console.warn('⚠️ DB Check Failed:', err); }
           finally {
-            setCheckingDuplicates(prev => { 
-              const next = new Set(prev); 
-              next.delete(rowIndex); 
-              return next; 
-            });
+            setCheckingDuplicates(prev => { const next = new Set(prev); next.delete(rowIndex); return next; });
           }
         }
-      } else {
-        console.log(`   ⏭️  [Skip] ข้ามการตรวจสอบ เพราะแถวนี้ถูกนำเข้าแล้ว`);
       }
-    } else {
-      console.log(`   ⏭️  [Skip] ข้ามการตรวจสอบบัตรซ้ำ เพราะ id_card ไม่ถูกต้องหรือไม่มี`);
     }
-    
-    console.log(`   📋 [validateRow] สรุป error ทั้งหมด:`, errors);
-    console.log(`----------------------------------------\n`);
-    
     return errors;
   };
 
-  // ✅ ฟังก์ชันรัน Validation ทั้งหมด (สร้าง duplicateMap + Debug)
+  // ✅ ฟังก์ชันรัน Validation ทั้งหมด
   const runValidation = async (data: any[]) => {
-    console.log(`\n🚀 [runValidation] เริ่มตรวจสอบ ${data.length} แถว...`);
     const errors: Record<number, string[]> = {};
-    
-    // สร้าง Map เพื่อเก็บตำแหน่งแรกของแต่ละ ID (O(n)) สำหรับตรวจสอบซ้ำภายในไฟล์
-    console.log(`\n📊 [runValidation] ขั้นตอนที่ 1: สร้าง firstOccurrence Map...`);
     const firstOccurrence = new Map<string, number>();
-    
     data.forEach((r, i) => {
       if (r.id_card && validateThaiIdCard(r.id_card)) {
-        if (!firstOccurrence.has(r.id_card)) {
-          firstOccurrence.set(r.id_card, i);
-          console.log(`   ✅ เพิ่ม ID "${r.id_card}" ที่ index ${i} (ครั้งแรก)`);
-        } else {
-          const firstIdx = firstOccurrence.get(r.id_card);
-          console.log(`   ⚠️ พบ ID ซ้ำ "${r.id_card}" ที่ index ${i} (ซ้ำกับ index ${firstIdx})`);
-        }
+        if (!firstOccurrence.has(r.id_card)) firstOccurrence.set(r.id_card, i);
       }
     });
-    
-    console.log(`\n📊 [runValidation] firstOccurrence Map มี ${firstOccurrence.size} รายการ`);
-    console.log(`   Map contents:`, Object.fromEntries(firstOccurrence));
-
-    // ✅ ตรวจสอบทุกแถว โดยส่ง duplicateMap เข้าไปด้วย
-    console.log(`\n🔍 [runValidation] ขั้นตอนที่ 2: ตรวจสอบแต่ละแถว...`);
     for (let idx = 0; idx < data.length; idx++) {
-      console.log(`\n   ━━ แถวที่ ${idx + 1} ━━`);
       errors[idx] = await validateRow(data[idx], idx, firstOccurrence);
     }
-    
-    console.log(`\n✅ [runValidation] เสร็จสิ้นการตรวจสอบทั้งหมด`);
-    console.log(`   จำนวนแถวที่มี error: ${Object.values(errors).filter(e => e.length > 0).length}`);
-    
     setValidationErrors(errors);
     setPreviewData(prev => prev.map(r => ({ ...r, _errors: errors[r._rowIndex] || [] })));
   };
@@ -529,14 +459,172 @@ export default function ImportExcelPage() {
     }
   }, [importResult]);
 
+  // ✅ ฟังก์ชัน Export Excel แบบละเอียด (แยกหมวดหมู่ + สรุปผล)
   const handleExportToExcel = () => {
-    if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
-    const ws = XLSX.utils.json_to_sheet(previewData.map((row, idx) => ({ 'ลำดับ': idx + 1, ...row })));
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
-    XLSX.writeFile(wb, `ผู้ป่วยที่แก้ไข_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`);
+    if (!previewData || previewData.length === 0) { 
+      setError('ไม่มีข้อมูลสำหรับส่งออก'); 
+      return; 
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    // ============================================
+    // 📋 Sheet 1: ข้อมูลทั้งหมด (เรียงตาม ID Card)
+    // ============================================
+    const sortedData = [...previewData].sort((a, b) => {
+      const idA = (a.id_card || '').replace(/[-\s]/g, '');
+      const idB = (b.id_card || '').replace(/[-\s]/g, '');
+      return idA.localeCompare(idB);
+    });
+
+    // 🔍 หาแถวที่ซ้ำ
+    const duplicateMap = new Map<string, number[]>();
+    sortedData.forEach((row, idx) => {
+      if (row.id_card) {
+        const cleanId = row.id_card.replace(/[-\s]/g, '');
+        if (!duplicateMap.has(cleanId)) duplicateMap.set(cleanId, []);
+        duplicateMap.get(cleanId)!.push(idx);
+      }
+    });
+
+    // 📝 เตรียมข้อมูลสำหรับ Export
+    const exportData = sortedData.map((row, idx) => {
+      const cleanId = (row.id_card || '').replace(/[-\s]/g, '');
+      const isDuplicate = duplicateMap.has(cleanId) && duplicateMap.get(cleanId)!.length > 1;
+      const isImported = row._status === 'success' || row._imported;
+      const hasErrors = row._errors?.length > 0;
+      const duplicateRows = isDuplicate ? duplicateMap.get(cleanId)!.map(i => i + 2).join(', ') : '';
+
+      return {
+        'ลำดับ': idx + 1,
+        'เลขบัตรประชาชน': row.id_card || '',
+        'ชื่อ': row.first_name || '',
+        'นามสกุล': row.last_name || '',
+        'HN': row.hospital_number || '',
+        'วันเกิด': row.birth_date || '',
+        'เพศ': row.gender || '',
+        'โรงพยาบาล': row.hospital_name || '',
+        'เบอร์โทรศัพท์': row.phone || '',
+        'อีเมล': row.email || '',
+        'น้ำหนัก(กก.)': row.current_weight || '',
+        'ส่วนสูง(ซม.)': row.height || '',
+        'รอบเอว(ซม.)': row.waist_circumference || '',
+        'ประเภทเบาหวาน': row.diabetes_type || '',
+        'ค่าน้ำตาล': row.blood_sugar || '',
+        'ค่าHbA1c': row.hba1c_level || '',
+        'หมายเหตุ': row.notes || '',
+        'สถานะการนำเข้า': isImported ? '✅ สำเร็จ' : (hasErrors ? '❌ มีข้อผิดพลาด' : '⏳ รอนำเข้า'),
+        'ข้อผิดพลาด': hasErrors ? row._errors.join('; ') : '',
+        'ซ้ำกับแถว': isDuplicate ? duplicateRows : '',
+        'คำเตือน': isDuplicate ? '⚠️ ซ้ำ' : ''
+      };
+    });
+
+    const wsAll = XLSX.utils.json_to_sheet(exportData);
+    wsAll['!cols'] = [
+      { wch: 6 }, { wch: 18 }, { wch: 15 }, { wch: 20 }, { wch: 10 }, { wch: 12 },
+      { wch: 8 }, { wch: 25 }, { wch: 15 }, { wch: 25 }, { wch: 10 }, { wch: 8 },
+      { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 30 }, { wch: 15 },
+      { wch: 40 }, { wch: 15 }, { wch: 10 }
+    ];
+    XLSX.utils.book_append_sheet(wb, wsAll, '📋 ข้อมูลทั้งหมด');
+
+    // ============================================
+    // ✅ Sheet 2: นำเข้าสำเร็จ
+    // ============================================
+    const successData = exportData.filter(row => row['สถานะการนำเข้า'] === '✅ สำเร็จ');
+    if (successData.length > 0) {
+      const wsSuccess = XLSX.utils.json_to_sheet(successData);
+      wsSuccess['!cols'] = wsAll['!cols'];
+      XLSX.utils.book_append_sheet(wb, wsSuccess, '✅ สำเร็จ');
+    }
+
+    // ============================================
+    // ❌ Sheet 3: มีข้อผิดพลาด
+    // ============================================
+    const errorData = exportData.filter(row => row['สถานะการนำเข้า'] === '❌ มีข้อผิดพลาด');
+    if (errorData.length > 0) {
+      const wsError = XLSX.utils.json_to_sheet(errorData);
+      wsError['!cols'] = wsAll['!cols'];
+      XLSX.utils.book_append_sheet(wb, wsError, '❌ มีข้อผิดพลาด');
+    }
+
+    // ============================================
+    // ⏳ Sheet 4: รอนำเข้า (ยังไม่ได้นำเข้า)
+    // ============================================
+    const pendingData = exportData.filter(row => row['สถานะการนำเข้า'] === '⏳ รอนำเข้า');
+    if (pendingData.length > 0) {
+      const wsPending = XLSX.utils.json_to_sheet(pendingData);
+      wsPending['!cols'] = wsAll['!cols'];
+      XLSX.utils.book_append_sheet(wb, wsPending, '⏳ รอนำเข้า');
+    }
+
+    // ============================================
+    // ⚠️ Sheet 5: ซ้ำ (Duplicate)
+    // ============================================
+    const duplicateData = exportData.filter(row => row['คำเตือน'] === '⚠️ ซ้ำ');
+    if (duplicateData.length > 0) {
+      const wsDuplicate = XLSX.utils.json_to_sheet(duplicateData);
+      wsDuplicate['!cols'] = wsAll['!cols'];
+      XLSX.utils.book_append_sheet(wb, wsDuplicate, '⚠️ ซ้ำ');
+    }
+
+    // ============================================
+    // 📊 Sheet 6: สรุปผลการนำเข้า
+    // ============================================
+    const summary: any[][] = [
+      ['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'],
+      [''],
+      ['📅 วันที่ส่งออก:', new Date().toLocaleString('th-TH')],
+      [''],
+      ['📈 สถิติรวม:'],
+      ['จำนวนแถวทั้งหมด:', previewData.length],
+      ['จำนวนที่นำเข้าสำเร็จ:', successData.length],
+      ['จำนวนที่มีข้อผิดพลาด:', errorData.length],
+      ['จำนวนที่รอนำเข้า:', pendingData.length],
+      ['จำนวนบัตรซ้ำ:', duplicateData.length],
+      [''],
+      ['📋 รายละเอียดบัตรซ้ำ:'],
+    ];
+
+    duplicateMap.forEach((rows, idCard) => {
+      if (rows.length > 1) {
+        const firstRow = sortedData[rows[0]];
+        summary.push([
+          `บัตร: ${idCard}`,
+          `ชื่อ: ${firstRow?.first_name} ${firstRow?.last_name}`,
+          `พบในแถว: ${rows.map(r => r + 1).join(', ')}`,
+          `จำนวน: ${rows.length} ครั้ง`
+        ]);
+      }
+    });
+
+    summary.push(['']);
+    summary.push(['📋 รายการที่ยังไม่ได้นำเข้า (รอนำเข้า):']);
+    summary.push(['ลำดับ', 'เลขบัตร', 'ชื่อ-นามสกุล', 'HN', 'ข้อผิดพลาด']);
+    
+    pendingData.forEach((row, idx) => {
+      summary.push([
+        idx + 1,
+        row['เลขบัตรประชาชน'],
+        `${row['ชื่อ']} ${row['นามสกุล']}`,
+        row['HN'],
+        row['ข้อผิดพลาด'] || '-'
+      ]);
+    });
+
+    const wsSummary = XLSX.utils.aoa_to_sheet(summary);
+    wsSummary['!cols'] = [{ wch: 50 }, { wch: 50 }, { wch: 50 }, { wch: 50 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, '📊 สรุปผล');
+
+    // ============================================
+    // 💾 บันทึกไฟล์
+    // ============================================
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    XLSX.writeFile(wb, `รายงานนำเข้าผู้ป่วย_${timestamp}.xlsx`);
   };
 
-  // ✅ ฟังก์ชันนำเข้าแถวเดียว (อัปเดต ImportedIds & ล็อคแถว)
+  // ✅ ฟังก์ชันนำเข้าแถวเดียว
   const handleImportSingleRow = async (rowIndex: number) => {
     const row = previewData[rowIndex];
     try {
@@ -564,8 +652,6 @@ export default function ImportExcelPage() {
 
       const result = await importPatientsBatch([data], user.id);
       if (result.success > 0) {
-        // ✅ อัปเดต ImportedIds และล็อคแถว
-        console.log(`✅ [handleImportSingleRow] นำเข้าสำเร็จ! เพิ่ม ID "${row.id_card}" ลง importedIds`);
         setImportedIds(prev => new Set(prev).add(row.id_card));
         setPreviewData(prev => {
           const next = [...prev];
@@ -597,9 +683,8 @@ export default function ImportExcelPage() {
     setTimeout(async () => {
       const updatedRow = previewData[rowIndex];
       const rowErrors = await validateRow(updatedRow, rowIndex);
-      if (rowErrors.length === 0) {
-        setReadyToImportIndex(rowIndex); // ✅ แสดงปุ่มนำเข้าทันที
-      } else {
+      if (rowErrors.length === 0) setReadyToImportIndex(rowIndex);
+      else {
         const newErrors = [...importResult.errors];
         newErrors[errorIndex] = { ...newErrors[errorIndex], hospital_fixed: true, fixed: false };
         setImportResult({ ...importResult, errors: newErrors });
@@ -664,9 +749,7 @@ export default function ImportExcelPage() {
       if (result.success > 0) {
         const successfulItems = selectedData.slice(0, result.success);
         const newIds = successfulItems.map(item => item.id_card);
-        console.log(`✅ [handleImport] นำเข้าสำเร็จ ${result.success} รายการ! เพิ่ม ${newIds.length} ID ลง importedIds`);
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
-        
         setPreviewData(prev => prev.map(r => {
           if (successRecords.some(s => s.id_card === r.id_card)) return { ...r, _status: 'success', _imported: true, _selected: false };
           return r;
@@ -710,7 +793,7 @@ export default function ImportExcelPage() {
       runValidation(previewData);
       const updatedRow = previewData[rowIndex];
       const rowErrors = await validateRow(updatedRow, rowIndex);
-      if (rowErrors.length === 0) setReadyToImportIndex(rowIndex); // ✅ แสดงปุ่มนำเข้าทันที
+      if (rowErrors.length === 0) setReadyToImportIndex(rowIndex);
     }, 100);
     const newErrors = [...importResult.errors];
     newErrors[errorIndex] = { ...newErrors[errorIndex], fixed: true };
@@ -779,7 +862,7 @@ export default function ImportExcelPage() {
               </div>
               <div className="flex gap-2">
                 <button onClick={() => runValidation(previewData)} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔄 ตรวจสอบใหม่</button>
-                <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2"><Download className="w-4 h-4" /> นำออก Excel</button>
+                <button onClick={handleExportToExcel} className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 text-sm flex items-center gap-2"><Download className="w-4 h-4" /> 📥 นำออก Excel</button>
                 <button onClick={() => setStep('mapping')} className="px-3 py-1.5 border rounded hover:bg-gray-50 text-sm">🔧 แก้ไขการจับคู่</button>
                 <button disabled={selectedRows.size === 0 || hasErrorsInSelected || importing} onClick={handleImport} className="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2">
                   {importing ? (<><Loader2 className="w-4 h-4 animate-spin" /> กำลังนำเข้า... ({importProgress.current}/{importProgress.total})</>) : hasErrorsInSelected ? (<><ShieldAlert className="w-4 h-4" /> แก้ไขข้อผิดพลาดก่อนนำเข้า</>) : (<><Upload className="w-4 h-4" /> 🚀 นำเข้าที่เลือก ({selectedRows.size})</>)}
@@ -801,22 +884,11 @@ export default function ImportExcelPage() {
                   <tbody>
                     {previewData.map((row, rIdx) => {
                       const isImported = row._imported || row._status === 'success';
-                      // ✅ ตรวจสอบว่าเป็นแถวที่มีข้อผิดพลาดเกี่ยวกับ "ซ้ำ" หรือไม่
-                      const isDuplicateError = row._errors?.some(e => 
-                        e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว')
-                      );
-
+                      const isDuplicateError = row._errors?.some(e => e.includes('ซ้ำ') || e.includes('มีอยู่ในระบบแล้ว'));
                       return (
                         <tr key={rIdx} className={`border-b hover:bg-gray-50 ${isImported ? 'bg-green-50/50' : (row._errors?.length > 0 ? 'bg-red-50/50' : '')}`}>
                           <td className="p-3 text-center sticky left-0 bg-white z-10">
-                            <input 
-                              type="checkbox" 
-                              checked={row._selected} 
-                              // ✅ ปิดการเลือกถ้าเป็นแถวที่นำเข้าแล้ว หรือ มีข้อผิดพลาดเรื่อง "ซ้ำ"
-                              disabled={isImported || isDuplicateError}
-                              onChange={() => (!isImported && !isDuplicateError) && toggleSelectRow(rIdx)} 
-                              className={`w-4 h-4 ${isImported || isDuplicateError ? 'opacity-50 cursor-not-allowed' : ''}`} 
-                            />
+                            <input type="checkbox" checked={row._selected} disabled={isImported || isDuplicateError} onChange={() => (!isImported && !isDuplicateError) && toggleSelectRow(rIdx)} className={`w-4 h-4 ${isImported || isDuplicateError ? 'opacity-50 cursor-not-allowed' : ''}`} />
                           </td>
                           <td className="p-3 text-center sticky left-10 bg-white z-10">
                             {isImported ? (<span className="text-green-600 font-bold flex items-center justify-center gap-1"><CheckCircle className="w-5 h-5" /> บันทึกแล้ว</span>) : row._errors?.length > 0 ? (<XCircle className="w-5 h-5 text-red-500 mx-auto" />) : (<CheckCircle className="w-5 h-5 text-green-500 mx-auto" />)}
@@ -840,11 +912,7 @@ export default function ImportExcelPage() {
                             );
                           })}
                           <td className="p-3 align-top sticky right-0 bg-white z-10 border-l">
-                            {isImported ? (<span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>) : row._errors?.length > 0 ? (<div className="space-y-1">{row._errors.map((err, idx) => (
-                              <div key={idx} className={`flex items-start gap-1 text-xs px-2 py-1 rounded ${err.includes('ซ้ำ') || err.includes('มีอยู่ในระบบแล้ว') ? 'text-red-700 bg-red-100' : 'text-orange-700 bg-orange-100'}`}>
-                                <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /><span>{err}</span>
-                              </div>
-                            ))}</div>) : checkingDuplicates.has(rIdx) ? (<div className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="w-3 h-3 animate-spin" /><span>ตรวจสอบบัตร...</span></div>) : (<span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>)}
+                            {isImported ? (<span className="text-xs text-green-600 font-medium">✓ สำเร็จ</span>) : row._errors?.length > 0 ? (<div className="space-y-1">{row._errors.map((err, idx) => (<div key={idx} className={`flex items-start gap-1 text-xs px-2 py-1 rounded ${err.includes('ซ้ำ') || err.includes('มีอยู่ในระบบแล้ว') ? 'text-red-700 bg-red-100' : 'text-orange-700 bg-orange-100'}`}><AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5" /><span>{err}</span></div>))}</div>) : checkingDuplicates.has(rIdx) ? (<div className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="w-3 h-3 animate-spin" /><span>ตรวจสอบบัตร...</span></div>) : (<span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบ</span>)}
                           </td>
                         </tr>
                       );
@@ -883,21 +951,14 @@ export default function ImportExcelPage() {
                   <div className="bg-red-50 border border-red-200 rounded-lg p-3 max-h-96 overflow-auto space-y-3">
                     {importResult.errors.map((err, idx) => {
                       if (err.fixed) return (<div key={idx} className="bg-green-50 border border-green-200 rounded p-4 flex items-center gap-3"><CheckCircle className="w-6 h-6 text-green-600" /><div><p className="text-sm font-bold text-green-800">✅ แถวที่ {err.row} - แก้ไขเรียบร้อย</p><p className="text-xs text-green-600">ข้อมูลในตารางถูกอัปเดตแล้ว พร้อมนำเข้าใหม่</p></div></div>);
-
                       const isDuplicateId = err.error_type === 'duplicate_id';
                       const isHospitalMissing = (err.error_type === 'hospital' || !err.hospital_id);
                       const hospitalMatch = !isHospitalMissing ? { hospital: hospitals.find(h => h.id === err.hospital_id) } : null;
                       const isReady = readyToImportIndex === err.row - 1;
-
                       return (
                         <div key={idx} className="bg-white border border-red-200 rounded p-4">
-                          <div className="flex items-start gap-2 mb-3">
-                            <XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1"><p className="text-sm font-medium text-red-800"><strong>แถวที่ {err.row}:</strong> {err.error}</p><p className="text-xs text-gray-600 mt-1">บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}</p></div>
-                          </div>
-                          
+                          <div className="flex items-start gap-2 mb-3"><XCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" /><div className="flex-1"><p className="text-sm font-medium text-red-800"><strong>แถวที่ {err.row}:</strong> {err.error}</p><p className="text-xs text-gray-600 mt-1">บัตร ปชช.: {err.id_card} | HN: {err.hospital_number}</p></div></div>
                           {isDuplicateId && (<div className="pl-6 space-y-2 border-l-4 border-orange-300 bg-orange-50 p-3 rounded"><div className="flex items-center gap-2 text-sm text-orange-800 font-semibold"><CreditCard className="w-4 h-4" />⚠️ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว</div><p className="text-xs text-gray-600">กรุณาตรวจสอบไฟล์ Excel หรือฐานข้อมูล แล้วทำการแก้ไขก่อนนำเข้าใหม่<br/>(ไม่สามารถแก้ไขได้ที่นี่ เนื่องจากต้องเปลี่ยนข้อมูลต้นทาง)</p></div>)}
-
                           {isHospitalMissing && !isDuplicateId && (
                             <div className="mb-4 pl-6 space-y-2 border-l-4 border-red-300 bg-red-50 p-3 rounded">
                               <label className="block text-xs font-bold text-red-700 flex items-center gap-1"><Hospital className="w-3 h-3" /> 1. เลือกโรงพยาบาลที่ถูกต้องก่อน:</label>
@@ -906,37 +967,21 @@ export default function ImportExcelPage() {
                               <p className="text-xs text-gray-500 mt-1">📝 เมื่อบันทึกแล้ว ระบบจะตรวจสอบฟิลด์อื่นๆ ต่อไป</p>
                             </div>
                           )}
-
                           {!isHospitalMissing && !isDuplicateId && (
                             <div className="pl-6 space-y-2 border-l-4 border-blue-300 bg-blue-50 p-3 rounded">
                               <div className="flex items-center gap-2 text-xs font-bold text-green-700 mb-2"><CheckCircle className="w-4 h-4" /> โรงพยาบาลถูกต้อง: {hospitalMatch?.hospital?.name}</div>
-                              {err.error_type === 'coach' && (
-                                <>
-                                  <label className="block text-xs font-bold text-blue-700 flex items-center gap-1"><UserCheck className="w-3 h-3" /> 2. เลือกโค้ชผู้ดูแล (จากโรงพยาบาล {hospitalMatch?.hospital?.name}):</label>
-                                  
-                                  {/* ✅ NEW: แสดงชื่อโค้ชเดิมเพื่อช่วยค้นหา */}
-                                  {err.original_coach_name && (
-                                    <div className="text-xs text-gray-600 mb-1 bg-gray-100 p-1 rounded text-center">
-                                       💡 ค้นหาชื่อ: <strong>{err.original_coach_name}</strong>
-                                    </div>
-                                  )}
-
-                                  {!modalCoaches[idx] && err.hospital_id && (<div className="text-xs text-gray-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> กำลังโหลดรายชื่อโค้ชในเครือข่าย...</div>)}
-                                  {modalCoaches[idx] && modalCoaches[idx].length === 0 && (<div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">⚠️ ไม่พบโค้ชในเครือข่ายโรงพยาบาลนี้ กรุณาติดต่อผู้ดูแลระบบ</div>)}
-                                  <select key={`coach-select-${idx}-${err.coach_id || 'none'}-${modalCoaches[idx]?.length || 0}`} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100" value={err.coach_id || ''} onChange={(e) => { const selectedCoachId = e.target.value; const updatedErrors = [...importResult.errors]; updatedErrors[idx] = { ...updatedErrors[idx], coach_id: selectedCoachId }; setImportResult({ ...importResult, errors: updatedErrors }); const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId); if (selectedCoach) { updatedErrors[idx] = { ...updatedErrors[idx], original_coach_name: selectedCoach.full_name_th }; setImportResult({ ...importResult, errors: updatedErrors }); } }} disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}><option value="">-- เลือกโค้ช --</option>{modalCoaches[idx]?.map(coach => (<option key={coach.user_id} value={coach.user_id}>{coach.full_name_th} | {coach.specialization_th || 'ไม่ระบุ'} | {coach.users?.hospitals?.name || 'ไม่มีสังกัด'}</option>))}</select>
-                                  <p className="text-xs text-gray-500 mt-2">💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน {err.coach_id && ` | ✅ เลือกแล้ว: ${err.original_coach_name || '...'}`}</p>
-                                  <button onClick={() => handleApplyModalFix(idx)} disabled={!err.coach_id} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"><Save className="w-4 h-4" /> ✅ บันทึกการแก้ไขและนำเข้า</button>
-                                </>
-                              )}
+                              {err.error_type === 'coach' && (<>
+                                <label className="block text-xs font-bold text-blue-700 flex items-center gap-1"><UserCheck className="w-3 h-3" /> 2. เลือกโค้ชผู้ดูแล (จากโรงพยาบาล {hospitalMatch?.hospital?.name}):</label>
+                                {err.original_coach_name && (<div className="text-xs text-gray-600 mb-1 bg-gray-100 p-1 rounded text-center">💡 ค้นหาชื่อ: <strong>{err.original_coach_name}</strong></div>)}
+                                {!modalCoaches[idx] && err.hospital_id && (<div className="text-xs text-gray-500 flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> กำลังโหลดรายชื่อโค้ชในเครือข่าย...</div>)}
+                                {modalCoaches[idx] && modalCoaches[idx].length === 0 && (<div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2">⚠️ ไม่พบโค้ชในเครือข่ายโรงพยาบาลนี้ กรุณาติดต่อผู้ดูแลระบบ</div>)}
+                                <select key={`coach-select-${idx}-${err.coach_id || 'none'}-${modalCoaches[idx]?.length || 0}`} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100" value={err.coach_id || ''} onChange={(e) => { const selectedCoachId = e.target.value; const updatedErrors = [...importResult.errors]; updatedErrors[idx] = { ...updatedErrors[idx], coach_id: selectedCoachId }; setImportResult({ ...importResult, errors: updatedErrors }); const selectedCoach = modalCoaches[idx]?.find(c => c.user_id === selectedCoachId); if (selectedCoach) { updatedErrors[idx] = { ...updatedErrors[idx], original_coach_name: selectedCoach.full_name_th }; setImportResult({ ...importResult, errors: updatedErrors }); } }} disabled={!modalCoaches[idx] || modalCoaches[idx].length === 0}><option value="">-- เลือกโค้ช --</option>{modalCoaches[idx]?.map(coach => (<option key={coach.user_id} value={coach.user_id}>{coach.full_name_th} | {coach.specialization_th || 'ไม่ระบุ'} | {coach.users?.hospitals?.name || 'ไม่มีสังกัด'}</option>))}</select>
+                                <p className="text-xs text-gray-500 mt-2">💡 แสดงโค้ช: {modalCoaches[idx]?.length || 0} คน {err.coach_id && ` | ✅ เลือกแล้ว: ${err.original_coach_name || '...'}`}</p>
+                                <button onClick={() => handleApplyModalFix(idx)} disabled={!err.coach_id} className="w-full mt-4 flex items-center justify-center gap-2 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"><Save className="w-4 h-4" /> ✅ บันทึกการแก้ไขและนำเข้า</button>
+                              </>)}
                             </div>
                           )}
-                          
-                          {/* ✅ ปุ่มนำเข้าทันที (โผล่เมื่อแก้ไขเสร็จและไม่มี Error) */}
-                          {isReady && (
-                            <button onClick={() => handleImportSingleRow(err.row - 1)} className="w-full mt-4 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 text-base font-bold transition-all shadow-md animate-pulse">
-                              <Zap className="w-5 h-5" /> 🚀 นำเข้าทันที
-                            </button>
-                          )}
+                          {isReady && (<button onClick={() => handleImportSingleRow(err.row - 1)} className="w-full mt-4 flex items-center justify-center gap-2 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 text-base font-bold transition-all shadow-md animate-pulse"><Zap className="w-5 h-5" /> 🚀 นำเข้าทันที</button>)}
                         </div>
                       );
                     })}
