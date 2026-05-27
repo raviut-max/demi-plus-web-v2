@@ -56,8 +56,8 @@ const STANDARD_FIELDS = [
   { key: 'province', label: 'จังหวัด', inputType: 'text' },
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ เปลี่ยนแล้ว
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ เปลี่ยนแล้ว
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -272,7 +272,7 @@ export default function ImportExcelPage() {
     const rowErrors: string[] = [];
     let isDuplicate = false; // ใช้เฉพาะสำหรับซ้ำ Patient เท่านั้น
 
-    // 1. ตรวจสอบเลขบัตรประชาชน
+    // 1. ตรวจสอบเลขบัตรประชาชน + Role (ตรวจสอบทั้งคู่ควบคู่กัน)
     if (row.id_card) {
       if (!validateThaiIdCard(row.id_card)) {
         rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -838,7 +838,7 @@ export default function ImportExcelPage() {
                           <div className="space-y-2">
                             {row.coach_name && <p className="text-xs text-gray-500">ชื่อที่นำเข้า: <strong>{row.coach_name}</strong></p>}
                             <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedCoachId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedCoachId: e.target.value } }))}>
-                              <option value="">-- ไม่ใส่โค้ช --</option> {/* ✅ เพิ่มตัวเลือกไม่ใส่โค้ช */}
+                              <option value="">-- ไม่ใส่โค้ช --</option>
                               {networkCoaches.map(c => <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>)}
                             </select>
                             {networkCoaches.length === 0 && <p className="text-xs text-red-400">ไม่พบโค้ชในเครือข่าย</p>}
@@ -847,7 +847,6 @@ export default function ImportExcelPage() {
                       </div>
                     </div>
                     <div className="mt-4 pt-3 border-t flex justify-end">
-                      {/* ✅ แก้ไข: ปุ่มปรับแก้ให้ถูกต้องต้อง enable ได้ */}
                       <button 
                         onClick={() => applyFix(idx)} 
                         disabled={(!fd.selectedHospitalId && !fd.hospitalMatch) || (!fd.isCoachEmpty && !fd.selectedCoachId && !fd.coachMatch)} 
