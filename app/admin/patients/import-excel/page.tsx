@@ -22,7 +22,7 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -183,7 +183,7 @@ export default function ImportExcelPage() {
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'fixing' | 'saving' | 'success'>('upload');
   const [validProvinces, setValidProvinces] = useState<string[]>([]);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
-  const [success, setSuccess] = useState(false);
+  const [importedPatients, setImportedPatients] = useState<any[]>([]);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   const [hospitals, setHospitals] = useState<any[]>([]);
@@ -384,7 +384,7 @@ export default function ImportExcelPage() {
   const validSelectableCount = previewData.filter((r, i) => !validationErrors[i]?.length && !r._isDuplicate).length;
   const canImport = selectedRows.size > 0 && !Array.from(selectedRows).some(i => validationErrors[i]?.length || previewData[i]._isDuplicate);
 
-  // ✅ แก้ไข: เพิ่มคอลัมน์ "ข้อผิดพลาด" ในข้อมูลที่ส่งออก
+  // ✅ แก้ไข: เพิ่มคอลัมน์ "ข้อผิดพลาด" และจัดกลุ่มข้อมูลในไฟล์ Excel
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
     
@@ -409,7 +409,6 @@ export default function ImportExcelPage() {
         'ส่วนสูง(ซม.)': row.height || '', 
         'โค้ชผู้ดูแล': row.coach_name || '-',
         'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : (isDup ? '⚠️ ซ้ำ' : '⏳ ยังไม่ได้นำเข้า')),
-        // ✅ เพิ่มคอลัมน์ข้อผิดพลาดสำหรับข้อมูลที่ผิดพลาด
         'ข้อผิดพลาด': hasErrors ? validationErrors[idx]?.join('; ') : ''
       };
     });
@@ -420,14 +419,10 @@ export default function ImportExcelPage() {
     const importedData = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
     if (importedData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(importedData), '✅ เข้าระบบแล้ว');
 
-    // ✅ ข้อมูลที่มีข้อผิดพลาด: รวมคอลัมน์ข้อผิดพลาดด้วย
     const errorData = exportData.filter(r => r['สถานะ'] === '❌ มีข้อผิดพลาด');
     if (errorData.length > 0) {
       const wsError = XLSX.utils.json_to_sheet(errorData);
-      // ปรับความกว้างคอลัมน์ข้อผิดพลาดให้อ่านง่าย
-      wsError['!cols'] = exportData[0] ? Object.keys(exportData[0]).map(key => 
-        key === 'ข้อผิดพลาด' ? { wch: 60 } : { wch: 20 }
-      ) : [];
+      wsError['!cols'] = exportData[0] ? Object.keys(exportData[0]).map(key => key === 'ข้อผิดพลาด' ? { wch: 60 } : { wch: 20 }) : [];
       XLSX.utils.book_append_sheet(wb, wsError, '❌ มีข้อผิดพลาด');
     }
 
@@ -479,7 +474,6 @@ export default function ImportExcelPage() {
       const hospMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       const netHospId = hospMatch?.hospital.id;
       
-      // กรองโค้ชในเครือข่าย (แม่ข่าย + ลูกข่าย)
       const networkCoaches = coaches.filter(c => {
         const cHospId = c.users?.hospital_id;
         const targetHosp = hospitals.find(h => h.id === netHospId);
@@ -531,6 +525,18 @@ export default function ImportExcelPage() {
       if (result.success > 0) {
         const newIds = selectedData.slice(0, result.success).map(d => cleanIdCard(d.id_card));
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
+        
+        // ✅ เก็บรายชื่อผู้ป่วยที่นำเข้าสำเร็จเพื่อแสดงรายงาน
+        const successfulPatients = selectedData.slice(0, result.success).map((d, i) => ({
+          id_card: d.id_card,
+          first_name: d.first_name,
+          last_name: d.last_name,
+          hospital_number: d.hospital_number,
+          hospital_name: d.hospital_name,
+          coach_name: d.coach_name || '-'
+        }));
+        setImportedPatients(successfulPatients);
+        
         setStep('success');
       } else {
         setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
@@ -547,23 +553,62 @@ export default function ImportExcelPage() {
   const backToPreview = () => {
     setSelectedRows(new Set());
     setFixData({});
+    setImportedPatients([]);
     setStep('preview');
     runPreviewValidation(previewData);
   };
 
+  // ✅ หน้าสำเร็จ: แสดงรายชื่อผู้ป่วยที่นำเข้า + ปุ่มนำทาง 2 ทาง
   if (step === 'success') return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-md w-full">
-        <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-          <CheckCircle className="w-10 h-10 text-green-600" />
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+      <div className="bg-white rounded-2xl shadow-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="p-6 border-b bg-green-50">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">บันทึกข้อมูลสำเร็จ!</h2>
+              <p className="text-sm text-gray-600">นำเข้าผู้ป่วยสำเร็จ {importedPatients.length} ราย</p>
+            </div>
+          </div>
         </div>
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">บันทึกข้อมูลสำเร็จ!</h2>
-        <p className="text-gray-500 mb-8">ระบบได้บันทึกข้อมูลผู้ป่วยลงฐานข้อมูลเรียบร้อยแล้ว</p>
-        <div className="grid grid-cols-2 gap-4">
-          <button onClick={backToPreview} className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
+        
+        <div className="flex-1 overflow-y-auto p-6">
+          <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <Users className="w-4 h-4" /> รายชื่อผู้ป่วยที่นำเข้าระบบ:
+          </h3>
+          <div className="bg-gray-50 rounded-lg border max-h-64 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-100 sticky top-0">
+                <tr>
+                  <th className="p-2 text-left">ชื่อ-นามสกุล</th>
+                  <th className="p-2 text-left">HN</th>
+                  <th className="p-2 text-left">บัตรประชาชน</th>
+                  <th className="p-2 text-left">โรงพยาบาล</th>
+                  <th className="p-2 text-left">โค้ช</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importedPatients.map((p, idx) => (
+                  <tr key={idx} className="border-t hover:bg-gray-100">
+                    <td className="p-2">{p.first_name} {p.last_name}</td>
+                    <td className="p-2">{p.hospital_number}</td>
+                    <td className="p-2 font-mono text-xs">{p.id_card}</td>
+                    <td className="p-2">{p.hospital_name}</td>
+                    <td className="p-2">{p.coach_name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <div className="p-4 border-t bg-gray-50 flex gap-3">
+          <button onClick={backToPreview} className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
             <Upload className="w-4 h-4" /> นำเข้าเพิ่มเติม
           </button>
-          <button onClick={() => router.push('/admin/patients')} className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center justify-center gap-2">
+          <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center justify-center gap-2">
             <ArrowLeft className="w-4 h-4" /> ไปหน้ารายการผู้ป่วย
           </button>
         </div>
