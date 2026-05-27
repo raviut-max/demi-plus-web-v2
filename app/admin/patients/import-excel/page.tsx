@@ -395,6 +395,7 @@ export default function ImportExcelPage() {
       const hasErrors = validationErrors[idx]?.length > 0;
       const isDup = row._isDuplicate;
       const isImported = row._status === 'success' || row._imported;
+      const isAlreadyInSystem = isDup && row._isDuplicate;
       return { 
         'ลำดับ': idx + 1, 
         'เลขบัตรประชาชน': row.id_card || '', 
@@ -408,7 +409,7 @@ export default function ImportExcelPage() {
         'น้ำหนัก(กก.)': row.current_weight || '', 
         'ส่วนสูง(ซม.)': row.height || '', 
         'โค้ชผู้ดูแล': row.coach_name || '-',
-        'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : (isDup ? '⚠️ ซ้ำ' : '⏳ ยังไม่ได้นำเข้า')),
+        'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (isAlreadyInSystem ? '🔄 มีในระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : '⏳ ยังไม่ได้นำเข้า')),
         'ข้อผิดพลาด': hasErrors ? validationErrors[idx]?.join('; ') : ''
       };
     });
@@ -418,6 +419,9 @@ export default function ImportExcelPage() {
 
     const importedData = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
     if (importedData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(importedData), '✅ เข้าระบบแล้ว');
+
+    const alreadyInSystemData = exportData.filter(r => r['สถานะ'] === '🔄 มีในระบบแล้ว');
+    if (alreadyInSystemData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(alreadyInSystemData), '🔄 มีในระบบแล้ว');
 
     const errorData = exportData.filter(r => r['สถานะ'] === '❌ มีข้อผิดพลาด');
     if (errorData.length > 0) {
@@ -435,6 +439,7 @@ export default function ImportExcelPage() {
       [''],
       ['จำนวนแถวทั้งหมด:', previewData.length],
       ['จำนวนที่เข้าระบบแล้ว:', importedData.length],
+      ['จำนวนที่มีในระบบแล้ว:', alreadyInSystemData.length],
       ['จำนวนที่มีข้อผิดพลาด:', errorData.length],
       ['จำนวนที่ยังไม่ได้นำเข้า:', pendingData.length]
     ];
@@ -526,7 +531,6 @@ export default function ImportExcelPage() {
         const newIds = selectedData.slice(0, result.success).map(d => cleanIdCard(d.id_card));
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
         
-        // ✅ เก็บรายชื่อผู้ป่วยที่นำเข้าสำเร็จเพื่อแสดงรายงาน
         const successfulPatients = selectedData.slice(0, result.success).map((d, i) => ({
           id_card: d.id_card,
           first_name: d.first_name,
