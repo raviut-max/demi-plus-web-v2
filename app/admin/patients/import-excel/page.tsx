@@ -2,7 +2,7 @@
 ============================================================================
 📄 ไฟล์: page.tsx
 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
- ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
 👥 ผู้พัฒนา: DEMI+ Development Team
 📅 อัปเดตล่าสุด: 27 พฤษภาคม 2569
@@ -278,11 +278,11 @@ export default function ImportExcelPage() {
               rowErrors.push('🔍 พบข้อมูลซ้ำในระบบ: เลขบัตรประชาชนนี้มีอยู่แล้ว ไม่สามารถนำเข้าซ้ำได้');
               isDuplicate = true;
             } else if (duplicateMap.has(cleanId) && duplicateMap.get(cleanId)!.length > 1) {
-              rowErrors.push(' ซ้ำในไฟล์นำเข้า: เลขบัตรนี้ปรากฏมากกว่า 1 แถว');
+              rowErrors.push('❌ ซ้ำในไฟล์นำเข้า: เลขบัตรนี้ปรากฏมากกว่า 1 แถว');
               isDuplicate = true;
             }
           } catch (err) {
-            rowErrors.push('️ ไม่สามารถตรวจสอบความซ้ำกับฐานข้อมูลได้');
+            rowErrors.push('⚠️ ไม่สามารถตรวจสอบความซ้ำกับฐานข้อมูลได้');
           }
         }
       }
@@ -384,6 +384,7 @@ export default function ImportExcelPage() {
   const validSelectableCount = previewData.filter((r, i) => !validationErrors[i]?.length && !r._isDuplicate).length;
   const canImport = selectedRows.size > 0 && !Array.from(selectedRows).some(i => validationErrors[i]?.length || previewData[i]._isDuplicate);
 
+  // ✅ แก้ไข: เพิ่มคอลัมน์ "ข้อผิดพลาด" ในข้อมูลที่ส่งออก
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
     
@@ -407,7 +408,9 @@ export default function ImportExcelPage() {
         'น้ำหนัก(กก.)': row.current_weight || '', 
         'ส่วนสูง(ซม.)': row.height || '', 
         'โค้ชผู้ดูแล': row.coach_name || '-',
-        'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : (isDup ? '⚠️ ซ้ำ' : '⏳ ยังไม่ได้นำเข้า'))
+        'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : (isDup ? '⚠️ ซ้ำ' : '⏳ ยังไม่ได้นำเข้า')),
+        // ✅ เพิ่มคอลัมน์ข้อผิดพลาดสำหรับข้อมูลที่ผิดพลาด
+        'ข้อผิดพลาด': hasErrors ? validationErrors[idx]?.join('; ') : ''
       };
     });
     
@@ -417,8 +420,16 @@ export default function ImportExcelPage() {
     const importedData = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
     if (importedData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(importedData), '✅ เข้าระบบแล้ว');
 
+    // ✅ ข้อมูลที่มีข้อผิดพลาด: รวมคอลัมน์ข้อผิดพลาดด้วย
     const errorData = exportData.filter(r => r['สถานะ'] === '❌ มีข้อผิดพลาด');
-    if (errorData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(errorData), '❌ มีข้อผิดพลาด');
+    if (errorData.length > 0) {
+      const wsError = XLSX.utils.json_to_sheet(errorData);
+      // ปรับความกว้างคอลัมน์ข้อผิดพลาดให้อ่านง่าย
+      wsError['!cols'] = exportData[0] ? Object.keys(exportData[0]).map(key => 
+        key === 'ข้อผิดพลาด' ? { wch: 60 } : { wch: 20 }
+      ) : [];
+      XLSX.utils.book_append_sheet(wb, wsError, '❌ มีข้อผิดพลาด');
+    }
 
     const pendingData = exportData.filter(r => r['สถานะ'] === '⏳ ยังไม่ได้นำเข้า');
     if (pendingData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pendingData), '⏳ ยังไม่ได้นำเข้า');
@@ -778,7 +789,7 @@ export default function ImportExcelPage() {
                         ) : (
                           <div className="space-y-2">
                             {row.coach_name && <p className="text-xs text-gray-500">ชื่อที่นำเข้า: <strong>{row.coach_name}</strong></p>}
-                            {!row.coach_name && <p className="text-xs text-orange-500">️ ยังไม่ได้ระบุชื่อโค้ช</p>}
+                            {!row.coach_name && <p className="text-xs text-orange-500">⚠️ ยังไม่ได้ระบุชื่อโค้ช</p>}
                             <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedCoachId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedCoachId: e.target.value } }))}>
                               <option value="">-- เลือกโค้ชในเครือข่าย --</option>
                               {networkCoaches.map(c => <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>)}
