@@ -2,7 +2,7 @@
 ============================================================================
 📄 ไฟล์: page.tsx
 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
-🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+ ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
 👥 ผู้พัฒนา: DEMI+ Development Team
 📅 อัปเดตล่าสุด: 27 พฤษภาคม 2569
@@ -22,7 +22,8 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users,
+  Scissors
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -121,31 +122,40 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
   return bestMatch ? { coach: bestMatch, similarity: bestScore } : null;
 };
 
+// ✅ ปรับปรุง: เติมปี พ.ศ. ตามเงื่อนไข 80-99 -> 24xx, 00-79 -> 25xx
 const formatThaiDate = (input: string | number | Date): string => {
   if (!input) return '';
   let day = '', month = '', year = '';
   const str = String(input).trim();
+  
+  // กรณีรูปแบบ YYYY-MM-DD (ISO)
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
     const [y, m, d] = str.split('-');
     year = String(parseInt(y) + 543); month = m; day = d;
-  } else if (str.match(/^[\d/.\-]+$/)) {
+  } 
+  // กรณีรูปแบบที่มีตัวเลขและตัวคั่น
+  else if (str.match(/^[\d/.\-]+$/)) {
     const parts = str.split(/[/.\-]/).map(p => p.trim());
     if (parts.length >= 3) {
       const [p1, p2, p3] = parts;
-      if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; }
-      else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; }
-      else { day = p1; month = p2; year = p3; }
+      if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; } // ปี ค.ศ. นำหน้า
+      else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; } // ปี พ.ศ. หรือ ค.ศ. ปิดท้าย
+      else { day = p1; month = p2; year = p3; } // สมมติว่าเป็น วัน/เดือน/ปี (ค.ศ.)
     }
   }
+
   let formattedYear = year;
   if (year.length === 2) {
     const shortYear = parseInt(year);
-    formattedYear = shortYear >= 90 ? `24${year}` : `25${year}`;
+    // เงื่อนไข: 80-99 -> 24xx, 00-79 -> 25xx
+    if (shortYear >= 80) formattedYear = `24${year}`;
+    else formattedYear = `25${year}`;
   } else if (year.length === 4) {
     formattedYear = year;
   } else if (year.length === 3) {
     formattedYear = `2${year}`;
   }
+  
   return `${String(parseInt(day) || 1).padStart(2, '0')}/${String(parseInt(month) || 1).padStart(2, '0')}/${formattedYear}`;
 };
 
@@ -168,6 +178,13 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
   return found ? { valid: true, errors: [] } : { valid: false, errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง หรือไม่มีในระบบ`] };
 };
 
+// ฟังก์ชันลบคำนำหน้าชื่อ
+const removeNamePrefixes = (name: string): string => {
+  if (!name) return '';
+  // Regex สำหรับ นาย, นาง, นางสาว, นส, น.ส., เด็กชาย, เด็กหญิง
+  return name.replace(/^(นาย|นางสาว|นาง|นส|น\.?ส\.?|เด็กชาย|เด็กหญิง)\.?/i, '').trim();
+};
+
 // =====================================================
 // MAIN COMPONENT
 // =====================================================
@@ -185,6 +202,7 @@ export default function ImportExcelPage() {
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // เพิ่มสถานะ 'fixing' สำหรับการปรับแก้ รพ/โค้ช ก่อนบันทึกจริง
   const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'fixing' | 'saving' | 'success'>('upload');
   const [validProvinces, setValidProvinces] = useState<string[]>([]);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
@@ -193,7 +211,7 @@ export default function ImportExcelPage() {
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
   const [hospitals, setHospitals] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
-  const [fixData, setFixData] = useState<Record<number, any>>({});
+  const [fixData, setFixData] = useState<Record<number, { hospitalMatch?: any; coachMatch?: any; selectedHospitalId?: string; selectedCoachId?: string; isFixed: boolean }>>({});
 
   useEffect(() => {
     const userData = checkSession();
@@ -271,7 +289,7 @@ export default function ImportExcelPage() {
       const rowErrors: string[] = [];
       let isDuplicate = false;
 
-      // 1. ตรวจสอบเลขบัตรประชาชนก่อน
+      // 1. ตรวจสอบเลขบัตรประชาชน (สำคัญที่สุด)
       if (row.id_card) {
         if (!validateThaiIdCard(row.id_card)) {
           rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -292,31 +310,36 @@ export default function ImportExcelPage() {
         }
       }
 
-      // 2. ถ้าไม่ซ้ำ ค่อยตรวจสอบฟิลด์อื่นต่อ
+      // 2. ถ้าไม่ซ้ำ ตรวจสอบอย่างอื่นต่อ
       if (!isDuplicate) {
+        // ตรวจสอบฟิลด์บังคับ
         STANDARD_FIELDS.forEach(field => {
           if (field.required && (!row[field.key] || String(row[field.key]).trim() === '')) {
             rowErrors.push(`❌ ${field.label} เป็นฟิลด์บังคับ (ขาดหายไป)`);
           }
         });
 
+        // ตรวจสอบวันเกิด
         if (row.birth_date) {
           const dateRegex = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
           const match = row.birth_date.match(dateRegex);
-          if (!match) rowErrors.push('❌ วันเกิดรูปแบบไม่ถูกต้อง (ต้องใช้รูปแบบ วว/ดด/ปปปป)');
-          else {
+          if (!match) {
+            rowErrors.push('❌ วันเกิดรูปแบบไม่ถูกต้อง (ต้องใช้รูปแบบ วว/ดด/ปปปป)');
+          } else {
             const [, d, m, y] = match;
-            if (parseInt(d) < 1 || parseInt(d) > 31) rowErrors.push('❌ วันเกิด: วันไม่ถูกต้อง (1-31)');
-            if (parseInt(m) < 1 || parseInt(m) > 12) rowErrors.push('❌ วันเกิด: เดือนไม่ถูกต้อง (1-12)');
-            if (parseInt(y) < 2400 || parseInt(y) > 2569) rowErrors.push('❌ วันเกิด: ปี พ.ศ. ไม่ถูกต้อง (2400-2569)');
+            if (parseInt(d) < 1 || parseInt(d) > 31) rowErrors.push('❌ วันเกิด: วันไม่ถูกต้อง (ต้องอยู่ระหว่าง 1-31)');
+            if (parseInt(m) < 1 || parseInt(m) > 12) rowErrors.push(' วันเกิด: เดือนไม่ถูกต้อง (ต้องอยู่ระหว่าง 1-12)');
+            if (parseInt(y) < 2400 || parseInt(y) > 2569) rowErrors.push('❌ วันเกิด: ปี พ.ศ. ไม่ถูกต้อง (ต้องอยู่ระหว่าง 2400-2569)');
           }
         }
 
+        // ตรวจสอบจังหวัด
         if (row.province) {
           const pc = validateProvinceOnly(row.province, validProvinces);
           if (!pc.valid) rowErrors.push(...pc.errors.map(e => `❌ ${e}`));
         }
 
+        // ตรวจสอบฟิลด์ตัวเลข
         const numericFields = [
           { key: 'current_weight', label: 'น้ำหนัก', min: 30, max: 200 },
           { key: 'height', label: 'ส่วนสูง', min: 100, max: 250 },
@@ -332,7 +355,9 @@ export default function ImportExcelPage() {
               rowErrors.push(`❌ ${label}: มีตัวอักษรปน หรือรูปแบบไม่ถูกต้อง (ต้องเป็นตัวเลขเท่านั้น)`);
             } else {
               const num = parseFloat(val);
-              if (num < min || num > max) rowErrors.push(` ${label}: ค่าไม่อยู่ในช่วงที่กำหนด (${min}-${max})`);
+              if (num < min || num > max) {
+                rowErrors.push(`❌ ${label}: ค่าไม่อยู่ในช่วงที่กำหนด (${min}-${max})`);
+              }
             }
           }
         });
@@ -355,7 +380,29 @@ export default function ImportExcelPage() {
     });
   };
 
-  const startEdit = (rIdx: number, key: string) => { setEditingCell({ row: rIdx, key }); setEditValue(previewData[rIdx][key] || ''); };
+  // ✅ ฟังก์ชันลบคำนำหน้าชื่อทั้งคอลัมน์
+  const cleanAllNames = () => {
+    setPreviewData(prev => {
+      const updated = prev.map(row => {
+        if (row.first_name) {
+          return { ...row, first_name: removeNamePrefixes(row.first_name) };
+        }
+        return row;
+      });
+      // รัน validation ใหม่ถ้าจำเป็น (กรณีชื่อว่างแล้วกลายเป็น Error)
+      runPreviewValidation(updated);
+      return updated;
+    });
+  };
+
+  const startEdit = (rIdx: number, key: string) => { 
+    // อนุญาตให้แก้ไขได้เสมอ ยกเว้นแถวที่ซ้ำ (Duplicate)
+    const row = previewData[rIdx];
+    if (row._isDuplicate) return; 
+    setEditingCell({ row: rIdx, key }); 
+    setEditValue(previewData[rIdx][key] || ''); 
+  };
+
   const cancelEdit = () => setEditingCell(null);
   const saveEdit = () => {
     if (!editingCell) return;
@@ -367,6 +414,7 @@ export default function ImportExcelPage() {
   };
 
   const toggleSelectRow = (idx: number) => {
+    // เลือกได้เฉพาะแถวที่ไม่มี Error และไม่ซ้ำ
     if (validationErrors[idx]?.length || previewData[idx]._isDuplicate) return;
     const next = new Set(selectedRows);
     next.has(idx) ? next.delete(idx) : next.add(idx);
@@ -382,6 +430,7 @@ export default function ImportExcelPage() {
   const validSelectableCount = previewData.filter((r, i) => !validationErrors[i]?.length && !r._isDuplicate).length;
   const canImport = selectedRows.size > 0 && !Array.from(selectedRows).some(i => validationErrors[i]?.length || previewData[i]._isDuplicate);
 
+  // ✅ ปรับปรุง: จัดกลุ่มข้อมูลส่งออกให้ชัดเจนตามที่ต้องการ
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
     
@@ -393,40 +442,55 @@ export default function ImportExcelPage() {
       const isDup = row._isDuplicate;
       const isImported = row._status === 'success' || row._imported;
       return { 
-        'ลำดับ': idx + 1, 'เลขบัตรประชาชน': row.id_card || '', 'ชื่อ': row.first_name || '', 'นามสกุล': row.last_name || '', 
-        'HN': row.hospital_number || '', 'วันเกิด': row.birth_date || '', 'เพศ': row.gender || '', 'โรงพยาบาล': row.hospital_name || '', 
-        'เบอร์โทรศัพท์': row.phone || '', 'น้ำหนัก(กก.)': row.current_weight || '', 'ส่วนสูง(ซม.)': row.height || '', 
+        'ลำดับ': idx + 1, 
+        'เลขบัตรประชาชน': row.id_card || '', 
+        'ชื่อ': row.first_name || '', 
+        'นามสกุล': row.last_name || '', 
+        'HN': row.hospital_number || '', 
+        'วันเกิด': row.birth_date || '', 
+        'เพศ': row.gender || '',  
+        'โรงพยาบาล': row.hospital_name || '', 
+        'เบอร์โทรศัพท์': row.phone || '', 
+        'น้ำหนัก(กก.)': row.current_weight || '', 
+        'ส่วนสูง(ซม.)': row.height || '', 
         'โค้ชผู้ดูแล': row.coach_name || '-',
         'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (isDup ? '🔄 มีในระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : '⏳ ยังไม่ได้นำเข้า')),
         'ข้อผิดพลาด': hasErrors ? validationErrors[idx]?.join('; ') : ''
       };
     });
     
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportData), '📋 ข้อมูลทั้งหมด');
+    const wsAll = XLSX.utils.json_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(wb, wsAll, '📋 ข้อมูลทั้งหมด');
 
-    const imported = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
-    if (imported.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(imported), '✅ เข้าระบบแล้ว');
+    const importedData = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
+    if (importedData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(importedData), '✅ เข้าระบบแล้ว');
 
-    const inSystem = exportData.filter(r => r['สถานะ'] === '🔄 มีในระบบแล้ว');
-    if (inSystem.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inSystem), '🔄 มีในระบบแล้ว');
+    const alreadyInSystemData = exportData.filter(r => r['สถานะ'] === '🔄 มีในระบบแล้ว');
+    if (alreadyInSystemData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(alreadyInSystemData), ' มีในระบบแล้ว');
 
-    const errors = exportData.filter(r => r['สถานะ'] === '❌ มีข้อผิดพลาด');
-    if (errors.length > 0) {
-      const wsErr = XLSX.utils.json_to_sheet(errors);
-      wsErr['!cols'] = exportData[0] ? Object.keys(exportData[0]).map(k => k === 'ข้อผิดพลาด' ? { wch: 60 } : { wch: 20 }) : [];
-      XLSX.utils.book_append_sheet(wb, wsErr, '❌ มีข้อผิดพลาด');
+    // ข้อมูลที่มีข้อผิดพลาด (ไม่รวมที่ซ้ำมีในระบบแล้ว - แยกออกไปแล้ว)
+    const errorData = exportData.filter(r => r['สถานะ'] === ' มีข้อผิดพลาด');
+    if (errorData.length > 0) {
+      const wsError = XLSX.utils.json_to_sheet(errorData);
+      wsError['!cols'] = exportData[0] ? Object.keys(exportData[0]).map(key => key === 'ข้อผิดพลาด' ? { wch: 60 } : { wch: 20 }) : [];
+      XLSX.utils.book_append_sheet(wb, wsError, '❌ มีข้อผิดพลาด');
     }
 
-    const pending = exportData.filter(r => r['สถานะ'] === '⏳ ยังไม่ได้นำเข้า');
-    if (pending.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pending), ' ยังไม่ได้นำเข้า');
+    const pendingData = exportData.filter(r => r['สถานะ'] === '⏳ ยังไม่ได้นำเข้า');
+    if (pendingData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pendingData), '⏳ ยังไม่ได้นำเข้า');
 
     const summary = [
-      ['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'], ['วันที่ส่งออก:', new Date().toLocaleString('th-TH')], [''],
-      ['จำนวนแถวทั้งหมด:', previewData.length], ['จำนวนที่เข้าระบบแล้ว:', imported.length],
-      ['จำนวนที่มีในระบบแล้ว:', inSystem.length], ['จำนวนที่มีข้อผิดพลาด:', errors.length],
-      ['จำนวนที่ยังไม่ได้นำเข้า:', pending.length]
+      ['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'],
+      ['วันที่ส่งออก:', new Date().toLocaleString('th-TH')],
+      [''],
+      ['จำนวนแถวทั้งหมด:', previewData.length],
+      ['จำนวนที่เข้าระบบแล้ว:', importedData.length],
+      ['จำนวนที่มีในระบบแล้ว:', alreadyInSystemData.length],
+      ['จำนวนที่มีข้อผิดพลาด:', errorData.length],
+      ['จำนวนที่ยังไม่ได้นำเข้า:', pendingData.length]
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '📊 สรุปผล');
+
     XLSX.writeFile(wb, `รายงานนำเข้าผู้ป่วย_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`);
   };
 
@@ -441,12 +505,15 @@ export default function ImportExcelPage() {
         const json = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
         setRawData(json);
         if (json.length > 0) setExcelHeaders(Object.keys(json[0]));
-      } catch { setError('❌ ไม่สามารถอ่านไฟล์ได้'); }
+      } catch { setError(' ไม่สามารถอ่านไฟล์ได้'); }
       finally { setLoading(false); }
     };
     reader.readAsArrayBuffer(file);
   };
 
+  // =====================================================
+  // 🚀 ขั้นตอนการตรวจสอบและแก้ไข รพ./โค้ช
+  // =====================================================
   const startImportProcess = async () => {
     setStep('fixing');
     setError('');
@@ -458,35 +525,37 @@ export default function ImportExcelPage() {
       const hospMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       const netHospId = hospMatch?.hospital.id;
       
+      // กรองโค้ชในเครือข่าย (แม่ข่าย + ลูกข่าย)
       const networkCoaches = coaches.filter(c => {
         const cHospId = c.users?.hospital_id;
         const targetHosp = hospitals.find(h => h.id === netHospId);
         return cHospId === netHospId || cHospId === targetHosp?.parent_hospital_id || targetHosp?.parent_hospital_id === cHospId;
       });
-
+      
       const isCoachEmpty = !row.coach_name || String(row.coach_name).trim() === '';
       const coachMatch = isCoachEmpty ? null : findBestCoachMatch(row.coach_name, networkCoaches);
 
+      // ถ้าโค้ชว่าง ถือว่า Fixed ทันที
+      const needsFix = !hospMatch || (!isCoachEmpty && !coachMatch) || (coachMatch && coachMatch.similarity < 0.95);
+      
       newFixData[idx] = {
         hospitalMatch: hospMatch,
         coachMatch: coachMatch,
-        selectedHospitalId: hospMatch?.hospital.id || '',
-        selectedCoachId: coachMatch?.coach.user_id || '',
+        selectedHospitalId: hospMatch?.hospital.id,
+        selectedCoachId: coachMatch?.coach.user_id,
         isCoachEmpty,
-        hospFixed: !!hospMatch,
-        coachFixed: isCoachEmpty || !!coachMatch
+        isFixed: !needsFix
       };
     }
     setFixData(newFixData);
   };
 
   const applyFix = (idx: number) => {
-    setFixData(prev => {
-      const fd = prev[idx];
-      if (!fd) return prev;
-      // อัปเดตข้อมูลใน previewData ด้วยค่าที่เลือกใหม่
-      setPreviewData(pPrev => {
-        const next = [...pPrev];
+    setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], isFixed: true } }));
+    const fd = fixData[idx];
+    if (fd) {
+      setPreviewData(prev => {
+        const next = [...prev];
         if (fd.selectedHospitalId) {
           const h = hospitals.find(hosp => hosp.id === fd.selectedHospitalId);
           if (h) next[idx].hospital_name = h.name;
@@ -497,14 +566,13 @@ export default function ImportExcelPage() {
         }
         return next;
       });
-      return { ...prev, [idx]: { ...fd, hospFixed: true, coachFixed: true } };
-    });
+    }
   };
 
-  const areAllResolved = Object.values(fixData).every(fd => fd.hospFixed && fd.coachFixed);
+  const areAllFixed = Object.values(fixData).every(fd => fd.isFixed);
 
   const saveToSystem = async () => {
-    if (!areAllResolved) return;
+    if (!areAllFixed) return;
     setStep('saving');
     setImportProgress({ current: 0, total: selectedRows.size });
     try {
@@ -515,10 +583,16 @@ export default function ImportExcelPage() {
         const newIds = selectedData.slice(0, result.success).map(d => cleanIdCard(d.id_card));
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
         
-        setImportedPatients(selectedData.slice(0, result.success).map(d => ({
-          id_card: d.id_card, first_name: d.first_name, last_name: d.last_name,
-          hospital_number: d.hospital_number, hospital_name: d.hospital_name, coach_name: d.coach_name || '-'
-        })));
+        const successfulPatients = selectedData.slice(0, result.success).map((d, i) => ({
+          id_card: d.id_card,
+          first_name: d.first_name,
+          last_name: d.last_name,
+          hospital_number: d.hospital_number,
+          hospital_name: d.hospital_name,
+          coach_name: d.coach_name || '-'
+        }));
+        setImportedPatients(successfulPatients);
+        
         setStep('success');
       } else {
         setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
@@ -540,27 +614,59 @@ export default function ImportExcelPage() {
     runPreviewValidation(previewData);
   };
 
+  // ✅ หน้าสำเร็จ: แสดงรายชื่อผู้ป่วยที่นำเข้า + ปุ่มนำทาง 2 ทาง
   if (step === 'success') return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <div className="bg-white rounded-2xl shadow-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         <div className="p-6 border-b bg-green-50">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center"><CheckCircle className="w-6 h-6 text-green-600" /></div>
-            <div><h2 className="text-xl font-bold text-gray-800">บันทึกข้อมูลสำเร็จ!</h2><p className="text-sm text-gray-600">นำเข้าผู้ป่วยสำเร็จ {importedPatients.length} ราย</p></div>
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-800">บันทึกข้อมูลสำเร็จ!</h2>
+              <p className="text-sm text-gray-600">นำเข้าผู้ป่วยสำเร็จ {importedPatients.length} ราย</p>
+            </div>
           </div>
         </div>
+        
         <div className="flex-1 overflow-y-auto p-6">
-          <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2"><Users className="w-4 h-4" /> รายชื่อผู้ป่วยที่นำเข้าระบบ:</h3>
+          <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+            <Users className="w-4 h-4" /> รายชื่อผู้ป่วยที่นำเข้าระบบ:
+          </h3>
           <div className="bg-gray-50 rounded-lg border max-h-64 overflow-y-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-100 sticky top-0"><tr><th className="p-2 text-left">ชื่อ-นามสกุล</th><th className="p-2 text-left">HN</th><th className="p-2 text-left">บัตรประชาชน</th><th className="p-2 text-left">โรงพยาบาล</th><th className="p-2 text-left">โค้ช</th></tr></thead>
-              <tbody>{importedPatients.map((p, idx) => (<tr key={idx} className="border-t hover:bg-gray-100"><td className="p-2">{p.first_name} {p.last_name}</td><td className="p-2">{p.hospital_number}</td><td className="p-2 font-mono text-xs">{p.id_card}</td><td className="p-2">{p.hospital_name}</td><td className="p-2">{p.coach_name}</td></tr>))}</tbody>
+              <thead className="bg-gray-100 sticky top-0">
+                <tr>
+                  <th className="p-2 text-left">ชื่อ-นามสกุล</th>
+                  <th className="p-2 text-left">HN</th>
+                  <th className="p-2 text-left">บัตรประชาชน</th>
+                  <th className="p-2 text-left">โรงพยาบาล</th>
+                  <th className="p-2 text-left">โค้ช</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importedPatients.map((p, idx) => (
+                  <tr key={idx} className="border-t hover:bg-gray-100">
+                    <td className="p-2">{p.first_name} {p.last_name}</td>
+                    <td className="p-2">{p.hospital_number}</td>
+                    <td className="p-2 font-mono text-xs">{p.id_card}</td>
+                    <td className="p-2">{p.hospital_name}</td>
+                    <td className="p-2">{p.coach_name}</td>
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         </div>
+        
         <div className="p-4 border-t bg-gray-50 flex gap-3">
-          <button onClick={backToPreview} className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2"><Upload className="w-4 h-4" /> นำเข้าเพิ่มเติม</button>
-          <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center justify-center gap-2"><ArrowLeft className="w-4 h-4" /> ไปหน้ารายการผู้ป่วย</button>
+          <button onClick={backToPreview} className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
+            <Upload className="w-4 h-4" /> นำเข้าเพิ่มเติม
+          </button>
+          <button onClick={() => router.push('/admin/patients')} className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center justify-center gap-2">
+            <ArrowLeft className="w-4 h-4" /> ไปหน้ารายการผู้ป่วย
+          </button>
         </div>
       </div>
     </div>
@@ -573,20 +679,32 @@ export default function ImportExcelPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow-sm border-b border-gray-200 px-4 py-6">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"><ArrowLeft className="w-4 h-4" /> กลับ</button>
-        <h1 className="text-3xl font-bold text-gray-800">📥 นำเข้าข้อมูลผู้ป่วยจาก Excel</h1>
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
+          <ArrowLeft className="w-4 h-4" /> กลับ
+        </button>
+        <h1 className="text-3xl font-bold text-gray-800"> นำเข้าข้อมูลผู้ป่วยจาก Excel</h1>
         <p className="text-gray-600 mt-1">ตรวจสอบ แก้ไข และเลือกข้อมูลก่อนนำเข้าระบบ</p>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {error && (<div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3"><AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" /><p className="text-sm text-red-700 flex-1">{error}</p><button onClick={() => setError('')} className="text-red-600">✕</button></div>)}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+            <p className="text-sm text-red-700 flex-1">{error}</p>
+            <button onClick={() => setError('')} className="text-red-600">✕</button>
+          </div>
+        )}
 
         {step === 'upload' && (
           <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
-            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2"><span className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs">1</span> อัปโหลดไฟล์</h2>
+            <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <span className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs">1</span> อัปโหลดไฟล์
+            </h2>
             <div onDrop={(e) => { e.preventDefault(); if(e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); }} onDragOver={e => e.preventDefault()} onClick={() => document.getElementById('file-input')?.click()} className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-500 cursor-pointer bg-gray-50">
               <input id="file-input" type="file" accept=".xlsx,.xls" onChange={e => e.target.files?.[0] && processFile(e.target.files[0])} className="hidden" />
-              <Upload className="w-10 h-10 text-gray-400 mx-auto mb-3" /><p className="text-gray-700 font-medium">ลากไฟล์มาวาง หรือคลิกเลือก</p><p className="text-sm text-gray-500">รองรับ .xlsx, .xls</p>
+              <Upload className="w-10 h-10 text-gray-400 mx-auto mb-3" /> 
+              <p className="text-gray-700 font-medium">ลากไฟล์มาวาง หรือคลิกเลือก</p> 
+              <p className="text-sm text-gray-500">รองรับ .xlsx, .xls</p>
             </div>
             {loading && <div className="mt-4 flex justify-center items-center gap-2 text-blue-600"><Loader2 className="w-4 h-4 animate-spin" /> กำลังอ่านไฟล์...</div>}
           </div>
@@ -595,7 +713,9 @@ export default function ImportExcelPage() {
         {step === 'mapping' && (
           <div className="bg-white rounded-xl shadow p-6 border border-gray-200">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold flex items-center gap-2"><span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> ตรวจสอบการจับคู่คอลัมน์</h2>
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> ตรวจสอบการจับคู่คอลัมน์
+              </h2>
               <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">ถัดไป: Preview & Validation →</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
@@ -604,7 +724,7 @@ export default function ImportExcelPage() {
                 const isMatched = matchedKey && matchedKey !== '';
                 return (
                   <div key={header} className={`p-4 border rounded-lg transition-all ${isMatched ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-300'}`}>
-                    <p className="text-xs font-medium text-gray-500 mb-1"> คอลัมน์ใน Excel</p>
+                    <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
                     <p className={`font-semibold truncate mb-2 ${isMatched ? 'text-green-900' : 'text-red-700'}`}>{header} {isMatched && <span className="ml-2">✅</span>}</p>
                     <select value={headerMapping[header] || ''} onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} className={`w-full px-3 py-2 border rounded-lg text-sm ${isMatched ? 'border-green-400' : 'border-red-300'}`}>
                       <option value="">-- ไม่จับคู่ --</option>
@@ -650,6 +770,7 @@ export default function ImportExcelPage() {
                           <div className="flex items-center justify-between gap-2">
                             <span>{field.label} {field.required && <span className="text-red-500">*</span>}</span>
                             {field.key === 'birth_date' && <button onClick={swapAllBirthDates} className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200">🔄 สลับทั้งคอลัมน์</button>}
+                            {field.key === 'first_name' && <button onClick={cleanAllNames} className="ml-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 flex items-center gap-1"><Scissors className="w-3 h-3" /> ลบคำนำหน้า</button>}
                           </div>
                         </th>
                       ))}
@@ -661,11 +782,13 @@ export default function ImportExcelPage() {
                       const hasError = validationErrors[rIdx]?.length > 0;
                       const isDup = row._isDuplicate;
                       const isChecking = checkingDuplicates.has(rIdx);
-                      const isDisabled = hasError || isDup;
+                      const isDisabledSelect = hasError || isDup; // ปิดการเลือก
+                      const isDisabledEdit = isDup; // เปิดการแก้ไข (ยกเว้นซ้ำ)
+                      
                       return (
                         <tr key={rIdx} className={`border-b hover:bg-gray-50 transition-colors ${isDup ? 'bg-red-50/40 border-l-4 border-red-400' : (hasError ? 'bg-orange-50/40 border-l-4 border-orange-400' : '')}`}>
                           <td className="p-3 text-center sticky left-0 bg-white z-10">
-                            <input type="checkbox" checked={selectedRows.has(rIdx)} disabled={isDisabled || isChecking} onChange={() => toggleSelectRow(rIdx)} className={`w-4 h-4 ${isDisabled ? 'opacity-40 cursor-not-allowed' : ''}`} />
+                            <input type="checkbox" checked={selectedRows.has(rIdx)} disabled={isDisabledSelect || isChecking} onChange={() => toggleSelectRow(rIdx)} className={`w-4 h-4 ${isDisabledSelect ? 'opacity-40 cursor-not-allowed' : ''}`} />
                           </td>
                           <td className="p-3 text-center sticky left-10 bg-white z-10">
                             {isDup ? <XCircle className="w-5 h-5 text-red-500 mx-auto" /> : hasError ? <AlertTriangle className="w-5 h-5 text-orange-500 mx-auto" /> : <CheckCircle className="w-5 h-5 text-green-500 mx-auto" />}
@@ -680,9 +803,9 @@ export default function ImportExcelPage() {
                                   : field.inputType === 'select' ? <select autoFocus className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}><option value="">-- เลือก --</option>{field.options?.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>
                                   : <input autoFocus type={field.inputType === 'number' ? 'number' : 'text'} step={field.inputType === 'number' ? '0.1' : undefined} className="w-full px-2 py-1 border-2 border-blue-500 rounded bg-blue-50" value={editValue} onChange={e => setEditValue(e.target.value)} onBlur={saveEdit} onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }} />
                                 ) : (
-                                  <div onClick={() => !isDisabled && startEdit(rIdx, field.key)} className={`px-2 py-1 min-h-[32px] rounded flex items-center gap-1 group ${!isDisabled ? 'cursor-text hover:bg-blue-50' : 'cursor-not-allowed opacity-60'}`}>
+                                  <div onClick={() => !isDisabledEdit && startEdit(rIdx, field.key)} className={`px-2 py-1 min-h-[32px] rounded flex items-center gap-1 group ${!isDisabledEdit ? 'cursor-text hover:bg-blue-50' : 'cursor-not-allowed opacity-60'}`}>
                                     <span className={`truncate max-w-[140px] ${!val ? 'text-gray-400 text-xs italic' : ''}`}>{val || 'คลิกเพื่อแก้ไข'}</span>
-                                    {field.key === 'birth_date' && val && <button onClick={(e) => { if (isDisabled) return; e.stopPropagation(); const swapped = swapDayMonth(String(val)); setPreviewData(prev => { const next = [...prev]; next[rIdx] = { ...next[rIdx], birth_date: swapped }; return next; }); runPreviewValidation(previewData.map((r, i) => i === rIdx ? { ...r, birth_date: swapped } : r)); }} className="ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded">🔁</button>}
+                                    {field.key === 'birth_date' && val && <button onClick={(e) => { if (isDisabledEdit) return; e.stopPropagation(); const swapped = swapDayMonth(String(val)); setPreviewData(prev => { const next = [...prev]; next[rIdx] = { ...next[rIdx], birth_date: swapped }; return next; }); runPreviewValidation(previewData.map((r, i) => i === rIdx ? { ...r, birth_date: swapped } : r)); }} className="ml-1 p-1 text-xs text-blue-600 hover:bg-blue-100 rounded">🔁</button>}
                                     <Edit3 className="w-3 h-3 text-gray-300 ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
                                   </div>
                                 )}
@@ -691,8 +814,15 @@ export default function ImportExcelPage() {
                           })}
                           <td className="p-3 align-top sticky right-0 bg-white z-10 border-l min-w-[280px]">
                             {isChecking ? <div className="flex items-center gap-1 text-xs text-blue-700"><Loader2 className="w-3 h-3 animate-spin" /> ตรวจสอบบัตร...</div> : 
-                             (hasError || isDup) ? (<div className="space-y-1.5">{validationErrors[rIdx]?.map((err, idx) => (<div key={idx} className="flex items-start gap-1.5 text-xs px-2 py-1.5 rounded bg-red-50 text-red-700 border border-red-100"><AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" /> <span>{err}</span></div>))}</div>) 
-                             : <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบพื้นฐาน</span>}
+                             (hasError || isDup) ? (
+                              <div className="space-y-1.5">
+                                {validationErrors[rIdx]?.map((err, idx) => (
+                                  <div key={idx} className="flex items-start gap-1.5 text-xs px-2 py-1.5 rounded bg-red-50 text-red-700 border border-red-100">
+                                    <AlertCircle className="w-3 h-3 flex-shrink-0 mt-0.5" /> <span>{err}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : <span className="text-xs text-green-600 font-medium">✓ ผ่านการตรวจสอบพื้นฐาน</span>}
                           </td>
                         </tr>
                       );
@@ -715,6 +845,7 @@ export default function ImportExcelPage() {
                 const row = previewData[idx];
                 const fd = fixData[idx];
                 if (!fd) return null;
+                
                 const netHospId = fd.selectedHospitalId || fd.hospitalMatch?.hospital.id;
                 const networkCoaches = coaches.filter(c => {
                   const cHospId = c.users?.hospital_id;
@@ -725,9 +856,13 @@ export default function ImportExcelPage() {
                 return (
                   <div key={idx} className="border rounded-xl p-4 bg-white shadow-sm">
                     <div className="flex justify-between items-start mb-3">
-                      <div><p className="font-bold text-gray-800">แถวที่ {idx + 1}: {row.first_name} {row.last_name}</p><p className="text-xs text-gray-500">HN: {row.hospital_number} | บัตร: {row.id_card}</p></div>
-                      {fd.hospFixed && fd.coachFixed && <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium flex items-center gap-1"><CheckCircle className="w-3 h-3" /> พร้อมบันทึก</span>}
+                      <div>
+                        <p className="font-bold text-gray-800">แถวที่ {idx + 1}: {row.first_name} {row.last_name}</p>
+                        <p className="text-xs text-gray-500">HN: {row.hospital_number} | บัตร: {row.id_card}</p>
+                      </div>
+                      {fd.isFixed && <span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-medium flex items-center gap-1"><CheckCircle className="w-3 h-3" /> พร้อมบันทึก</span>}
                     </div>
+                    
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <label className="text-xs font-semibold text-gray-600 flex items-center gap-1"><Hospital className="w-3 h-3" /> โรงพยาบาล</label>
@@ -740,7 +875,7 @@ export default function ImportExcelPage() {
                         ) : (
                           <div className="space-y-2">
                             <p className="text-xs text-red-500">❌ ไม่พบโรงพยาบาลในระบบ</p>
-                            <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedHospitalId} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedHospitalId: e.target.value, hospFixed: !!e.target.value } }))}>
+                            <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedHospitalId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedHospitalId: e.target.value } }))}>
                               <option value="">-- เลือกโรงพยาบาล --</option>
                               {hospitals.map(h => <option key={h.id} value={h.id}>{h.name} ({h.code}) {h.type === 'main' ? '- แม่ข่าย' : '- ลูกข่าย'}</option>)}
                             </select>
@@ -755,11 +890,14 @@ export default function ImportExcelPage() {
                             ℹ️ ไม่ระบุโค้ชในไฟล์ (ข้ามการตรวจสอบได้ สามารถนำเข้าได้โดยไม่มีโค้ช)
                           </div>
                         ) : fd.coachMatch && fd.coachMatch.similarity >= 0.95 ? (
-                          <div className="p-3 rounded-lg bg-green-50 border border-green-200"><p className="text-sm text-gray-700">ระบบจับคู่: <strong>{fd.coachMatch.coach.full_name_th}</strong></p></div>
+                          <div className="p-3 rounded-lg bg-green-50 border border-green-200">
+                            <p className="text-sm text-gray-700">ระบบจับคู่: <strong>{fd.coachMatch.coach.full_name_th}</strong></p>
+                          </div>
                         ) : (
                           <div className="space-y-2">
                             {row.coach_name && <p className="text-xs text-gray-500">ชื่อที่นำเข้า: <strong>{row.coach_name}</strong></p>}
-                            <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedCoachId} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedCoachId: e.target.value, coachFixed: !!e.target.value } }))}>
+                            {!row.coach_name && <p className="text-xs text-orange-500">⚠️ ยังไม่ได้ระบุชื่อโค้ช</p>}
+                            <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedCoachId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedCoachId: e.target.value } }))}>
                               <option value="">-- เลือกโค้ชในเครือข่าย --</option>
                               {networkCoaches.map(c => <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>)}
                             </select>
@@ -768,8 +906,9 @@ export default function ImportExcelPage() {
                         )}
                       </div>
                     </div>
+
                     <div className="mt-4 pt-3 border-t flex justify-end">
-                      <button onClick={() => applyFix(idx)} disabled={!fd.hospFixed || (!fd.isCoachEmpty && !fd.coachFixed)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2">
+                      <button onClick={() => applyFix(idx)} disabled={(!fd.selectedHospitalId && !fd.hospitalMatch) || (!fd.isCoachEmpty && !fd.selectedCoachId && !fd.coachMatch)} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-2">
                         <Edit3 className="w-3 h-3" /> ปรับแก้ให้ถูกต้อง
                       </button>
                     </div>
@@ -779,8 +918,8 @@ export default function ImportExcelPage() {
             </div>
             <div className="p-4 border-t bg-gray-50 flex justify-between items-center">
               <button onClick={() => setStep('preview')} className="px-4 py-2 border rounded-lg hover:bg-gray-100 text-sm">ยกเลิก</button>
-              <button onClick={saveToSystem} disabled={!areAllResolved} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2">
-                {areAllResolved ? <><CheckCircle className="w-4 h-4" /> บันทึกข้อมูลเข้าระบบ</> : <><AlertCircle className="w-4 h-4" /> กรุณาปรับแก้ข้อมูลให้ครบถ้วน</>}
+              <button onClick={saveToSystem} disabled={!areAllFixed} className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium flex items-center gap-2">
+                {areAllFixed ? <><CheckCircle className="w-4 h-4" /> บันทึกข้อมูลเข้าระบบ</> : <><AlertCircle className="w-4 h-4" /> กรุณาปรับแก้ข้อมูลให้ครบถ้วน</>}
               </button>
             </div>
           </div>
