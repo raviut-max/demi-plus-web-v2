@@ -2,7 +2,7 @@
 ============================================================================
 📄 ไฟล์: page.tsx
 📂 ตำแหน่ง: app/admin/patients/import-excel/page.tsx
-🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
+ ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
 👥 ผู้พัฒนา: DEMI+ Development Team
 📅 อัปเดตล่าสุด: 27 พฤษภาคม 2569
@@ -21,12 +21,14 @@ import {
   getHospitalsWithHierarchy
 } from '@/lib/supabase/queries';
 import {
-  Upload, FileSpreadsheet, AlertCircle, Loader2, ArrowLeft,
-  CheckCircle, XCircle, Edit3, AlertTriangle, RotateCcw, X,
-  Hospital, UserCheck, Download, ShieldAlert, ChevronRight
+  Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
+// =====================================================
+// 📋 กำหนดคอลัมน์มาตรฐาน
+// =====================================================
 const STANDARD_FIELDS = [
   { key: 'id_card', label: 'เลขบัตรประชาชน', required: true, inputType: 'text' },
   { key: 'first_name', label: 'ชื่อผู้ป่วย', required: true, inputType: 'text' },
@@ -60,6 +62,9 @@ const STANDARD_FIELDS = [
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
 
+// =====================================================
+// 🧠 UTILS & MATCHING
+// =====================================================
 const stripHospitalPrefix = (text: string): string => {
   if (!text) return '';
   let clean = text.trim().toLowerCase();
@@ -158,6 +163,9 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
   return found ? { valid: true, errors: [] } : { valid: false, errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง หรือไม่มีในระบบ`] };
 };
 
+// =====================================================
+// MAIN COMPONENT
+// =====================================================
 export default function ImportExcelPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -172,9 +180,8 @@ export default function ImportExcelPage() {
   const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'fixing' | 'saving'>('upload');
+  const [step, setStep] = useState<'upload' | 'mapping' | 'preview' | 'fixing' | 'saving' | 'success'>('upload');
   const [validProvinces, setValidProvinces] = useState<string[]>([]);
-  const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [success, setSuccess] = useState(false);
   const [checkingDuplicates, setCheckingDuplicates] = useState<Set<number>>(new Set());
@@ -259,7 +266,7 @@ export default function ImportExcelPage() {
       const rowErrors: string[] = [];
       let isDuplicate = false;
 
-      // 1. ตรวจสอบเลขบัตรประชาชน
+      // 1. ตรวจสอบเลขบัตรประชาชน (สำคัญที่สุด)
       if (row.id_card) {
         if (!validateThaiIdCard(row.id_card)) {
           rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -271,11 +278,11 @@ export default function ImportExcelPage() {
               rowErrors.push('🔍 พบข้อมูลซ้ำในระบบ: เลขบัตรประชาชนนี้มีอยู่แล้ว ไม่สามารถนำเข้าซ้ำได้');
               isDuplicate = true;
             } else if (duplicateMap.has(cleanId) && duplicateMap.get(cleanId)!.length > 1) {
-              rowErrors.push('❌ ซ้ำในไฟล์นำเข้า: เลขบัตรนี้ปรากฏมากกว่า 1 แถว');
+              rowErrors.push(' ซ้ำในไฟล์นำเข้า: เลขบัตรนี้ปรากฏมากกว่า 1 แถว');
               isDuplicate = true;
             }
           } catch (err) {
-            rowErrors.push('⚠️ ไม่สามารถตรวจสอบความซ้ำกับฐานข้อมูลได้');
+            rowErrors.push('️ ไม่สามารถตรวจสอบความซ้ำกับฐานข้อมูลได้');
           }
         }
       }
@@ -386,6 +393,7 @@ export default function ImportExcelPage() {
     const exportData = sortedData.map((row, idx) => {
       const hasErrors = validationErrors[idx]?.length > 0;
       const isDup = row._isDuplicate;
+      const isImported = row._status === 'success' || row._imported;
       return { 
         'ลำดับ': idx + 1, 
         'เลขบัตรประชาชน': row.id_card || '', 
@@ -399,13 +407,34 @@ export default function ImportExcelPage() {
         'น้ำหนัก(กก.)': row.current_weight || '', 
         'ส่วนสูง(ซม.)': row.height || '', 
         'โค้ชผู้ดูแล': row.coach_name || '-',
-        'สถานะ': hasErrors ? '❌ มีข้อผิดพลาด' : (isDup ? '⚠️ ซ้ำ' : '✅ พร้อมนำเข้า')
+        'สถานะ': isImported ? '✅ เข้าระบบแล้ว' : (hasErrors ? '❌ มีข้อผิดพลาด' : (isDup ? '⚠️ ซ้ำ' : '⏳ ยังไม่ได้นำเข้า'))
       };
     });
     
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
-    XLSX.writeFile(wb, `ข้อมูลผู้ป่วย_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`);
+    const wsAll = XLSX.utils.json_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(wb, wsAll, '📋 ข้อมูลทั้งหมด');
+
+    const importedData = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
+    if (importedData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(importedData), '✅ เข้าระบบแล้ว');
+
+    const errorData = exportData.filter(r => r['สถานะ'] === '❌ มีข้อผิดพลาด');
+    if (errorData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(errorData), '❌ มีข้อผิดพลาด');
+
+    const pendingData = exportData.filter(r => r['สถานะ'] === '⏳ ยังไม่ได้นำเข้า');
+    if (pendingData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pendingData), '⏳ ยังไม่ได้นำเข้า');
+
+    const summary = [
+      ['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'],
+      ['วันที่ส่งออก:', new Date().toLocaleString('th-TH')],
+      [''],
+      ['จำนวนแถวทั้งหมด:', previewData.length],
+      ['จำนวนที่เข้าระบบแล้ว:', importedData.length],
+      ['จำนวนที่มีข้อผิดพลาด:', errorData.length],
+      ['จำนวนที่ยังไม่ได้นำเข้า:', pendingData.length]
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '📊 สรุปผล');
+
+    XLSX.writeFile(wb, `รายงานนำเข้าผู้ป่วย_${new Date().toISOString().replace(/[:.]/g, '-')}.xlsx`);
   };
 
   const processFile = (file: File) => {
@@ -425,6 +454,9 @@ export default function ImportExcelPage() {
     reader.readAsArrayBuffer(file);
   };
 
+  // =====================================================
+  // 🚀 ขั้นตอนการตรวจสอบและแก้ไข รพ./โค้ช
+  // =====================================================
   const startImportProcess = async () => {
     setStep('fixing');
     setError('');
@@ -436,6 +468,7 @@ export default function ImportExcelPage() {
       const hospMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       const netHospId = hospMatch?.hospital.id;
       
+      // กรองโค้ชในเครือข่าย (แม่ข่าย + ลูกข่าย)
       const networkCoaches = coaches.filter(c => {
         const cHospId = c.users?.hospital_id;
         const targetHosp = hospitals.find(h => h.id === netHospId);
@@ -487,7 +520,7 @@ export default function ImportExcelPage() {
       if (result.success > 0) {
         const newIds = selectedData.slice(0, result.success).map(d => cleanIdCard(d.id_card));
         setImportedIds(prev => { const next = new Set(prev); newIds.forEach(id => next.add(id)); return next; });
-        setSuccess(true);
+        setStep('success');
       } else {
         setError(`❌ เกิดข้อผิดพลาด: ${result.errors[0]?.error || 'ไม่ทราบสาเหตุ'}`);
         setStep('fixing');
@@ -500,14 +533,14 @@ export default function ImportExcelPage() {
     }
   };
 
-  const resetImport = () => {
+  const backToPreview = () => {
     setSelectedRows(new Set());
     setFixData({});
     setStep('preview');
     runPreviewValidation(previewData);
   };
 
-  if (success) return (
+  if (step === 'success') return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="bg-white p-8 rounded-2xl shadow-lg text-center max-w-md w-full">
         <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -516,7 +549,7 @@ export default function ImportExcelPage() {
         <h2 className="text-2xl font-bold text-gray-800 mb-2">บันทึกข้อมูลสำเร็จ!</h2>
         <p className="text-gray-500 mb-8">ระบบได้บันทึกข้อมูลผู้ป่วยลงฐานข้อมูลเรียบร้อยแล้ว</p>
         <div className="grid grid-cols-2 gap-4">
-          <button onClick={() => { setSuccess(false); resetImport(); setStep('upload'); }} className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
+          <button onClick={backToPreview} className="px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium flex items-center justify-center gap-2">
             <Upload className="w-4 h-4" /> นำเข้าเพิ่มเติม
           </button>
           <button onClick={() => router.push('/admin/patients')} className="px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 font-medium flex items-center justify-center gap-2">
@@ -745,7 +778,7 @@ export default function ImportExcelPage() {
                         ) : (
                           <div className="space-y-2">
                             {row.coach_name && <p className="text-xs text-gray-500">ชื่อที่นำเข้า: <strong>{row.coach_name}</strong></p>}
-                            {!row.coach_name && <p className="text-xs text-orange-500">⚠️ ยังไม่ได้ระบุชื่อโค้ช</p>}
+                            {!row.coach_name && <p className="text-xs text-orange-500">️ ยังไม่ได้ระบุชื่อโค้ช</p>}
                             <select className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500" value={fd.selectedCoachId || ''} onChange={e => setFixData(prev => ({ ...prev, [idx]: { ...prev[idx], selectedCoachId: e.target.value } }))}>
                               <option value="">-- เลือกโค้ชในเครือข่าย --</option>
                               {networkCoaches.map(c => <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.specialization_th || 'ไม่ระบุ'}</option>)}
