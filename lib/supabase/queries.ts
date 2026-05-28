@@ -2045,22 +2045,6 @@ export function generateDummyIdCard(prefix: string = '1', provinceCode: string =
   return `${first12}${checkDigit}`;
 }
 
-export async function generateAndReserveIdCard(sequenceType: 'patient' | 'staff' | 'osm', prefix: string = '1', provinceCode: string = '1000') {
-  try {
-    const sequence = await getIdSequence(sequenceType, prefix, provinceCode);
-    if (!sequence) return { success: false, error: 'ไม่พบข้อมูลลำดับในฐานข้อมูล' };
-    
-    const currentSeq = sequence.current_sequence || 1;
-    const idCard = generateDummyIdCard(prefix, provinceCode, currentSeq);
-    await incrementIdSequence(sequenceType, prefix, provinceCode, 1);
-    
-    return { success: true, idCard, sequenceNumber: currentSeq };
-  } catch (err: any) {
-    console.error('❌ [generateAndReserveIdCard] Error:', err);
-    return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน' };
-  }
-}
-
 export function validateThaiIdCard(idCard: string): boolean {
   // ทำความสะอาดเลขบัตรก่อนตรวจ
   const cleaned = idCard.replace(/[-\s]/g, '');
@@ -2515,5 +2499,85 @@ export async function getCoachName(coachId: string) {
     return data?.full_name_th || '-';
   } catch {
     return '-';
+  }
+}
+
+// =====================================================
+// 🔍 ID Card Duplicate Check Function
+// =====================================================
+/**
+ * ตรวจสอบว่าเลขบัตรประชาชน + บทบาท มีอยู่ในระบบแล้วหรือไม่
+ * ใช้ตรวจสอบก่อนสร้างบัตรใหม่ เพื่อป้องกันข้อมูลซ้ำ
+ */
+export async function checkIdCardExists(idCard: string, role: string): Promise<boolean> {
+  try {
+    const { count, error } = await supabase
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('id_card', idCard)
+      .eq('role', role);
+    
+    if (error) {
+      console.error('❌ [checkIdCardExists] Error:', error);
+      return false;
+    }
+    return (count || 0) > 0;
+  } catch (err) {
+    console.error('❌ [checkIdCardExists] Exception:', err);
+    return false;
+  }
+}
+
+// =====================================================
+// 🎫 ID Card Sequence & Generator Functions (แก้ไข)
+// =====================================================
+/**
+ * สร้างและจองเลขบัตรประชาชนอัตโนมัติ พร้อมตรวจสอบความซ้ำ
+ * @param sequenceType ประเภทลำดับ (patient|staff|osm)
+ * @param prefix ตัวขึ้นต้นเลขบัตร (1-8)
+ * @param provinceCode รหัสจังหวัด (3 หลัก)
+ * @param role บทบาทผู้ใช้ สำหรับตรวจสอบความซ้ำ (optional)
+ * @param maxRetries จำนวนครั้งสูงสุดในการลองสร้างใหม่หากซ้ำ (default: 10)
+ */
+export async function generateAndReserveIdCard(
+  sequenceType: 'patient' | 'staff' | 'osm', 
+  prefix: string = '1', 
+  provinceCode: string = '1000',
+  role?: string,
+  maxRetries: number = 10
+) {
+  try {
+    let attempts = 0;
+    
+    while (attempts < maxRetries) {
+      // 1. ดึงลำดับปัจจุบัน
+      const sequence = await getIdSequence(sequenceType, prefix, provinceCode);
+      if (!sequence) return { success: false, error: 'ไม่พบข้อมูลลำดับในฐานข้อมูล' };
+      
+      const currentSeq = sequence.current_sequence || 1;
+      
+      // 2. สร้างเลขบัตรประชาชนด้วยอัลกอริทึมตรวจสอบได้ (Checksum)
+      const idCard = generateDummyIdCard(prefix, provinceCode, currentSeq);
+      
+      // 3. ✅ ตรวจสอบความซ้ำ (ถ้าระบุ role)
+      if (role) {
+        const exists = await checkIdCardExists(idCard, role);
+        if (exists) {
+          // เลขซ้ำ -> ข้ามลำดับนี้แล้วลองใหม่
+          await incrementIdSequence(sequenceType, prefix, provinceCode, 1);
+          attempts++;
+          continue;
+        }
+      }
+      
+      // 4. ✅ เลขไม่ซ้ำ -> จองสำเร็จ
+      await incrementIdSequence(sequenceType, prefix, provinceCode, 1);
+      return { success: true, idCard, sequenceNumber: currentSeq };
+    }
+    
+    return { success: false, error: 'ไม่สามารถสร้างเลขบัตรที่ไม่ซ้ำได้หลังจากลองหลายครั้ง กรุณาลองใหม่' };
+  } catch (err: any) {
+    console.error('❌ [generateAndReserveIdCard] Error:', err);
+    return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน' };
   }
 }

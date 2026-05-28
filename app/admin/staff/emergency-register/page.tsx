@@ -10,12 +10,13 @@ import {
   isSuperAdmin,
   getHospitalsWithHierarchy,
   generateAndReserveIdCard,
-  validateThaiIdCard
+  validateThaiIdCard,
+  checkIdCardExists // ✅ เพิ่มฟังก์ชันตรวจสอบความซ้ำ
 } from '@/lib/supabase/queries';
 import {
   ArrowLeft, UserPlus, Save, X, AlertCircle,
   CheckCircle, Building2, Calendar, CreditCard,
-  User, Phone, Mail, Shield, Stethoscope, Heart
+  User, Phone, Mail, Shield, Stethoscope, Heart, RefreshCw
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -35,7 +36,6 @@ export default function EmergencyRegisterPage() {
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-
   const [formData, setFormData] = useState({
     id_card: '',
     full_name_th: '',
@@ -48,11 +48,12 @@ export default function EmergencyRegisterPage() {
     password: '',
     admin_type: null as 'super' | 'hospital' | null,
   });
-
   const [generatedData, setGeneratedData] = useState({
     id_card: '',
     password: '',
   });
+  const [idCardStatus, setIdCardStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
+  const [idCardError, setIdCardError] = useState<string>('');
 
   useEffect(() => {
     const userData = checkSession();
@@ -65,7 +66,6 @@ export default function EmergencyRegisterPage() {
       router.push('/admin/dashboard');
       return;
     }
-
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
@@ -87,10 +87,12 @@ export default function EmergencyRegisterPage() {
     setHospitals(data);
   };
 
-  // ✅ Generate ID Card อัตโนมัติ
+  // ✅ Generate ID Card อัตโนมัติ พร้อมตรวจสอบความซ้ำ
   const handleGenerateIdCard = async () => {
     try {
       setLoading(true);
+      setIdCardStatus('generating');
+      setIdCardError('');
       
       // เลือก sequence type ตาม role
       const sequenceType = formData.role === 'osm' ? 'osm' : 'staff';
@@ -99,11 +101,24 @@ export default function EmergencyRegisterPage() {
       const result = await generateAndReserveIdCard(
         sequenceType as any,
         prefix,
-        '1000' // Default province code (Bangkok)
+        '1000', // Default province code (Bangkok)
+        formData.role // ✅ ส่ง role เพื่อตรวจสอบความซ้ำเฉพาะบทบาทนั้น
       );
 
       if (result.success && result.idCard) {
         const idCard = result.idCard;
+        
+        // ✅ ตรวจสอบความถูกต้องของเลขบัตร (Checksum)
+        if (!validateThaiIdCard(idCard)) {
+          throw new Error('เลขบัตรประชาชนที่สร้างไม่ผ่านการตรวจสอบความถูกต้อง');
+        }
+        
+        // ✅ ตรวจสอบความซ้ำอีกครั้ง (Double Check)
+        const isDuplicate = await checkIdCardExists(idCard, formData.role);
+        if (isDuplicate) {
+          throw new Error('เลขบัตรนี้ถูกใช้งานแล้วในระบบ กรุณาลองสร้างใหม่อีกครั้ง');
+        }
+        
         // Generate password จาก ID Card (6 หลักสุดท้าย)
         const password = idCard.slice(-6);
         
@@ -117,17 +132,31 @@ export default function EmergencyRegisterPage() {
           id_card: idCard,
           password: password,
         });
-
+        
+        setIdCardStatus('success');
         alert(`✅ สร้างบัตรประชาชนสำเร็จ!\nเลขบัตร: ${idCard}\nรหัสผ่าน: ${password}`);
       } else {
+        setIdCardStatus('error');
+        setIdCardError(result.error || 'ไม่สามารถสร้างบัตรประชาชนได้');
         alert('❌ ไม่สามารถสร้างบัตรประชาชนได้: ' + result.error);
       }
     } catch (error: any) {
       console.error('Error generating ID:', error);
+      setIdCardStatus('error');
+      setIdCardError(error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
       alert('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // ✅ ปุ่มสร้างใหม่ (Retry)
+  const handleRetryGenerate = () => {
+    setFormData(prev => ({ ...prev, id_card: '', password: '' }));
+    setGeneratedData({ id_card: '', password: '' });
+    setIdCardStatus('idle');
+    setIdCardError('');
+    handleGenerateIdCard();
   };
 
   // ✅ บันทึกข้อมูลแบบเร่งด่วน
@@ -144,15 +173,38 @@ export default function EmergencyRegisterPage() {
       alert('กรุณาเลือกโรงพยาบาล');
       return;
     }
-
-    setShowConfirmModal(true);
+    
+    // ✅ Final Validation: ตรวจสอบความซ้ำก่อนบันทึกจริง
+    try {
+      setLoading(true);
+      const isDuplicate = await checkIdCardExists(formData.id_card, formData.role);
+      if (isDuplicate) {
+        alert('⚠️ เลขบัตรประชาชนนี้ถูกใช้งานแล้วในระบบ กรุณากด "สร้างบัตรประชาชนอัตโนมัติ" ใหม่');
+        setFormData(prev => ({ ...prev, id_card: '', password: '' }));
+        setGeneratedData({ id_card: '', password: '' });
+        setIdCardStatus('idle');
+        return;
+      }
+      
+      // ✅ ตรวจสอบความถูกต้องของเลขบัตรอีกครั้ง
+      if (!validateThaiIdCard(formData.id_card)) {
+        alert('⚠️ เลขบัตรประชาชนไม่ผ่านการตรวจสอบความถูกต้อง กรุณาลองสร้างใหม่');
+        return;
+      }
+      
+      setShowConfirmModal(true);
+    } catch (error: any) {
+      alert('เกิดข้อผิดพลาดในการตรวจสอบ: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const confirmRegister = async () => {
     try {
       setLoading(true);
       setShowConfirmModal(false);
-
+      
       // ✅ 1. สร้าง user ในตาราง users (approved ทันที)
       const { data: userData, error: userError } = await supabase
         .from('users')
@@ -169,7 +221,13 @@ export default function EmergencyRegisterPage() {
         .select()
         .single();
 
-      if (userError) throw userError;
+      if (userError) {
+        // ✅ จัดการกรณี Duplicate Key (id_card + role ซ้ำ)
+        if (userError.code === '23505') {
+          throw new Error('เลขบัตรประชาชนนี้ถูกใช้งานแล้วในระบบ กรุณาลองสร้างใหม่อีกครั้ง');
+        }
+        throw userError;
+      }
 
       // ✅ 2. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm)
       if (['doctor', 'helper', 'osm'].includes(formData.role)) {
@@ -203,14 +261,12 @@ export default function EmergencyRegisterPage() {
         });
 
       alert(`✅ ลงทะเบียนเร่งด่วนสำเร็จ!
-        
 ชื่อ: ${formData.full_name_th}
 บัตรประชาชน: ${formData.id_card}
 รหัสผ่าน: ${formData.password}
 วันเกิด: 01-01-2511
-
 ✅ บัญชีพร้อมใช้งานทันที!`);
-
+      
       // Reset form
       setFormData({
         id_card: '',
@@ -225,6 +281,7 @@ export default function EmergencyRegisterPage() {
         admin_type: null,
       });
       setGeneratedData({ id_card: '', password: '' });
+      setIdCardStatus('idle');
 
     } catch (error: any) {
       console.error('Error emergency register:', error);
@@ -262,7 +319,6 @@ export default function EmergencyRegisterPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับหน้าจัดการเจ้าหน้าที่
           </button>
-          
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-red-600 mb-2 flex items-center gap-2">
@@ -286,7 +342,8 @@ export default function EmergencyRegisterPage() {
             <div>
               <h3 className="font-semibold text-red-800">โหมดลงทะเบียนเร่งด่วน</h3>
               <ul className="text-sm text-red-700 mt-1 space-y-1">
-                <li>• ระบบจะสร้างบัตรประชาชนอัตโนมัติ</li>
+                <li>• ระบบจะสร้างบัตรประชาชนอัตโนมัติ (ตรวจสอบความถูกต้องได้)</li>
+                <li>• ระบบตรวจสอบความซ้ำของเลขบัตรอัตโนมัติ</li>
                 <li>• กำหนดวันเกิดเป็น 01-01-2511</li>
                 <li>• บัญชีจะถูกอนุมัติและเปิดใช้งานทันที</li>
                 <li>• ไม่ต้องรออนุมัติจาก Admin</li>
@@ -307,14 +364,34 @@ export default function EmergencyRegisterPage() {
               <button
                 type="button"
                 onClick={handleGenerateIdCard}
-                disabled={loading || !!formData.id_card}
+                disabled={loading || idCardStatus === 'generating'}
                 className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-all font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 <CreditCard className="w-5 h-5" />
-                {formData.id_card ? 'สร้างแล้ว' : 'สร้างบัตรประชาชนอัตโนมัติ'}
+                {idCardStatus === 'generating' ? 'กำลังสร้าง...' : 
+                 idCardStatus === 'success' ? 'สร้างแล้ว ✓' : 'สร้างบัตรประชาชนอัตโนมัติ'}
               </button>
 
-              {generatedData.id_card && (
+              {/* ✅ แสดงสถานะและปุ่มสร้างใหม่ */}
+              {idCardStatus === 'error' && idCardError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm text-red-700">
+                    <p className="font-medium">เกิดข้อผิดพลาด:</p>
+                    <p>{idCardError}</p>
+                    <button
+                      type="button"
+                      onClick={handleRetryGenerate}
+                      className="mt-2 text-red-800 hover:text-red-900 font-medium flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      ลองสร้างใหม่อีกครั้ง
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {generatedData.id_card && idCardStatus === 'success' && (
                 <div className="bg-white border-2 border-green-400 rounded-lg p-4 space-y-2">
                   <div className="flex items-center gap-2 text-green-700">
                     <CheckCircle className="w-5 h-5" />
@@ -322,13 +399,16 @@ export default function EmergencyRegisterPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <span className="text-gray-500">เลขบัตรประชาชน:</span>
+                      <span className="text-gray-500">เลขบัตรประชาชน: </span>
                       <p className="font-mono font-bold text-lg">{generatedData.id_card}</p>
                     </div>
                     <div>
-                      <span className="text-gray-500">รหัสผ่าน:</span>
+                      <span className="text-gray-500">รหัสผ่าน: </span>
                       <p className="font-mono font-bold text-lg text-red-600">{generatedData.password}</p>
                     </div>
+                  </div>
+                  <div className="text-xs text-green-600 bg-green-50 p-2 rounded">
+                    ✅ เลขบัตรนี้ผ่านการตรวจสอบความถูกต้อง (Checksum Valid) และตรวจสอบแล้วว่าไม่ซ้ำในระบบ
                   </div>
                 </div>
               )}
@@ -366,7 +446,7 @@ export default function EmergencyRegisterPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="doctor">👨‍⚕️ แพทย์</option>
-                  <option value="helper">👩‍️ เจ้าหน้าที่</option>
+                  <option value="helper">👩‍⚕️ เจ้าหน้าที่</option>
                   <option value="osm">🏘️ อสม.</option>
                   {isSuperAdmin(user) && <option value="admin">👑 ผู้ดูแลระบบ</option>}
                 </select>
@@ -471,7 +551,7 @@ export default function EmergencyRegisterPage() {
             <button
               type="button"
               onClick={handleEmergencyRegister}
-              disabled={loading || !formData.id_card || !formData.full_name_th || !formData.hospital_id}
+              disabled={loading || !formData.id_card || !formData.full_name_th || !formData.hospital_id || idCardStatus !== 'success'}
               className="w-full bg-red-600 text-white py-4 rounded-lg hover:bg-red-700 transition-all font-bold text-lg disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg"
             >
               <UserPlus className="w-6 h-6" />
@@ -480,6 +560,11 @@ export default function EmergencyRegisterPage() {
             <p className="text-center text-sm text-gray-500 mt-2">
               ⚡ บัญชีจะถูกสร้างและเปิดใช้งานทันที ไม่ต้องรออนุมัติ
             </p>
+            {idCardStatus !== 'success' && formData.id_card && (
+              <p className="text-center text-xs text-orange-600 mt-1">
+                ⚠️ กรุณารอจนกว่าสถานะบัตรประชาชนจะเป็น "สร้างแล้ว ✓" ก่อนกดลงทะเบียน
+              </p>
+            )}
           </div>
         </form>
       </div>
@@ -502,15 +587,15 @@ export default function EmergencyRegisterPage() {
 
             <div className="bg-gray-50 rounded-lg p-4 mb-4 space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-gray-500">ชื่อ-นามสกุล:</span>
+                <span className="text-gray-500">ชื่อ-นามสกุล: </span>
                 <span className="font-semibold">{formData.full_name_th}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">บัตรประชาชน:</span>
+                <span className="text-gray-500">บัตรประชาชน: </span>
                 <span className="font-mono font-bold">{formData.id_card}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">บทบาท:</span>
+                <span className="text-gray-500">บทบาท: </span>
                 <span className="font-semibold">
                   {formData.role === 'doctor' ? 'แพทย์' :
                    formData.role === 'helper' ? 'เจ้าหน้าที่' :
@@ -518,12 +603,18 @@ export default function EmergencyRegisterPage() {
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">รหัสผ่าน:</span>
+                <span className="text-gray-500">รหัสผ่าน: </span>
                 <span className="font-mono font-bold text-red-600">{formData.password}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">วันเกิด:</span>
+                <span className="text-gray-500">วันเกิด: </span>
                 <span className="font-semibold">01-01-2511</span>
+              </div>
+              <div className="pt-2 border-t border-gray-200">
+                <span className="text-green-600 text-xs flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" />
+                  เลขบัตรผ่านการตรวจสอบความถูกต้องและไม่ซ้ำในระบบ
+                </span>
               </div>
             </div>
 
