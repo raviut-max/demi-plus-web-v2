@@ -2116,7 +2116,9 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
   }
 }
 
-
+// =====================================================
+// 👥 Staff Management Functions (Updated for Temporary)
+// =====================================================
 export async function addStaff(data: {
   id_card: string;
   full_name_th: string;
@@ -2133,7 +2135,7 @@ export async function addStaff(data: {
   temp_id_notes?: string;
 }) {
   try {
-    // 1️⃣ เข้ารหัสรหัสผ่าน (ใช้ Supabase RPC หรือเปลี่ยนเป็น bcrypt/argon2 ตามระบบจริง)
+    // 1️⃣ เข้ารหัสรหัสผ่าน (ใช้ RPC หรือเปลี่ยนเป็น bcrypt ตามระบบจริง)
     const { data: passwordHash, error: hashError } = await supabase.rpc('hash_password', { 
       plain_text: data.password 
     });
@@ -2183,7 +2185,7 @@ export async function addStaff(data: {
 
       if (docError) {
         console.error('⚠️ สร้าง doctors record ล้มเหลว:', docError.message);
-        // หมายเหตุ: ในระบบ Production ควรใช้ Database Transaction หรือลบ user กลับถ้า doctors insert ไม่ผ่าน
+        // หมายเหตุ: ใน Production ควรใช้ Transaction เพื่อ Rollback ถ้าขั้นนี้ไม่ผ่าน
       }
     }
 
