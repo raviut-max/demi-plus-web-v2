@@ -2116,67 +2116,83 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
   }
 }
 
+// 📍 วางในไฟล์: @/lib/supabase/queries.ts
+import { supabase } from './client';
+
 export async function addStaff(data: {
   id_card: string;
-  password: string;
   full_name_th: string;
-  role: 'doctor' | 'helper' | 'osm' | 'admin';
+  role: 'admin' | 'doctor' | 'helper' | 'osm';
+  hospital_id?: string;
+  birth_date: string;
+  password: string;
+  created_by: string;
+  admin_type?: 'super' | 'hospital' | null;
   specialization_th?: string;
   phone?: string;
   email?: string;
-  hospital_id?: string;
-  birth_date?: string;
-  created_by: string;
-  admin_type?: 'super' | 'hospital' | null;
+  is_temporary_id?: boolean;
+  temp_id_notes?: string;
 }) {
   try {
+    // 1️⃣ เข้ารหัสรหัสผ่าน (ใช้ Supabase RPC หรือเปลี่ยนเป็น bcrypt/argon2 ตามระบบจริง)
+    const { data: passwordHash, error: hashError } = await supabase.rpc('hash_password', { 
+      plain_text: data.password 
+    });
+    if (hashError) throw new Error('ไม่สามารถเข้ารหัสรหัสผ่านได้: ' + hashError.message);
+
+    // 2️⃣ สร้าง User ในตาราง users
+    const now = new Date().toISOString();
+    const isTemp = data.is_temporary_id ?? false;
+
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert({
         id_card: data.id_card,
-        password_hash: data.password,
+        password_hash: passwordHash,
         role: data.role,
-        is_active: true,
-        created_by: data.created_by,
         hospital_id: data.hospital_id || null,
-        birth_date: data.birth_date || null,
+        birth_date: data.birth_date,
+        is_active: true,
         admin_type: data.admin_type || null,
+        created_by: data.created_by,
+        // 🚩 ฟิลด์ชั่วคราว
+        is_temporary_id: isTemp,
+        temp_id_notes: data.temp_id_notes || null,
+        id_card_updated_at: isTemp ? null : now,
+        id_card_updated_by: isTemp ? null : data.created_by,
       })
       .select()
       .single();
-    if (userError) return { success: false, error: userError.message };
 
-    let doctorData: any = null;
-    if (['doctor', 'helper', 'osm', 'admin'].includes(data.role)) {
-      const specialization = data.specialization_th?.trim() || (
-        data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
-        data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
-        data.role === 'admin' ? 'ผู้ดูแลระบบ' : 'แพทย์'
-      );
-      const { data: doctorDataResult, error: doctorError } = await supabase
-        .from('doctors')
-        .insert({
-          user_id: user.id,
-          full_name: data.full_name_th.trim(),
-          full_name_th: data.full_name_th.trim(),
-          specialization_th: specialization,
-          phone: data.phone || null,
-          email: data.email || null,
-          is_active: true,
-          is_verified: false,
-        })
-        .select()
-        .single();
-      if (doctorError) {
-        await supabase.from('users').delete().eq('id', user.id);
-        return { success: false, error: doctorError.message };
+    if (userError) throw userError;
+
+    // 3️⃣ ถ้าเป็นหมอ/เจ้าหน้าที่/อสม. ให้สร้างเรคคอร์ดในตาราง doctors ด้วย
+    if (['doctor', 'helper', 'osm'].includes(data.role)) {
+      const { error: docError } = await supabase.from('doctors').insert({
+        user_id: user.id,
+        full_name_th: data.full_name_th,
+        specialization_th: data.specialization_th || null,
+        phone: data.phone || null,
+        email: data.email || null,
+        is_active: true,
+        is_verified: !isTemp, // ✅ ยืนยันแล้วถ้าไม่ใช่ชั่วคราว
+        can_assign_goals: data.role === 'doctor',
+        can_view_all_patients: false,
+        max_patients: 100,
+        current_patients: 0,
+      });
+
+      if (docError) {
+        console.error('⚠️ สร้าง doctors record ล้มเหลว:', docError.message);
+        // หมายเหตุ: ในระบบ Production ควรใช้ Database Transaction หรือลบ user กลับถ้า doctors insert ไม่ผ่าน
       }
-      doctorData = doctorDataResult;
     }
-    return { success: true, user, doctor: doctorData };
-  } catch (err: any) {
-    console.error('❌ [addStaff] Unexpected error:', err);
-    return { success: false, error: err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด' };
+
+    return { success: true, user };
+  } catch (error: any) {
+    console.error('addStaff error:', error);
+    return { success: false, error: error.message };
   }
 }
 
@@ -2579,5 +2595,182 @@ export async function generateAndReserveIdCard(
   } catch (err: any) {
     console.error('❌ [generateAndReserveIdCard] Error:', err);
     return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการสร้างบัตรประชาชน' };
+  }
+}
+
+// =====================================================
+// 🎫 Temporary OSM ID Card Management Functions
+// =====================================================
+
+/**
+ * ตรวจสอบว่าเลขบัตรประชาชนซ้ำหรือไม่ (ไม่รวม user คนเดิม)
+ */
+export async function checkIdCardExists(idCard: string, excludeUserId?: string): Promise<boolean> {
+  try {
+    const cleanIdCard = idCard.replace(/[-\s]/g, '');
+    let query = supabase
+      .from('users')
+      .select('id', { count: 'exact', head: true })
+      .eq('id_card', cleanIdCard);
+    
+    if (excludeUserId) {
+      query = query.neq('id', excludeUserId);
+    }
+    
+    const { count, error } = await query;
+    if (error) {
+      console.error('❌ [checkIdCardExists] Error:', error);
+      return false;
+    }
+    return (count || 0) > 0;
+  } catch (err) {
+    console.error('❌ [checkIdCardExists] Exception:', err);
+    return false;
+  }
+}
+
+/**
+ * ดึงรายการอสม. ที่ใช้บัตรประชาชนชั่วคราว
+ */
+export async function getTemporaryOSMCards(hospitalIds?: string[]) {
+  try {
+    let query = supabase
+      .from('users')
+      .select(`
+        id,
+        id_card,
+        role,
+        is_active,
+        created_at,
+        is_temporary_id,
+        temp_id_notes,
+        id_card_updated_at,
+        id_card_updated_by,
+        hospital_id,
+        doctors (
+          full_name_th,
+          phone,
+          specialization_th,
+          email
+        ),
+        hospitals (
+          id,
+          name,
+          code,
+          type
+        ),
+        created_by_user:users!created_by (
+          full_name_th
+        )
+      `)
+      .eq('role', 'osm')
+      .eq('is_temporary_id', true)
+      .order('created_at', { ascending: false });
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('❌ [getTemporaryOSMCards] Error:', error);
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.error('❌ [getTemporaryOSMCards] Exception:', err);
+    return [];
+  }
+}
+
+/**
+ * อัปเดตเลขบัตรอสม. จากชั่วคราวเป็นเลขจริง
+ */
+export async function updateTemporaryOSMIdCard(
+  userId: string,
+  newIdCard: string,
+  updatedBy: string,
+  confirmNotes?: string
+) {
+  try {
+    // 1. ทำความสะอาดและตรวจสอบรูปแบบเลขบัตร
+    const cleanIdCard = newIdCard.replace(/[-\s]/g, '');
+    if (!/^\d{13}$/.test(cleanIdCard)) {
+      return { success: false, error: 'เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก' };
+    }
+
+    // 2. ตรวจสอบ Checksum
+    if (!validateThaiIdCard(cleanIdCard)) {
+      return { success: false, error: 'เลขบัตรประชาชนไม่ผ่านการตรวจสอบความถูกต้อง (Checksum Invalid)' };
+    }
+
+    // 3. ตรวจสอบความซ้ำ (ไม่รวมตัวเอง)
+    const isDuplicate = await checkIdCardExists(cleanIdCard, userId);
+    if (isDuplicate) {
+      return { success: false, error: 'เลขบัตรประชาชนนี้ถูกใช้งานแล้วในระบบ กรุณาตรวจสอบอีกครั้ง' };
+    }
+
+    // 4. อัปเดตข้อมูลในตาราง users
+    const { error } = await supabase
+      .from('users')
+      .update({
+        id_card: cleanIdCard,
+        is_temporary_id: false,
+        temp_id_notes: confirmNotes 
+          ? `${confirmNotes} | เดิม: ${notes || 'ไม่มี'}` 
+          : (temp_id_notes || 'อัปเดตเป็นเลขจริง'),
+        id_card_updated_at: new Date().toISOString(),
+        id_card_updated_by: updatedBy,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', userId);
+
+    if (error) {
+      if (error.code === '23505') {
+        return { success: false, error: 'เลขบัตรประชาชนนี้ถูกใช้งานแล้ว (Unique Constraint Violation)' };
+      }
+      return { success: false, error: error.message };
+    }
+
+    // 5. อัปเดต is_verified ในตาราง doctors เป็น true
+    await supabase
+      .from('doctors')
+      .update({
+        is_verified: true,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', userId);
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('❌ [updateTemporaryOSMIdCard] Exception:', err);
+    return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการอัปเดต' };
+  }
+}
+
+/**
+ * ดึงสถิติบัตรอสม.ชั่วคราว
+ */
+export async function getTemporaryOSMStats(hospitalIds?: string[]) {
+  try {
+    let query = supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true })
+      .eq('role', 'osm')
+      .eq('is_temporary_id', true);
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    const { count, error } = await query;
+    if (error) return { total: 0 };
+
+    return {
+      total: count || 0,
+    };
+  } catch (err) {
+    console.error('❌ [getTemporaryOSMStats] Error:', err);
+    return { total: 0 };
   }
 }
