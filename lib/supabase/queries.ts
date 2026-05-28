@@ -2116,8 +2116,6 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
   }
 }
 
-// 📍 วางในไฟล์: @/lib/supabase/queries.ts
-import { supabase } from './client';
 
 export async function addStaff(data: {
   id_card: string;
@@ -2194,6 +2192,45 @@ export async function addStaff(data: {
     console.error('addStaff error:', error);
     return { success: false, error: error.message };
   }
+}
+
+export async function getStaffForVerification(userId: string) {
+  const { data, error } = await supabase
+    .from('users')
+    .select(`
+      *,
+      doctors:doctors!user_id (
+        full_name_th,
+        specialization_th,
+        phone,
+        email
+      )
+    `)
+    .eq('id', userId)
+    .single();
+  
+  if (error) throw error;
+  return data;
+}
+
+export async function updateIdCard(userId: string, newIdCard: string, updatedBy: string) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('users')
+    .update({
+      id_card: newIdCard,
+      is_temporary_id: false,
+      id_card_updated_at: now,
+      id_card_updated_by: updatedBy,
+      updated_at: now,
+      temp_id_notes: null // ล้างหมายเหตุชั่วคราว
+    })
+    .eq('id', userId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
 }
 
 // =====================================================
@@ -2525,7 +2562,7 @@ export async function getCoachName(coachId: string) {
  * ตรวจสอบว่าเลขบัตรประชาชน + บทบาท มีอยู่ในระบบแล้วหรือไม่
  * ใช้ตรวจสอบก่อนสร้างบัตรใหม่ เพื่อป้องกันข้อมูลซ้ำ
  */
-export async function checkIdCardExists(idCard: string, role: string): Promise<boolean> {
+export async function checkIdCardExistsExcludeUser(idCard: string, role: string): Promise<boolean> {
   try {
     const { count, error } = await supabase
       .from('users')
