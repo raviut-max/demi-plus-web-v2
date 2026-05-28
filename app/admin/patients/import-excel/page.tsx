@@ -22,7 +22,7 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -37,7 +37,7 @@ const STANDARD_FIELDS = [
   { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text' },
+  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true }, // ✅ เพิ่ม flag สำหรับเตือน
   { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
   { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
@@ -57,7 +57,7 @@ const STANDARD_FIELDS = [
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
   { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ แก้ไขแล้ว + เพิ่ม flag
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -265,9 +265,9 @@ export default function ImportExcelPage() {
   // ✅ เพิ่ม: ฟังก์ชันดึงคำสำคัญสำหรับแต่ละฟิลด์ (ช่วยจับคู่คอลัมน์ได้ดีขึ้น)
   const getKeywordsForField = (fieldKey: string): string[] => {
     const keywords: Record<string, string[]> = {
-      'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'bs', 'fbs', 'glucose', 'bloodsugar'],
-      'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'emergency', 'contact', 'ชื่อผู้ติดต่อ'],
-      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร1', 'emergency phone'],
+      'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'ค่าน้ำตาลในเลือด', 'bs', 'fbs', 'glucose', 'bloodsugar'],
+      'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact', 'ชื่อผู้ติดต่อ'],
+      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์ติดต่อ(ญาติ)', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์โทรผู้ติดต่อฉุกเฉิน', 'เบอร์โทรญาติ', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'emergency phone'],
       'hba1c_level': ['hba1c', 'hba1c', 'ค่าhba1c', 'a1c'],
       'current_weight': ['น้ำหนัก', 'weight', 'นน'],
       'height': ['ส่วนสูง', 'height', 'สูง'],
@@ -275,7 +275,7 @@ export default function ImportExcelPage() {
       'hospital_number': ['hn', 'เลขที่ผู้ป่วย', 'เลขผู้ป่วย'],
       'id_card': ['บัตรประชาชน', 'id', 'เลขบัตร', 'ประชาชน'],
       'birth_date': ['วันเกิด', 'dob', 'เกิด'],
-      'phone': ['เบอร์โทร', 'โทรศัพท์', 'มือถือ', 'phone', 'tel'],
+      'phone': ['เบอร์โทร', 'โทรศัพท์', 'มือถือ', 'เบอร์โทรศัพท์', 'เบอร์โทรศัพท์ผู้ป่วย', 'เบอร์โทรผู้ป่วย', 'โทรศัพท์ผู้ป่วย', 'มือถือผู้ป่วย', 'เบอร์โทรศัพท์คนไข้', 'เบอร์โทรคนไข้', 'โทรศัพท์คนไข้', 'มือถือคนไข้'],
       'email': ['อีเมล', 'email', 'mail'],
       'province': ['จังหวัด', 'province'],
       'district': ['อำเภอ', 'district'],
@@ -756,6 +756,8 @@ export default function ImportExcelPage() {
                             <span>{field.label} {field.required && <span className="text-red-500">*</span>}</span>
                             {field.key === 'birth_date' && <button onClick={swapAllBirthDates} className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200">🔄 สลับทั้งคอลัมน์</button>}
                             {field.key === 'first_name' && <button onClick={cleanAllNames} className="ml-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 flex items-center gap-1"><Scissors className="w-3 h-3" /> ลบคำนำหน้า</button>}
+                            {/* ✅ เพิ่มไอคอนเตือนสำหรับฟิลด์เบอร์โทรศัพท์ */}
+                            {field.isPhoneField && <Phone className="w-3 h-3 text-yellow-600 ml-1" title="⚠️ โปรดตรวจสอบว่าจับคู่ถูกต้องกับเบอร์โทรศัพท์ที่ต้องการ" />}
                           </div>
                         </th>
                       ))}
