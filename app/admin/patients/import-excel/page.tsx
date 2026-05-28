@@ -43,7 +43,7 @@ const STANDARD_FIELDS = [
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
   { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
   { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ แก้ไขแล้ว
+  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ แก้ไขแล้ว: จาก "ค่าน้ำตาลในเลือด" เป็น "ค่าน้ำตาล"
   { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
   { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
   { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
@@ -56,8 +56,8 @@ const STANDARD_FIELDS = [
   { key: 'province', label: 'จังหวัด', inputType: 'text' },
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ แก้ไขแล้ว + เพิ่ม flag
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว: จาก "ชื่อผู้ติดต่อ(ญาติ)" เป็น "ผู้ติดต่อฉุกเฉิน"
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ แก้ไขแล้ว: จาก "เบอร์โทร_1" เป็น "เบอร์ติดต่อฉุกเฉิน" + เพิ่ม flag
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -267,7 +267,7 @@ export default function ImportExcelPage() {
     const keywords: Record<string, string[]> = {
       'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'ค่าน้ำตาลในเลือด', 'bs', 'fbs', 'glucose', 'bloodsugar'],
       'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact', 'ชื่อผู้ติดต่อ'],
-      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์ติดต่อ(ญาติ)', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์โทรผู้ติดต่อฉุกเฉิน', 'เบอร์โทรญาติ', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'emergency phone'],
+      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์ติดต่อ(ญาติ)', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์โทรผู้ติดต่อฉุกเฉิน', 'เบอร์โทรญาติ', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'emergency phone'],
       'hba1c_level': ['hba1c', 'hba1c', 'ค่าhba1c', 'a1c'],
       'current_weight': ['น้ำหนัก', 'weight', 'นน'],
       'height': ['ส่วนสูง', 'height', 'สูง'],
@@ -283,6 +283,30 @@ export default function ImportExcelPage() {
     };
     
     return keywords[fieldKey] || [];
+  };
+
+  // ✅ ตรวจสอบว่ามีฟิลด์ไหนที่ถูกจับคู่ซ้ำ (โดยเฉพาะเบอร์โทร)
+  const getDuplicateMappings = () => {
+    const mappingCount: Record<string, string[]> = {};
+    
+    Object.entries(headerMapping).forEach(([excelCol, fieldKey]) => {
+      if (fieldKey) {
+        if (!mappingCount[fieldKey]) {
+          mappingCount[fieldKey] = [];
+        }
+        mappingCount[fieldKey].push(excelCol);
+      }
+    });
+    
+    // กรองเอาเฉพาะฟิลด์ที่ถูกจับคู่ซ้ำ
+    const duplicates: Record<string, string[]> = {};
+    Object.entries(mappingCount).forEach(([fieldKey, excelCols]) => {
+      if (excelCols.length > 1) {
+        duplicates[fieldKey] = excelCols;
+      }
+    });
+    
+    return duplicates;
   };
 
   const buildPreview = useCallback(() => {
@@ -660,6 +684,7 @@ export default function ImportExcelPage() {
   if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
   const displayFields = STANDARD_FIELDS.filter(f => Object.values(headerMapping).includes(f.key));
+  const duplicateMappings = getDuplicateMappings();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -703,18 +728,79 @@ export default function ImportExcelPage() {
               <h2 className="text-lg font-semibold flex items-center gap-2"><span className="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-xs">2</span> ตรวจสอบการจับคู่คอลัมน์</h2>
               <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">ถัดไป: Preview & Validation →</button>
             </div>
+            
+            {/* ✅ แสดงคำเตือนหากมีการจับคู่ซ้ำ */}
+            {Object.keys(duplicateMappings).length > 0 && (
+              <div className="mb-4 p-4 bg-yellow-50 border border-yellow-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-yellow-800">⚠️ พบการจับคู่คอลัมน์ซ้ำซ้อน</h3>
+                    <p className="text-sm text-yellow-700 mt-1">โปรดตรวจสอบฟิลด์ต่อไปนี้ที่มีการใช้คอลัมน์เดียวกันมากกว่า 1 ครั้ง:</p>
+                    <ul className="mt-2 space-y-1">
+                      {Object.entries(duplicateMappings).map(([fieldKey, excelCols]) => {
+                        const fieldLabel = STANDARD_FIELDS.find(f => f.key === fieldKey)?.label || fieldKey;
+                        return (
+                          <li key={fieldKey} className="text-sm text-yellow-700">
+                            • <strong>{fieldLabel}</strong>: ใช้คอลัมน์ {excelCols.join(', ')}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
               {excelHeaders.map(header => {
                 const matchedKey = headerMapping[header];
                 const isMatched = matchedKey && matchedKey !== '';
+                
+                // ✅ ตรวจสอบว่าฟิลด์นี้มีการจับคู่ซ้ำหรือไม่
+                const isDuplicateField = matchedKey && duplicateMappings[matchedKey] && duplicateMappings[matchedKey].length > 1;
+                const isPhoneField = matchedKey && STANDARD_FIELDS.find(f => f.key === matchedKey)?.isPhoneField;
+                
                 return (
-                  <div key={header} className={`p-4 border rounded-lg transition-all ${isMatched ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-300'}`}>
+                  <div key={header} className={`p-4 border rounded-lg transition-all ${
+                    isMatched ? 
+                      (isDuplicateField || isPhoneField ? 'bg-yellow-50 border-yellow-400' : 'bg-green-50 border-green-400') 
+                      : 'bg-red-50 border-red-300'
+                  }`}>
                     <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
-                    <p className={`font-semibold truncate mb-2 ${isMatched ? 'text-green-900' : 'text-red-700'}`}>{header} {isMatched && <span className="ml-2">✅</span>}</p>
-                    <select value={headerMapping[header] || ''} onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} className={`w-full px-3 py-2 border rounded-lg text-sm ${isMatched ? 'border-green-400' : 'border-red-300'}`}>
+                    <p className={`font-semibold truncate mb-2 ${
+                      isMatched ? 
+                        (isDuplicateField || isPhoneField ? 'text-yellow-900' : 'text-green-900') 
+                        : 'text-red-700'
+                    }`}>
+                      {header} 
+                      {isMatched && <span className="ml-2">{isDuplicateField || isPhoneField ? '⚠️' : '✅'}</span>}
+                    </p>
+                    <select 
+                      value={headerMapping[header] || ''} 
+                      onChange={e => setHeaderMapping(prev => ({ ...prev, [header]: e.target.value }))} 
+                      className={`w-full px-3 py-2 border rounded-lg text-sm ${
+                        isMatched ? 
+                          (isDuplicateField || isPhoneField ? 'border-yellow-400' : 'border-green-400') 
+                          : 'border-red-300'
+                      }`}
+                    >
                       <option value="">-- ไม่จับคู่ --</option>
                       {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                     </select>
+                    
+                    {/* ✅ แสดงไอคอนและข้อความเตือนสำหรับฟิลด์เบอร์โทรหรือฟิลด์ซ้ำ */}
+                    {(isDuplicateField || isPhoneField) && (
+                      <div className="mt-2 flex items-start gap-1.5">
+                        <Phone className="w-3 h-3 text-yellow-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-xs text-yellow-700">
+                          {isDuplicateField 
+                            ? `⚠️ ซ้ำซ้อน: ใช้ร่วมกับ ${duplicateMappings[matchedKey].filter(c => c !== header).join(', ')}`
+                            : '⚠️ โปรดตรวจสอบว่าเป็นเบอร์โทรศัพท์ที่ถูกต้อง'}
+                        </p>
+                      </div>
+                    )}
+                    
                     {!isMatched && <p className="text-xs text-red-600 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> ต้องเลือกด้วยมือ</p>}
                   </div>
                 );
