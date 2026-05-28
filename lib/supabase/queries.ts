@@ -2286,19 +2286,27 @@ export async function importPatientsBatch(
 
   const { data: allHospitals } = await supabase.from('hospitals').select('id, name').eq('is_active', true);
   const { data: allCoaches } = await supabase.from('doctors').select('user_id, full_name_th').eq('is_active', true);
-  const { data: existingUsers } = await supabase.from('users').select('id_card');
-  const existingIdCards = new Set(existingUsers?.map(u => u.id_card) || []);
+  
+  // ✅ แก้ไข: ตรวจสอบทั้ง id_card และ role patient
+  const { data: existingUsers } = await supabase
+    .from('users')
+    .select('id_card, role')
+    .eq('role', 'patient'); // ดึงเฉพาะ patient
+  
+  const existingPatientIdCards = new Set(
+    existingUsers?.map(u => u.id_card.replace(/[-\s]/g, '')) || []
+  );
 
   const hospitalMap = new Map<string, string>();
   allHospitals?.forEach(h => hospitalMap.set(h.name.toLowerCase().trim(), h.id));
-  
+
   const coachMap = new Map<string, string>();
   allCoaches?.forEach(c => coachMap.set(c.full_name_th.toLowerCase().trim(), c.user_id));
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const rowIndex = i + 1;
-    
+
     try {
       const genderMap: Record<string, string> = { 'ชาย': 'male', 'หญิง': 'female' };
       const gender = genderMap[row.gender] || row.gender.toLowerCase();
@@ -2307,8 +2315,10 @@ export async function importPatientsBatch(
       if (!birthDateISO) throw new Error(`รูปแบบวันเกิดไม่ถูกต้อง: ${row.birth_date}`);
       
       const cleanIdCard = row.id_card.replace(/\D/g, '');
-      if (existingIdCards.has(cleanIdCard)) {
-        throw new Error('เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว');
+      
+      // ✅ แก้ไข: ตรวจสอบเฉพาะ patient ที่มีบัตรซ้ำ
+      if (existingPatientIdCards.has(cleanIdCard)) {
+        throw new Error('เลขบัตรประชาชนนี้มีผู้ป่วยอยู่ในระบบแล้ว (Role: Patient)');
       }
       
       let hospitalId = hospitalMap.get(row.hospital_name.toLowerCase().trim());
@@ -2398,7 +2408,7 @@ export async function importPatientsBatch(
       console.error(`❌ Row ${rowIndex} failed:`, error.message);
     }
   }
-  
+
   return results;
 }
 
