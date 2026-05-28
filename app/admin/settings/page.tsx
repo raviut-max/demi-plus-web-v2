@@ -1,11 +1,10 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: เพิ่มทางเข้าแก้ไขอสม.ชั่วคราว + แก้ไขจุดที่ Build ล้มเหลว
+// ✅ แก้ไขล่าสุด: เพิ่มทางเข้าสร้าง อสม.ชั่วคราว (เฉพาะ)
 // ✅ การแก้ไข:
-//    1. ✅ แก้ไขทุกจุดที่ typo (supabase, &&, select, etc.)
-//    2. ✅ เพิ่มปุ่ม "แก้ไขอสม.ชั่วคราว" ในหมวดจัดการบุคลากร
-//    3. ✅ จัดกลุ่มเมนูให้ชัดเจนเป็น 3 หมวดหมู่
-//    4. ✅ เพิ่มสถิติระบบแบบเรียลไทม์
-//    5. ✅ อัปเดตการตรวจสอบสิทธิ์ให้รองรับ Hospital Admin
+//    1. ❌ ลบปุ่ม "ลงทะเบียนด่วน" ออก
+//    2. ✅ เพิ่มปุ่ม "สร้าง อสม.ชั่วคราว" ในหมวดจัดการบุคลากร
+//    3. ✅ แก้ไขทุกจุดที่ typo ให้ผ่าน Build
+//    4. ✅ จัดกลุ่มเมนูให้ชัดเจน
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -167,7 +166,6 @@ export default function SettingsPage() {
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // ✅ ตรวจสอบรหัสผ่าน (แนะนำให้เปลี่ยนเป็นระบบที่ปลอดภัยกว่าในผลิต)
     if (password === '12345678') {
       setIsAuthenticated(true);
       setError('');
@@ -209,7 +207,6 @@ export default function SettingsPage() {
             </div>
 
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -225,7 +222,6 @@ export default function SettingsPage() {
                       </p>
                     </div>
                   </div>
-
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
@@ -373,7 +369,7 @@ export default function SettingsPage() {
             {/* ✅ เมนูจัดการ - แบ่งเป็น 3 หมวดหมู่ */}
             <div className="space-y-8">
               
-              {/* 🚨 หมวดเร่งด่วน */}
+              {/* 🚨 หมวดเร่งด่วน - ลบปุ่มลงทะเบียนด่วนออก */}
               <div>
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-orange-600" />
@@ -381,34 +377,6 @@ export default function SettingsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   
-                  {/* 🚨 ปุ่มลงทะเบียนด่วน - ใหม่! */}
-                  <button
-                    onClick={() => router.push('/admin/staff/emergency-register')}
-                    className="bg-gradient-to-r from-orange-500 to-red-500 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group border-2 border-orange-300"
-                  >
-                    <div className="flex items-center gap-4 mb-3">
-                      <div className="w-14 h-14 bg-white/20 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
-                        <UserPlus className="w-7 h-7 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-white">
-                          🚨 ลงทะเบียนด่วน
-                        </h3>
-                        <p className="text-orange-100 text-sm">
-                          อสม./แพทย์/เจ้าหน้าที่
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-white/90 text-sm">
-                      ลงทะเบียนเจ้าหน้าที่แบบเร่งด่วน ไม่ต้องรออนุมัติ 
-                      รหัสผ่านกำหนดอัตโนมัติจากวันเกิด
-                    </p>
-                    <div className="mt-3 flex items-center gap-2 text-xs text-orange-100">
-                      <Clock className="w-3 h-3" />
-                      <span>เสร็จใน 1 นาที</span>
-                    </div>
-                  </button>
-
                   {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
                   <button
                     onClick={() => router.push('/admin/patients/import-excel')}
@@ -430,6 +398,25 @@ export default function SettingsPage() {
                     <p className="text-gray-600 text-sm">
                       อัปโหลดไฟล์ Excel เพื่อนำเข้าผู้ป่วยหลายรายพร้อมกัน 
                       พร้อมตรวจสอบและแก้ไขก่อนบันทึก
+                    </p>
+                  </button>
+
+                  {/* 📊 ปุ่มรายงานด่วน */}
+                  <button
+                    onClick={() => router.push('/admin/reports/quick')}
+                    className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all text-left group"
+                  >
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-indigo-100 rounded-lg flex items-center justify-center group-hover:bg-indigo-200 transition-all">
+                        <FileText className="w-7 h-7 text-indigo-600" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold text-gray-800">รายงานด่วน</h3>
+                        <p className="text-sm text-gray-500">สรุปข้อมูลรายวัน</p>
+                      </div>
+                    </div>
+                    <p className="text-gray-600 text-sm">
+                      ดูรายงานสรุปประจำวัน ยอดผู้ป่วย และสถานะการติดตามผลแบบเรียลไทม์
                     </p>
                   </button>
                 </div>
@@ -466,30 +453,26 @@ export default function SettingsPage() {
                     </p>
                   </button>
 
-                  {/* ✅ ปุ่มแก้ไขอสม.ชั่วคราว - ใหม่! */}
+                  {/* ✅ ปุ่มสร้าง อสม.ชั่วคราว - ใหม่! (เฉพาะ) */}
                   <button
-                    onClick={() => router.push('/admin/staff?filter=temporary')}
-                    className="bg-white rounded-xl shadow-lg p-6 border border-amber-200 hover:shadow-xl transition-all text-left group relative overflow-hidden"
+                    onClick={() => router.push('/admin/staff/add-temporary')}
+                    className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
                   >
-                    <div className="absolute top-2 right-2 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-semibold">
-                      อสม.ชั่วคราว
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-white/20 backdrop-blur rounded-md text-xs font-bold">
+                      ใหม่ ✨
                     </div>
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="w-14 h-14 bg-amber-100 rounded-lg flex items-center justify-center group-hover:bg-amber-200 transition-all">
-                        <Clock className="w-7 h-7 text-amber-600" />
+                      <div className="w-14 h-14 bg-white/20 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <UserPlus className="w-7 h-7" />
                       </div>
                       <div>
-                        <h3 className="text-xl font-bold text-gray-800">
-                          แก้ไขอสม.ชั่วคราว
-                        </h3>
-                        <p className="text-sm text-gray-500">
-                          ยืนยันเลขบัตรจริง
-                        </p>
+                        <h3 className="text-xl font-bold">🏘️ สร้าง อสม.ชั่วคราว</h3>
+                        <p className="text-white/90 text-sm">ลงทะเบียนด่วน</p>
                       </div>
                     </div>
-                    <p className="text-gray-600 text-sm">
-                      รายการอสม.ที่รอการยืนยันเลขบัตรประชาชน 
-                      เปลี่ยนจากเลขชั่วคราวเป็นเลขจริง
+                    <p className="text-white/90 text-sm">
+                      สร้างบัญชีอสม.ชั่วคราวพร้อมเลขบัตรที่ตรวจสอบได้ 
+                      รหัสผ่านอัตโนมัติจากวันเกิด แก้ไขเป็นเลขจริงภายหลังได้
                     </p>
                   </button>
 
