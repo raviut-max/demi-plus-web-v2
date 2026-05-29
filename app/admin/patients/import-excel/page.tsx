@@ -16,15 +16,14 @@ import {
   checkPatientExists,
   importPatientsBatch,
   getCoachesWithHospitals,
-  getHospitalsWithHierarchy,
-  // Import supabase client เพื่อใช้ดึงค่า HN สูงสุดโดยตรง
+  getHospitalsWithHierarchy
 } from '@/lib/supabase/queries';
-import { supabase } from '@/lib/supabase/client'; // ตรวจสอบ path นี้ให้ตรงกับ project คุณ
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
   AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone, Hash
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { supabase } from '@/lib/supabase/client'; // ✅ Import supabase client เพื่อใช้ดึง HN
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
@@ -37,13 +36,13 @@ const STANDARD_FIELDS = [
   { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true }, // ✅ ฟิลด์เบอร์โทร 1
+  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true }, // ✅ เบอร์โทร 1
   { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
   { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
   { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
   { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ แก้ไขแล้ว
+  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ เปลี่ยนชื่อ
   { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
   { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
   { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
@@ -56,8 +55,8 @@ const STANDARD_FIELDS = [
   { key: 'province', label: 'จังหวัด', inputType: 'text' },
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ แก้ไขแล้ว + เบอร์โทร 2
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ เปลี่ยนชื่อ
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ เปลี่ยนชื่อ + เบอร์โทร 2
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -121,7 +120,7 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
   return bestMatch ? { coach: bestMatch, similarity: bestScore } : null;
 };
 
-// ✅ ฟังก์ชันจัดการวันที่ (สำคัญมาก)
+// ✅ ฟังก์ชันแปลงวันที่ที่ปรับปรุงใหม่ (รองรับ 2 หลัก, วันเดือน, ว่าง)
 const formatThaiDate = (input: string | number | Date): string => {
   if (!input || String(input).trim() === '') {
     return '01/01/2511'; // กรณีว่าง ให้เติมค่า default
@@ -137,17 +136,17 @@ const formatThaiDate = (input: string | number | Date): string => {
   } else if (str.match(/^[\d\/.\-]+$/)) {
     const parts = str.split(/[/.\-]/).map(p => p.trim());
     if (parts.length >= 3) {
+      // กรณีมีครบ วัน/เดือน/ปี
       const [p1, p2, p3] = parts;
-      if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; }
-      else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; }
-      else { day = p1; month = p2; year = p3; }
+      if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; } // ปีนำหน้า
+      else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; } // ปีตามหลัง
+      else { day = p1; month = p2; year = p3; } // สมมติเป็น วัน/เดือน/ปี
     } else if (parts.length === 2) {
-      // กรณีมีแค่วัน/เดือน เช่น 01/01
+      // กรณีมีแค่วัน/เดือน (เช่น 01/01)
       day = parts[0];
       month = parts[1];
       year = '2511'; // เติมปี 2511
     } else {
-      // กรณีไม่สมบูรณ์ ให้ default
       return '01/01/2511';
     }
   } else {
@@ -170,7 +169,7 @@ const formatThaiDate = (input: string | number | Date): string => {
 };
 
 const swapDayMonth = (dateStr: string): string => {
-  if (!dateStr) return '01/01/2511';
+  if (!dateStr || dateStr === '01/01/2511') return dateStr;
   const parts = dateStr.split('/');
   if (parts.length >= 2) {
     [parts[0], parts[1]] = [parts[1], parts[0]];
@@ -190,7 +189,41 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
 
 const removeNamePrefixes = (name: string): string => {
   if (!name) return '';
-  return name.replace(/^(นาย|นางสาว|นาง|นส|น\.?s\.?|เด็กชาย|เด็กหญิง)\.?/i, '').trim();
+  return name.replace(/^(นาย|นางสาว|นาง|ด.ช.|ด.ญ.|นส|น.?s.?|เด็กชาย|เด็กหญิง|นาย|นาง)\.?/i, '').trim();
+};
+
+// ✅ ฟังก์ชันดึง HN สูงสุดจาก DB
+const fetchMaxHNFromDB = async (): Promise<number> => {
+  try {
+    // ดึงค่าจาก profiles เนื่องจากเป็นตารางที่เก็บ HN (hospital_number)
+    // หากต้องการดึงจาก users โดยตรง (ถ้ามีคอลัมน์) ให้เปลี่ยนจาก 'profiles' เป็น 'users'
+    const { data, error } = await supabase
+      .from('profiles') 
+      .select('hospital_number')
+      .not('hospital_number', 'is', null)
+      .neq('hospital_number', '')
+      .order('hospital_number', { ascending: false })
+      .limit(100);
+
+    if (error) return 1;
+
+    let maxNum = 0;
+    const hnRegex = /(?:HN99[-]?)?(\d{4})$/i; 
+
+    data?.forEach(row => {
+      const hn = row.hospital_number;
+      if (hn) {
+        const match = String(hn).match(hnRegex);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num > maxNum) maxNum = num;
+        }
+      }
+    });
+    return maxNum + 1;
+  } catch (err) {
+    return 1;
+  }
 };
 
 // =====================================================
@@ -223,7 +256,6 @@ export default function ImportExcelPage() {
   const [validationProgress, setValidationProgress] = useState(0);
   const [isInitialValidation, setIsInitialValidation] = useState(false);
   
-  // ✅ State สำหรับ HN
   const [hnCounter, setHnCounter] = useState(1);
   const [hnLoading, setHnLoading] = useState(false);
 
@@ -256,23 +288,27 @@ export default function ImportExcelPage() {
   useEffect(() => {
     if (rawData.length === 0 || excelHeaders.length === 0) return;
     const autoMap: Record<string, string> = {};
+    
     excelHeaders.forEach(header => {
       const cleanHeader = header.replace(/\s+/g, '').toLowerCase().replace(/[().\-]/g, '');
+      
       const match = STANDARD_FIELDS.find(f => {
         const fClean = f.label.replace(/\s+/g, '').replace(/[().\-]/g, '').toLowerCase();
         const fKeywords = getKeywordsForField(f.key);
         return cleanHeader.includes(fClean) || fClean.includes(cleanHeader) || fKeywords.some(keyword => cleanHeader.includes(keyword));
       });
+      
       autoMap[header] = match?.key || '';
     });
+    
     setHeaderMapping(autoMap);
     setStep('mapping');
   }, [rawData, excelHeaders]);
 
   const getKeywordsForField = (fieldKey: string): string[] => {
     const keywords: Record<string, string[]> = {
-      'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'bs', 'fbs', 'glucose'],
-      'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact'],
+      'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'ค่าน้ำตาลในเลือด', 'bs', 'fbs', 'glucose', 'bloodsugar'],
+      'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact', 'ชื่อผู้ติดต่อ'],
       'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ'],
       'hba1c_level': ['hba1c', 'ค่าhba1c', 'a1c'],
       'current_weight': ['น้ำหนัก', 'weight', 'นน'],
@@ -305,36 +341,28 @@ export default function ImportExcelPage() {
     return duplicates;
   };
 
-  // ✅ ฟังก์ชันดึง HN สูงสุดจาก DB เพื่อเริ่มนับต่อ
-  const fetchMaxHNFromDB = async (): Promise<number> => {
+  // ✅ ฟังก์ชันสร้าง HN ชั่วคราว
+  const handleFillMissingHN = async () => {
+    setHnLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('hospital_number')
-        .not('hospital_number', 'is', null)
-        .neq('hospital_number', '')
-        .order('hospital_number', { ascending: false })
-        .limit(100); // ดึงมา 100 รายการล่าสุดเพื่อหา Max
+      const startCounter = await fetchMaxHNFromDB();
+      let counter = startCounter;
       
-      if (error) return 1;
-      
-      let maxNum = 0;
-      // Regex เพื่อหา HN99-xxxx หรือ xxxx
-      const hnRegex = /(?:HN99[-]?)?(\d{4})$/i; 
-      
-      data?.forEach(row => {
-        const hn = row.hospital_number;
-        if (hn) {
-          const match = String(hn).match(hnRegex);
-          if (match) {
-            const num = parseInt(match[1]);
-            if (num > maxNum) maxNum = num;
+      setPreviewData(prev => {
+        const updated = prev.map(row => {
+          if (!row.hospital_number || row.hospital_number.trim() === '') {
+            const hn = `HN99-${String(counter).padStart(4, '0')}`;
+            counter++;
+            return { ...row, hospital_number: hn };
           }
-        }
+          return row;
+        });
+        return updated;
       });
-      return maxNum + 1;
     } catch (err) {
-      return 1;
+      setError('❌ ไม่สามารถดึงข้อมูล HN จากฐานข้อมูลได้');
+    } finally {
+      setHnLoading(false);
     }
   };
 
@@ -344,8 +372,21 @@ export default function ImportExcelPage() {
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
-          // ใช้ formatDate ที่ปรับปรุงแล้ว
-          newRow[dbKey] = dbKey === 'birth_date' ? formatThaiDate(val) : (val !== undefined && val !== null ? String(val).trim() : '');
+          
+          // ✅ แปลงเพศอัตโนมัติ
+          if (dbKey === 'gender' && val) {
+            const v = String(val).trim();
+            if (['ช', 'ช.', '1'].includes(v)) newRow[dbKey] = 'ชาย';
+            else if (['ญ', 'ญ.', '2'].includes(v)) newRow[dbKey] = 'หญิง';
+            else newRow[dbKey] = v;
+          } 
+          // ✅ แปลงวันที่อัตโนมัติ
+          else if (dbKey === 'birth_date') {
+            newRow[dbKey] = formatThaiDate(val);
+          } 
+          else {
+            newRow[dbKey] = val !== undefined && val !== null ? String(val).trim() : '';
+          }
         }
       });
       return newRow;
@@ -357,10 +398,9 @@ export default function ImportExcelPage() {
 
   const validateSingleRow = async (row: any, idx: number, duplicateMap: Map<string, number[]>) => {
     const rowErrors: string[] = [];
-    let isDuplicate = false; // แดง (ซ้ำ Patient)
-    let isWarning = false;   // เหลือง (ซ้ำแต่ไม่ใช่ Patient)
+    let isDuplicate = false; 
+    let isWarning = false;
 
-    // 1. ตรวจสอบเลขบัตรประชาชน
     if (row.id_card) {
       if (!validateThaiIdCard(row.id_card)) {
         rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -386,7 +426,6 @@ export default function ImportExcelPage() {
       }
     }
 
-    // 2. ตรวจสอบฟิลด์อื่นๆ (ถ้าไม่ซ้ำแบบ Red)
     if (!isDuplicate) {
       STANDARD_FIELDS.forEach(field => {
         if (field.required && (!row[field.key] || String(row[field.key]).trim() === '')) {
@@ -394,8 +433,7 @@ export default function ImportExcelPage() {
         }
       });
 
-      // วันเกิด ตรวจสอบ format หลังจากเติมปีแล้ว
-      if (row.birth_date) {
+      if (row.birth_date && row.birth_date !== '01/01/2511') {
         const dateRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
         const match = row.birth_date.match(dateRegex);
         if (!match) rowErrors.push('❌ วันเกิดรูปแบบไม่ถูกต้อง');
@@ -463,32 +501,6 @@ export default function ImportExcelPage() {
     setPreviewData(updatedData);
     setIsInitialValidation(false);
     setValidationProgress(0);
-  };
-
-  // ✅ ฟังก์ชันสร้าง HN ชั่วคราว
-  const handleFillMissingHN = async () => {
-    setHnLoading(true);
-    try {
-      // อ่านค่า Max HN จาก DB ก่อน
-      const startCounter = await fetchMaxHNFromDB();
-      let counter = startCounter;
-      
-      setPreviewData(prev => {
-        const updated = prev.map(row => {
-          if (!row.hospital_number || row.hospital_number.trim() === '') {
-            const hn = `HN99-${String(counter).padStart(4, '0')}`;
-            counter++;
-            return { ...row, hospital_number: hn };
-          }
-          return row;
-        });
-        return updated;
-      });
-    } catch (err) {
-      setError('❌ ไม่สามารถดึงข้อมูล HN จากฐานข้อมูลได้');
-    } finally {
-      setHnLoading(false);
-    }
   };
 
   const swapAllBirthDates = () => {
@@ -806,6 +818,7 @@ export default function ImportExcelPage() {
               {excelHeaders.map(header => {
                 const matchedKey = headerMapping[header];
                 const isMatched = matchedKey && matchedKey !== '';
+                
                 const isDuplicateField = matchedKey && duplicateMappings[matchedKey] && duplicateMappings[matchedKey].length > 1;
                 const isPhoneField = matchedKey && STANDARD_FIELDS.find(f => f.key === matchedKey)?.isPhoneField;
                 
@@ -885,7 +898,7 @@ export default function ImportExcelPage() {
                     {previewData.map((row, rIdx) => {
                       const hasError = validationErrors[rIdx]?.length > 0;
                       const isDup = row._isDuplicate;
-                      const isWarning = row._isWarning; // สถานะเหลือง
+                      const isWarning = row._isWarning;
                       const isChecking = checkingDuplicates.has(rIdx);
                       const isDisabledSelect = isDup;
 
