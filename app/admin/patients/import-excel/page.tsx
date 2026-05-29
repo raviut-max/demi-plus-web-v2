@@ -22,9 +22,10 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone, Hash
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { supabase } from '@/lib/supabase/client';
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน (แก้ไขชื่อฟิลด์ตามที่ต้องการ)
@@ -37,13 +38,13 @@ const STANDARD_FIELDS = [
   { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true }, // ✅ เพิ่ม flag สำหรับเตือน
+  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true },
   { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
   { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
   { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
   { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ แก้ไขแล้ว: จาก "ค่าน้ำตาลในเลือด" เป็น "ค่าน้ำตาล"
+  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' },
   { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
   { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
   { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
@@ -56,8 +57,8 @@ const STANDARD_FIELDS = [
   { key: 'province', label: 'จังหวัด', inputType: 'text' },
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ แก้ไขแล้ว: จาก "ชื่อผู้ติดต่อ(ญาติ)" เป็น "ผู้ติดต่อฉุกเฉิน"
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ แก้ไขแล้ว: จาก "เบอร์โทร_1" เป็น "เบอร์ติดต่อฉุกเฉิน" + เพิ่ม flag
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true },
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -130,9 +131,7 @@ const formatThaiDate = (input: string | number | Date): string => {
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
     const [y, m, d] = str.split('-');
     year = String(parseInt(y) + 543); month = m; day = d;
-  } 
-  // ✅ แก้ไข Regex: escape เครื่องหมาย - และ / ใน character class
-  else if (str.match(/^[\d\/.\-]+$/)) {
+  } else if (str.match(/^[\d\/.\-]+$/)) {
     const parts = str.split(/[/.\-]/).map(p => p.trim());
     if (parts.length >= 3) {
       const [p1, p2, p3] = parts;
@@ -145,7 +144,6 @@ const formatThaiDate = (input: string | number | Date): string => {
   let formattedYear = year;
   if (year.length === 2) {
     const shortYear = parseInt(year);
-    // เงื่อนไข: 80-99 -> 24xx, 00-79 -> 25xx
     if (shortYear >= 80) formattedYear = `24${year}`;
     else formattedYear = `25${year}`;
   } else if (year.length === 4) {
@@ -181,6 +179,45 @@ const removeNamePrefixes = (name: string): string => {
   return name.replace(/^(นาย|นางสาว|นาง|นส|น\.?s\.?|เด็กชาย|เด็กหญิง)\.?/i, '').trim();
 };
 
+// ✅ ฟังก์ชันอ่านค่า HN99-xxxx สูงสุดจากฐานข้อมูล
+const getMaxHN99FromDatabase = async (): Promise<number> => {
+  try {
+    // ดึงข้อมูล HN ทั้งหมดจากตาราง users (profiles.hospital_number)
+    const { data: profilesData, error } = await supabase
+      .from('profiles')
+      .select('hospital_number')
+      .not('hospital_number', 'is', null)
+      .neq('hospital_number', '');
+    
+    if (error) {
+      console.error('❌ Error fetching HN from database:', error);
+      return 0;
+    }
+
+    let maxNum = 0;
+    const hn99Regex = /^HN99-(\d{4})$/i;
+
+    profilesData?.forEach(profile => {
+      const hn = profile.hospital_number?.trim();
+      if (hn) {
+        const match = hn.match(hn99Regex);
+        if (match) {
+          const num = parseInt(match[1]);
+          if (num > maxNum) {
+            maxNum = num;
+          }
+        }
+      }
+    });
+
+    console.log(`✅ Max HN99 number found: ${maxNum}`);
+    return maxNum;
+  } catch (err) {
+    console.error('❌ Error in getMaxHN99FromDatabase:', err);
+    return 0;
+  }
+};
+
 // =====================================================
 // MAIN COMPONENT
 // =====================================================
@@ -211,6 +248,10 @@ export default function ImportExcelPage() {
   // ✅ แถบความคืบหน้าการตรวจสอบเริ่มต้น
   const [validationProgress, setValidationProgress] = useState(0);
   const [isInitialValidation, setIsInitialValidation] = useState(false);
+  
+  // ✅ State สำหรับตัวนับ HN ชั่วคราว
+  const [hnCounter, setHnCounter] = useState(1);
+  const [hnLoading, setHnLoading] = useState(false);
 
   useEffect(() => {
     const userData = checkSession();
@@ -245,7 +286,6 @@ export default function ImportExcelPage() {
     excelHeaders.forEach(header => {
       const cleanHeader = header.replace(/\s+/g, '').toLowerCase().replace(/[().\-]/g, '');
       
-      // ✅ ปรับปรุง: ค้นหาแบบ flexible มากขึ้น ด้วยคำสำคัญ
       const match = STANDARD_FIELDS.find(f => {
         const fClean = f.label.replace(/\s+/g, '').replace(/[().\-]/g, '').toLowerCase();
         const fKeywords = getKeywordsForField(f.key);
@@ -267,15 +307,15 @@ export default function ImportExcelPage() {
     const keywords: Record<string, string[]> = {
       'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'ค่าน้ำตาลในเลือด', 'bs', 'fbs', 'glucose', 'bloodsugar'],
       'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact', 'ชื่อผู้ติดต่อ'],
-      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์ติดต่อ(ญาติ)', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์โทรผู้ติดต่อฉุกเฉิน', 'เบอร์โทรญาติ', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'โทรศัพท์ฉุกเฉิน', 'โทรศัพท์ผู้ติดต่อ', 'โทรศัพท์ญาติ', 'โทรศัพท์ผู้ติดต่อฉุกเฉิน', 'emergency phone'],
-      'hba1c_level': ['hba1c', 'hba1c', 'ค่าhba1c', 'a1c'],
+      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์ติดต่อ(ญาติ)', 'เบอร์โทรผู้ติดต่อ', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ', 'emergency phone'],
+      'hba1c_level': ['hba1c', 'ค่าhba1c', 'a1c'],
       'current_weight': ['น้ำหนัก', 'weight', 'นน'],
       'height': ['ส่วนสูง', 'height', 'สูง'],
       'waist_circumference': ['รอบเอว', 'waist'],
       'hospital_number': ['hn', 'เลขที่ผู้ป่วย', 'เลขผู้ป่วย'],
       'id_card': ['บัตรประชาชน', 'id', 'เลขบัตร', 'ประชาชน'],
       'birth_date': ['วันเกิด', 'dob', 'เกิด'],
-      'phone': ['เบอร์โทร', 'โทรศัพท์', 'มือถือ', 'เบอร์โทรศัพท์', 'เบอร์โทรศัพท์ผู้ป่วย', 'เบอร์โทรผู้ป่วย', 'โทรศัพท์ผู้ป่วย', 'มือถือผู้ป่วย', 'เบอร์โทรศัพท์คนไข้', 'เบอร์โทรคนไข้', 'โทรศัพท์คนไข้', 'มือถือคนไข้'],
+      'phone': ['เบอร์โทร', 'โทรศัพท์', 'มือถือ', 'เบอร์โทรศัพท์', 'เบอร์โทรศัพท์ผู้ป่วย'],
       'email': ['อีเมล', 'email', 'mail'],
       'province': ['จังหวัด', 'province'],
       'district': ['อำเภอ', 'district'],
@@ -298,7 +338,6 @@ export default function ImportExcelPage() {
       }
     });
     
-    // กรองเอาเฉพาะฟิลด์ที่ถูกจับคู่ซ้ำ
     const duplicates: Record<string, string[]> = {};
     Object.entries(mappingCount).forEach(([fieldKey, excelCols]) => {
       if (excelCols.length > 1) {
@@ -307,6 +346,42 @@ export default function ImportExcelPage() {
     });
     
     return duplicates;
+  };
+
+  // ✅ ฟังก์ชันสร้าง HN ชั่วคราวสำหรับช่องว่าง (ฟอร์แมต HN99-xxxx)
+  const fillMissingHN = async () => {
+    setHnLoading(true);
+    try {
+      // อ่านค่า HN99-xxxx สูงสุดจากฐานข้อมูล
+      const maxHN = await getMaxHN99FromDatabase();
+      let counter = maxHN + 1;
+      
+      setPreviewData(prev => {
+        const updated = prev.map(row => {
+          // ถ้าช่อง HN ว่างเปล่า หรือไม่มีข้อมูล
+          if (!row.hospital_number || row.hospital_number.trim() === '') {
+            const hn = `HN99-${String(counter).padStart(4, '0')}`;
+            counter++;
+            return { ...row, hospital_number: hn };
+          }
+          return row;
+        });
+        setHnCounter(counter);
+        return updated;
+      });
+      
+      // Re-validate หลังจากเพิ่ม HN
+      runPreviewValidation(previewData.map((row, idx) => {
+        const hn = updatedData[idx]?.hospital_number || row.hospital_number;
+        return { ...row, hospital_number: hn };
+      }));
+      
+    } catch (err) {
+      console.error('❌ Error filling HN:', err);
+      setError('❌ ไม่สามารถสร้างเลข HN ได้');
+    } finally {
+      setHnLoading(false);
+    }
   };
 
   const buildPreview = useCallback(() => {
@@ -328,9 +403,8 @@ export default function ImportExcelPage() {
   // ✅ ตรวจสอบพื้นฐานเฉพาะแถว (สำหรับแก้ไขข้อมูล)
   const validateSingleRow = async (row: any, idx: number, duplicateMap: Map<string, number[]>) => {
     const rowErrors: string[] = [];
-    let isDuplicate = false; // ใช้เฉพาะสำหรับซ้ำ Patient เท่านั้น
+    let isDuplicate = false;
 
-    // 1. ตรวจสอบเลขบัตรประชาชน + Role (ตรวจสอบทั้งคู่ควบคู่กัน)
     if (row.id_card) {
       if (!validateThaiIdCard(row.id_card)) {
         rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -340,11 +414,9 @@ export default function ImportExcelPage() {
           const { exists, isPatient } = await checkPatientExists(cleanId);
           
           if (exists && isPatient) {
-            // 🔴 ซ้ำจริง (Role: Patient) -> หยุดตรวจสอบอื่น, ปิดช่องเลือก
             rowErrors.push('🔍 พบข้อมูลซ้ำในระบบ: มีผู้ป่วยคนนี้อยู่แล้ว (Role: Patient) ไม่สามารถนำเข้าซ้ำได้');
             isDuplicate = true;
           } else if (exists && !isPatient) {
-            // 🟡 มีในระบบแต่ไม่ใช่ Patient -> แจ้งเตือนสีเหลือง, ยังเลือกได้, ตรวจสอบต่อ
             rowErrors.push('⚠️ เลขบัตรนี้มีอยู่ในระบบแล้ว แต่ไม่ใช่ Role ผู้ป่วย (สามารถเลือกนำเข้าได้)');
           } else if (importedIds.has(cleanId)) {
             rowErrors.push('🔍 พบข้อมูลซ้ำในรอบนี้: เลขบัตรนี้เพิ่งถูกเลือกนำเข้า');
@@ -357,7 +429,6 @@ export default function ImportExcelPage() {
       }
     }
 
-    // 2. ถ้าไม่ใช่ซ้ำ Patient จริง ให้ตรวจสอบฟิลด์อื่นต่อ
     if (!isDuplicate) {
       STANDARD_FIELDS.forEach(field => {
         if (field.required && (!row[field.key] || String(row[field.key]).trim() === '')) {
@@ -443,7 +514,6 @@ export default function ImportExcelPage() {
     });
   };
 
-  // ✅ ลบคำนำหน้าชื่อทั้งคอลัมน์
   const cleanAllNames = () => {
     setPreviewData(prev => {
       const updated = prev.map(row => {
@@ -498,7 +568,6 @@ export default function ImportExcelPage() {
   };
 
   const toggleSelectRow = (idx: number) => {
-    // เลือกได้เฉพาะแถวที่ไม่ได้ซ้ำ Patient จริง
     if (previewData[idx]._isDuplicate) return;
     const next = new Set(selectedRows);
     next.has(idx) ? next.delete(idx) : next.add(idx);
@@ -514,7 +583,6 @@ export default function ImportExcelPage() {
   const validSelectableCount = previewData.filter(r => !r._isDuplicate).length;
   const canImport = selectedRows.size > 0 && !Array.from(selectedRows).some(i => previewData[i]._isDuplicate);
 
-  // ✅ ปรับปรุง: จัดกลุ่มข้อมูลส่งออกให้ชัดเจนตามที่ต้องการ
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
     
@@ -729,7 +797,6 @@ export default function ImportExcelPage() {
               <button onClick={buildPreview} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium shadow-sm">ถัดไป: Preview & Validation →</button>
             </div>
             
-            {/* ✅ แสดงคำเตือนหากมีการจับคู่ซ้ำ */}
             {Object.keys(duplicateMappings).length > 0 && (
               <div className="mb-4 p-4 bg-yellow-50 border border-yellow-300 rounded-lg">
                 <div className="flex items-start gap-2">
@@ -757,7 +824,6 @@ export default function ImportExcelPage() {
                 const matchedKey = headerMapping[header];
                 const isMatched = matchedKey && matchedKey !== '';
                 
-                // ✅ ตรวจสอบว่าฟิลด์นี้มีการจับคู่ซ้ำหรือไม่
                 const isDuplicateField = matchedKey && duplicateMappings[matchedKey] && duplicateMappings[matchedKey].length > 1;
                 const isPhoneField = matchedKey && STANDARD_FIELDS.find(f => f.key === matchedKey)?.isPhoneField;
                 
@@ -789,7 +855,6 @@ export default function ImportExcelPage() {
                       {STANDARD_FIELDS.map(f => <option key={f.key} value={f.key}>{f.label}</option>)}
                     </select>
                     
-                    {/* ✅ แสดงไอคอนและข้อความเตือนสำหรับฟิลด์เบอร์โทรหรือฟิลด์ซ้ำ */}
                     {(isDuplicateField || isPhoneField) && (
                       <div className="mt-2 flex items-start gap-1.5">
                         <Phone className="w-3 h-3 text-yellow-600 flex-shrink-0 mt-0.5" />
@@ -842,8 +907,20 @@ export default function ImportExcelPage() {
                             <span>{field.label} {field.required && <span className="text-red-500">*</span>}</span>
                             {field.key === 'birth_date' && <button onClick={swapAllBirthDates} className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200">🔄 สลับทั้งคอลัมน์</button>}
                             {field.key === 'first_name' && <button onClick={cleanAllNames} className="ml-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 flex items-center gap-1"><Scissors className="w-3 h-3" /> ลบคำนำหน้า</button>}
-                            {/* ✅ เพิ่มไอคอนเตือนสำหรับฟิลด์เบอร์โทรศัพท์ */}
                             {field.isPhoneField && <Phone className="w-3 h-3 text-yellow-600 ml-1" title="⚠️ โปรดตรวจสอบว่าจับคู่ถูกต้องกับเบอร์โทรศัพท์ที่ต้องการ" />}
+                            
+                            {/* ✅ ปุ่มสร้าง HN ชั่วคราว - ฟอร์แมต HN99-xxxx */}
+                            {field.key === 'hospital_number' && (
+                              <button 
+                                onClick={fillMissingHN} 
+                                disabled={hnLoading}
+                                className="ml-1 text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded hover:bg-orange-200 flex items-center gap-1 whitespace-nowrap disabled:opacity-50"
+                                title="สร้างเลข HN ชั่วคราวสำหรับช่องว่าง (HN99-xxxx)"
+                              >
+                                {hnLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Hash className="w-3 h-3" />}
+                                {hnLoading ? 'กำลังอ่าน...' : 'สร้าง HN ชั่วคราว'}
+                              </button>
+                            )}
                           </div>
                         </th>
                       ))}
@@ -853,10 +930,10 @@ export default function ImportExcelPage() {
                   <tbody>
                     {previewData.map((row, rIdx) => {
                       const hasError = validationErrors[rIdx]?.length > 0;
-                      const isDup = row._isDuplicate; // true เฉพาะซ้ำ Patient
-                      const isWarning = hasError && !isDup; // สีเหลือง: มีในระบบแต่ไม่ใช่ Patient
+                      const isDup = row._isDuplicate;
+                      const isWarning = hasError && !isDup;
                       const isChecking = checkingDuplicates.has(rIdx);
-                      const isDisabledSelect = isDup; // ปิดเลือกเฉพาะซ้ำ Patient จริง
+                      const isDisabledSelect = isDup;
 
                       return (
                         <tr key={rIdx} className={`border-b hover:bg-gray-50 transition-colors ${
