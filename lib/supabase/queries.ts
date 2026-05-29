@@ -2119,6 +2119,9 @@ export async function getPendingIdCards(hospitalIds?: string[]) {
 // =====================================================
 // 👥 Staff Management Functions (Updated for Temporary)
 // =====================================================
+// =====================================================
+// 👥 Staff Management Functions (Plain Text Mode)
+// =====================================================
 export async function addStaff(data: {
   id_card: string;
   full_name_th: string;
@@ -2135,21 +2138,15 @@ export async function addStaff(data: {
   temp_id_notes?: string;
 }) {
   try {
-    // 1️⃣ เข้ารหัสรหัสผ่าน (ใช้ RPC หรือเปลี่ยนเป็น bcrypt ตามระบบจริง)
-    const { data: passwordHash, error: hashError } = await supabase.rpc('hash_password', { 
-      plain_text: data.password 
-    });
-    if (hashError) throw new Error('ไม่สามารถเข้ารหัสรหัสผ่านได้: ' + hashError.message);
-
-    // 2️⃣ สร้าง User ในตาราง users
     const now = new Date().toISOString();
     const isTemp = data.is_temporary_id ?? false;
 
+    // ✅ 1. สร้าง User ในตาราง users (เก็บรหัสผ่านแบบ Plain Text ตรงๆ)
     const { data: user, error: userError } = await supabase
       .from('users')
       .insert({
         id_card: data.id_card,
-        password_hash: passwordHash,
+        password_hash: data.password, // 🔓 แก้ไขแล้ว: ใช้ Plain Text โดยตรง ไม่เรียก RPC hash_password
         role: data.role,
         hospital_id: data.hospital_id || null,
         birth_date: data.birth_date,
@@ -2167,12 +2164,13 @@ export async function addStaff(data: {
 
     if (userError) throw userError;
 
-    // 3️⃣ ถ้าเป็นหมอ/เจ้าหน้าที่/อสม. ให้สร้างเรคคอร์ดในตาราง doctors ด้วย
+    // ✅ 2. สร้างข้อมูลในตาราง doctors (ถ้าไม่ใช่ Admin)
     if (['doctor', 'helper', 'osm'].includes(data.role)) {
       const { error: docError } = await supabase.from('doctors').insert({
         user_id: user.id,
+        full_name: data.full_name_th,    // ✅ เพิ่ม full_name เพื่อป้องกัน DB Error (Column NOT NULL)
         full_name_th: data.full_name_th,
-        specialization_th: data.specialization_th || null,
+        specialization_th: data.specialization_th || (data.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : data.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 'แพทย์'),
         phone: data.phone || null,
         email: data.email || null,
         is_active: true,
@@ -2185,7 +2183,6 @@ export async function addStaff(data: {
 
       if (docError) {
         console.error('⚠️ สร้าง doctors record ล้มเหลว:', docError.message);
-        // หมายเหตุ: ใน Production ควรใช้ Transaction เพื่อ Rollback ถ้าขั้นนี้ไม่ผ่าน
       }
     }
 
@@ -2725,6 +2722,9 @@ export async function getTemporaryOSMCards(hospitalIds?: string[]) {
 /**
  * อัปเดตเลขบัตรอสม. จากชั่วคราวเป็นเลขจริง
  */
+/**
+อัปเดตเลขบัตรอสม. จากชั่วคราวเป็นเลขจริง
+*/
 export async function updateTemporaryOSMIdCard(
   userId: string,
   newIdCard: string,
@@ -2737,40 +2737,38 @@ export async function updateTemporaryOSMIdCard(
     if (!/^\d{13}$/.test(cleanIdCard)) {
       return { success: false, error: 'เลขบัตรประชาชนต้องเป็นตัวเลข 13 หลัก' };
     }
-
+    
     // 2. ตรวจสอบ Checksum
     if (!validateThaiIdCard(cleanIdCard)) {
       return { success: false, error: 'เลขบัตรประชาชนไม่ผ่านการตรวจสอบความถูกต้อง (Checksum Invalid)' };
     }
-
+    
     // 3. ตรวจสอบความซ้ำ (ไม่รวมตัวเอง)
     const isDuplicate = await checkIdCardExists(cleanIdCard, userId);
     if (isDuplicate) {
       return { success: false, error: 'เลขบัตรประชาชนนี้ถูกใช้งานแล้วในระบบ กรุณาตรวจสอบอีกครั้ง' };
     }
-
-    // 4. อัปเดตข้อมูลในตาราง users
+    
+    // 4. อัปเดตข้อมูลในตาราง users ✅ แก้ไขแล้ว: ลบตัวแปร notes ที่ไม่ได้ประกาศออก
     const { error } = await supabase
       .from('users')
       .update({
         id_card: cleanIdCard,
         is_temporary_id: false,
-        temp_id_notes: confirmNotes 
-          ? `${confirmNotes} | เดิม: ${notes || 'ไม่มี'}` 
-          : (temp_id_notes || 'อัปเดตเป็นเลขจริง'),
+        temp_id_notes: confirmNotes || 'อัปเดตเป็นเลขจริง', // ✅ แก้ไขแล้ว: ใช้ค่าเดียว ไม่ต่อสตริงกับตัวแปรที่ไม่มี
         id_card_updated_at: new Date().toISOString(),
         id_card_updated_by: updatedBy,
         updated_at: new Date().toISOString()
       })
       .eq('id', userId);
-
+    
     if (error) {
       if (error.code === '23505') {
         return { success: false, error: 'เลขบัตรประชาชนนี้ถูกใช้งานแล้ว (Unique Constraint Violation)' };
       }
       return { success: false, error: error.message };
     }
-
+    
     // 5. อัปเดต is_verified ในตาราง doctors เป็น true
     await supabase
       .from('doctors')
@@ -2779,14 +2777,13 @@ export async function updateTemporaryOSMIdCard(
         updated_at: new Date().toISOString()
       })
       .eq('user_id', userId);
-
+    
     return { success: true };
   } catch (err: any) {
     console.error('❌ [updateTemporaryOSMIdCard] Exception:', err);
     return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการอัปเดต' };
   }
 }
-
 /**
  * ดึงสถิติบัตรอสม.ชั่วคราว
  */
