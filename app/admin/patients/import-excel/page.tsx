@@ -4,7 +4,7 @@
 🏥 ระบบ: DEMI+ (Diabetes Engagement Management Interface Plus)
 📝 หน้าที่: นำเข้าข้อมูลผู้ป่วยจากไฟล์ Excel
 👥 ผู้พัฒนา: DEMI+ Development Team
-📅 อัปเดตล่าสุด: 28 พฤษภาคม 2569
+📅 อัปเดตล่าสุด: 29 พฤษภาคม 2569
 */
 'use client';
 import { useState, useEffect, useCallback } from 'react';
@@ -23,7 +23,7 @@ import {
   AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone, Hash
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { supabase } from '@/lib/supabase/client'; // ✅ Import supabase client เพื่อใช้ดึง HN
+import { supabase } from '@/lib/supabase/client';
 
 // =====================================================
 // 📋 กำหนดคอลัมน์มาตรฐาน
@@ -36,7 +36,7 @@ const STANDARD_FIELDS = [
   { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true }, // ✅ เบอร์โทร 1
+  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true },
   { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
   { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
@@ -56,7 +56,7 @@ const STANDARD_FIELDS = [
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
   { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ เปลี่ยนชื่อ
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ เปลี่ยนชื่อ + เบอร์โทร 2
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ เปลี่ยนชื่อ
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -156,8 +156,8 @@ const formatThaiDate = (input: string | number | Date): string => {
   let formattedYear = year;
   if (year.length === 2) {
     const shortYear = parseInt(year);
-    // 80-99 -> 24xx, 00-79 -> 25xx
-    if (shortYear >= 80) formattedYear = `24${year}`;
+    // 70-99 -> 24xx, 00-69 -> 25xx
+    if (shortYear >= 70) formattedYear = `24${year}`;
     else formattedYear = `25${year}`;
   } else if (year.length === 4) {
     formattedYear = year;
@@ -187,18 +187,12 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
   return found ? { valid: true, errors: [] } : { valid: false, errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง หรือไม่มีในระบบ`] };
 };
 
-const removeNamePrefixes = (name: string): string => {
-  if (!name) return '';
-  return name.replace(/^(นาย|นางสาว|นาง|ด.ช.|ด.ญ.|นส|น.?s.?|เด็กชาย|เด็กหญิง|นาย|นาง)\.?/i, '').trim();
-};
-
 // ✅ ฟังก์ชันดึง HN สูงสุดจาก DB
 const fetchMaxHNFromDB = async (): Promise<number> => {
   try {
     // ดึงค่าจาก profiles เนื่องจากเป็นตารางที่เก็บ HN (hospital_number)
-    // หากต้องการดึงจาก users โดยตรง (ถ้ามีคอลัมน์) ให้เปลี่ยนจาก 'profiles' เป็น 'users'
     const { data, error } = await supabase
-      .from('profiles') 
+      .from('profiles')
       .select('hospital_number')
       .not('hospital_number', 'is', null)
       .neq('hospital_number', '')
@@ -345,6 +339,7 @@ export default function ImportExcelPage() {
   const handleFillMissingHN = async () => {
     setHnLoading(true);
     try {
+      // อ่านค่า HN สูงสุดจากฐานข้อมูล
       const startCounter = await fetchMaxHNFromDB();
       let counter = startCounter;
       
