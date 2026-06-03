@@ -1,10 +1,10 @@
 // app/admin/patients/[id]/appointments/page.tsx
-// ✅ แก้ไขล่าสุด: 2 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 3 มิถุนายน 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขปัญหา Timezone (+7 ชั่วโมง)
-//    2. แปลงเวลาให้ถูกต้องก่อนบันทึก
-//    3. แสดงเวลาให้ถูกต้องตาม timezone ประเทศไทย
-
+//    1. แก้ไขปัญหา Bad Request ใน loadDoctors โดยใช้ !inner join
+//    2. แก้ไขปัญหา Timezone (+7 ชั่วโมง)
+//    3. แปลงเวลาให้ถูกต้องก่อนบันทึก
+//    4. แสดงเวลาให้ถูกต้องตาม timezone ประเทศไทย
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -44,7 +44,7 @@ export default function PatientAppointmentsPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  
+
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,7 +56,7 @@ export default function PatientAppointmentsPage() {
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const [appointmentsWithFollowup, setAppointmentsWithFollowup] = useState<Set<string>>(new Set());
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-  
+
   const [formData, setFormData] = useState({
     doctor_id: '',
     appointment_type: 'followup',
@@ -78,7 +78,6 @@ export default function PatientAppointmentsPage() {
       router.push('/admin/login');
       return;
     }
-    
     setUser(userData);
     loadUserHospital(userData.id);
     loadData();
@@ -99,7 +98,7 @@ export default function PatientAppointmentsPage() {
   const loadData = async () => {
     try {
       console.log('📥 [loadData] Loading patient detail for ID:', patientId);
-      
+
       // ✅ 1. โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       console.log('✅ [loadData] Patient detail loaded:', patientData);
@@ -140,7 +139,7 @@ export default function PatientAppointmentsPage() {
   const loadAccessibleHospitalsForPatient = async (patientHospitalId: string) => {
     try {
       console.log('🏥 [loadAccessibleHospitalsForPatient] Patient hospital:', patientHospitalId);
-      
+
       // ✅ ดึงข้อมูลโรงพยาบาลของผู้ป่วย
       const { data: patientHospital, error: hospError } = await supabase
         .from('hospitals')
@@ -180,7 +179,7 @@ export default function PatientAppointmentsPage() {
           console.log('✅ [loadAccessibleHospitalsForPatient] Found', subHospitals.length, 'sub hospitals');
         }
       }
-      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ 
+      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ  
       else if (patientHospital.type === 'sub' && patientHospital.parent_id) {
         console.log('🏥 [loadAccessibleHospitalsForPatient] Patient is in SUB hospital');
         console.log('🏥 [loadAccessibleHospitalsForPatient] Parent hospital:', patientHospital.parent_id);
@@ -213,92 +212,103 @@ export default function PatientAppointmentsPage() {
     }
   };
 
-  // ✅ โหลดแพทย์ (แก้ไขแล้ว - ดึง hospital_id จาก users table)
+  // ✅ โหลดแพทย์ (แก้ไขแล้ว - ใช้ inner join กับ users table แก้ Bad Request)
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
       console.log('👨‍⚕️ [loadDoctors] Starting...');
       console.log('🏥 [loadDoctors] Hospital IDs to filter:', hospitalIds);
       console.log('👤 [loadDoctors] Current user role:', user?.role);
-      
-      // ✅ 1. ดึงข้อมูลแพทย์ทั้งหมด (ไม่ join กับ hospitals)
-      let doctorsQuery = supabase
-        .from('doctors')
-        .select(`
-          id, 
-          user_id, 
-          full_name_th, 
-          specialization_th,
-          is_active
-        `)
-        .eq('is_active', true);
 
-      console.log('🔍 [loadDoctors] Doctors query built');
+      let doctorsData: any[] = [];
 
-      // ✅ 2. ถ้ามี hospitalIds ให้กรอง
       if (hospitalIds && hospitalIds.length > 0) {
         console.log('🔍 [loadDoctors] Filtering by hospital_ids:', hospitalIds);
         
-        // ✅ ดึง user_id จาก users table ที่มี hospital_id ในรายการ
-        const { data: usersData, error: usersError } = await supabase
-          .from('users')
-          .select('id')
-          .in('hospital_id', hospitalIds)
+        // ✅ ใช้ !inner join โดยตรงกับ users table (แก้ Bad Request)
+        const { data, error } = await supabase
+          .from('doctors')
+          .select(`
+            id, 
+            user_id, 
+            full_name_th, 
+            specialization_th,
+            is_active,
+            users!inner (
+              id,
+              hospital_id,
+              is_active
+            )
+          `)
+          .eq('is_active', true)
+          .eq('users.is_active', true)
+          .in('users.hospital_id', hospitalIds);
+
+        if (error) {
+          console.error('❌ [loadDoctors] Error fetching doctors:', error);
+          console.error('❌ [loadDoctors] Error details: ', JSON.stringify(error, null, 2));
+          setDoctors([]);
+          return;
+        }
+
+        console.log('✅ [loadDoctors] Found', data?.length || 0, 'doctors');
+        
+        if (!data || data.length === 0) {
+          console.warn('⚠️ [loadDoctors] No doctors found in these hospitals');
+          setDoctors([]);
+          return;
+        }
+
+        doctorsData = data;
+      } else {
+        // ✅ ถ้าไม่มี hospitalIds ให้ดึงแพทย์ทั้งหมด
+        console.log('🔍 [loadDoctors] No hospital filter, fetching all active doctors');
+        const { data, error } = await supabase
+          .from('doctors')
+          .select(`
+            id, 
+            user_id, 
+            full_name_th, 
+            specialization_th,
+            is_active
+          `)
           .eq('is_active', true);
 
-        if (usersError) {
-          console.error('❌ [loadDoctors] Error fetching users:', usersError);
-        } else {
-          console.log('✅ [loadDoctors] Found', usersData?.length || 0, 'active users in hospitals');
-           
-          if (usersData && usersData.length > 0) {
-            const userIds = usersData.map(u => u.id);
-            console.log('👥 [loadDoctors] User IDs:', userIds);
-            
-            doctorsQuery = doctorsQuery.in('user_id', userIds);
-          } else {
-            console.warn('⚠️ [loadDoctors] No active users found in these hospitals');
-            setDoctors([]);
-            return;
-          }
+        if (error) {
+          console.error('❌ [loadDoctors] Error fetching all doctors:', error);
+          setDoctors([]);
+          return;
         }
+
+        doctorsData = data || [];
       }
 
-      // ✅ 3. Execute query
-      const { data: doctorsData, error: doctorsError } = await doctorsQuery;
-
-      if (doctorsError) {
-        console.error('❌ [loadDoctors] Error fetching doctors:', doctorsError);
-        console.error('❌ [loadDoctors] Error details:', JSON.stringify(doctorsError, null, 2));
-        setDoctors([]);
-        return;
-      }
-
-      console.log('✅ [loadDoctors] Found', doctorsData?.length || 0, 'doctors');
-      
-      if (!doctorsData || doctorsData.length === 0) {
-        console.warn('⚠️ [loadDoctors] No doctors found');
-        setDoctors([]);
-        return;
-      }
-
-      // ✅ 4. โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์แยก
+      // ✅ โหลดข้อมูลโรงพยาบาลของแต่ละแพทย์
       console.log('🏥 [loadDoctors] Loading hospital info for each doctor...');
       const doctorsWithHospitals = await Promise.all(
-        doctorsData.map(async (doctor) => {
+        doctorsData.map(async (doctor: any) => {
           try {
-            // ✅ ดึง hospital_id จาก users table
-            const { data: userData, error: userError } = await supabase
-              .from('users')
-              .select('hospital_id')
-              .eq('id', doctor.user_id)
-              .single();
+            let hospitalId: string | null = null;
+            
+            // ✅ ถ้ามี users data จาก join แล้ว ให้ใช้เลย
+            if (doctor.users?.hospital_id) {
+              hospitalId = doctor.users.hospital_id;
+            } else {
+              // Fallback: ดึงจาก users table
+              const { data: userData, error: userError } = await supabase
+                .from('users')
+                .select('hospital_id')
+                .eq('id', doctor.user_id)
+                .single();
 
-            if (userError) {
-              console.warn(`⚠️ [loadDoctors] Error fetching user ${doctor.user_id}:`, userError);
-              return { ...doctor, hospitals: null };
+              if (userError) {
+                console.warn(`⚠️ [loadDoctors] Error fetching user ${doctor.user_id}:`, userError);
+                return { ...doctor, hospitals: null };
+              }
+
+              hospitalId = userData?.hospital_id || null;
             }
 
-            if (!userData?.hospital_id) {
+            if (!hospitalId) {
               console.log(`ℹ️ [loadDoctors] Doctor ${doctor.full_name_th} has no hospital_id`);
               return { ...doctor, hospitals: null };
             }
@@ -307,11 +317,11 @@ export default function PatientAppointmentsPage() {
             const { data: hospData, error: hospError } = await supabase
               .from('hospitals')
               .select('id, name, code, type')
-              .eq('id', userData.hospital_id)
+              .eq('id', hospitalId)
               .single();
 
             if (hospError) {
-              console.warn(`⚠️ [loadDoctors] Error fetching hospital ${userData.hospital_id}:`, hospError);
+              console.warn(`⚠️ [loadDoctors] Error fetching hospital ${hospitalId}:`, hospError);
               return { ...doctor, hospitals: null };
             }
 
@@ -341,7 +351,7 @@ export default function PatientAppointmentsPage() {
   const loadFollowupStatus = async (appointmentsList: any[]) => {
     try {
       const followupSet = new Set<string>();
-      
+
       for (const apt of appointmentsList) {
         const { count } = await supabase
           .from('appointment_followups')
@@ -419,7 +429,7 @@ export default function PatientAppointmentsPage() {
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
-    
+
     try {
       // ✅ แก้ไขปัญหา Timezone เช่นเดียวกัน
       const dateTimeString = `${formData.appointment_date}T${formData.appointment_time}:00`;
@@ -453,7 +463,7 @@ export default function PatientAppointmentsPage() {
 
   const handleCancelAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการยกเลิกนัดหมายนี้หรือไม่?')) return;
-    
+
     try {
       const { error } = await supabase
         .from('appointments')
@@ -475,7 +485,7 @@ export default function PatientAppointmentsPage() {
 
   const handleCompleteAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการทำเครื่องหมายว่านัดหมายนี้เสร็จสิ้นแล้วหรือไม่?')) return;
-    
+
     try {
       const { error } = await supabase
         .from('appointments')
@@ -500,7 +510,7 @@ export default function PatientAppointmentsPage() {
     const dateTime = new Date(appointment.appointment_date);
     const date = dateTime.toISOString().split('T')[0];
     const time = dateTime.toTimeString().split(' ')[0].substring(0, 5);
-    
+
     setFormData({
       doctor_id: appointment.doctor_id || '',
       appointment_type: appointment.appointment_type || 'followup',
@@ -510,7 +520,7 @@ export default function PatientAppointmentsPage() {
       location_detail: appointment.location_detail || '',
       notes: appointment.notes || '',
     });
-    
+
     setShowEditModal(true);
   };
 
@@ -568,7 +578,7 @@ export default function PatientAppointmentsPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับหน้าผู้ป่วย
           </button>
-          
+
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">ประวัตินัดหมาย</h1>
@@ -655,6 +665,7 @@ export default function PatientAppointmentsPage() {
               </div>
             </div>
           </div>
+
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -668,6 +679,7 @@ export default function PatientAppointmentsPage() {
               </div>
             </div>
           </div>
+
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
@@ -681,6 +693,7 @@ export default function PatientAppointmentsPage() {
               </div>
             </div>
           </div>
+
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
@@ -694,6 +707,7 @@ export default function PatientAppointmentsPage() {
               </div>
             </div>
           </div>
+
           <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
@@ -788,7 +802,7 @@ export default function PatientAppointmentsPage() {
                             <span className="text-gray-700">
                               {appointment.location_type === 'clinic' ? 'คลินิก' : 
                                appointment.location_type === 'online' ? 'ออนไลน์' : 
-                               appointment.location_type === 'home' ? 'บ้าน' : 
+                                appointment.location_type === 'home' ? 'บ้าน' : 
                                appointment.location_detail || '-'}
                             </span>
                           </div>
