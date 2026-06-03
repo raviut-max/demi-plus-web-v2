@@ -1,10 +1,9 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: เพิ่มทางเข้าสร้าง อสม.ชั่วคราว (เฉพาะ)
+// ✅ แก้ไขล่าสุด: เพิ่มทางเข้าหน้า Correct Data
 // ✅ การแก้ไข:
-//    1. ❌ ลบปุ่ม "ลงทะเบียนด่วน" ออก
-//    2. ✅ เพิ่มปุ่ม "สร้าง อสม.ชั่วคราว" ในหมวดจัดการบุคลากร
-//    3. ✅ แก้ไขทุกจุดที่ typo ให้ผ่าน Build
-//    4. ✅ จัดกลุ่มเมนูให้ชัดเจน
+//    1. ✅ เพิ่มปุ่ม "จัดการข้อมูลบกพร่อง" ในหมวดฟีเจอร์เร่งด่วน
+//    2. ✅ แก้ไขทุกจุดที่ typo ให้ผ่าน Build
+//    3. ✅ จัดกลุ่มเมนูให้ชัดเจน
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -37,7 +36,8 @@ import {
   Clock,
   Zap,
   Stethoscope,
-  Heart
+  Heart,
+  Wrench
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -106,7 +106,7 @@ export default function SettingsPage() {
   const loadSystemStats = async () => {
     try {
       const hospitalIds = await getAccessibleHospitalIds(user?.id);
-      
+
       // ✅ นับโรงพยาบาล
       let hospitalsQuery = supabase
         .from('hospitals')
@@ -205,7 +205,6 @@ export default function SettingsPage() {
               </h1>
               <p className="text-gray-600">จัดการการตั้งค่าระบบและข้อมูลพื้นฐาน</p>
             </div>
-
             <div className="flex items-center gap-4">
               {userHospital && (
                 <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
@@ -369,14 +368,37 @@ export default function SettingsPage() {
             {/* ✅ เมนูจัดการ - แบ่งเป็น 3 หมวดหมู่ */}
             <div className="space-y-8">
               
-              {/* 🚨 หมวดเร่งด่วน - ลบปุ่มลงทะเบียนด่วนออก */}
+              {/* 🚨 หมวดเร่งด่วน - เพิ่มปุ่ม Correct Data */}
               <div>
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-orange-600" />
                   ⚡ ฟีเจอร์เร่งด่วน
                 </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   
+                  {/* 🔧 ปุ่มจัดการข้อมูลบกพร่อง (Correct Data) - ใหม่! */}
+                  <button
+                    onClick={() => router.push('/admin/correct-data')}
+                    className="bg-gradient-to-br from-red-500 to-pink-600 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-white/20 backdrop-blur rounded-md text-xs font-bold">
+                      ใหม่ ✨
+                    </div>
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-white/20 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Wrench className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">🔧 Correct Data</h3>
+                        <p className="text-white/90 text-sm">แก้ไขข้อมูลบกพร่อง</p>
+                      </div>
+                    </div>
+                    <p className="text-white/90 text-sm">
+                      จัดการข้อมูลผู้ป่วยที่มีปัญหา เช่น ไม่มี Profile, HN ซ้ำ, 
+                      เลขบัตรผิด Format, ชื่อไม่ครบ
+                    </p>
+                  </button>
+
                   {/* 📥 ปุ่มนำเข้าผู้ป่วยจาก Excel */}
                   <button
                     onClick={() => router.push('/admin/patients/import-excel')}
@@ -453,7 +475,7 @@ export default function SettingsPage() {
                     </p>
                   </button>
 
-                  {/* ✅ ปุ่มสร้าง อสม.ชั่วคราว - ใหม่! (เฉพาะ) */}
+                  {/* ✅ ปุ่มสร้าง อสม.ชั่วคราว */}
                   <button
                     onClick={() => router.push('/admin/staff/add-temporary')}
                     className="bg-gradient-to-r from-amber-500 to-orange-500 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
