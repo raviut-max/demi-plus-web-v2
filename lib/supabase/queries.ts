@@ -328,6 +328,157 @@ export async function getPatientList(
 }
 // ... existing code ...
 
+// ... existing code ...
+// ✅ เพิ่มฟังก์ชันใหม่: ดึงจำนวนผู้ป่วยทั้งหมด
+export async function getPatientCount(
+  search?: string,
+  pamLevel?: string,
+  hospitalIds?: string[],
+  hospitalId?: string,
+  coachId?: string
+) {
+  try {
+    let query = supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_active', true);
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    if (hospitalId && hospitalId !== 'all') {
+      query = query.eq('hospital_id', hospitalId);
+    }
+
+    if (coachId && coachId !== 'all') {
+      query = query.eq('coach_id', coachId);
+    }
+
+    if (pamLevel) {
+      query = query.eq('pam_level', pamLevel);
+    }
+
+    if (search) {
+      query = query.or(
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+      );
+    }
+
+    const { count, error } = await query;
+
+    if (error) {
+      console.error('❌ [getPatientCount] Error:', error);
+      return 0;
+    }
+
+    return count || 0;
+  } catch (err) {
+    console.error('❌ [getPatientCount] Exception:', err);
+    return 0;
+  }
+}
+
+// ✅ เพิ่มฟังก์ชันใหม่: ดึงผู้ป่วยแบบแบ่งหน้า
+export async function getPatientListPaginated(
+  page: number = 0,
+  pageSize: number = 50,
+  search?: string,
+  pamLevel?: string,
+  hospitalIds?: string[],
+  hospitalId?: string,
+  coachId?: string
+) {
+  try {
+    const start = page * pageSize;
+    const end = start + pageSize - 1;
+
+    let query = supabase
+      .from('profiles')
+      .select(`
+        *,
+        hospitals:profiles_hospital_id_fkey (
+          id,
+          name,
+          code,
+          type
+        )
+      `, { count: 'exact' })
+      .eq('is_active', true)
+      .range(start, end);
+
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds);
+    }
+
+    if (hospitalId && hospitalId !== 'all') {
+      query = query.eq('hospital_id', hospitalId);
+    }
+
+    if (coachId && coachId !== 'all') {
+      query = query.eq('coach_id', coachId);
+    }
+
+    if (pamLevel) {
+      query = query.eq('pam_level', pamLevel);
+    }
+
+    if (search) {
+      query = query.or(
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+      );
+    }
+
+    const { data: profiles, error, count } = await query;
+
+    if (error) {
+      console.error('❌ [getPatientListPaginated] Error:', error);
+      return { patients: [], total: 0 };
+    }
+
+    if (!profiles || profiles.length === 0) {
+      return { patients: [], total: count || 0 };
+    }
+
+    // ดึงข้อมูล users
+    const userIds = profiles.map(p => p.id);
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('id, id_card, role, is_active, created_at')
+      .in('id', userIds);
+
+    const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
+
+    // ดึงชื่อโค้ช
+    const coachIds = profiles.map(p => p.coach_id).filter(Boolean);
+    let coachesMap = new Map();
+
+    if (coachIds.length > 0) {
+      const { data: doctorsData } = await supabase
+        .from('doctors')
+        .select('user_id, full_name_th')
+        .in('user_id', coachIds);
+
+      if (doctorsData) {
+        coachesMap = new Map(doctorsData.map(d => [d.user_id, d.full_name_th]));
+      }
+    }
+
+    const patients = profiles.map(profile => ({
+      ...profile,
+      users: usersMap.get(profile.id) || null,
+      coach_name: coachesMap.get(profile.coach_id) || null,
+      full_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
+    }));
+
+    return { patients, total: count || 0 };
+  } catch (err) {
+    console.error('❌ [getPatientListPaginated] Exception:', err);
+    return { patients: [], total: 0 };
+  }
+}
+// ... existing code ...
+
 export async function getDeletedPatients() {
   try {
     // ดึงข้อมูล profiles ที่ถูกลบ

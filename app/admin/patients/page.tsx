@@ -2,11 +2,12 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import * as XLSX from 'xlsx'; // ✅ เพิ่มสำหรับ Export Excel
+import * as XLSX from 'xlsx';
 import {
   checkSession,
   logout,
-  getPatientList,
+  getPatientListPaginated,
+  getPatientCount,
   deletePatient,
   restorePatient,
   permanentlyDeletePatient,
@@ -22,7 +23,7 @@ import {
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
-  FileSpreadsheet  // ✅ ไอคอนสำหรับ Export
+  FileSpreadsheet
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -51,8 +52,13 @@ export default function PatientManagementPage() {
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  
+  // ✅ Pagination State
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPatients, setTotalPatients] = useState(0);
+  const [pageSize] = useState(50);
+  const totalPages = Math.ceil(totalPatients / pageSize);
 
-  // Helper: รับ hospital ids สำหรับ filter ตาม network
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
     if (hospitalIdFilter === 'all') {
       return accessibleHospitalIds;
@@ -80,7 +86,6 @@ export default function PatientManagementPage() {
     }
   }, [accessibleHospitalIds]);
 
-  // โหลดรายชื่อโค้ชตามโรงพยาบาลที่เลือก
   const loadFilterCoachesByHospital = useCallback(async (hospitalIdFilter: string) => {
     try {
       setLoadingFilters(true);
@@ -118,14 +123,12 @@ export default function PatientManagementPage() {
     }
   }, [getHospitalIdsForFilter]);
 
-  // เมื่อเปลี่ยนโรงพยาบาล filter ให้โหลดโค้ชใหม่และรีเซ็ต coach filter
   useEffect(() => {
     if (!user) return;
     setSelectedCoachFilter('all');
     loadFilterCoachesByHospital(selectedHospitalFilter);
   }, [selectedHospitalFilter, user, loadFilterCoachesByHospital]);
 
-  // โหลดข้อมูลเริ่มต้น
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -172,8 +175,7 @@ export default function PatientManagementPage() {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       await loadFilterHospitals(userId, ids);
-      // ✅ แก้ไข: ส่ง undefined แทน array ว่างสำหรับ Super Admin
-      await loadPatients(ids.length > 0 ? ids : undefined);
+      await loadPatients(ids);
       await loadDeletedPatients(ids);
     } catch (error) {
       debugLog('loadAccessibleHospitals', 'error', error);
@@ -225,7 +227,6 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ แก้ไข: ปรับปรุง logic การส่ง parameter
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -233,17 +234,27 @@ export default function PatientManagementPage() {
       const isAllPam = selectedPamLevel === 'all';
       const isNoSearch = !searchTerm;
 
-      const data = await getPatientList(
+      const total = await getPatientCount(
         isNoSearch ? '' : searchTerm,
         isAllPam ? undefined : selectedPamLevel,
         isAllHospitals ? undefined : hospitalIds,
         isAllHospitals ? undefined : selectedHospitalFilter,
         isAllCoaches ? undefined : selectedCoachFilter
       );
-      
+      setTotalPatients(total);
+
+      const { patients: data } = await getPatientListPaginated(
+        currentPage,
+        pageSize,
+        isNoSearch ? '' : searchTerm,
+        isAllPam ? undefined : selectedPamLevel,
+        isAllHospitals ? undefined : hospitalIds,
+        isAllHospitals ? undefined : selectedHospitalFilter,
+        isAllCoaches ? undefined : selectedCoachFilter
+      );
+
       setPatients(data);
-      // ✅ เพิ่ม: แสดงจำนวนผู้ป่วยที่โหลดได้จริง
-      console.log(`📊 [loadPatients] Total loaded: ${data.length} patients`);
+      console.log(`📊 [loadPatients] Page ${currentPage + 1}/${totalPages}, Loaded: ${data.length}, Total: ${total}`);
     } catch (error) {
       debugLog('loadPatients', 'error', error);
       setPatients([]);
@@ -269,16 +280,19 @@ export default function PatientManagementPage() {
   };
 
   const handleSearch = useCallback(() => {
-    loadPatients(accessibleHospitalIds);
-  }, [searchTerm, selectedPamLevel, selectedHospitalFilter, selectedCoachFilter, accessibleHospitalIds]);
+    setCurrentPage(0);
+  }, [searchTerm, selectedPamLevel, selectedHospitalFilter, selectedCoachFilter]);
 
-  // ✅ แก้ไข: ลบเงื่อนไข if ออก ให้เรียก handleSearch ทุกครั้ง
   useEffect(() => {
     const timer = setTimeout(() => {
       handleSearch();
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm, selectedHospitalFilter, selectedCoachFilter, selectedPamLevel, handleSearch]);
+
+  useEffect(() => {
+    loadPatients(accessibleHospitalIds);
+  }, [currentPage, searchTerm, selectedPamLevel, selectedHospitalFilter, selectedCoachFilter, accessibleHospitalIds]);
 
   const handleLogout = () => {
     logout();
@@ -323,15 +337,12 @@ export default function PatientManagementPage() {
     return 0;
   });
 
-  // ✅ ฟังก์ชัน Export to Excel
   const exportToExcel = () => {
     const exportData = sortedPatients.map((patient, idx) => {
-      // แปลงเพศ
       let genderThai = '';
       if (patient.gender === 'male') genderThai = 'ชาย';
       else if (patient.gender === 'female') genderThai = 'หญิง';
       
-      // จัดรูปแบบวันเกิด
       let birthDateStr = '';
       if (patient.birth_date) {
         const date = new Date(patient.birth_date);
@@ -358,21 +369,10 @@ export default function PatientManagementPage() {
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
-    // กำหนดความกว้างคอลัมน์ (optional)
     ws['!cols'] = [
-      { wch: 8 },   // ลำดับ
-      { wch: 25 },  // ชื่อ-นามสกุล
-      { wch: 15 },  // HN
-      { wch: 18 },  // เลขบัตรประชาชน
-      { wch: 15 },  // วันเกิด
-      { wch: 8 },   // อายุ
-      { wch: 8 },   // เพศ
-      { wch: 15 },  // โทรศัพท์
-      { wch: 20 },  // อีเมล
-      { wch: 25 },  // โรงพยาบาล
-      { wch: 20 },  // โค้ช
-      { wch: 10 },  // PAM Level
-      { wch: 12 }   // Zone
+      { wch: 8 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 15 },
+      { wch: 8 }, { wch: 8 }, { wch: 15 }, { wch: 20 }, { wch: 25 },
+      { wch: 20 }, { wch: 10 }, { wch: 12 }
     ];
 
     const wb = XLSX.utils.book_new();
@@ -495,7 +495,6 @@ export default function PatientManagementPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -561,9 +560,7 @@ export default function PatientManagementPage() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
@@ -572,7 +569,7 @@ export default function PatientManagementPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p>
-                <p className="text-2xl font-bold">{patients.length}</p>
+                <p className="text-2xl font-bold">{totalPatients}</p>
               </div>
             </div>
           </div>
@@ -611,7 +608,6 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-2">
@@ -637,7 +633,7 @@ export default function PatientManagementPage() {
                 disabled={loadingFilters}
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
               >
-                <option value="all">ทั้งหมด ({patients.length})</option>
+                <option value="all">ทั้งหมด ({totalPatients})</option>
                 {filterHospitals.map((h: any) => (
                   <option key={h.id} value={h.id}>{h.typeLabel} {h.name} ({h.patientCount} คน)</option>
                 ))}
@@ -688,7 +684,6 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* ✅ ปุ่ม Export Excel */}
         <div className="flex justify-end mb-4">
           <button
             onClick={exportToExcel}
@@ -699,7 +694,6 @@ export default function PatientManagementPage() {
           </button>
         </div>
 
-        {/* Patient Table */}
         <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -810,10 +804,60 @@ export default function PatientManagementPage() {
               </tbody>
             </table>
           </div>
+          
+          {totalPages > 1 && (
+            <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
+              <div className="text-sm text-gray-600">
+                แสดง {currentPage * pageSize + 1} - {Math.min((currentPage + 1) * pageSize, totalPatients)} จาก {totalPatients} รายการ
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                  disabled={currentPage === 0}
+                  className="px-4 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  ก่อนหน้า
+                </button>
+                <div className="flex gap-1">
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum = i;
+                    if (totalPages > 5) {
+                      if (currentPage < 3) {
+                        pageNum = i;
+                      } else if (currentPage > totalPages - 4) {
+                        pageNum = totalPages - 5 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                    }
+                    return (
+                      <button
+                        key={pageNum}
+                        onClick={() => setCurrentPage(pageNum)}
+                        className={`px-4 py-2 rounded-lg ${
+                          currentPage === pageNum
+                            ? 'bg-blue-500 text-white'
+                            : 'bg-white border hover:bg-gray-50'
+                        }`}
+                      >
+                        {pageNum + 1}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                  disabled={currentPage >= totalPages - 1}
+                  className="px-4 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                >
+                  ถัดไป
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Deleted Modal */}
       {showDeletedModal && canDeleteData() && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
