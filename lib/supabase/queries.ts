@@ -265,6 +265,7 @@ export async function getPatientList(
     // ✅ สำคัญ: เพิ่ม range เพื่อดึงข้อมูลมากกว่า 1000 rows
     query = query.range(0, 10000);
 
+    
     const { data: profiles, error, count } = await query;
 
     if (error) {
