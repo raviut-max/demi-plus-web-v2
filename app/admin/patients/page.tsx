@@ -44,13 +44,11 @@ export default function PatientManagementPage() {
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [userName, setUserName] = useState<string>('');
-  
   const [selectedHospitalFilter, setSelectedHospitalFilter] = useState<string>('all');
   const [selectedCoachFilter, setSelectedCoachFilter] = useState<string>('all');
   const [filterHospitals, setFilterHospitals] = useState<any[]>([]);
   const [filterCoaches, setFilterCoaches] = useState<any[]>([]);
   const [loadingFilters, setLoadingFilters] = useState(false);
-  
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
@@ -59,18 +57,22 @@ export default function PatientManagementPage() {
     if (hospitalIdFilter === 'all') {
       return accessibleHospitalIds;
     }
+    
     const { data: hospital, error } = await supabase
       .from('hospitals')
       .select('id, type, parent_id')
       .eq('id', hospitalIdFilter)
       .single();
+
     if (error || !hospital) return [hospitalIdFilter];
+
     if (hospital.type === 'main') {
       const { data: subHospitals } = await supabase
         .from('hospitals')
         .select('id')
         .eq('parent_id', hospital.id)
         .eq('is_active', true);
+      
       const subIds = subHospitals?.map(h => h.id) || [];
       return [hospital.id, ...subIds];
     } else {
@@ -92,6 +94,7 @@ export default function PatientManagementPage() {
             .select('*', { count: 'exact', head: true })
             .eq('coach_id', c.user_id)
             .eq('is_active', true);
+          
           return {
             ...c,
             patientCount: count || 0,
@@ -105,6 +108,7 @@ export default function PatientManagementPage() {
       const sortedCoaches = [...coachesWithCount].sort((a, b) => 
         (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
       );
+      
       setFilterCoaches(sortedCoaches);
     } catch (error) {
       debugLog('loadFilterCoachesByHospital', 'error', error);
@@ -133,6 +137,7 @@ export default function PatientManagementPage() {
       router.push('/admin/login');
       return;
     }
+    
     setUser(userData);
     loadUserName(userData.id);
     loadUserHospital(userData.id);
@@ -146,6 +151,7 @@ export default function PatientManagementPage() {
         .select('full_name_th')
         .eq('user_id', userId)
         .single();
+      
       setUserName(data?.full_name_th || 'ผู้ดูแลระบบ');
     } catch {
       setUserName('ผู้ใช้งาน');
@@ -166,7 +172,8 @@ export default function PatientManagementPage() {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
       await loadFilterHospitals(userId, ids);
-      await loadPatients(ids);
+      // ✅ แก้ไข: ส่ง undefined แทน array ว่างสำหรับ Super Admin
+      await loadPatients(ids.length > 0 ? ids : undefined);
       await loadDeletedPatients(ids);
     } catch (error) {
       debugLog('loadAccessibleHospitals', 'error', error);
@@ -185,6 +192,7 @@ export default function PatientManagementPage() {
       const allHospitals = await getHospitalsWithHierarchy(
         isSuperAdmin(user) ? undefined : accessibleIds
       );
+      
       const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
         try {
           const { count } = await supabase
@@ -192,6 +200,7 @@ export default function PatientManagementPage() {
             .select('*', { count: 'exact', head: true })
             .eq('hospital_id', h.id)
             .eq('is_active', true);
+          
           return {
             ...h,
             patientCount: count || 0,
@@ -201,10 +210,12 @@ export default function PatientManagementPage() {
           return { ...h, patientCount: 0, typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย' };
         }
       }));
+      
       const sortedHospitals = [...hospitalsWithCount].sort((a, b) => {
         if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
         return (a.name || '').localeCompare(b.name || '', 'th');
       });
+      
       setFilterHospitals(sortedHospitals);
     } catch (error) {
       debugLog('loadFilterHospitals', 'error', error);
@@ -214,15 +225,22 @@ export default function PatientManagementPage() {
     }
   };
 
+  // ✅ แก้ไข: ปรับปรุง logic การส่ง parameter
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
+      const isAllHospitals = selectedHospitalFilter === 'all';
+      const isAllCoaches = selectedCoachFilter === 'all';
+      const isAllPam = selectedPamLevel === 'all';
+      const isNoSearch = !searchTerm;
+
       const data = await getPatientList(
-        searchTerm,
-        selectedPamLevel === 'all' ? undefined : selectedPamLevel,
-        hospitalIds,
-        selectedHospitalFilter === 'all' ? undefined : selectedHospitalFilter,
-        selectedCoachFilter === 'all' ? undefined : selectedCoachFilter
+        isNoSearch ? '' : searchTerm,
+        isAllPam ? undefined : selectedPamLevel,
+        isAllHospitals ? undefined : hospitalIds,
+        isAllHospitals ? undefined : selectedHospitalFilter,
+        isAllCoaches ? undefined : selectedCoachFilter
       );
+      
       setPatients(data);
     } catch (error) {
       debugLog('loadPatients', 'error', error);
@@ -234,11 +252,13 @@ export default function PatientManagementPage() {
     try {
       const data = await getDeletedPatients();
       let filteredData = data;
+      
       if (!isSuperAdmin(user) && hospitalIds && hospitalIds.length > 0) {
         filteredData = data.filter((p: any) => 
           !p.hospital_id || hospitalIds.includes(p.hospital_id)
         );
       }
+      
       setDeletedPatients(filteredData);
     } catch (error) {
       debugLog('loadDeletedPatients', 'error', error);
@@ -250,11 +270,10 @@ export default function PatientManagementPage() {
     loadPatients(accessibleHospitalIds);
   }, [searchTerm, selectedPamLevel, selectedHospitalFilter, selectedCoachFilter, accessibleHospitalIds]);
 
+  // ✅ แก้ไข: ลบเงื่อนไข if ออก ให้เรียก handleSearch ทุกครั้ง
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all' || selectedPamLevel !== 'all') {
-        handleSearch();
-      }
+      handleSearch();
     }, 300);
     return () => clearTimeout(timer);
   }, [searchTerm, selectedHospitalFilter, selectedCoachFilter, selectedPamLevel, handleSearch]);
@@ -276,22 +295,27 @@ export default function PatientManagementPage() {
   const sortedPatients = [...patients].sort((a, b) => {
     let aValue = a[sortColumn];
     let bValue = b[sortColumn];
+    
     if (sortColumn.includes('.')) {
       const [parent, child] = sortColumn.split('.');
       aValue = a[parent]?.[child];
       bValue = b[parent]?.[child];
     }
+    
     if (sortColumn === 'coach_name') {
       aValue = a.coach_name || '';
       bValue = b.coach_name || '';
     }
+    
     if (aValue == null) aValue = '';
     if (bValue == null) bValue = '';
+    
     if (typeof aValue === 'string' && typeof bValue === 'string') {
-      return sortDirection === 'asc' 
+      return sortDirection === 'asc'
         ? aValue.localeCompare(bValue, 'th')
         : bValue.localeCompare(aValue, 'th');
     }
+    
     if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
     if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
     return 0;
@@ -330,7 +354,7 @@ export default function PatientManagementPage() {
         'Zone': patient.zone || '',
       };
     });
-    
+
     const ws = XLSX.utils.json_to_sheet(exportData);
     // กำหนดความกว้างคอลัมน์ (optional)
     ws['!cols'] = [
@@ -348,7 +372,7 @@ export default function PatientManagementPage() {
       { wch: 10 },  // PAM Level
       { wch: 12 }   // Zone
     ];
-    
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ผู้ป่วย');
     const fileName = `patients_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
@@ -360,7 +384,9 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
+    
     if (!confirm(`⚠️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
+    
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
@@ -380,7 +406,9 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์กู้คืน');
       return;
     }
+    
     if (!confirm(`♻️ ยืนยันการกู้คืนผู้ป่วย ${patientName}?`)) return;
+    
     try {
       const result = await restorePatient(patientId);
       if (result.success) {
@@ -400,12 +428,15 @@ export default function PatientManagementPage() {
       alert('❌ อสม. ไม่มีสิทธิ์ลบถาวร');
       return;
     }
+    
     if (!confirm(`⚠️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
+    
     const secondConfirm = prompt('พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:');
     if (secondConfirm !== 'YES') {
       alert('ยกเลิกการลบถาวร');
       return;
     }
+    
     try {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
@@ -423,17 +454,20 @@ export default function PatientManagementPage() {
 
   const getRoleBadge = () => {
     if (!user) return null;
+    
     const roleConfig: any = {
       'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
-      'admin': {
-        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin',
+      'admin': { 
+        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', 
         bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100',
         textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700'
       },
       'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
-      'helper': { text: '👩‍💼 เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
+      'helper': { text: '👩‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
+    
     const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
+    
     return (
       <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
         {config.text}
@@ -465,11 +499,13 @@ export default function PatientManagementPage() {
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
             <ArrowLeft className="w-4 h-4" /> กลับ Dashboard
           </button>
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการผู้ป่วย</h1>
               <p className="text-gray-600">จัดการข้อมูลผู้ป่วยและติดตามผลการรักษา</p>
             </div>
+            
             <div className="flex-1 max-w-md mx-4">
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200 shadow-sm">
                 <div className="flex items-start gap-3">
@@ -505,6 +541,7 @@ export default function PatientManagementPage() {
                 </div>
               </div>
             </div>
+            
             <div className="flex gap-2">
               {canDeleteData() && (
                 <button onClick={() => setShowDeletedModal(true)} className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
@@ -528,26 +565,46 @@ export default function PatientManagementPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><Users className="w-5 h-5 text-blue-600" /></div>
-              <div><p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p><p className="text-2xl font-bold">{patients.length}</p></div>
+              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                <Users className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">ผู้ป่วยทั้งหมด</p>
+                <p className="text-2xl font-bold">{patients.length}</p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-600" /></div>
-              <div><p className="text-sm text-gray-500">Green Zone</p><p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Green Zone').length}</p></div>
+              <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Green Zone</p>
+                <p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Green Zone').length}</p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center"><AlertCircle className="w-5 h-5 text-yellow-600" /></div>
-              <div><p className="text-sm text-gray-500">Yellow Zone</p><p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Yellow Zone').length}</p></div>
+              <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-yellow-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Yellow Zone</p>
+                <p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Yellow Zone').length}</p>
+              </div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center"><XCircle className="w-5 h-5 text-red-600" /></div>
-              <div><p className="text-sm text-gray-500">Red Zone</p><p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Red Zone').length}</p></div>
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <XCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <p className="text-sm text-gray-500">Red Zone</p>
+                <p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Red Zone').length}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -556,12 +613,28 @@ export default function PatientManagementPage() {
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2"><Search className="w-4 h-4 inline mr-1" /> ค้นหา (ชื่อ, นามสกุล, HN)</label>
-              <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} placeholder="พิมพ์เพื่อค้นหา..." className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Search className="w-4 h-4 inline mr-1" /> ค้นหา (ชื่อ, นามสกุล, HN)
+              </label>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="พิมพ์เพื่อค้นหา..."
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2"><Building2 className="w-4 h-4 inline mr-1" /> โรงพยาบาล</label>
-              <select value={selectedHospitalFilter} onChange={(e) => setSelectedHospitalFilter(e.target.value)} disabled={loadingFilters} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Building2 className="w-4 h-4 inline mr-1" /> โรงพยาบาล
+              </label>
+              <select
+                value={selectedHospitalFilter}
+                onChange={(e) => setSelectedHospitalFilter(e.target.value)}
+                disabled={loadingFilters}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              >
                 <option value="all">ทั้งหมด ({patients.length})</option>
                 {filterHospitals.map((h: any) => (
                   <option key={h.id} value={h.id}>{h.typeLabel} {h.name} ({h.patientCount} คน)</option>
@@ -569,8 +642,15 @@ export default function PatientManagementPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2"><User className="w-4 h-4 inline mr-1" /> โค้ชผู้ดูแล</label>
-              <select value={selectedCoachFilter} onChange={(e) => setSelectedCoachFilter(e.target.value)} disabled={loadingFilters} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <User className="w-4 h-4 inline mr-1" /> โค้ชผู้ดูแล
+              </label>
+              <select
+                value={selectedCoachFilter}
+                onChange={(e) => setSelectedCoachFilter(e.target.value)}
+                disabled={loadingFilters}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              >
                 <option value="all">ทั้งหมด</option>
                 {filterCoaches.map((c: any) => (
                   <option key={c.user_id} value={c.user_id}>{c.full_name_th} | {c.hospitalName} ({c.patientCount} คน)</option>
@@ -578,14 +658,28 @@ export default function PatientManagementPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2"><Filter className="w-4 h-4 inline mr-1" /> PAM Level</label>
-              <select value={selectedPamLevel} onChange={(e) => setSelectedPamLevel(e.target.value)} className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Filter className="w-4 h-4 inline mr-1" /> PAM Level
+              </label>
+              <select
+                value={selectedPamLevel}
+                onChange={(e) => setSelectedPamLevel(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
                 <option value="all">ทั้งหมด</option>
-                <option value="L0">L0 - ไม่ทราบ</option><option value="L1">L1 - Deny</option><option value="L2">L2 - General</option><option value="L3">L3 - Intensive</option><option value="L4">L4 - Champion</option>
+                <option value="L0">L0 - ไม่ทราบ</option>
+                <option value="L1">L1 - Deny</option>
+                <option value="L2">L2 - General</option>
+                <option value="L3">L3 - Intensive</option>
+                <option value="L4">L4 - Champion</option>
               </select>
             </div>
             <div className="flex items-end">
-              <button onClick={handleSearch} disabled={loadingFilters} className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50">
+              <button
+                onClick={handleSearch}
+                disabled={loadingFilters}
+                className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
                 {loadingFilters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} ค้นหา
               </button>
             </div>
@@ -609,10 +703,18 @@ export default function PatientManagementPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th onClick={() => handleSort('first_name')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none"><div className="flex items-center">ชื่อ-นามสกุล {getSortIcon('first_name')}</div></th>
-                  <th onClick={() => handleSort('users.id_card')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none"><div className="flex items-center">HN / ID Card {getSortIcon('users.id_card')}</div></th>
-                  <th onClick={() => handleSort('hospitals.name')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none"><div className="flex items-center">โรงพยาบาล {getSortIcon('hospitals.name')}</div></th>
-                  <th onClick={() => handleSort('coach_name')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none"><div className="flex items-center">โค้ช {getSortIcon('coach_name')}</div></th>
+                  <th onClick={() => handleSort('first_name')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center">ชื่อ-นามสกุล {getSortIcon('first_name')}</div>
+                  </th>
+                  <th onClick={() => handleSort('users.id_card')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center">HN / ID Card {getSortIcon('users.id_card')}</div>
+                  </th>
+                  <th onClick={() => handleSort('hospitals.name')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center">โรงพยาบาล {getSortIcon('hospitals.name')}</div>
+                  </th>
+                  <th onClick={() => handleSort('coach_name')} className="px-6 py-4 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center">โค้ช {getSortIcon('coach_name')}</div>
+                  </th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
@@ -620,17 +722,86 @@ export default function PatientManagementPage() {
               </thead>
               <tbody className="divide-y">
                 {sortedPatients.length === 0 ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-gray-500"><Users className="w-12 h-12 mx-auto mb-4 text-gray-300" /><p>ไม่พบข้อมูลผู้ป่วย</p>{(searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all') && (<button onClick={() => { setSearchTerm(''); setSelectedHospitalFilter('all'); setSelectedCoachFilter('all'); handleSearch(); }} className="mt-4 px-4 py-2 text-blue-600 hover:underline">ล้างฟิลเตอร์และค้นหาใหม่</button>)}</td></tr>
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                      <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>ไม่พบข้อมูลผู้ป่วย</p>
+                      {(searchTerm || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all') && (
+                        <button
+                          onClick={() => { setSearchTerm(''); setSelectedHospitalFilter('all'); setSelectedCoachFilter('all'); handleSearch(); }}
+                          className="mt-4 px-4 py-2 text-blue-600 hover:underline"
+                        >
+                          ล้างฟิลเตอร์และค้นหาใหม่
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                 ) : (
                   sortedPatients.map((patient) => (
                     <tr key={patient.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4"><div className="flex items-center gap-3"><div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><Users className="w-5 h-5 text-blue-600" /></div><div><p className="font-medium">{patient.first_name} {patient.last_name}</p><p className="text-sm text-gray-500">{patient.phone || '-'}</p></div></div></td>
-                      <td className="px-6 py-4"><div className="text-sm"><p className="font-mono">{patient.hospital_number || '-'}</p><p className="text-xs text-gray-400">{patient.users?.id_card || '-'}</p></div></td>
-                      <td className="px-6 py-4"><span className="text-sm">{patient.hospitals?.name || '-'}</span></td>
-                      <td className="px-6 py-4"><span className="text-sm">{patient.coach_name || '-'}</span></td>
-                      <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${patient.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' : patient.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' : patient.pam_level === 'L2' ? 'bg-green-100 text-green-700' : patient.pam_level === 'L1' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'}`}>{patient.pam_level || 'L0'}</span></td>
-                      <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-semibold ${patient.zone === 'Green Zone' ? 'bg-green-100 text-green-700' : patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' : patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{patient.zone || 'Zero Zone'}</span></td>
-                      <td className="px-6 py-4"><div className="flex items-center gap-2"><button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye className="w-4 h-4" /></button><button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg"><Edit className="w-4 h-4" /></button>{canDeleteData() ? (<button onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4" /></button>) : (<span className="text-xs text-gray-400" title="อสม. ไม่มีสิทธิ์ลบ"><Lock className="w-3 h-3" /></span>)}</div></td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                            <Users className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium">{patient.first_name} {patient.last_name}</p>
+                            <p className="text-sm text-gray-500">{patient.phone || '-'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-sm">
+                          <p className="font-mono">{patient.hospital_number || '-'}</p>
+                          <p className="text-xs text-gray-400">{patient.users?.id_card || '-'}</p>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm">{patient.hospitals?.name || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm">{patient.coach_name || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          patient.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
+                          patient.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
+                          patient.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
+                          patient.pam_level === 'L1' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {patient.pam_level || 'L0'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          patient.zone === 'Green Zone' ? 'bg-green-100 text-green-700' :
+                          patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
+                          patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {patient.zone || 'Zero Zone'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg">
+                            <Edit className="w-4 h-4" />
+                          </button>
+                          {canDeleteData() ? (
+                            <button onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-400" title="อสม. ไม่มีสิทธิ์ลบ">
+                              <Lock className="w-3 h-3" />
+                            </span>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}
@@ -644,9 +815,58 @@ export default function PatientManagementPage() {
       {showDeletedModal && canDeleteData() && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b flex justify-between items-center"><h2 className="text-2xl font-bold flex gap-2"><Archive className="w-6 h-6" /> ผู้ป่วยที่ลบแล้ว ({deletedPatients.length})</h2><button onClick={() => setShowDeletedModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl">×</button></div>
-            <div className="p-6">{deletedPatients.length === 0 ? (<div className="text-center py-12"><Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" /><p>ไม่มีผู้ป่วยที่ถูกลบ</p></div>) : (<div className="space-y-4">{deletedPatients.map((patient) => (<div key={patient.id} className="border rounded-lg p-4"><div className="flex justify-between"><div><div className="flex gap-2 mb-2"><h3 className="font-semibold">{patient.first_name} {patient.last_name}</h3><span className="px-2 py-1 bg-gray-100 rounded-full text-xs">{patient.hospital_number}</span></div><div className="text-sm space-y-1"><p>HN: {patient.hospital_number || '-'}</p><p>โรงพยาบาล: {patient.hospitals?.name || '-'}</p><p>ลบเมื่อ: {new Date(patient.updated_at).toLocaleDateString('th-TH')}</p></div></div><div className="flex gap-2"><button onClick={() => handleRestorePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="flex gap-2 px-4 py-2 bg-green-500 text-white rounded-lg"><RotateCcw className="w-4 h-4" /> กู้คืน</button><button onClick={() => handlePermanentlyDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="flex gap-2 px-4 py-2 bg-red-600 text-white rounded-lg"><Trash2 className="w-4 h-4" /> ลบถาวร</button></div></div></div>))}</div>)}</div>
-            <div className="p-6 border-t bg-gray-50"><button onClick={() => setShowDeletedModal(false)} className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg">ปิด</button></div>
+            <div className="p-6 border-b flex justify-between items-center">
+              <h2 className="text-2xl font-bold flex gap-2">
+                <Archive className="w-6 h-6" />
+                ผู้ป่วยที่ลบแล้ว ({deletedPatients.length})
+              </h2>
+              <button onClick={() => setShowDeletedModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
+            </div>
+            <div className="p-6">
+              {deletedPatients.length === 0 ? (
+                <div className="text-center py-12">
+                  <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p>ไม่มีผู้ป่วยที่ถูกลบ</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {deletedPatients.map((patient) => (
+                    <div key={patient.id} className="border rounded-lg p-4">
+                      <div className="flex justify-between">
+                        <div>
+                          <div className="flex gap-2 mb-2">
+                            <h3 className="font-semibold">{patient.first_name} {patient.last_name}</h3>
+                            <span className="px-2 py-1 bg-gray-100 rounded-full text-xs">{patient.hospital_number}</span>
+                          </div>
+                          <div className="text-sm space-y-1">
+                            <p>HN: {patient.hospital_number || '-'}</p>
+                            <p>โรงพยาบาล: {patient.hospitals?.name || '-'}</p>
+                            <p>ลบเมื่อ: {new Date(patient.updated_at).toLocaleDateString('th-TH')}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleRestorePatient(patient.id, `${patient.first_name} ${patient.last_name}`)}
+                            className="flex gap-2 px-4 py-2 bg-green-500 text-white rounded-lg"
+                          >
+                            <RotateCcw className="w-4 h-4" /> กู้คืน
+                          </button>
+                          <button
+                            onClick={() => handlePermanentlyDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)}
+                            className="flex gap-2 px-4 py-2 bg-red-600 text-white rounded-lg"
+                          >
+                            <Trash2 className="w-4 h-4" /> ลบถาวร
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="p-6 border-t bg-gray-50">
+              <button onClick={() => setShowDeletedModal(false)} className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg">ปิด</button>
+            </div>
           </div>
         </div>
       )}
