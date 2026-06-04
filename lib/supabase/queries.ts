@@ -210,6 +210,7 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 // 👥 Patient Management Functions
 // =====================================================
+// ... existing code ...
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
@@ -230,30 +231,30 @@ export async function getPatientList(
           code,
           type
         )
-      `)
+      `, { count: 'exact' })  // ✅ เพิ่ม: นับจำนวนรวม
       .eq('is_active', true);
 
-    // ✅ 1. สิทธิ์การเข้าถึงโรงพยาบาล - เฉพาะเมื่อมี hospitalIds และไม่ว่าง
+    // 1. สิทธิ์การเข้าถึงโรงพยาบาล
     if (hospitalIds && Array.isArray(hospitalIds) && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
-    // ✅ 2. กรองตามโรงพยาบาล (ฟิลเตอร์) - เฉพาะเมื่อระบุและไม่ใช่ 'all'
+    // 2. กรองตามโรงพยาบาล (ฟิลเตอร์)
     if (hospitalId && hospitalId !== 'all' && hospitalId.trim() !== '') {
       query = query.eq('hospital_id', hospitalId);
     }
 
-    // ✅ 3. กรองตามโค้ช - เฉพาะเมื่อระบุและไม่ใช่ 'all'
+    // 3. กรองตามโค้ช
     if (coachId && coachId !== 'all' && coachId.trim() !== '') {
       query = query.eq('coach_id', coachId);
     }
 
-    // ✅ 4. กรองตาม PAM level - เฉพาะเมื่อระบุและไม่ใช่ 'all'
+    // 4. กรองตาม PAM level
     if (pamLevel && pamLevel !== 'all' && pamLevel.trim() !== '') {
       query = query.eq('pam_level', pamLevel);
     }
 
-    // ✅ 5. ค้นหาด้วยชื่อหรือ HN - เฉพาะเมื่อมีคำค้นหาที่ไม่ใช่ค่าว่าง
+    // 5. ค้นหาด้วยชื่อหรือ HN
     if (search && search.trim() !== '') {
       const searchTerm = search.trim();
       query = query.or(
@@ -261,7 +262,10 @@ export async function getPatientList(
       );
     }
 
-    const { data: profiles, error } = await query;
+    // ✅ สำคัญ: เพิ่ม range เพื่อดึงข้อมูลมากกว่า 1000 rows
+    query = query.range(0, 10000);
+
+    const { data: profiles, error, count } = await query;
 
     if (error) {
       console.error('❌ [getPatientList] Supabase Error:', error);
@@ -272,6 +276,8 @@ export async function getPatientList(
       console.log('✅ [getPatientList] No patients found');
       return [];
     }
+
+    console.log(`✅ [getPatientList] Loaded: ${profiles.length} patients (Total: ${count})`);
 
     // ดึงข้อมูล users สำหรับผู้ป่วยทั้งหมด
     const userIds = profiles.map(p => p.id);
@@ -309,14 +315,13 @@ export async function getPatientList(
       full_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
     }));
 
-    console.log('✅ [getPatientList] Loaded:', patients.length, 'patients');
     return patients;
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
     return [];
   }
 }
-// ... existing code ...
+
 export async function getDeletedPatients() {
   try {
     // ดึงข้อมูล profiles ที่ถูกลบ

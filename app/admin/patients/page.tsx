@@ -242,6 +242,8 @@ export default function PatientManagementPage() {
       );
       
       setPatients(data);
+      // ✅ เพิ่ม: แสดงจำนวนผู้ป่วยที่โหลดได้จริง
+      console.log(`📊 [loadPatients] Total loaded: ${data.length} patients`);
     } catch (error) {
       debugLog('loadPatients', 'error', error);
       setPatients([]);
