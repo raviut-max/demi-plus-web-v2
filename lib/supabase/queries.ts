@@ -206,6 +206,10 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 // lib/supabase/queries.ts
 
+// ... existing code ...
+// =====================================================
+// 👥 Patient Management Functions
+// =====================================================
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
@@ -221,65 +225,77 @@ export async function getPatientList(
       .select(`
         *,
         hospitals:profiles_hospital_id_fkey (
-          id, name, code, type
+          id,
+          name,
+          code,
+          type
         )
       `)
       .eq('is_active', true);
 
-    // 1. สิทธิ์การเข้าถึงโรงพยาบาล
-    if (hospitalIds && hospitalIds.length > 0) {
+    // ✅ 1. สิทธิ์การเข้าถึงโรงพยาบาล - เฉพาะเมื่อมี hospitalIds และไม่ว่าง
+    if (hospitalIds && Array.isArray(hospitalIds) && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
-    // 2. กรองตามโรงพยาบาล (ฟิลเตอร์)
-    if (hospitalId && hospitalId !== 'all') {
+    // ✅ 2. กรองตามโรงพยาบาล (ฟิลเตอร์) - เฉพาะเมื่อระบุและไม่ใช่ 'all'
+    if (hospitalId && hospitalId !== 'all' && hospitalId.trim() !== '') {
       query = query.eq('hospital_id', hospitalId);
     }
 
-    // 3. กรองตามโค้ช
-    if (coachId && coachId !== 'all') {
+    // ✅ 3. กรองตามโค้ช - เฉพาะเมื่อระบุและไม่ใช่ 'all'
+    if (coachId && coachId !== 'all' && coachId.trim() !== '') {
       query = query.eq('coach_id', coachId);
     }
 
-    // 4. กรองตาม PAM level
-    if (pamLevel) {
+    // ✅ 4. กรองตาม PAM level - เฉพาะเมื่อระบุและไม่ใช่ 'all'
+    if (pamLevel && pamLevel !== 'all' && pamLevel.trim() !== '') {
       query = query.eq('pam_level', pamLevel);
     }
 
-    // 5. ค้นหาด้วยชื่อหรือ HN
-    if (search) {
+    // ✅ 5. ค้นหาด้วยชื่อหรือ HN - เฉพาะเมื่อมีคำค้นหาที่ไม่ใช่ค่าว่าง
+    if (search && search.trim() !== '') {
+      const searchTerm = search.trim();
       query = query.or(
-        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
+        `first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,hospital_number.ilike.%${searchTerm}%`
       );
     }
 
     const { data: profiles, error } = await query;
+
     if (error) {
       console.error('❌ [getPatientList] Supabase Error:', error);
       return [];
     }
 
-    if (!profiles || profiles.length === 0) return [];
+    if (!profiles || profiles.length === 0) {
+      console.log('✅ [getPatientList] No patients found');
+      return [];
+    }
 
-    // ดึงข้อมูล users (id_card, role, is_active, created_at) สำหรับผู้ป่วยทั้งหมด
+    // ดึงข้อมูล users สำหรับผู้ป่วยทั้งหมด
     const userIds = profiles.map(p => p.id);
     const { data: usersData, error: usersError } = await supabase
       .from('users')
       .select('id, id_card, role, is_active, created_at')
       .in('id', userIds);
+
     if (usersError) {
       console.error('❌ [getPatientList] Users Error:', usersError);
     }
+
     const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
 
-    // ดึงชื่อโค้ชจาก doctors table (coach_id -> users.id -> doctors.user_id)
+    // ดึงชื่อโค้ชจาก doctors table
     const coachIds = profiles.map(p => p.coach_id).filter(Boolean);
     let coachesMap = new Map();
+
     if (coachIds.length > 0) {
       const { data: doctorsData, error: doctorsError } = await supabase
         .from('doctors')
         .select('user_id, full_name_th')
         .in('user_id', coachIds);
+
       if (!doctorsError && doctorsData) {
         coachesMap = new Map(doctorsData.map(d => [d.user_id, d.full_name_th]));
       }
@@ -300,7 +316,7 @@ export async function getPatientList(
     return [];
   }
 }
-
+// ... existing code ...
 export async function getDeletedPatients() {
   try {
     // ดึงข้อมูล profiles ที่ถูกลบ
@@ -671,21 +687,40 @@ export async function getHospitals() {
   }
 }
 
-export async function getHospitalsWithHierarchy() {
+// ... existing code ...
+export async function getHospitalsWithHierarchy(hospitalIds?: string[]) {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('hospitals')
-      .select(`*, parent_hospital:hospitals!parent_id ( id, name, code )`)
+      .select(`
+        *,
+        parent_hospital:hospitals!parent_id (
+          id,
+          name,
+          code
+        )
+      `)
       .eq('is_active', true)
       .order('type', { ascending: true })
       .order('name', { ascending: true });
-    if (error) return [];
+
+    // ✅ เพิ่ม: กรองตาม hospitalIds ถ้ามี (สำหรับ non-super admin)
+    if (hospitalIds && Array.isArray(hospitalIds) && hospitalIds.length > 0) {
+      query = query.in('id', hospitalIds);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('❌ [getHospitalsWithHierarchy] Error:', error);
+      return [];
+    }
     return data || [];
   } catch (err) {
-    console.error('❌ Get hospitals with hierarchy error:', err);
+    console.error('❌ [getHospitalsWithHierarchy] Exception:', err);
     return [];
   }
 }
+// ... existing code ...
 
 export async function createHospital(data: {
   name: string;
