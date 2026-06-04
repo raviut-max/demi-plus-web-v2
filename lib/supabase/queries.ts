@@ -211,6 +211,7 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 // ... existing code ...
+// ... existing code ...
 export async function getPatientList(
   search?: string,
   pamLevel?: string,
@@ -235,37 +236,35 @@ export async function getPatientList(
       .eq('is_active', true);
 
     // 1. สิทธิ์การเข้าถึงโรงพยาบาล
-    if (hospitalIds && Array.isArray(hospitalIds) && hospitalIds.length > 0) {
+    if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
 
     // 2. กรองตามโรงพยาบาล (ฟิลเตอร์)
-    if (hospitalId && hospitalId !== 'all' && hospitalId.trim() !== '') {
+    if (hospitalId && hospitalId !== 'all') {
       query = query.eq('hospital_id', hospitalId);
     }
 
     // 3. กรองตามโค้ช
-    if (coachId && coachId !== 'all' && coachId.trim() !== '') {
+    if (coachId && coachId !== 'all') {
       query = query.eq('coach_id', coachId);
     }
 
     // 4. กรองตาม PAM level
-    if (pamLevel && pamLevel !== 'all' && pamLevel.trim() !== '') {
+    if (pamLevel) {
       query = query.eq('pam_level', pamLevel);
     }
 
     // 5. ค้นหาด้วยชื่อหรือ HN
-    if (search && search.trim() !== '') {
-      const searchTerm = search.trim();
+    if (search) {
       query = query.or(
-        `first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,hospital_number.ilike.%${searchTerm}%`
+        `first_name.ilike.%${search}%,last_name.ilike.%${search}%,hospital_number.ilike.%${search}%`
       );
     }
 
-    // ✅ สำคัญ: เพิ่ม range เพื่อดึงข้อมูลมากกว่า 1000 rows
+    // ✅ สำคัญ: เพิ่ม range เพื่อดึงข้อมูลมากกว่า 1000 rows (Supabase default limit)
     query = query.range(0, 10000);
 
-    
     const { data: profiles, error, count } = await query;
 
     if (error) {
@@ -273,14 +272,18 @@ export async function getPatientList(
       return [];
     }
 
+    // ✅ Debug: แสดงจำนวนผู้ป่วยที่ได้
+    console.log('✅ [getPatientList] ====================================');
+    console.log('📊 [getPatientList] Total count from DB:', count);
+    console.log('📊 [getPatientList] Profiles loaded:', profiles?.length || 0);
+    console.log('📊 [getPatientList] ====================================');
+
     if (!profiles || profiles.length === 0) {
       console.log('✅ [getPatientList] No patients found');
       return [];
     }
 
-    console.log(`✅ [getPatientList] Loaded: ${profiles.length} patients (Total: ${count})`);
-
-    // ดึงข้อมูล users สำหรับผู้ป่วยทั้งหมด
+    // ดึงข้อมูล users (id_card, role, is_active, created_at) สำหรับผู้ป่วยทั้งหมด
     const userIds = profiles.map(p => p.id);
     const { data: usersData, error: usersError } = await supabase
       .from('users')
@@ -293,7 +296,7 @@ export async function getPatientList(
 
     const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
 
-    // ดึงชื่อโค้ชจาก doctors table
+    // ดึงชื่อโค้ชจาก doctors table (coach_id -> users.id -> doctors.user_id)
     const coachIds = profiles.map(p => p.coach_id).filter(Boolean);
     let coachesMap = new Map();
 
@@ -316,12 +319,14 @@ export async function getPatientList(
       full_name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(),
     }));
 
+    console.log('✅ [getPatientList] Final patients count:', patients.length);
     return patients;
   } catch (err) {
     console.error('❌ [getPatientList] Exception:', err);
     return [];
   }
 }
+// ... existing code ...
 
 export async function getDeletedPatients() {
   try {
