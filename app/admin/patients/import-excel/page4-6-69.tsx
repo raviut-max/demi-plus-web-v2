@@ -20,7 +20,7 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Phone, Hash
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone, Hash
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase/client';
@@ -42,7 +42,7 @@ const STANDARD_FIELDS = [
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
   { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
   { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' },
+  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ เปลี่ยนชื่อ
   { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
   { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
   { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
@@ -55,8 +55,8 @@ const STANDARD_FIELDS = [
   { key: 'province', label: 'จังหวัด', inputType: 'text' },
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true },
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ เปลี่ยนชื่อ
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ เปลี่ยนชื่อ
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -129,17 +129,20 @@ const formatThaiDate = (input: string | number | Date): string => {
   let day = '', month = '', year = '';
   const str = String(input).trim();
   
+  // ตรวจสอบรูปแบบ
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
     const [y, m, d] = str.split('-');
     year = String(parseInt(y) + 543); month = m; day = d;
   } else if (str.match(/^[\d\/.\-]+$/)) {
     const parts = str.split(/[/.\-]/).map(p => p.trim());
     if (parts.length >= 3) {
+      // กรณีมีครบ วัน/เดือน/ปี
       const [p1, p2, p3] = parts;
-      if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; }
-      else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; }
-      else { day = p1; month = p2; year = p3; }
+      if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; } // ปีนำหน้า
+      else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; } // ปีตามหลัง
+      else { day = p1; month = p2; year = p3; } // สมมติเป็น วัน/เดือน/ปี
     } else if (parts.length === 2) {
+      // กรณีมีแค่วัน/เดือน (เช่น 01/01)
       day = parts[0];
       month = parts[1];
       year = '2511'; // เติมปี 2511
@@ -187,6 +190,7 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
 // ✅ ฟังก์ชันดึง HN สูงสุดจาก DB
 const fetchMaxHNFromDB = async (): Promise<number> => {
   try {
+    // ดึงค่าจาก profiles เนื่องจากเป็นตารางที่เก็บ HN (hospital_number)
     const { data, error } = await supabase
       .from('profiles')
       .select('hospital_number')
@@ -194,12 +198,12 @@ const fetchMaxHNFromDB = async (): Promise<number> => {
       .neq('hospital_number', '')
       .order('hospital_number', { ascending: false })
       .limit(100);
-    
+
     if (error) return 1;
-    
+
     let maxNum = 0;
     const hnRegex = /(?:HN99[-]?)?(\d{4})$/i; 
-    
+
     data?.forEach(row => {
       const hn = row.hospital_number;
       if (hn) {
@@ -335,6 +339,7 @@ export default function ImportExcelPage() {
   const handleFillMissingHN = async () => {
     setHnLoading(true);
     try {
+      // อ่านค่า HN สูงสุดจากฐานข้อมูล
       const startCounter = await fetchMaxHNFromDB();
       let counter = startCounter;
       
@@ -388,10 +393,9 @@ export default function ImportExcelPage() {
 
   const validateSingleRow = async (row: any, idx: number, duplicateMap: Map<string, number[]>) => {
     const rowErrors: string[] = [];
-    let isDuplicate = false;
+    let isDuplicate = false; 
     let isWarning = false;
-    
-    // 1. ตรวจสอบเลขบัตรประชาชน
+
     if (row.id_card) {
       if (!validateThaiIdCard(row.id_card)) {
         rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -405,7 +409,7 @@ export default function ImportExcelPage() {
             isDuplicate = true;
           } else if (exists && !isPatient) {
             rowErrors.push('⚠️ เลขบัตรนี้มีอยู่ในระบบแล้ว แต่ไม่ใช่ Role ผู้ป่วย (สามารถเลือกนำเข้าได้)');
-            isWarning = true;
+            isWarning = true; // เปลี่ยนเป็น Warning เหลือง
           } else if (importedIds.has(cleanId)) {
             rowErrors.push('🔍 พบข้อมูลซ้ำในรอบนี้: เลขบัตรนี้เพิ่งถูกเลือกนำเข้า');
             isDuplicate = true;
@@ -417,7 +421,6 @@ export default function ImportExcelPage() {
       }
     }
 
-    // 2. ถ้าไม่ใช่ซ้ำ Patient จริง ให้ตรวจสอบฟิลด์อื่นต่อ
     if (!isDuplicate) {
       STANDARD_FIELDS.forEach(field => {
         if (field.required && (!row[field.key] || String(row[field.key]).trim() === '')) {
@@ -498,6 +501,19 @@ export default function ImportExcelPage() {
   const swapAllBirthDates = () => {
     setPreviewData(prev => {
       const updated = prev.map(row => row.birth_date ? { ...row, birth_date: swapDayMonth(row.birth_date) } : row);
+      runPreviewValidation(updated);
+      return updated;
+    });
+  };
+
+  const cleanAllNames = () => {
+    setPreviewData(prev => {
+      const updated = prev.map(row => {
+        if (row.first_name) {
+          return { ...row, first_name: removeNamePrefixes(row.first_name) };
+        }
+        return row;
+      });
       runPreviewValidation(updated);
       return updated;
     });
@@ -859,6 +875,7 @@ export default function ImportExcelPage() {
                           <div className="flex items-center justify-between gap-2">
                             <span>{field.label} {field.required && <span className="text-red-500">*</span>}</span>
                             {field.key === 'birth_date' && <button onClick={swapAllBirthDates} className="ml-1 text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-200">🔄 สลับทั้งคอลัมน์</button>}
+                            {field.key === 'first_name' && <button onClick={cleanAllNames} className="ml-1 text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded hover:bg-purple-200 flex items-center gap-1"><Scissors className="w-3 h-3" /> ลบคำนำหน้า</button>}
                             {field.isPhoneField && <Phone className="w-3 h-3 text-yellow-600 ml-1" title="⚠️ โปรดตรวจสอบว่าจับคู่ถูกต้องกับเบอร์โทรศัพท์ที่ต้องการ" />}
                             {field.key === 'hospital_number' && (
                               <button onClick={handleFillMissingHN} disabled={hnLoading} className="ml-1 text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded hover:bg-orange-200 flex items-center gap-1 whitespace-nowrap disabled:opacity-50" title="สร้างเลข HN ชั่วคราวสำหรับช่องว่าง (HN99-xxxx)">
