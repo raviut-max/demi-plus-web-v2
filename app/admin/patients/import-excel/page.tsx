@@ -20,7 +20,7 @@ import {
 } from '@/lib/supabase/queries';
 import {
   Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Edit3, 
-  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Phone, Hash
+  AlertTriangle, RotateCcw, X, Hospital, UserCheck, Download, ShieldAlert, Users, Scissors, Phone, Hash
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase/client';
@@ -36,13 +36,13 @@ const STANDARD_FIELDS = [
   { key: 'birth_date', label: 'วันเกิด(วว/ดด/ปปปป พ.ศ.)', required: true, inputType: 'text' },
   { key: 'gender', label: 'เพศ', required: true, inputType: 'select', options: ['ชาย', 'หญิง'] },
   { key: 'hospital_name', label: 'โรงพยาบาล', required: true, inputType: 'text' },
-  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true },
+  { key: 'phone', label: 'เบอร์โทรศัพท์ผู้ป่วย', inputType: 'text', isPhoneField: true }, // ✅ เบอร์โทร 1 (เตือนเหลือง)
   { key: 'email', label: 'อีเมลผู้ป่วย', inputType: 'text' },
   { key: 'current_weight', label: 'น้ำหนัก(กก.)', inputType: 'number', min: 30, max: 200 },
   { key: 'height', label: 'ส่วนสูง(ซม.)', inputType: 'number', min: 100, max: 250 },
   { key: 'waist_circumference', label: 'รอบเอว(ซม.)', inputType: 'number', min: 26, max: 200 },
   { key: 'diabetes_type', label: 'ประเภทเบาหวาน', inputType: 'select', options: ['กลุ่มเสี่ยง', 'เบาหวาน'] },
-  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' },
+  { key: 'blood_sugar', label: 'ค่าน้ำตาล', inputType: 'number' }, // ✅ เปลี่ยนชื่อ
   { key: 'hba1c_level', label: 'ค่าHbA1c', inputType: 'number' },
   { key: 'notes', label: 'หมายเหตุสุขภาพ', inputType: 'text' },
   { key: 'house_number', label: 'บ้านเลขที่', inputType: 'text' },
@@ -55,8 +55,8 @@ const STANDARD_FIELDS = [
   { key: 'province', label: 'จังหวัด', inputType: 'text' },
   { key: 'postal_code', label: 'รหัสไปรษณีย์', inputType: 'text' },
   { key: 'address_line1', label: 'ที่อยู่เพิ่มเติม', inputType: 'text' },
-  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
-  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true },
+  { key: 'emergency_contact_name', label: 'ผู้ติดต่อฉุกเฉิน', inputType: 'text' }, // ✅ เปลี่ยนชื่อ
+  { key: 'emergency_contact_phone', label: 'เบอร์ติดต่อฉุกเฉิน', inputType: 'text', isPhoneField: true }, // ✅ เปลี่ยนชื่อ + เบอร์โทร 2 (เตือนเหลือง)
   { key: 'emergency_contact_relationship', label: 'ความสัมพันธ์ผู้ติดต่อฉุกเฉิน', inputType: 'text' },
   { key: 'coach_name', label: 'โค้ชผู้ดูแล', inputType: 'text' },
 ];
@@ -120,12 +120,9 @@ const findBestCoachMatch = (coachName: string, coaches: any[]) => {
   return bestMatch ? { coach: bestMatch, similarity: bestScore } : null;
 };
 
-// ✅ ฟังก์ชันแปลงวันที่ที่ปรับปรุงใหม่ (รองรับ 2 หลัก, วันเดือน, ว่าง)
-const formatThaiDate = (input: string | number | Date): string => {
-  if (!input || String(input).trim() === '') {
-    return '01/01/2511'; // กรณีว่าง ให้เติมค่า default
-  }
-  
+// ✅ ฟังก์ชันแปลงวันที่ที่ปรับปรุงใหม่
+const formatThaiDate = (input: any): string => {
+  if (!input || String(input).trim() === '') return '01/01/2511';
   let day = '', month = '', year = '';
   const str = String(input).trim();
   
@@ -134,15 +131,13 @@ const formatThaiDate = (input: string | number | Date): string => {
     year = String(parseInt(y) + 543); month = m; day = d;
   } else if (str.match(/^[\d\/.\-]+$/)) {
     const parts = str.split(/[/.\-]/).map(p => p.trim());
-    if (parts.length >= 3) {
+    if (parts.length === 3) {
       const [p1, p2, p3] = parts;
       if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; }
       else if (parseInt(p3) > 31 || p3.length === 4) { day = p1; month = p2; year = p3; }
       else { day = p1; month = p2; year = p3; }
     } else if (parts.length === 2) {
-      day = parts[0];
-      month = parts[1];
-      year = '2511'; // เติมปี 2511
+      day = parts[0]; month = parts[1]; year = '2511'; // ✅ เติมปี 2511 ถ้ามีแค่วัน/เดือน
     } else {
       return '01/01/2511';
     }
@@ -153,7 +148,7 @@ const formatThaiDate = (input: string | number | Date): string => {
   let formattedYear = year;
   if (year.length === 2) {
     const shortYear = parseInt(year);
-    // 70-99 -> 24xx, 00-69 -> 25xx
+    // ✅ 70-99 -> 24xx, 00-69 -> 25xx
     if (shortYear >= 70) formattedYear = `24${year}`;
     else formattedYear = `25${year}`;
   } else if (year.length === 4) {
@@ -161,7 +156,6 @@ const formatThaiDate = (input: string | number | Date): string => {
   } else if (year.length === 3) {
     formattedYear = `2${year}`;
   }
-  
   return `${String(parseInt(day) || 1).padStart(2, '0')}/${String(parseInt(month) || 1).padStart(2, '0')}/${formattedYear}`;
 };
 
@@ -184,36 +178,46 @@ const validateProvinceOnly = (provinceName: string, validProvinces: string[]): {
   return found ? { valid: true, errors: [] } : { valid: false, errors: [`จังหวัด "${provinceName}" ไม่ถูกต้อง หรือไม่มีในระบบ`] };
 };
 
-// ✅ ฟังก์ชันดึง HN สูงสุดจาก DB
-const fetchMaxHNFromDB = async (): Promise<number> => {
+// ✅ ฟังก์ชันดึง HN99 สูงสุดจาก DB
+const fetchMaxHN99 = async (): Promise<number> => {
   try {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('profiles')
       .select('hospital_number')
       .not('hospital_number', 'is', null)
-      .neq('hospital_number', '')
+      .ilike('hospital_number', 'HN99-%')
       .order('hospital_number', { ascending: false })
       .limit(100);
     
-    if (error) return 1;
-    
+    if (!data || data.length === 0) return 1;
     let maxNum = 0;
-    const hnRegex = /(?:HN99[-]?)?(\d{4})$/i; 
-    
-    data?.forEach(row => {
-      const hn = row.hospital_number;
-      if (hn) {
-        const match = String(hn).match(hnRegex);
-        if (match) {
-          const num = parseInt(match[1]);
-          if (num > maxNum) maxNum = num;
-        }
+    const regex = /HN99-(\d{4})/;
+    for (const row of data) {
+      const match = row.hospital_number.match(regex);
+      if (match) {
+        const num = parseInt(match[1]);
+        if (num > maxNum) maxNum = num;
       }
-    });
+    }
     return maxNum + 1;
-  } catch (err) {
-    return 1;
+  } catch { return 1; }
+};
+
+// ✅ ฟังก์ชันดึงรหัส รพ. ในเครือข่ายเดียวกัน (แม่ข่าย + ลูกข่ายทั้งหมด)
+const getNetworkHospitalIds = (hospitalId: string, hospitals: any[]): string[] => {
+  const ids = new Set<string>();
+  ids.add(hospitalId);
+  
+  const currentHosp = hospitals.find(h => h.id === hospitalId);
+  if (!currentHosp) return Array.from(ids);
+
+  if (currentHosp.type === 'main') {
+    hospitals.filter(h => h.parent_id === hospitalId).forEach(h => ids.add(h.id));
+  } else if (currentHosp.parent_id) {
+    ids.add(currentHosp.parent_id);
+    hospitals.filter(h => h.parent_id === currentHosp.parent_id).forEach(h => ids.add(h.id));
   }
+  return Array.from(ids);
 };
 
 // =====================================================
@@ -245,7 +249,6 @@ export default function ImportExcelPage() {
 
   const [validationProgress, setValidationProgress] = useState(0);
   const [isInitialValidation, setIsInitialValidation] = useState(false);
-  
   const [hnCounter, setHnCounter] = useState(1);
   const [hnLoading, setHnLoading] = useState(false);
 
@@ -278,28 +281,24 @@ export default function ImportExcelPage() {
   useEffect(() => {
     if (rawData.length === 0 || excelHeaders.length === 0) return;
     const autoMap: Record<string, string> = {};
-    
     excelHeaders.forEach(header => {
       const cleanHeader = header.replace(/\s+/g, '').toLowerCase().replace(/[().\-]/g, '');
-      
       const match = STANDARD_FIELDS.find(f => {
         const fClean = f.label.replace(/\s+/g, '').replace(/[().\-]/g, '').toLowerCase();
         const fKeywords = getKeywordsForField(f.key);
         return cleanHeader.includes(fClean) || fClean.includes(cleanHeader) || fKeywords.some(keyword => cleanHeader.includes(keyword));
       });
-      
       autoMap[header] = match?.key || '';
     });
-    
     setHeaderMapping(autoMap);
     setStep('mapping');
   }, [rawData, excelHeaders]);
 
   const getKeywordsForField = (fieldKey: string): string[] => {
     const keywords: Record<string, string[]> = {
-      'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'ค่าน้ำตาลในเลือด', 'bs', 'fbs', 'glucose', 'bloodsugar'],
-      'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact', 'ชื่อผู้ติดต่อ'],
-      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร', 'เบอร์โทรศัพท์', 'โทรศัพท์', 'มือถือ'],
+      'blood_sugar': ['ค่าน้ำตาล', 'น้ำตาล', 'ค่าน้ำตาลในเลือด', 'bs', 'fbs', 'glucose'],
+      'emergency_contact_name': ['ผู้ติดต่อฉุกเฉิน', 'ผู้ติดต่อ', 'ญาติ', 'ชื่อผู้ติดต่อ(ญาติ)', 'emergency', 'contact'],
+      'emergency_contact_phone': ['เบอร์ติดต่อฉุกเฉิน', 'เบอร์ติดต่อ', 'เบอร์โทรฉุกเฉิน', 'เบอร์ญาติ', 'เบอร์โทร1', 'เบอร์โทร_1', 'เบอร์โทร', 'เบอร์โทรศัพท์'],
       'hba1c_level': ['hba1c', 'ค่าhba1c', 'a1c'],
       'current_weight': ['น้ำหนัก', 'weight', 'นน'],
       'height': ['ส่วนสูง', 'height', 'สูง'],
@@ -307,7 +306,7 @@ export default function ImportExcelPage() {
       'hospital_number': ['hn', 'เลขที่ผู้ป่วย', 'เลขผู้ป่วย'],
       'id_card': ['บัตรประชาชน', 'id', 'เลขบัตร', 'ประชาชน'],
       'birth_date': ['วันเกิด', 'dob', 'เกิด'],
-      'phone': ['เบอร์โทร', 'โทรศัพท์', 'มือถือ', 'เบอร์โทรศัพท์', 'เบอร์โทรศัพท์ผู้ป่วย'],
+      'phone': ['เบอร์โทร', 'โทรศัพท์', 'มือถือ', 'เบอร์โทรศัพท์'],
       'email': ['อีเมล', 'email', 'mail'],
       'province': ['จังหวัด', 'province'],
       'district': ['อำเภอ', 'district'],
@@ -335,9 +334,8 @@ export default function ImportExcelPage() {
   const handleFillMissingHN = async () => {
     setHnLoading(true);
     try {
-      const startCounter = await fetchMaxHNFromDB();
+      const startCounter = await fetchMaxHN99();
       let counter = startCounter;
-      
       setPreviewData(prev => {
         const updated = prev.map(row => {
           if (!row.hospital_number || row.hospital_number.trim() === '') {
@@ -362,12 +360,11 @@ export default function ImportExcelPage() {
       Object.entries(headerMapping).forEach(([excelKey, dbKey]) => {
         if (dbKey) {
           const val = row[excelKey];
-          
           // ✅ แปลงเพศอัตโนมัติ
           if (dbKey === 'gender' && val) {
             const v = String(val).trim();
-            if (['ช', 'ช.', '1'].includes(v)) newRow[dbKey] = 'ชาย';
-            else if (['ญ', 'ญ.', '2'].includes(v)) newRow[dbKey] = 'หญิง';
+            if (['ช', 'ช.'].includes(v)) newRow[dbKey] = 'ชาย';
+            else if (['ญ', 'ญ.'].includes(v)) newRow[dbKey] = 'หญิง';
             else newRow[dbKey] = v;
           } 
           // ✅ แปลงวันที่อัตโนมัติ
@@ -391,7 +388,7 @@ export default function ImportExcelPage() {
     let isDuplicate = false;
     let isWarning = false;
     
-    // 1. ตรวจสอบเลขบัตรประชาชน
+    // 1. ตรวจสอบเลขบัตรประชาชน + Role
     if (row.id_card) {
       if (!validateThaiIdCard(row.id_card)) {
         rowErrors.push('❌ รูปแบบเลขบัตรประชาชนไม่ถูกต้อง (ต้องมี 13 หลัก)');
@@ -562,10 +559,8 @@ export default function ImportExcelPage() {
 
   const handleExportToExcel = () => {
     if (!previewData || previewData.length === 0) { setError('ไม่มีข้อมูลสำหรับส่งออก'); return; }
-    
     const wb = XLSX.utils.book_new();
     const sortedData = [...previewData].sort((a, b) => cleanIdCard(a.id_card).localeCompare(cleanIdCard(b.id_card)));
-    
     const exportData = sortedData.map((row, idx) => {
       const hasErrors = validationErrors[idx]?.length > 0;
       const isDup = row._isDuplicate;
@@ -580,12 +575,12 @@ export default function ImportExcelPage() {
         'ข้อผิดพลาด': hasErrors ? validationErrors[idx]?.join('; ') : ''
       };
     });
-    
+
     const readyData = exportData.filter(r => r['สถานะ'] === '⏳ พร้อมนำเข้า' || r['สถานะ'] === '🟡 ซ้ำในระบบ(ผ่าน)');
-    if (readyData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(readyData), '✅ พร้อมนำเข้า/แก้ไขถูกต้องแล้ว');
+    if (readyData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(readyData), '✅ แก้ไขถูกต้องแล้ว');
 
     const inSystemData = exportData.filter(r => r['สถานะ'] === '🔴 ซ้ำคนไข้(บล็อก)');
-    if (inSystemData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inSystemData), '🔄 ซ้ำคนไข้ในระบบแล้ว');
+    if (inSystemData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(inSystemData), '🔄 มีในระบบแล้ว');
 
     const importedData = exportData.filter(r => r['สถานะ'] === '✅ เข้าระบบแล้ว');
     if (importedData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(importedData), '✅ เข้าระบบแล้ว');
@@ -599,8 +594,8 @@ export default function ImportExcelPage() {
 
     const summary = [
       ['📊 สรุปผลการนำเข้าข้อมูลผู้ป่วย'], ['วันที่ส่งออก:', new Date().toLocaleString('th-TH')], [''],
-      ['จำนวนแถวทั้งหมด:', previewData.length], ['จำนวนที่พร้อมนำเข้า:', readyData.length],
-      ['จำนวนที่ซ้ำคนไข้(บล็อก):', inSystemData.length], ['จำนวนที่เข้าระบบแล้ว:', importedData.length],
+      ['จำนวนแถวทั้งหมด:', previewData.length], ['จำนวนที่แก้ไขถูกต้องแล้ว:', readyData.length],
+      ['จำนวนที่มีในระบบแล้ว:', inSystemData.length], ['จำนวนที่เข้าระบบแล้ว:', importedData.length],
       ['จำนวนที่มีข้อผิดพลาด:', errorData.length]
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summary), '📊 สรุปผล');
@@ -629,27 +624,20 @@ export default function ImportExcelPage() {
     setError('');
     const selectedData = Array.from(selectedRows).map(i => previewData[i]);
     const newFixData: Record<number, any> = {};
-
     for (const row of selectedData) {
       const idx = row._rowIndex;
       const hospMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       const netHospId = hospMatch?.hospital.id;
-      
       const networkCoaches = coaches.filter(c => {
         const cHospId = c.users?.hospital_id;
         const targetHosp = hospitals.find(h => h.id === netHospId);
-        return cHospId === netHospId || cHospId === targetHosp?.parent_hospital_id || targetHosp?.parent_hospital_id === cHospId;
+        const netIds = getNetworkHospitalIds(netHospId || '', hospitals);
+        return netIds.includes(cHospId);
       });
-
       const isCoachEmpty = !row.coach_name || String(row.coach_name).trim() === '';
       const coachMatch = isCoachEmpty ? null : findBestCoachMatch(row.coach_name, networkCoaches);
       const needsFix = !hospMatch || (!isCoachEmpty && !coachMatch) || (coachMatch && coachMatch.similarity < 0.95);
-      
-      newFixData[idx] = {
-        hospitalMatch: hospMatch, coachMatch: coachMatch,
-        selectedHospitalId: hospMatch?.hospital.id, selectedCoachId: coachMatch?.coach.user_id,
-        isCoachEmpty, isFixed: !needsFix
-      };
+      newFixData[idx] = { hospitalMatch: hospMatch, coachMatch: coachMatch, selectedHospitalId: hospMatch?.hospital.id, selectedCoachId: coachMatch?.coach.user_id, isCoachEmpty, isFixed: !needsFix };
     }
     setFixData(newFixData);
   };
@@ -784,9 +772,7 @@ export default function ImportExcelPage() {
                     <ul className="mt-2 space-y-1">
                       {Object.entries(duplicateMappings).map(([fieldKey, excelCols]) => {
                         const fieldLabel = STANDARD_FIELDS.find(f => f.key === fieldKey)?.label || fieldKey;
-                        return (
-                          <li key={fieldKey} className="text-sm text-yellow-700">• <strong>{fieldLabel}</strong>: ใช้คอลัมน์ {excelCols.join(', ')}</li>
-                        );
+                        return (<li key={fieldKey} className="text-sm text-yellow-700">• <strong>{fieldLabel}</strong>: ใช้คอลัมน์ {excelCols.join(', ')}</li>);
                       })}
                     </ul>
                   </div>
@@ -797,14 +783,10 @@ export default function ImportExcelPage() {
               {excelHeaders.map(header => {
                 const matchedKey = headerMapping[header];
                 const isMatched = matchedKey && matchedKey !== '';
-                
                 const isDuplicateField = matchedKey && duplicateMappings[matchedKey] && duplicateMappings[matchedKey].length > 1;
                 const isPhoneField = matchedKey && STANDARD_FIELDS.find(f => f.key === matchedKey)?.isPhoneField;
-                
                 return (
-                  <div key={header} className={`p-4 border rounded-lg transition-all ${
-                    isMatched ? (isDuplicateField || isPhoneField ? 'bg-yellow-50 border-yellow-400' : 'bg-green-50 border-green-400') : 'bg-red-50 border-red-300'
-                  }`}>
+                  <div key={header} className={`p-4 border rounded-lg transition-all ${isMatched ? (isDuplicateField || isPhoneField ? 'bg-yellow-50 border-yellow-400' : 'bg-green-50 border-green-400') : 'bg-red-50 border-red-300'}`}>
                     <p className="text-xs font-medium text-gray-500 mb-1">📄 คอลัมน์ใน Excel</p>
                     <p className={`font-semibold truncate mb-2 ${isMatched ? (isDuplicateField || isPhoneField ? 'text-yellow-900' : 'text-green-900') : 'text-red-700'}`}>
                       {header} {isMatched && <span className="ml-2">{isDuplicateField || isPhoneField ? '⚠️' : '✅'}</span>}
@@ -879,12 +861,8 @@ export default function ImportExcelPage() {
                       const isWarning = row._isWarning;
                       const isChecking = checkingDuplicates.has(rIdx);
                       const isDisabledSelect = isDup;
-
                       return (
-                        <tr key={rIdx} className={`border-b hover:bg-gray-50 transition-colors ${
-                          isDup ? 'bg-red-50/40 border-l-4 border-red-400' : 
-                          (isWarning ? 'bg-yellow-50/40 border-l-4 border-yellow-400' : (hasError ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''))
-                        }`}>
+                        <tr key={rIdx} className={`border-b hover:bg-gray-50 transition-colors ${isDup ? 'bg-red-50/40 border-l-4 border-red-400' : (isWarning ? 'bg-yellow-50/40 border-l-4 border-yellow-400' : (hasError ? 'bg-orange-50/40 border-l-4 border-orange-400' : ''))}`}>
                           <td className="p-3 text-center sticky left-0 bg-white z-10">
                             <input type="checkbox" checked={selectedRows.has(rIdx)} disabled={isDisabledSelect || isChecking} onChange={() => toggleSelectRow(rIdx)} className={`w-4 h-4 ${isDisabledSelect ? 'opacity-40 cursor-not-allowed' : ''}`} />
                           </td>
@@ -944,11 +922,14 @@ export default function ImportExcelPage() {
                 const fd = fixData[idx];
                 if (!fd) return null;
                 const netHospId = fd.selectedHospitalId || fd.hospitalMatch?.hospital.id;
-                const networkCoaches = coaches.filter(c => {
+                
+                // ✅ ดึงโค้ชในเครือข่ายเดียวกัน (แม่ข่าย + ลูกข่าย)
+                const networkCoaches = netHospId ? coaches.filter(c => {
                   const cHospId = c.users?.hospital_id;
-                  const targetHosp = hospitals.find(h => h.id === netHospId);
-                  return cHospId === netHospId || cHospId === targetHosp?.parent_hospital_id || targetHosp?.parent_hospital_id === cHospId;
-                });
+                  const netIds = getNetworkHospitalIds(netHospId, hospitals);
+                  return netIds.includes(cHospId);
+                }) : [];
+
                 return (
                   <div key={idx} className="border rounded-xl p-4 bg-white shadow-sm">
                     <div className="flex justify-between items-start mb-3">
