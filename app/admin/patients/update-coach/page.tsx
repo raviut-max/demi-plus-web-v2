@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, getCoachesWithHospitals } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import { Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Download, FileSpreadsheet } from 'lucide-react';
+import { Upload, AlertCircle, Loader2, ArrowLeft, CheckCircle, XCircle, Download, FileSpreadsheet, User } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export default function UpdateCoachPage() {
@@ -26,6 +26,9 @@ export default function UpdateCoachPage() {
   const [coaches, setCoaches] = useState<any[]>([]);
   const [processedCount, setProcessedCount] = useState({ success: 0, failed: 0 });
   const [errors, setErrors] = useState<any[]>([]);
+  
+  // ✅ State สำหรับเก็บชื่อคนไข้เพื่อแสดงในตาราง
+  const [patientNames, setPatientNames] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const userData = checkSession();
@@ -87,12 +90,13 @@ export default function UpdateCoachPage() {
     reader.readAsArrayBuffer(file);
   };
 
-  const buildPreview = () => {
+  const buildPreview = async () => {
     if (!headerMapping.id_card || !headerMapping.coach_name) {
       setError('❌ กรุณาระบุคอลัมน์ "เลขบัตรประชาชน" และ "ชื่อโค้ช" ให้ครบถ้วน');
       return;
     }
     
+    setLoading(true);
     const mapped = rawData.map((row, idx) => ({
       _rowIndex: idx,
       id_card: String(row[headerMapping.id_card] || '').replace(/[-\s]/g, ''),
@@ -101,6 +105,47 @@ export default function UpdateCoachPage() {
     })).filter(r => r.id_card && r.coach_name); // กรองแถวที่ข้อมูลไม่ครบออก
 
     setPreviewData(mapped);
+    
+    // ✅ ดึงชื่อคนไข้จากฐานข้อมูลมาแสดง
+    if (mapped.length > 0) {
+      const idCards = mapped.map(m => m.id_card);
+      // ใช้ in query เพื่อดึงข้อมูลหลายรายการพร้อมกัน (จำกัดจำนวนถ้าเยอะมากอาจต้องแบ่ง batch)
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name')
+        .in('id', idCards); // หมายเหตุ: ถ้า id_card เป็น key หลักใน users อาจต้อง join หรือเช็คโครงสร้างอีกที
+      
+      // กรณีถ้า profiles ไม่มี id_card โดยตรง แต่มี user_id ที่เชื่อมกับ users
+      // สมมติว่าเราเช็คจาก users table ผ่าน id_card
+      const { data: usersData } = await supabase
+        .from('users')
+        .select('id_card, id')
+        .in('id_card', idCards);
+        
+      if (usersData) {
+         const userIds = usersData.map(u => u.id);
+         const { data: profilesData } = await supabase
+            .from('profiles')
+            .select('id, first_name, last_name')
+            .in('id', userIds);
+            
+         const namesMap: Record<string, string> = {};
+         if (profilesData) {
+             // สร้าง Map จาก id_card -> ชื่อ
+             const idToUserId = new Map(usersData.map(u => [u.id_card, u.id]));
+             profilesData.forEach(p => {
+                 // หา id_card ที่ตรงกับ profile id นี้
+                 const entry = Array.from(idToUserId.entries()).find(([_, uid]) => uid === p.id);
+                 if (entry) {
+                     namesMap[entry[0]] = `${p.first_name || ''} ${p.last_name || ''}`.trim();
+                 }
+             });
+         }
+         setPatientNames(namesMap);
+      }
+    }
+    
+    setLoading(false);
     setStep('preview');
   };
 
@@ -223,7 +268,7 @@ export default function UpdateCoachPage() {
           )}
 
           <div className="flex justify-center gap-4">
-            <button onClick={() => { setStep('upload'); setRawData([]); setPreviewData([]); setErrors([]); }} className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+            <button onClick={() => { setStep('upload'); setRawData([]); setPreviewData([]); setErrors([]); setPatientNames({}); }} className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
               อัปโหลดไฟล์ใหม่
             </button>
             <button onClick={() => router.back()} className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">
@@ -298,7 +343,10 @@ export default function UpdateCoachPage() {
               </div>
             </div>
             <div className="flex justify-end">
-              <button onClick={buildPreview} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">ถัดไป: ตรวจสอบข้อมูล →</button>
+              <button onClick={buildPreview} disabled={loading} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2">
+                {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                ถัดไป: ตรวจสอบข้อมูล →
+              </button>
             </div>
           </div>
         )}
@@ -325,18 +373,27 @@ export default function UpdateCoachPage() {
             <div className="max-h-96 overflow-y-auto border rounded-lg mb-6">
               <table className="w-full text-sm text-left">
                 <thead className="bg-gray-100 sticky top-0">
-                  <tr><th className="p-3">#</th><th className="p-3">เลขบัตรประชาชน</th><th className="p-3">ชื่อโค้ชในไฟล์</th></tr>
+                  <tr>
+                    <th className="p-3">#</th>
+                    <th className="p-3">เลขบัตรประชาชน</th>
+                    <th className="p-3">ชื่อ-นามสกุล ผู้ป่วย</th> {/* ✅ เพิ่มคอลัมน์ชื่อ */}
+                    <th className="p-3">ชื่อโค้ชในไฟล์</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {previewData.slice(0, 10).map((row, idx) => (
                     <tr key={idx} className="border-b">
                       <td className="p-3">{idx + 1}</td>
                       <td className="p-3 font-mono">{row.id_card}</td>
+                      <td className="p-3 text-gray-700">
+                        {/* ✅ แสดงชื่อที่ดึงมาจาก DB หรือ "-" ถ้ายังไม่มี */}
+                        {patientNames[row.id_card] || <span className="text-gray-400 italic">กำลังโหลด...</span>}
+                      </td>
                       <td className="p-3">{row.coach_name}</td>
                     </tr>
                   ))}
                   {previewData.length > 10 && (
-                    <tr><td colSpan={3} className="p-3 text-center text-gray-500 italic">...และอีก {previewData.length - 10} รายการ</td></tr>
+                    <tr><td colSpan={4} className="p-3 text-center text-gray-500 italic">...และอีก {previewData.length - 10} รายการ</td></tr>
                   )}
                 </tbody>
               </table>
