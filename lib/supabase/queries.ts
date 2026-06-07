@@ -3041,3 +3041,102 @@ export async function getTemporaryOSMStats(hospitalIds?: string[]) {
     return { total: 0 };
   }
 }
+
+// lib/supabase/queries.ts
+
+/**
+ * ฟังก์ชันสำหรับอัปเดตโค้ชให้คนไข้ที่มีอยู่แล้ว
+ * @param rows ข้อมูลจาก Excel [{ id_card: string, coach_name: string, ... }]
+ */
+export async function updatePatientCoachesBatch(
+  rows: Array<{
+    id_card: string;
+    coach_name: string;
+    // สามารถเพิ่มฟิลด์อื่นๆ ที่ต้องการตรวจสอบหรืออัปเดตได้ที่นี่
+  }>
+) {
+  const results = {
+    success: 0,
+    failed: 0,
+    errors: [] as Array<{ row: number; id_card: string; error: string }>
+  };
+
+  console.log(`🔄 [updatePatientCoachesBatch] Starting update for ${rows.length} patients...`);
+
+  // 1. ดึงรายชื่อโค้ชทั้งหมดในระบบเพื่อ Map ชื่อ -> user_id
+  const { data: allCoaches } = await supabase
+    .from('doctors')
+    .select('user_id, full_name_th')
+    .eq('is_active', true);
+  
+  const coachMap = new Map<string, string>();
+  allCoaches?.forEach(c => coachMap.set(c.full_name_th.toLowerCase().trim(), c.user_id));
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowIndex = i + 1;
+
+    try {
+      if (!row.id_card || !row.coach_name) {
+        throw new Error('ขาดข้อมูลเลขบัตรประชาชนหรือชื่อโค้ช');
+      }
+
+      const cleanIdCard = row.id_card.replace(/\D/g, '');
+      
+      // 2. หา Patient ID จากเลขบัตรประชาชน
+      const { data: patientUser, error: userError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id_card', cleanIdCard)
+        .eq('role', 'patient') // ยืนยันว่าเป็นคนไข้
+        .single();
+
+      if (userError || !patientUser) {
+        throw new Error('ไม่พบคนไข้ในระบบ (ตรวจสอบเลขบัตรประชาชน)');
+      }
+
+      // 3. หา Coach ID จากชื่อ
+      let coachId = coachMap.get(row.coach_name.toLowerCase().trim());
+      
+      // ถ้าไม่เจอจาก Map ลองค้นหาจาก DB โดยตรง (กรณีชื่ออาจมีวรรคตอนต่างกันเล็กน้อย)
+      if (!coachId) {
+        const { data: coachData } = await supabase
+          .from('doctors')
+          .select('user_id')
+          .ilike('full_name_th', row.coach_name.trim())
+          .maybeSingle();
+        
+        if (coachData) {
+          coachId = coachData.user_id;
+        }
+      }
+
+      if (!coachId) {
+        throw new Error(`ไม่พบโค้ชชื่อ: "${row.coach_name}" ในระบบ`);
+      }
+
+      // 4. อัปเดต coach_id ในตาราง profiles
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ 
+          coach_id: coachId,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', patientUser.id);
+
+      if (updateError) throw updateError;
+
+      results.success++;
+    } catch (error: any) {
+      results.failed++;
+      results.errors.push({
+        row: rowIndex,
+        id_card: row.id_card,
+        error: error.message || 'เกิดข้อผิดพลาด'
+      });
+      console.error(`❌ Row ${rowIndex} failed:`, error.message);
+    }
+  }
+
+  return results;
+}

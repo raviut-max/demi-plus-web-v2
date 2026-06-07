@@ -1,9 +1,5 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: เพิ่มทางเข้าหน้า Correct Data
-// ✅ การแก้ไข:
-//    1. ✅ เพิ่มปุ่ม "จัดการข้อมูลบกพร่อง" ในหมวดฟีเจอร์เร่งด่วน
-//    2. ✅ แก้ไขทุกจุดที่ typo ให้ผ่าน Build
-//    3. ✅ จัดกลุ่มเมนูให้ชัดเจน
+// ✅ แก้ไขล่าสุด: เพิ่มลิงก์ไปหน้า Update Coach จาก Excel
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -37,7 +33,8 @@ import {
   Zap,
   Stethoscope,
   Heart,
-  Wrench
+  Wrench,
+  RefreshCw // ✅ เพิ่มไอคอนสำหรับอัปเดต
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -106,7 +103,7 @@ export default function SettingsPage() {
   const loadSystemStats = async () => {
     try {
       const hospitalIds = await getAccessibleHospitalIds(user?.id);
-
+      
       // ✅ นับโรงพยาบาล
       let hospitalsQuery = supabase
         .from('hospitals')
@@ -242,7 +239,6 @@ export default function SettingsPage() {
                   </div>
                 </div>
               )}
-
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -368,7 +364,7 @@ export default function SettingsPage() {
             {/* ✅ เมนูจัดการ - แบ่งเป็น 3 หมวดหมู่ */}
             <div className="space-y-8">
               
-              {/* 🚨 หมวดเร่งด่วน - เพิ่มปุ่ม Correct Data */}
+              {/* 🚨 หมวดเร่งด่วน - เพิ่มปุ่ม Correct Data และ Update Coach */}
               <div>
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-orange-600" />
@@ -376,7 +372,7 @@ export default function SettingsPage() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   
-                  {/* 🔧 ปุ่มจัดการข้อมูลบกพร่อง (Correct Data) - ใหม่! */}
+                  {/* 🔧 ปุ่มจัดการข้อมูลบกพร่อง (Correct Data) */}
                   <button
                     onClick={() => router.push('/admin/correct-data')}
                     className="bg-gradient-to-br from-red-500 to-pink-600 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
@@ -396,6 +392,29 @@ export default function SettingsPage() {
                     <p className="text-white/90 text-sm">
                       จัดการข้อมูลผู้ป่วยที่มีปัญหา เช่น ไม่มี Profile, HN ซ้ำ, 
                       เลขบัตรผิด Format, ชื่อไม่ครบ
+                    </p>
+                  </button>
+
+                  {/* 🔄 ปุ่มอัปเดตโค้ชให้ผู้ป่วยจาก Excel (ใหม่!) */}
+                  <button
+                    onClick={() => router.push('/admin/patients/update-coach')}
+                    className="bg-gradient-to-br from-teal-500 to-cyan-600 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-white/20 backdrop-blur rounded-md text-xs font-bold">
+                      ใหม่ ✨
+                    </div>
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-white/20 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <RefreshCw className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">🔄 อัปเดตโค้ช (Excel)</h3>
+                        <p className="text-white/90 text-sm">เติมโค้ชให้คนไข้เดิม</p>
+                      </div>
+                    </div>
+                    <p className="text-white/90 text-sm">
+                      อัปโหลด Excel เพื่อระบุชื่อโค้ชให้ผู้ป่วยที่มีอยู่แล้วในระบบ 
+                      โดยไม่ต้องสร้างผู้ป่วยใหม่
                     </p>
                   </button>
 
