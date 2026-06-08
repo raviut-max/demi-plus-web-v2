@@ -878,5 +878,6 @@ export default function PatientGoalsSetupPage() {
         </div>
       </div>
     </div>
+    
   );
 }
