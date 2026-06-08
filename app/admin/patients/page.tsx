@@ -23,7 +23,7 @@ import {
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
-  FileSpreadsheet, ChevronLeft, ChevronRight
+  FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -55,11 +55,14 @@ export default function PatientManagementPage() {
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  // ✅ Pagination State
+  // ✅ Pagination State - แสดงหน้าละ 100 คน
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPatients, setTotalPatients] = useState(0);
-  const [pageSize] = useState(50);
+  const [pageSize] = useState(100); // ✅ เปลี่ยนเป็น 100 คนต่อหน้า
   const totalPages = Math.ceil(totalPatients / pageSize);
+
+  // ✅ Jump to page state
+  const [jumpToPage, setJumpToPage] = useState<string>('');
 
   // Helper: รับ hospital ids สำหรับ filter ตาม network
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
@@ -329,6 +332,17 @@ export default function PatientManagementPage() {
       setSortDirection('asc');
     }
     setCurrentPage(0); // ✅ สำคัญ: Reset กลับหน้าแรกเมื่อ sort
+  };
+
+  // ✅ Handle jump to page
+  const handleJumpToPage = () => {
+    const pageNum = parseInt(jumpToPage);
+    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+      setCurrentPage(pageNum - 1);
+      setJumpToPage('');
+    } else {
+      alert(`กรุณาใส่เลขหน้าระหว่าง 1 - ${totalPages}`);
+    }
   };
 
   // ✅ Export Excel (เฉพาะข้อมูลที่แสดงในหน้าปัจจุบัน ซึ่ง sort แล้วจาก DB)
@@ -638,7 +652,7 @@ export default function PatientManagementPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="lg:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Search className="w-4 h-4 inline mr-1" /> ค้นหา (ชื่อ, นามสกุล, HN)
+                <Search className="w-4 h-4 inline mr-1" /> ค้นหา (ชื่อ, นามสกุล, HN, ID Card)
               </label>
               <input
                 type="text"
@@ -710,8 +724,8 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* Export Excel */}
-        <div className="flex justify-between items-center mb-4">
+        {/* Export Excel & Pagination Info */}
+        <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="text-sm text-gray-600">
             📄 แสดงหน้าที่ {currentPage + 1} จาก {totalPages || 1} (หน้าละ {pageSize} รายการ)
           </div>
@@ -816,14 +830,14 @@ export default function PatientManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg">
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด">
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg">
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข">
                             <Edit className="w-4 h-4" />
                           </button>
                           {canDeleteData() ? (
-                            <button onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg">
+                            <button onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="ลบ">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           ) : (
@@ -840,70 +854,95 @@ export default function PatientManagementPage() {
             </table>
           </div>
 
-          {/* ✅ Pagination Controls */}
+          {/* ✅ Pagination Controls with Jump to Page */}
           {totalPages > 1 && (
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
               <div className="text-sm text-gray-600">
                 แสดง {currentPage * pageSize + 1} - {Math.min((currentPage + 1) * pageSize, totalPatients)} จาก {totalPatients.toLocaleString()} รายการ
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(0)}
-                  disabled={currentPage === 0}
-                  className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 text-sm"
-                  title="หน้าแรก"
-                >
-                  ««
-                </button>
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
-                  disabled={currentPage === 0}
-                  className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 flex items-center gap-1 text-sm"
-                >
-                  <ChevronLeft className="w-4 h-4" /> ก่อนหน้า
-                </button>
-
-                <div className="flex gap-1">
-                  {getPageNumbers().map((pageNum, idx) => {
-                    if (pageNum === '...') {
-                      return (
-                        <span key={`ellipsis-${idx}`} className="px-3 py-2 text-gray-400">
-                          ...
-                        </span>
-                      );
-                    }
-                    const p = pageNum as number;
-                    return (
-                      <button
-                        key={p}
-                        onClick={() => setCurrentPage(p)}
-                        className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                          currentPage === p
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-white border hover:bg-gray-50'
-                        }`}
-                      >
-                        {p + 1}
-                      </button>
-                    );
-                  })}
+              
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* Jump to Page Input */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">ไปยังหน้า:</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max={totalPages}
+                    value={jumpToPage}
+                    onChange={(e) => setJumpToPage(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleJumpToPage()}
+                    className="w-16 px-2 py-1 border rounded text-center text-sm"
+                    placeholder="หน้า"
+                  />
+                  <button
+                    onClick={handleJumpToPage}
+                    className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
+                  >
+                    ไป
+                  </button>
                 </div>
 
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
-                  disabled={currentPage >= totalPages - 1}
-                  className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 flex items-center gap-1 text-sm"
-                >
-                  ถัดไป <ChevronRight className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setCurrentPage(totalPages - 1)}
-                  disabled={currentPage >= totalPages - 1}
-                  className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 text-sm"
-                  title="หน้าสุดท้าย"
-                >
-                  »»
-                </button>
+                {/* Navigation Buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentPage(0)}
+                    disabled={currentPage === 0}
+                    className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 text-sm flex items-center gap-1"
+                    title="หน้าแรก"
+                  >
+                    <SkipBack className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                    disabled={currentPage === 0}
+                    className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 flex items-center gap-1 text-sm"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> ก่อนหน้า
+                  </button>
+
+                  <div className="flex gap-1">
+                    {getPageNumbers().map((pageNum, idx) => {
+                      if (pageNum === '...') {
+                        return (
+                          <span key={`ellipsis-${idx}`} className="px-3 py-2 text-gray-400">
+                            ...
+                          </span>
+                        );
+                      }
+                      const p = pageNum as number;
+                      return (
+                        <button
+                          key={p}
+                          onClick={() => setCurrentPage(p)}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                            currentPage === p
+                              ? 'bg-blue-500 text-white'
+                              : 'bg-white border hover:bg-gray-50'
+                          }`}
+                        >
+                          {p + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                    disabled={currentPage >= totalPages - 1}
+                    className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 flex items-center gap-1 text-sm"
+                  >
+                    ถัดไป <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(totalPages - 1)}
+                    disabled={currentPage >= totalPages - 1}
+                    className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 text-sm flex items-center gap-1"
+                    title="หน้าสุดท้าย"
+                  >
+                    <SkipForward className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
           )}
