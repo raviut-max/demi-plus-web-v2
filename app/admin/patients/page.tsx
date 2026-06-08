@@ -40,9 +40,9 @@ export default function PatientManagementPage() {
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Search States
-  const [searchTermNameHN, setSearchTermNameHN] = useState(''); // ค้นหา ชื่อ/HN
-  const [searchTermIdCard, setSearchTermIdCard] = useState(''); // ค้นหา ID Card
+  // ✅ Search States แยกกันชัดเจน
+  const [searchTermNameHN, setSearchTermNameHN] = useState(''); 
+  const [searchTermIdCard, setSearchTermIdCard] = useState(''); 
   
   const [selectedPamLevel, setSelectedPamLevel] = useState<string>('all');
   const [showDeletedModal, setShowDeletedModal] = useState(false);
@@ -205,13 +205,14 @@ export default function PatientManagementPage() {
   };
 
   // ✅ โหลดข้อมูลผู้ป่วยแบบ Pagination + Server-side Sort
-  const loadPatients = async (hospitalIds?: string[]) => {
+  const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
       
       // รวมคำค้นหาคู่กันเพื่อส่งไป backend (ถ้ามีอย่างน้อยหนึ่งช่อง)
+      // Backend จะนำไปค้นทั้ง profiles.first_name, profiles.last_name, profiles.hospital_number และ users.id_card
       const combinedSearch = searchTermNameHN || searchTermIdCard; 
 
       const pamParam = isAllPam ? undefined : selectedPamLevel;
@@ -219,12 +220,18 @@ export default function PatientManagementPage() {
       const hospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
 
+      // ดึงจำนวนผู้ป่วยทั้งหมด (สำหรับแสดง summary และ pagination)
       const total = await getPatientCount(combinedSearch, pamParam, hospitalIdsParam, hospitalIdParam, coachIdParam);
       setTotalPatients(total);
 
+      // กำหนดขนาดหน้าสำหรับการดึงข้อมูล
+      const fetchPageSize = forceFetchAll ? total : pageSize;
+      const fetchCurrentPage = forceFetchAll ? 0 : currentPage;
+
+      // ดึงข้อมูลเฉพาะหน้าปัจจุบัน (หรือทั้งหมดถ้าเป็นโหมด Export All) พร้อม sort จาก database
       const { patients: data } = await getPatientListPaginated(
-        currentPage,
-        pageSize,
+        fetchCurrentPage,
+        fetchPageSize,
         combinedSearch,
         pamParam,
         hospitalIdsParam,
@@ -235,7 +242,9 @@ export default function PatientManagementPage() {
       );
 
       setPatients(data);
-      console.log(`📊 [loadPatients] Page ${currentPage + 1}/${totalPages || 1}, Loaded: ${data.length}, Total: ${total}`);
+      if (!forceFetchAll) {
+        console.log(`📊 [loadPatients] Page ${currentPage + 1}/${totalPages || 1}, Loaded: ${data.length}, Total: ${total}`);
+      }
     } catch (error) {
       debugLog('loadPatients', 'error', error);
       setPatients([]);
@@ -256,6 +265,7 @@ export default function PatientManagementPage() {
     }
   };
 
+  // รีเซ็ตไปหน้าแรกเมื่อเปลี่ยน filter/search
   useEffect(() => {
     const timer = setTimeout(() => {
       setCurrentPage(0);
@@ -263,6 +273,7 @@ export default function PatientManagementPage() {
     return () => clearTimeout(timer);
   }, [searchTermNameHN, searchTermIdCard, selectedHospitalFilter, selectedCoachFilter, selectedPamLevel]);
 
+  // โหลดข้อมูลใหม่เมื่อ currentPage หรือ filter ใดๆ เปลี่ยน
   useEffect(() => {
     if (!user) return;
     loadPatients(accessibleHospitalIds);
@@ -278,6 +289,7 @@ export default function PatientManagementPage() {
     router.push('/admin/login');
   };
 
+  // Sort: เปลี่ยน column/direction + reset กลับหน้าแรก
   const handleSort = (column: string) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -299,14 +311,15 @@ export default function PatientManagementPage() {
   };
 
   // ✅ Export Excel with Selection
-  const exportToExcel = (mode: 'current' | 'all') => {
-    // ถ้า export ทั้งหมด ต้องดึงข้อมูลใหม่โดยไม่จำกัด range (หรือใช้ฟังก์ชันแยกสำหรับ export all)
-    // ในที่นี้สมมติว่าเราใช้ patients ที่มีอยู่ (ซึ่งคือหน้าปัจจุบัน) ถ้าต้องการทั้งหมดจริงๆ 
-    // ควรเรียก API อีกครั้งด้วย range(0, total) แต่เพื่อความรวดเร็วใน UI นี้เราจะใช้ข้อมูลที่มี
-    // *หมายเหตุ: หากต้องการ Export All จริงๆ ควรเพิ่ม parameter ให้ getPatientListPaginated ดึงทั้งหมด*
+  const exportToExcel = async (mode: 'current' | 'all') => {
+    let dataToExport = patients;
     
-    const dataToExport = mode === 'current' ? patients : patients; // ⚠️ ควรปรับเป็นดึงข้อมูลทั้งหมดหากจำเป็น
-    
+    // ถ้าเลือก Export ทั้งหมด ให้ดึงข้อมูลใหม่โดยไม่จำกัดจำนวนแถว
+    if (mode === 'all') {
+      await loadPatients(accessibleHospitalIds, true);
+      dataToExport = patients; // ใช้ข้อมูลที่เพิ่งโหลดมาทั้งหมด
+    }
+
     const exportData = dataToExport.map((patient, idx) => {
       let genderThai = '';
       if (patient.gender === 'male') genderThai = 'ชาย';
@@ -647,11 +660,11 @@ export default function PatientManagementPage() {
           
           <div className="flex justify-end">
              <button
-                onClick={handleSearch}
-                disabled={loadingFilters}
-                className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {loadingFilters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} ค้นหา
+               onClick={handleSearch}
+               disabled={loadingFilters}
+               className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50"
+             >
+               {loadingFilters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} ค้นหา
              </button>
           </div>
         </div>
@@ -663,22 +676,22 @@ export default function PatientManagementPage() {
            </div>
            
            {/* ✅ ปุ่ม Export แบบเลือกโหมด */}
-           <div className="flex items-center gap-2">
-              <button
-                onClick={() => exportToExcel('current')}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                Export เฉพาะหน้านี้
-              </button>
-              <button
-                onClick={() => exportToExcel('all')}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
-              >
-                <Download className="w-4 h-4" />
-                Export ทั้งหมด
-              </button>
-           </div>
+            <div className="flex items-center gap-2">
+               <button
+                 onClick={() => exportToExcel('current')}
+                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+               >
+                 <FileSpreadsheet className="w-4 h-4" />
+                 Export เฉพาะหน้านี้
+               </button>
+               <button
+                 onClick={() => exportToExcel('all')}
+                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+               >
+                 <Download className="w-4 h-4" />
+                 Export ทั้งหมด
+               </button>
+            </div>
         </div>
 
         {/* Patient Table */}
