@@ -326,13 +326,11 @@ export async function getPatientList(
     return [];
   }
 }
-// ... existing code ...
 
-// ... existing code ...
-// ✅ เพิ่มฟังก์ชันใหม่: ดึงจำนวนผู้ป่วยทั้งหมด
 // ... existing code ...
 export async function getPatientCount(
   search?: string,
+  idCardSearch?: string, // ✅ เพิ่ม parameter สำหรับค้นหา ID Card โดยเฉพาะ
   pamLevel?: string,
   hospitalIds?: string[],
   hospitalId?: string,
@@ -343,6 +341,26 @@ export async function getPatientCount(
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('is_active', true);
+
+    // ✅ เพิ่มเงื่อนไขค้นหา ID Card จากตาราง users โดยใช้ subquery หรือ join ทางอ้อม
+    // เนื่องจาก profiles ไม่มี id_card โดยตรง เราต้องเช็คผ่าน users table
+    if (idCardSearch && idCardSearch.trim() !== '') {
+      const cleanId = idCardSearch.trim().replace(/[-\s]/g, '');
+      // ดึง user_id ที่มี id_card ตรงกันก่อน แล้วค่อยมากรอง profiles
+      const { data: matchingUsers } = await supabase
+        .from('users')
+        .select('id')
+        .eq('role', 'patient')
+        .ilike('id_card', `%${cleanId}%`);
+      
+      const userIds = matchingUsers?.map(u => u.id) || [];
+      if (userIds.length > 0) {
+        query = query.in('id', userIds);
+      } else {
+        // ถ้าไม่เจอเลยให้คืนค่า 0 ทันทีเพื่อประหยัดทรัพยากร
+        return 0; 
+      }
+    }
 
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
@@ -360,6 +378,7 @@ export async function getPatientCount(
       query = query.eq('pam_level', pamLevel);
     }
 
+    // ค้นหาทั่วไป (ชื่อ, HN)
     if (search && search.trim() !== '') {
       const searchTerm = search.trim();
       query = query.or(
@@ -380,14 +399,13 @@ export async function getPatientCount(
     return 0;
   }
 }
-// ... existing code ...
 
-// ✅ เพิ่มฟังก์ชันใหม่: ดึงผู้ป่วยแบบแบ่งหน้า
 // ... existing code ...
 export async function getPatientListPaginated(
   page: number = 0,
   pageSize: number = 50,
   search?: string,
+  idCardSearch?: string, // ✅ เพิ่ม parameter สำหรับค้นหา ID Card
   pamLevel?: string,
   hospitalIds?: string[],
   hospitalId?: string,
@@ -399,37 +417,48 @@ export async function getPatientListPaginated(
     const start = page * pageSize;
     const end = start + pageSize - 1;
 
-    // ✅ Mapping column names
+    // Mapping column names for sorting
     const columnMap: Record<string, string> = {
       'first_name': 'first_name',
       'last_name': 'last_name',
       'hospital_number': 'hospital_number',
-      'users.id_card': 'users.id_card',
-      'hospitals.name': 'hospitals.name',
-      'coach_name': 'coach_name',
+      'users.id_card': 'created_at', // Sort by created_at as proxy or handle separately if needed
+      'hospitals.name': 'hospital_id', // Sort by FK
+      'coach_name': 'coach_id',
       'pam_level': 'pam_level',
       'zone': 'zone',
       'created_at': 'created_at'
     };
 
-    const sortColumn = columnMap[sortBy] || 'first_name';
+    const sortColumn = columnMap[sortBy] || 'created_at';
 
-    // ✅ แก้ไข: แยก query เป็น 2 ขั้นตอน
-    // ขั้นตอนที่ 1: ดึง profiles
     let query = supabase
       .from('profiles')
       .select(`
         *,
         hospitals:profiles_hospital_id_fkey (
-          id,
-          name,
-          code,
-          type
+          id, name, code, type
         )
       `, { count: 'exact' })
       .eq('is_active', true);
 
-    // Filters
+    // ✅ Logic การค้นหา ID Card ที่ถูกต้อง
+    if (idCardSearch && idCardSearch.trim() !== '') {
+      const cleanId = idCardSearch.trim().replace(/[-\s]/g, '');
+      const { data: matchingUsers } = await supabase
+        .from('users')
+        .select('id')
+        .eq('role', 'patient')
+        .ilike('id_card', `%${cleanId}%`);
+      
+      const userIds = matchingUsers?.map(u => u.id) || [];
+      if (userIds.length > 0) {
+        query = query.in('id', userIds);
+      } else {
+        return { patients: [], total: 0 };
+      }
+    }
+
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
@@ -453,7 +482,6 @@ export async function getPatientListPaginated(
       );
     }
 
-    // Sort และ Range
     query = query.order(sortColumn, { ascending: sortOrder === 'asc' });
     query = query.range(start, end);
 
@@ -468,7 +496,7 @@ export async function getPatientListPaginated(
       return { patients: [], total: count || 0 };
     }
 
-    // ✅ ขั้นตอนที่ 2: ดึงข้อมูล users แยก
+    // ดึงข้อมูล users (รวม id_card)
     const userIds = profiles.map(p => p.id);
     const { data: usersData, error: usersError } = await supabase
       .from('users')
@@ -481,7 +509,7 @@ export async function getPatientListPaginated(
 
     const usersMap = new Map(usersData?.map(u => [u.id, u]) || []);
 
-    // ✅ ดึงชื่อโค้ช
+    // ดึงชื่อโค้ช
     const coachIds = profiles.map(p => p.coach_id).filter(Boolean);
     let coachesMap = new Map();
 
@@ -496,7 +524,7 @@ export async function getPatientListPaginated(
       }
     }
 
-    // ✅ รวมข้อมูล
+    // รวมข้อมูล
     const patients = profiles.map(profile => ({
       ...profile,
       users: usersMap.get(profile.id) || null,
