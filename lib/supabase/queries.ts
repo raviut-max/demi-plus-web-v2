@@ -151,8 +151,6 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 // ... existing code ...
-
-// ... existing code ...
 export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
   try {
     const { data: userData, error: userError } = await supabase
@@ -165,6 +163,7 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
     // ✅ Super Admin เห็นทั้งหมด -> ส่งค่าว่างเพื่อให้ Backend ไม่กรอง
     if (isSuperAdmin(userData)) return [];
+    
     if (!userData.hospital_id) return [];
 
     const { data: hospitalData, error: hospitalError } = await supabase
@@ -177,13 +176,14 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
     let mainHospitalId = hospitalData.id;
 
-    // ✅ ถ้าเป็นลูกข่าย ให้หา ID ของแม่ข่ายก่อน
+    // ✅ กรณีเป็นลูกข่าย: ต้องหา ID ของแม่ข่ายก่อน เพื่อไปดึงลูกข่ายตัวอื่น
     if (hospitalData.type === 'sub' && hospitalData.parent_id) {
       mainHospitalId = hospitalData.parent_id;
     }
 
-    // ✅ ดึงลูกข่ายทั้งหมดภายใต้แม่ข่ายนี้
-    const accessibleIds: string[] = [mainHospitalId];
+    // ✅ ดึงลูกข่ายทั้งหมดภายใต้แม่ข่ายนี้ (รวมถึงตัวเองด้วยถ้าเป็น sub)
+    const accessibleIds: string[] = [mainHospitalId]; // เพิ่มแม่ข่ายเข้าไปด้วยเสมอ
+    
     const { data: subHospitals } = await supabase
       .from('hospitals')
       .select('id')
@@ -200,6 +200,7 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
     return [];
   }
 }
+// ... existing code ...
 // ... existing code ...
 export async function getPatientCount(
   search?: string,       // ค้นหา ชื่อ, นามสกุล, HN

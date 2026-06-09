@@ -84,7 +84,7 @@ export default function PatientManagementPage() {
         .select('id')
         .eq('parent_id', hospital.id)
         .eq('is_active', true);
-
+      
       const subIds = subHospitals?.map(h => h.id) || [];
       return [hospital.id, ...subIds];
     } else {
@@ -98,7 +98,7 @@ export default function PatientManagementPage() {
       setLoadingFilters(true);
       const targetHospitalIds = await getHospitalIdsForFilter(hospitalIdFilter);
       const allCoaches = await getCoachesWithHospitals(targetHospitalIds);
-
+      
       const coachesWithCount = await Promise.all(allCoaches.map(async (c: any) => {
         try {
           const { count } = await supabase
@@ -106,7 +106,7 @@ export default function PatientManagementPage() {
             .select('*', { count: 'exact', head: true })
             .eq('coach_id', c.user_id)
             .eq('is_active', true);
-
+          
           return {
             ...c,
             patientCount: count || 0,
@@ -116,11 +116,11 @@ export default function PatientManagementPage() {
           return { ...c, patientCount: 0, hospitalName: c.users?.hospitals?.name || 'ไม่ระบุ' };
         }
       }));
-
-      const sortedCoaches = [...coachesWithCount].sort((a, b) =>
+      
+      const sortedCoaches = [...coachesWithCount].sort((a, b) => 
         (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
       );
-
+      
       setFilterCoaches(sortedCoaches);
     } catch (error) {
       debugLog('loadFilterCoachesByHospital', 'error', error);
@@ -147,7 +147,7 @@ export default function PatientManagementPage() {
       router.push('/admin/login');
       return;
     }
-
+    
     setUser(userData);
     loadUserName(userData.id);
     loadUserHospital(userData.id);
@@ -194,7 +194,7 @@ export default function PatientManagementPage() {
     try {
       setLoadingFilters(true);
       const allHospitals = await getHospitalsWithHierarchy(isSuperAdmin(user) ? undefined : accessibleIds);
-
+      
       const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
         try {
           const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('hospital_id', h.id).eq('is_active', true);
@@ -203,12 +203,12 @@ export default function PatientManagementPage() {
           return { ...h, patientCount: 0, typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย' };
         }
       }));
-
+      
       const sortedHospitals = [...hospitalsWithCount].sort((a, b) => {
         if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
         return (a.name || '').localeCompare(b.name || '', 'th');
       });
-
+      
       setFilterHospitals(sortedHospitals);
     } catch (error) {
       debugLog('loadFilterHospitals', 'error', error);
@@ -230,7 +230,7 @@ export default function PatientManagementPage() {
       const hospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
 
-      // ดึงจำนวนผู้ป่วยทั้งหมด
+      // ดึงจำนวนผู้ป่วยทั้งหมด (สำหรับแสดง summary และ pagination)
       const total = await getPatientCount(
         searchTermNameHN,   // search (ชื่อ/HN)
         searchTermIdCard,   // idCardSearch (ID Card)
@@ -384,6 +384,7 @@ export default function PatientManagementPage() {
       return;
     }
     if (!confirm(`⚠️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
+    
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
@@ -404,6 +405,7 @@ export default function PatientManagementPage() {
       return;
     }
     if (!confirm(`♻️ ยืนยันการกู้คืนผู้ป่วย ${patientName}?`)) return;
+    
     try {
       const result = await restorePatient(patientId);
       if (result.success) {
@@ -424,11 +426,13 @@ export default function PatientManagementPage() {
       return;
     }
     if (!confirm(`⚠️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
+    
     const secondConfirm = prompt('พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:');
     if (secondConfirm !== 'YES') {
       alert('ยกเลิกการลบถาวร');
       return;
     }
+    
     try {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
@@ -446,14 +450,25 @@ export default function PatientManagementPage() {
 
   const getRoleBadge = () => {
     if (!user) return null;
+    
     const roleConfig: any = {
       'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
-      'admin': { text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100', textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700' },
+      'admin': { 
+        text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', 
+        bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100',
+        textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700'
+      },
       'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
       'helper': { text: '👩‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
+    
     const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
-    return <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>{config.text}</span>;
+    
+    return (
+      <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
+        {config.text}
+      </span>
+    );
   };
 
   const getSortIcon = (columnName: string) => {
@@ -464,6 +479,7 @@ export default function PatientManagementPage() {
   const getPageNumbers = () => {
     const pages: (number | string)[] = [];
     const maxVisible = 5;
+    
     if (totalPages <= maxVisible) {
       for (let i = 0; i < totalPages; i++) pages.push(i);
     } else {
