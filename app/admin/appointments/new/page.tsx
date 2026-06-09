@@ -40,15 +40,17 @@ interface Patient {
   first_name: string; 
   last_name: string; 
   hospital_number: string;
-  id_card?: string; 
+  id_card?: string; // ✅ เพิ่มเลขบัตรประชาชน
   phone?: string; 
   hospital_id?: string;
-  hospital_name?: string; // เพิ่มชื่อกันไว้เลยเพื่อความสะดวก
+  hospital_name?: string; // ✅ เพิ่มชื่อโรงพยาบาลสำหรับแสดงผล
   hospital_code?: string;
 }
 
 export default function NewAppointmentPage() {
   const router = useRouter();
+  
+  // Refs สำหรับจัดการ Click Outside Dropdown
   const patientDropdownRef = useRef<HTMLDivElement>(null);
   const staffDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -70,6 +72,7 @@ export default function NewAppointmentPage() {
   // Search States
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
   const [isPatientDropdownOpen, setIsPatientDropdownOpen] = useState(false);
+  
   const [staffSearchTerm, setStaffSearchTerm] = useState('');
   const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
 
@@ -94,7 +97,7 @@ export default function NewAppointmentPage() {
     loadNetworkData(userData.id);
   }, [router]);
 
-  // Handle Click Outside
+  // Handle Click Outside to close dropdowns
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (patientDropdownRef.current && !patientDropdownRef.current.contains(event.target as Node)) setIsPatientDropdownOpen(false);
@@ -156,7 +159,7 @@ export default function NewAppointmentPage() {
   };
 
   // =====================================================
-  // ️ HANDLERS & LOGIC
+  // ⚙️ HANDLERS & LOGIC
   // =====================================================
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
