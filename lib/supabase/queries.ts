@@ -141,13 +141,7 @@ export async function filterDataByHospitalPermission<T>(
   return fetchData(hospitalIds);
 }
 
-
 // ... existing code ...
-// =====================================================
-// 👤 Super Admin & Permission System Functions
-// =====================================================
-
-
 export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
   try {
     const { data: userData, error: userError } = await supabase
@@ -158,67 +152,58 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
     if (userError || !userData) return [];
 
-    // ✅ Super Admin: ดูทั้งหมด (ส่งค่าว่างเพื่อให้ Backend ไม่กรอง)
+    // ✅ Super Admin เห็นทั้งหมด -> ส่ง [] เพื่อให้ Backend ไม่กรอง
     if (isSuperAdmin(userData)) return [];
-    
+
     if (!userData.hospital_id) return [];
 
-    const { data: myHospital, error: hospError } = await supabase
+    const { data: hospitalData, error: hospError } = await supabase
       .from('hospitals')
       .select('id, type, parent_id')
       .eq('id', userData.hospital_id)
       .single();
 
-    if (hospError || !myHospital) return [];
+    if (hospError || !hospitalData) return [];
 
-    const accessibleIds: string[] = [myHospital.id];
+    const accessibleIds: string[] = [];
 
-    // ✅ Logic เครือข่าย (Network View)
-    if (myHospital.type === 'main') {
-      // แม่ข่าย: ดูตัวเอง + ลูกข่ายทั้งหมดใต้สังกัด
-      const { data: subs } = await supabase
+    // ✅ กรณีแม่ข่าย: ดูตัวเอง + ลูกข่ายทั้งหมด
+    if (hospitalData.type === 'main') {
+      accessibleIds.push(hospitalData.id);
+      const { data: subHospitals } = await supabase
         .from('hospitals')
         .select('id')
-        .eq('parent_id', myHospital.id)
+        .eq('parent_id', hospitalData.id)
         .eq('is_active', true);
-      
-      if (subs) subs.forEach(s => accessibleIds.push(s.id));
-      
-    } else if (myHospital.type === 'sub' && myHospital.parent_id) {
-      // ลูกข่าย: ดูตัวเอง + แม่ข่าย + ลูกข่ายตัวอื่นในเครือเดียวกัน
-      accessibleIds.push(myHospital.parent_id); // เพิ่มแม่ข่าย
-      
-      const { data: siblings } = await supabase
+      if (subHospitals) subHospitals.forEach(s => accessibleIds.push(s.id));
+    }
+    // ✅ กรณีลูกข่าย: ดูแม่ข่ายของตน + ลูกข่ายทั้งหมดในเครือเดียวกัน + ตัวเอง
+    else if (hospitalData.type === 'sub' && hospitalData.parent_id) {
+      accessibleIds.push(hospitalData.parent_id); // แม่ข่าย
+      const { data: allSubs } = await supabase
         .from('hospitals')
         .select('id')
-        .eq('parent_id', myHospital.parent_id)
+        .eq('parent_id', hospitalData.parent_id)
         .eq('is_active', true);
-      
-      if (siblings) siblings.forEach(s => accessibleIds.push(s.id));
+      if (allSubs) allSubs.forEach(s => accessibleIds.push(s.id));
+      // รวม ID ของตัวเองเข้าไปด้วย
+      accessibleIds.push(hospitalData.id);
     }
 
-    // ลบ ID ซ้ำออก (กรณีที่เป็นแม่ข่ายอยู่แล้ว หรือลูกข่ายซ้ำ)
     return [...new Set(accessibleIds)];
-
   } catch (err) {
     console.error('❌ [getAccessibleHospitalIds] Exception:', err);
     return [];
   }
 }
 
-// ... existing code ...
-
-// =====================================================
-// 👥 Patient Management Functions (Updated for Permission)
-// =====================================================
-
-// ✅ ฟังก์ชันนับจำนวนผู้ป่วย (ใช้สิทธิ์การเข้าถึงเดียวกัน)
+// ✅ ฟังก์ชันนับจำนวนผู้ป่วย (รองรับ Network View อย่างเคร่งครัด)
 export async function getPatientCount(
   search?: string,
   idCardSearch?: string,
   pamLevel?: string,
-  hospitalIds?: string[], // ✅ รับ List IDs จาก Permission
-  hospitalId?: string,    // Filter Dropdown เพิ่มเติม
+  accessibleHospitalIds?: string[], // ✅ ขอบเขตสิทธิ์เครือข่าย (Mandatory)
+  filterHospitalId?: string,       // ✅ กรองย่อยภายในเครือข่าย (Optional)
   coachId?: string
 ) {
   try {
@@ -227,14 +212,19 @@ export async function getPatientCount(
       .select('*', { count: 'exact', head: true })
       .eq('is_active', true);
 
-    // ✅ 1. กรองตามสิทธิ์เครือข่าย (สำคัญที่สุด)
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('hospital_id', hospitalIds);
+    // ✅ ขั้นตอนแรกเสมอ: บังคับสิทธิ์เครือข่าย
+    if (accessibleHospitalIds && accessibleHospitalIds.length > 0) {
+      query = query.in('hospital_id', accessibleHospitalIds);
     }
 
-    // 2. ค้นหา ID Card แยกต่างหาก
+    // ✅ ขั้นตอนที่สอง: กรองย่อยภายในเครือข่าย
+    if (filterHospitalId && filterHospitalId !== 'all') {
+      query = query.eq('hospital_id', filterHospitalId);
+    }
+
+    // ✅ ขั้นตอนที่สาม: ค้นหา ID Card (บนชุดข้อมูลที่ผ่านการบังคับสิทธิ์แล้ว)
     if (idCardSearch && idCardSearch.trim() !== '') {
-      const cleanId = idCardSearch.trim().replace(/[-\s]/g, '');
+      const cleanId = idCardSearch.trim().replace(/[-\\s]/g, '');
       const { data: matchingUsers } = await supabase
         .from('users')
         .select('id')
@@ -245,24 +235,19 @@ export async function getPatientCount(
       if (userIds.length > 0) {
         query = query.in('id', userIds);
       } else {
-        return 0; 
+        return 0;
       }
     }
 
-    // 3. Filter Dropdown (เลือก รพ. เฉพาะเจาะจงในเครือข่าย)
-    if (hospitalId && hospitalId !== 'all') {
-      query = query.eq('hospital_id', hospitalId);
+    // ✅ ขั้นตอนที่สี่: กรองตาม PAM Level และโค้ช
+    if (pamLevel && pamLevel !== 'all') {
+      query = query.eq('pam_level', pamLevel);
     }
-
     if (coachId && coachId !== 'all') {
       query = query.eq('coach_id', coachId);
     }
 
-    if (pamLevel && pamLevel !== 'all') {
-      query = query.eq('pam_level', pamLevel);
-    }
-
-    // 4. ค้นหาทั่วไป (ชื่อ/HN)
+    // ✅ ขั้นตอนที่ห้า: ค้นหาทั่วไป (ชื่อ/HN)
     if (search && search.trim() !== '') {
       const searchTerm = search.trim();
       query = query.or(
@@ -271,7 +256,10 @@ export async function getPatientCount(
     }
 
     const { count, error } = await query;
-    if (error) return 0;
+    if (error) {
+      console.error('❌ [getPatientCount] Error:', error);
+      return 0;
+    }
     return count || 0;
   } catch (err) {
     console.error('❌ [getPatientCount] Exception:', err);
@@ -279,15 +267,15 @@ export async function getPatientCount(
   }
 }
 
-// ✅ ฟังก์ชันดึงข้อมูลแบบแบ่งหน้า (ใช้สิทธิ์การเข้าถึงเดียวกัน)
+// ✅ ฟังก์ชันดึงข้อมูลแบบแบ่งหน้า (รองรับ Network View)
 export async function getPatientListPaginated(
   page: number = 0,
   pageSize: number = 50,
   search?: string,
   idCardSearch?: string,
   pamLevel?: string,
-  hospitalIds?: string[], // ✅ รับ List IDs จาก Permission
-  hospitalId?: string,
+  accessibleHospitalIds?: string[], // ✅ ขอบเขตสิทธิ์
+  filterHospitalId?: string,       // ✅ กรองย่อย
   coachId?: string,
   sortBy: string = 'created_at',
   sortOrder: 'asc' | 'desc' = 'desc'
@@ -301,7 +289,7 @@ export async function getPatientListPaginated(
       'first_name': 'first_name',
       'last_name': 'last_name',
       'hospital_number': 'hospital_number',
-      'users.id_card': 'created_at', 
+      'users.id_card': 'created_at',
       'hospitals.name': 'hospital_id',
       'coach_name': 'coach_id',
       'pam_level': 'pam_level',
@@ -320,20 +308,24 @@ export async function getPatientListPaginated(
       `, { count: 'exact' })
       .eq('is_active', true);
 
-    // ✅ 1. กรองตามสิทธิ์เครือข่าย (สำคัญที่สุด)
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('hospital_id', hospitalIds);
+    // ✅ 1. บังคับสิทธิ์เครือข่ายก่อนทุกอย่าง
+    if (accessibleHospitalIds && accessibleHospitalIds.length > 0) {
+      query = query.in('hospital_id', accessibleHospitalIds);
     }
 
-    // 2. ค้นหา ID Card
+    // ✅ 2. กรองย่อยภายในเครือข่าย
+    if (filterHospitalId && filterHospitalId !== 'all') {
+      query = query.eq('hospital_id', filterHospitalId);
+    }
+
+    // ✅ 3. ค้นหา ID Card บนชุดข้อมูลที่ผ่านการบังคับสิทธิ์แล้ว
     if (idCardSearch && idCardSearch.trim() !== '') {
-      const cleanId = idCardSearch.trim().replace(/[-\s]/g, '');
+      const cleanId = idCardSearch.trim().replace(/[-\\s]/g, '');
       const { data: matchingUsers } = await supabase
         .from('users')
         .select('id')
         .eq('role', 'patient')
         .ilike('id_card', `%${cleanId}%`);
-      
       const userIds = matchingUsers?.map(u => u.id) || [];
       if (userIds.length > 0) {
         query = query.in('id', userIds);
@@ -342,18 +334,15 @@ export async function getPatientListPaginated(
       }
     }
 
-    // 3. Filter Dropdown
-    if (hospitalId && hospitalId !== 'all') {
-      query = query.eq('hospital_id', hospitalId);
+    // ✅ 4. กรองตาม PAM Level และโค้ช
+    if (pamLevel && pamLevel !== 'all') {
+      query = query.eq('pam_level', pamLevel);
     }
     if (coachId && coachId !== 'all') {
       query = query.eq('coach_id', coachId);
     }
-    if (pamLevel && pamLevel !== 'all') {
-      query = query.eq('pam_level', pamLevel);
-    }
-    
-    // 4. ค้นหาทั่วไป
+
+    // ✅ 5. ค้นหาทั่วไป
     if (search && search.trim() !== '') {
       const searchTerm = search.trim();
       query = query.or(
@@ -361,16 +350,21 @@ export async function getPatientListPaginated(
       );
     }
 
-    // ✅ Server-side Sort & Range
+    // ✅ 6. เรียงลำดับและแบ่งหน้า
     query = query.order(sortColumn, { ascending: sortOrder === 'asc' });
     query = query.range(start, end);
 
     const { data: profiles, error: profilesError, count } = await query;
-     
-    if (profilesError) return { patients: [], total: 0 };
-    if (!profiles || profiles.length === 0) return { patients: [], total: count || 0 };
+    
+    if (profilesError) {
+      console.error('❌ [getPatientListPaginated] Profiles Error:', profilesError);
+      return { patients: [], total: 0 };
+    }
+    if (!profiles || profiles.length === 0) {
+      return { patients: [], total: count || 0 };
+    }
 
-    // ดึงข้อมูล users และ coaches เพิ่มเติม
+    // ดึงข้อมูล users และ coaches
     const userIds = profiles.map(p => p.id);
     const { data: usersData } = await supabase
       .from('users')
