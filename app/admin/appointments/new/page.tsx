@@ -35,15 +35,17 @@ interface Coach {
   users?: { hospital_id?: string; role?: string; hospitals?: { id?: string; name?: string; code?: string; type?: 'main' | 'sub'; } };
 }
 
+// app/admin/appointments/new/page.tsx
+
 interface Patient {
-  id: string; 
-  first_name: string; 
-  last_name: string; 
+  id: string;
+  first_name: string;
+  last_name: string;
   hospital_number: string;
-  id_card?: string; // ✅ เพิ่มเลขบัตรประชาชน
-  phone?: string; 
+  id_card?: string;       // ✅ ต้องมีเพื่อรองรับการแสดงผลและค้นหา
+  phone?: string;
   hospital_id?: string;
-  hospital_name?: string; // ✅ เพิ่มชื่อโรงพยาบาลสำหรับแสดงผล
+  hospital_name?: string; // ✅ ต้องมีเพื่อแสดงชื่อ รพ. ใน Dropdown
   hospital_code?: string;
 }
 

@@ -3102,15 +3102,11 @@ export async function updatePatientCoachesBatch(
 
 // lib/supabase/queries.ts
 
-/**
- * ดึงรายชื่อผู้ป่วยจากเครือข่ายโรงพยาบาลที่กำหนด
- * รองรับ Searchable Dropdown: แสดง ชื่อ-สกุล, HN, และชื่อโรงพยาบาล
- */
 export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
   try {
     console.log('🔍 [Queries] Fetching patients for hospitals:', hospitalIds);
     
-    // ✅ ใช้ Join เพื่อดึงข้อมูลจากตาราง users (id_card) และ hospitals (name)
+    // ✅ แก้ไข: ใช้ชื่อ FK 'profiles_id_fkey' แทน 'users' เพื่อแก้ปัญหา PGRST201
     const { data, error } = await supabase
       .from('profiles')
       .select(`
@@ -3121,16 +3117,16 @@ export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
         phone, 
         hospital_id,
         is_active,
-        users!inner ( 
+        users:profiles_id_fkey!inner ( 
           id_card 
         ),
-        hospitals:hospital_id (
+        hospitals:profiles_hospital_id_fkey (
           name,
           code
         )
       `)
       .in('hospital_id', hospitalIds)
-      .eq('is_active', true) // ดึงเฉพาะผู้ป่วยที่ยัง Active
+      .eq('is_active', true)
       .order('first_name', { ascending: true });
 
     if (error) {
@@ -3138,7 +3134,7 @@ export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
       throw error;
     }
 
-    // ✅ จัดรูปแบบข้อมูลให้ใช้งานง่ายใน Frontend (Searchable Dropdown)
+    // จัดรูปแบบข้อมูลให้ใช้งานง่ายในหน้าเพจ
     const formattedData = (data || []).map((p: any) => ({
       id: p.id,
       first_name: p.first_name,
