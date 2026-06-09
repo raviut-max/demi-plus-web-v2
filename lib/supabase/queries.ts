@@ -263,15 +263,15 @@ export async function getPatientCount(
   }
 }
 
-// ✅ ฟังก์ชันดึงข้อมูลแบบแบ่งหน้า + เรียงลำดับจาก Database
+// ... existing code ...
 export async function getPatientListPaginated(
   page: number = 0,
   pageSize: number = 50,
-  searchNameHN?: string,     // ค้นหา ชื่อ, นามสกุล, HN
-  searchIdCard?: string,     // ค้นหา เลขบัตรประชาชน
+  searchNameHN?: string,
+  searchIdCard?: string,
   pamLevel?: string,
-  hospitalIds?: string[],    // Permission
-  hospitalId?: string,       // Filter
+  hospitalIds?: string[], // ✅ ใช้เฉพาะสำหรับสิทธิ์
+  hospitalId?: string,    // ✅ ใช้เฉพาะสำหรับ dropdown filter
   coachId?: string,
   sortBy: string = 'created_at',
   sortOrder: 'asc' | 'desc' = 'desc'
@@ -285,7 +285,7 @@ export async function getPatientListPaginated(
       'first_name': 'first_name',
       'last_name': 'last_name',
       'hospital_number': 'hospital_number',
-      'users.id_card': 'created_at', // Sort by created_at as proxy for ID card sort
+      'users.id_card': 'created_at',
       'hospitals.name': 'hospital_id',
       'coach_name': 'coach_id',
       'pam_level': 'pam_level',
@@ -304,13 +304,18 @@ export async function getPatientListPaginated(
       `, { count: 'exact' })
       .eq('is_active', true);
 
-    // ✅ 1. Logic การค้นหา ID Card (ทำก่อนอื่นเพื่อหา User IDs)
+    // ✅ 1. บังคับใช้สิทธิ์ที่ระดับฐานข้อมูล (First and Mandatory)
+    if (hospitalIds && hospitalIds.length > 0) {
+      query = query.in('hospital_id', hospitalIds); // ✅ ขั้นตอนแรกเสมอ
+    }
+
+    // ✅ 2. ค้นหา ID Card บนชุดข้อมูลที่ผ่านการบังคับสิทธิ์แล้ว
     if (searchIdCard && searchIdCard.trim() !== '') {
-      const cleanId = searchIdCard.trim().replace(/[-\s]/g, '');
+      const cleanId = searchIdCard.trim().replace(/[-\\s]/g, '');
       const { data: matchingUsers } = await supabase
         .from('users')
         .select('id')
-        .eq('role', 'patient')
+        .eq('role', 'patient') // ✅ ยืนยัน role อย่างชัดเจน
         .ilike('id_card', `%${cleanId}%`);
       
       const userIds = matchingUsers?.map(u => u.id) || [];
@@ -321,7 +326,7 @@ export async function getPatientListPaginated(
       }
     }
 
-    // ✅ 2. ค้นหาทั่วไป (ชื่อ/HN)
+    // ✅ 3. ค้นหาทั่วไป (ชื่อ/HN) บนชุดข้อมูลที่ผ่านการบังคับสิทธิ์แล้ว
     if (searchNameHN && searchNameHN.trim() !== '') {
       const searchTerm = searchNameHN.trim();
       query = query.or(
@@ -329,30 +334,23 @@ export async function getPatientListPaginated(
       );
     }
 
-    // ✅ 3. กรองตามสิทธิ์โรงพยาบาล (ต้องอยู่หลัง Search ID Card เสมอ!)
-    if (hospitalIds && hospitalIds.length > 0) {
-      query = query.in('hospital_id', hospitalIds);
-    }
-
-    // ✅ 4. กรองตาม Dropdown โรงพยาบาล
+    // ✅ 4. กรองตาม dropdown filter (Optional) บนชุดข้อมูลที่ผ่านการบังคับสิทธิ์แล้ว
     if (hospitalId && hospitalId !== 'all') {
       query = query.eq('hospital_id', hospitalId);
     }
-
     if (coachId && coachId !== 'all') {
       query = query.eq('coach_id', coachId);
     }
-
     if (pamLevel && pamLevel !== 'all') {
       query = query.eq('pam_level', pamLevel);
     }
 
-    // ✅ 5. Server-side Sort & Range
+    // ✅ 5. เรียงลำดับและแบ่งหน้า (Server-side)
     query = query.order(sortColumn, { ascending: sortOrder === 'asc' });
     query = query.range(start, end);
 
     const { data: profiles, error: profilesError, count } = await query;
-     
+    
     if (profilesError) {
       console.error('❌ [getPatientListPaginated] Profiles Error:', profilesError);
       return { patients: [], total: 0 };
@@ -361,7 +359,7 @@ export async function getPatientListPaginated(
       return { patients: [], total: count || 0 };
     }
 
-    // ดึงข้อมูล users และ coaches เพิ่มเติม
+    // ดึงข้อมูล users และ coaches
     const userIds = profiles.map(p => p.id);
     const { data: usersData } = await supabase
       .from('users')
@@ -394,7 +392,6 @@ export async function getPatientListPaginated(
     return { patients: [], total: 0 };
   }
 }
-// ... existing code ...
 
 // ✅ ฟังก์ชันเดิมสำหรับดึงรายการทั้งหมด (ยังคงใช้ได้ในบางจุด)
 export async function getPatientList(
