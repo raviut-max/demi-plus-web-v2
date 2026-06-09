@@ -1,3 +1,4 @@
+// app/admin/patients/page.tsx
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -39,7 +40,7 @@ export default function PatientManagementPage() {
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ✅ Search States แยกกันชัดเจน เพื่อแก้ปัญหา Permission และ Search ผิดที่
+  // ✅ Search States แยกกันชัดเจนเพื่อแก้ปัญหา Permission และ Search ผิดที่
   const [searchTermNameHN, setSearchTermNameHN] = useState('');
   const [searchTermIdCard, setSearchTermIdCard] = useState('');
   
@@ -216,7 +217,7 @@ export default function PatientManagementPage() {
       const hospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
 
-      // ดึงจำนวนผู้ป่วยทั้งหมด
+      // ดึงจำนวนผู้ป่วยทั้งหมด (ส่ง Search แยกประเภท)
       const total = await getPatientCount(
         searchTermNameHN,   // search (ชื่อ/HN)
         searchTermIdCard,   // idCardSearch (ID Card)
@@ -235,8 +236,8 @@ export default function PatientManagementPage() {
       const { patients: data } = await getPatientListPaginated(
         fetchCurrentPage,
         fetchPageSize,
-        searchTermNameHN,   // search
-        searchTermIdCard,   // idCardSearch
+        searchTermNameHN,   // searchNameHN
+        searchTermIdCard,   // searchIdCard
         pamParam,
         hospitalIdsParam,
         hospitalIdParam,
@@ -679,22 +680,22 @@ export default function PatientManagementPage() {
            </div>
            
            {/* ✅ ปุ่ม Export แบบเลือกโหมด */}
-            <div className="flex items-center gap-2">
-               <button
-                onClick={() => exportToExcel('current')}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
-               >
-                 <FileSpreadsheet className="w-4 h-4" />
-                Export เฉพาะหน้านี้
-               </button>
-               <button
-                onClick={() => exportToExcel('all')}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
-               >
-                 <Download className="w-4 h-4" />
-                Export ทั้งหมด
-               </button>
-            </div>
+           <div className="flex items-center gap-2">
+              <button
+               onClick={() => exportToExcel('current')}
+               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+               Export เฉพาะหน้านี้
+              </button>
+              <button
+               onClick={() => exportToExcel('all')}
+               className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+              >
+                <Download className="w-4 h-4" />
+               Export ทั้งหมด
+              </button>
+           </div>
         </div>
 
         {/* Patient Table */}
@@ -726,10 +727,10 @@ export default function PatientManagementPage() {
               </thead>
               <tbody className="divide-y">
                 {patients.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                      <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                      <p>ไม่พบข้อมูลผู้ป่วย</p>
+                   <tr>
+                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                       <p>ไม่พบข้อมูลผู้ป่วย</p>
                       {(searchTermNameHN || searchTermIdCard || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all') && (
                          <button
                           onClick={() => { setSearchTermNameHN(''); setSearchTermIdCard(''); setSelectedHospitalFilter('all'); setSelectedCoachFilter('all'); handleSearch(); }}
@@ -738,8 +739,8 @@ export default function PatientManagementPage() {
                           ล้างฟิลเตอร์และค้นหาใหม่
                          </button>
                       )}
-                    </td>
-                  </tr>
+                     </td>
+                   </tr>
                 ) : (
                   patients.map((patient) => (
                      <tr key={patient.id} className="hover:bg-gray-50">
