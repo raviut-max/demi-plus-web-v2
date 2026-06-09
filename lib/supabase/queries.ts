@@ -150,6 +150,7 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 // 👥 Patient Management Functions
 // =====================================================
+
 // ... existing code ...
 export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
   try {
@@ -174,24 +175,36 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
     if (hospitalError || !hospitalData) return [];
 
-    let mainHospitalId = hospitalData.id;
+    let accessibleIds: string[] = [];
 
-    // ✅ กรณีเป็นลูกข่าย: ต้องหา ID ของแม่ข่ายก่อน เพื่อไปดึงลูกข่ายตัวอื่น
-    if (hospitalData.type === 'sub' && hospitalData.parent_id) {
-      mainHospitalId = hospitalData.parent_id;
-    }
-
-    // ✅ ดึงลูกข่ายทั้งหมดภายใต้แม่ข่ายนี้ (รวมถึงตัวเองด้วยถ้าเป็น sub)
-    const accessibleIds: string[] = [mainHospitalId]; // เพิ่มแม่ข่ายเข้าไปด้วยเสมอ
-    
-    const { data: subHospitals } = await supabase
-      .from('hospitals')
-      .select('id')
-      .eq('parent_id', mainHospitalId)
-      .eq('is_active', true);
-
-    if (subHospitals && subHospitals.length > 0) {
-      subHospitals.forEach(sub => accessibleIds.push(sub.id));
+    if (hospitalData.type === 'main') {
+      // ✅ แม่ข่าย: ดูตัวเอง + ลูกข่ายทั้งหมดใต้สังกัด
+      accessibleIds = [hospitalData.id];
+      const { data: subHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalData.id)
+        .eq('is_active', true);
+      
+      if (subHospitals && subHospitals.length > 0) {
+        subHospitals.forEach(sub => accessibleIds.push(sub.id));
+      }
+    } else if (hospitalData.type === 'sub' && hospitalData.parent_id) {
+      // ✅ ลูกข่าย: Network View (ดูแม่ข่าย + ลูกข่ายตัวอื่นในเครือเดียวกัน)
+      accessibleIds = [hospitalData.parent_id]; // เพิ่มแม่ข่ายก่อน
+      
+      const { data: siblingHospitals } = await supabase
+        .from('hospitals')
+        .select('id')
+        .eq('parent_id', hospitalData.parent_id)
+        .eq('is_active', true);
+      
+      if (siblingHospitals && siblingHospitals.length > 0) {
+        siblingHospitals.forEach(sib => accessibleIds.push(sib.id));
+      }
+    } else {
+      // กรณีอื่นๆ หรือไม่มี parent_id
+      accessibleIds = [hospitalData.id];
     }
 
     return accessibleIds;
@@ -200,7 +213,6 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
     return [];
   }
 }
-// ... existing code ...
 // ... existing code ...
 export async function getPatientCount(
   search?: string,       // ค้นหา ชื่อ, นามสกุล, HN
@@ -222,7 +234,7 @@ export async function getPatientCount(
       const { data: matchingUsers } = await supabase
         .from('users')
         .select('id')
-        .eq('role', 'patient')
+         .eq('role', 'patient')
         .ilike('id_card', `%${cleanId}%`);
       
       const userIds = matchingUsers?.map(u => u.id) || [];
@@ -233,7 +245,7 @@ export async function getPatientCount(
       }
     }
 
-    // ✅ กรองตามสิทธิ์โรงพยาบาล (Permission)
+    // ✅ กรองตามสิทธิ์โรงพยาบาล (Permission) - สำคัญมาก!
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
@@ -293,7 +305,7 @@ export async function getPatientListPaginated(
       'first_name': 'first_name',
       'last_name': 'last_name',
       'hospital_number': 'hospital_number',
-      'users.id_card': 'created_at', // Sort by created_at as proxy or handle separately
+      'users.id_card': 'created_at', 
       'hospitals.name': 'hospital_id',
       'coach_name': 'coach_id',
       'pam_level': 'pam_level',
@@ -318,7 +330,7 @@ export async function getPatientListPaginated(
       const { data: matchingUsers } = await supabase
         .from('users')
         .select('id')
-        .eq('role', 'patient')
+         .eq('role', 'patient')
         .ilike('id_card', `%${cleanId}%`);
       
       const userIds = matchingUsers?.map(u => u.id) || [];
@@ -329,7 +341,7 @@ export async function getPatientListPaginated(
       }
     }
 
-    // ✅ Permission & Filters
+    // ✅ Permission & Filters - ต้องอยู่ก่อน Sort/Range
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }

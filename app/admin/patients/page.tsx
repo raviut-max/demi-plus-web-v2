@@ -219,6 +219,7 @@ export default function PatientManagementPage() {
   };
 
   // ✅ โหลดข้อมูลผู้ป่วยแบบ Pagination + Server-side Sort
+  // ส่ง Parameter แยกกันชัดเจนเพื่อรักษา Permission
   const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -359,6 +360,7 @@ export default function PatientManagementPage() {
         'วันเกิด': birthDateStr,
         'เพศ': genderThai,
         'โทรศัพท์': patient.phone || '',
+        'อีเมล': patient.email || '',
         'โรงพยาบาล': patient.hospitals?.name || '',
         'โค้ช': patient.coach_name || '',
         'PAM Level': patient.pam_level || '',
