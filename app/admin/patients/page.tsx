@@ -210,7 +210,6 @@ export default function PatientManagementPage() {
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
       
-      // ส่งคำค้นหาแยกประเภทไปยัง Backend
       const pamParam = isAllPam ? undefined : selectedPamLevel;
       const hospitalIdsParam = isAllHospitals ? undefined : hospitalIds;
       const hospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
@@ -317,7 +316,6 @@ export default function PatientManagementPage() {
   // ✅ Export Excel with Selection
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
-    
     // ถ้าเลือก Export ทั้งหมด ให้ดึงข้อมูลใหม่โดยไม่จำกัดจำนวนแถว
     if (mode === 'all') {
       await loadPatients(accessibleHospitalIds, true);
@@ -664,11 +662,11 @@ export default function PatientManagementPage() {
           
           <div className="flex justify-end">
              <button
-               onClick={handleSearch}
-               disabled={loadingFilters}
-               className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50"
+              onClick={handleSearch}
+              disabled={loadingFilters}
+              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50"
              >
-               {loadingFilters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} ค้นหา
+              {loadingFilters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} ค้นหา
              </button>
           </div>
         </div>
@@ -682,18 +680,18 @@ export default function PatientManagementPage() {
            {/* ✅ ปุ่ม Export แบบเลือกโหมด */}
             <div className="flex items-center gap-2">
                <button
-                 onClick={() => exportToExcel('current')}
-                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+                onClick={() => exportToExcel('current')}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
                >
                  <FileSpreadsheet className="w-4 h-4" />
-                 Export เฉพาะหน้านี้
+                Export เฉพาะหน้านี้
                </button>
                <button
-                 onClick={() => exportToExcel('all')}
-                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+                onClick={() => exportToExcel('all')}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
                >
                  <Download className="w-4 h-4" />
-                 Export ทั้งหมด
+                Export ทั้งหมด
                </button>
             </div>
         </div>
