@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 
 // =====================================================
-//  Interfaces
+// 📋 Interfaces
 // =====================================================
 interface Hospital {
   id: string; name: string; code: string; type: 'main' | 'sub'; parent_id: string | null;
@@ -36,9 +36,15 @@ interface Coach {
 }
 
 interface Patient {
-  id: string; first_name: string; last_name: string; hospital_number: string;
-  id_card?: string; phone?: string; hospital_id?: string;
-  hospitals?: { name?: string; code?: string };
+  id: string; 
+  first_name: string; 
+  last_name: string; 
+  hospital_number: string;
+  id_card?: string; 
+  phone?: string; 
+  hospital_id?: string;
+  hospital_name?: string; // เพิ่มชื่อกันไว้เลยเพื่อความสะดวก
+  hospital_code?: string;
 }
 
 export default function NewAppointmentPage() {
@@ -75,7 +81,7 @@ export default function NewAppointmentPage() {
   });
 
   // =====================================================
-  //  AUTH & DATA LOADING
+  // 📥 AUTH & DATA LOADING
   // =====================================================
   useEffect(() => {
     const userData = checkSession();
@@ -118,9 +124,18 @@ export default function NewAppointmentPage() {
 
       setHospitals(networkHospitals);
       const networkIds = networkHospitals.map(h => h.id);
-      await Promise.all([loadCoaches(networkIds), loadPatients(networkIds)]);
-    } catch (err) { console.error('❌ Network Data Error:', err); setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย'); }
-    finally { setLoading(false); }
+      
+      // โหลดข้อมูลแบบ Parallel เพื่อความเร็ว
+      await Promise.all([
+        loadCoaches(networkIds),
+        loadPatients(networkIds)
+      ]);
+    } catch (err) { 
+      console.error('❌ Network Data Error:', err); 
+      setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย'); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   const loadCoaches = async (ids: string[]) => {
@@ -129,13 +144,19 @@ export default function NewAppointmentPage() {
 
   const loadPatients = async (ids: string[]) => {
     try {
-      if (typeof getPatientsByHospitalNetwork !== 'function') { console.warn('Function not found'); return; }
-      setPatients(await getPatientsByHospitalNetwork(ids));
-    } catch (e) { console.error(e); }
+      if (typeof getPatientsByHospitalNetwork !== 'function') { 
+        console.warn('Function getPatientsByHospitalNetwork not found'); 
+        return; 
+      }
+      const data = await getPatientsByHospitalNetwork(ids);
+      setPatients(data);
+    } catch (e) { 
+      console.error('❌ Load Patients Error:', e); 
+    }
   };
 
   // =====================================================
-  // HANDLERS & LOGIC
+  // ️ HANDLERS & LOGIC
   // =====================================================
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -143,6 +164,7 @@ export default function NewAppointmentPage() {
     if (validationErrors[name]) setValidationErrors(prev => ({ ...prev, [name]: '' }));
   };
 
+  // Filter Patients Logic (ค้นหาจาก ชื่อ, HN, เลขบัตร)
   const filteredPatients = useMemo(() => {
     if (!patientSearchTerm.trim()) return patients.slice(0, 50);
     const term = patientSearchTerm.toLowerCase();
@@ -153,6 +175,7 @@ export default function NewAppointmentPage() {
     ).slice(0, 50);
   }, [patients, patientSearchTerm]);
 
+  // Filter Staff Logic
   const filteredStaff = useMemo(() => {
     if (!staffSearchTerm.trim()) return coaches.slice(0, 50);
     const term = staffSearchTerm.toLowerCase();
@@ -193,7 +216,7 @@ export default function NewAppointmentPage() {
   };
 
   // =====================================================
-  // RENDER
+  // 🎨 RENDER
   // =====================================================
   if (success) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -248,6 +271,7 @@ export default function NewAppointmentPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6">
+        
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
@@ -266,41 +290,64 @@ export default function NewAppointmentPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
-                type="text" placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
+                type="text" 
+                placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
                 value={patientSearchTerm}
                 onChange={(e) => {
-                  setPatientSearchTerm(e.target.value); setIsPatientDropdownOpen(true);
-                  if (formData.patient_id) { setFormData(p => ({...p, patient_id: ''})); setPatientSearchTerm(''); }
+                  setPatientSearchTerm(e.target.value); 
+                  setIsPatientDropdownOpen(true);
+                  if (formData.patient_id) { 
+                    setFormData(p => ({...p, patient_id: ''})); 
+                    setPatientSearchTerm(''); 
+                  }
                 }}
                 onFocus={() => setIsPatientDropdownOpen(true)}
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${validationErrors.patient_id ? 'border-red-500' : 'border-gray-300'}`}
               />
             </div>
+            
+            {/* Dropdown List */}
             {isPatientDropdownOpen && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
                 {filteredPatients.length > 0 ? (
                   filteredPatients.map((p) => (
-                    <div key={p.id} onClick={() => {
-                      setFormData(prev => ({ ...prev, patient_id: p.id }));
-                      setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
-                      setIsPatientDropdownOpen(false);
-                    }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
+                    <div 
+                      key={p.id} 
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, patient_id: p.id }));
+                        setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
+                        setIsPatientDropdownOpen(false);
+                      }} 
+                      className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
+                    >
                       <div className="flex justify-between items-start">
                         <div>
-                          <span className="font-bold text-gray-800">{p.first_name} {p.last_name}</span>
-                          <span className="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">HN: {p.hospital_number}</span>
+                          <span className="font-bold text-gray-800 text-base">{p.first_name} {p.last_name}</span>
+                          <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-medium">HN: {p.hospital_number}</span>
                         </div>
                       </div>
-                      <div className="mt-1 flex items-center gap-4 text-xs text-gray-500">
-                        <span className="flex items-center gap-1"><IdCard className="w-3 h-3" /> {p.id_card || '-'}</span>
-                        <span className="flex items-center gap-1"><Hospital className="w-3 h-3" /> {p.hospitals?.name || 'ไม่ระบุรพ.'}</span>
+                      
+                      {/* แสดงรายละเอียดเพิ่มเติม: เลขบัตร + โรงพยาบาล */}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+                        <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                          <IdCard className="w-3 h-3 text-gray-400" /> 
+                          บัตร: {p.id_card || '-'}
+                        </span>
+                        <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                          <Hospital className="w-3 h-3 text-gray-400" /> 
+                          รพ.: {p.hospital_name || 'ไม่ระบุ'}
+                        </span>
                       </div>
                     </div>
                   ))
-                ) : (<div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>)}
+                ) : (
+                  <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
+                )}
               </div>
             )}
+            
             {validationErrors.patient_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.patient_id}</p>}
+            <p className="text-xs text-gray-400 mt-2">* ค้นหาได้จาก: ชื่อ-สกุล, เลข HN, หรือเลขบัตรประชาชน</p>
           </div>
         </div>
 
@@ -314,11 +361,16 @@ export default function NewAppointmentPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
-                type="text" placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหาโค้ช..."
+                type="text" 
+                placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหาโค้ช..."
                 value={staffSearchTerm}
                 onChange={(e) => {
-                  setStaffSearchTerm(e.target.value); setIsStaffDropdownOpen(true);
-                  if (formData.staff_id) { setFormData(p => ({...p, staff_id: ''})); setStaffSearchTerm(''); }
+                  setStaffSearchTerm(e.target.value); 
+                  setIsStaffDropdownOpen(true);
+                  if (formData.staff_id) { 
+                    setFormData(p => ({...p, staff_id: ''})); 
+                    setStaffSearchTerm(''); 
+                  }
                 }}
                 onFocus={() => setIsStaffDropdownOpen(true)}
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${validationErrors.staff_id ? 'border-red-500' : 'border-gray-300'}`}
@@ -328,11 +380,15 @@ export default function NewAppointmentPage() {
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
                 {filteredStaff.length > 0 ? (
                   filteredStaff.map((c) => (
-                    <div key={c.user_id} onClick={() => {
-                      setFormData(prev => ({ ...prev, staff_id: c.user_id }));
-                      setStaffSearchTerm(`${c.full_name_th} ${c.specialization_th ? `(${c.specialization_th})` : ''}`);
-                      setIsStaffDropdownOpen(false);
-                    }} className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
+                    <div 
+                      key={c.user_id} 
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, staff_id: c.user_id }));
+                        setStaffSearchTerm(`${c.full_name_th} ${c.specialization_th ? `(${c.specialization_th})` : ''}`);
+                        setIsStaffDropdownOpen(false);
+                      }} 
+                      className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
+                    >
                       <div className="font-medium text-gray-800">{c.full_name_th}</div>
                       <div className="text-xs text-gray-500 mt-1 flex justify-between">
                         <span>{c.specialization_th || 'ไม่ระบุความเชี่ยวชาญ'}</span>
@@ -340,7 +396,9 @@ export default function NewAppointmentPage() {
                       </div>
                     </div>
                   ))
-                ) : (<div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>)}
+                ) : (
+                  <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
+                )}
               </div>
             )}
             {validationErrors.staff_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.staff_id}</p>}
@@ -401,5 +459,4 @@ export default function NewAppointmentPage() {
       </form>
     </div>
   );
-  
 }

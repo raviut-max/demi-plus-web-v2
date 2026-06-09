@@ -3104,8 +3104,9 @@ export async function updatePatientCoachesBatch(
 
 export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
   try {
-    console.log('🔍 [Queries] Fetching patients for hospitals:', hospitalIds);
+    console.log(' [Queries] Fetching patients for hospitals:', hospitalIds);
     
+    // ✅ ใช้ select แบบ Join เพื่อดึงข้อมูลจากตาราง users (id_card) และ hospitals (name)
     const { data, error } = await supabase
       .from('profiles')
       .select(`
@@ -3115,20 +3116,37 @@ export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
         hospital_number, 
         phone, 
         hospital_id,
-        users!inner ( id_card ),          -- ✅ ดึงเลขบัตรประชาชนจากตาราง users
-        hospitals:profiles_hospital_id_fkey ( name, code ) -- ✅ ดึงชื่อโรงพยาบาล
+        is_active,
+        users!inner ( 
+          id_card 
+        ),
+        hospitals:hospital_id (
+          name,
+          code
+        )
       `)
       .in('hospital_id', hospitalIds)
-      .eq('is_active', true)
+      .eq('is_active', true) // ดึงเฉพาะผู้ป่วยที่ยัง Active
       .order('first_name', { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error('❌ [Queries] Supabase Error:', error);
+      throw error;
+    }
     
-    // จัดรูปแบบข้อมูลให้ใช้งานง่ายในหน้าเพจ
+    // ✅ จัดรูปแบบข้อมูลให้ใช้งานง่ายใน Frontend
     const formattedData = (data || []).map((p: any) => ({
-      ...p,
-      id_card: p.users?.id_card || '-',
-      hospitals: { name: p.hospitals?.name || 'ไม่ระบุรพ.', code: p.hospitals?.code }
+      id: p.id,
+      first_name: p.first_name,
+      last_name: p.last_name,
+      hospital_number: p.hospital_number,
+      phone: p.phone,
+      hospital_id: p.hospital_id,
+      // ดึงเลขบัตรจาก users ที่ Join มา
+      id_card: p.users?.id_card || '-', 
+      // ดึงชื่อโรงพยาบาลจาก hospitals ที่ Join มา
+      hospital_name: p.hospitals?.name || 'ไม่ระบุรพ.',
+      hospital_code: p.hospitals?.code || '-'
     }));
 
     console.log(`✅ [Queries] Found ${formattedData.length} patients`);
@@ -3138,3 +3156,4 @@ export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
     return [];
   }
 };
+
