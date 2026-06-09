@@ -151,6 +151,8 @@ export async function filterDataByHospitalPermission<T>(
 // 👥 Patient Management Functions
 // =====================================================
 // ... existing code ...
+
+// ... existing code ...
 export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
   try {
     const { data: userData, error: userError } = await supabase
@@ -161,9 +163,8 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
     if (userError || !userData) return [];
 
-    // ✅ Super Admin เห็นทั้งหมด -> ส่งค่าว่างเพื่อให้ Backend รู้ว่าไม่ต้องกรอง
+    // ✅ Super Admin เห็นทั้งหมด -> ส่งค่าว่างเพื่อให้ Backend ไม่กรอง
     if (isSuperAdmin(userData)) return [];
-    
     if (!userData.hospital_id) return [];
 
     const { data: hospitalData, error: hospitalError } = await supabase
@@ -174,23 +175,23 @@ export async function getAccessibleHospitalIds(userId: string): Promise<string[]
 
     if (hospitalError || !hospitalData) return [];
 
-    const accessibleIds: string[] = [hospitalData.id];
+    let mainHospitalId = hospitalData.id;
 
-    // ✅ กรณีเป็นแม่ข่าย: ต้องดึงลูกข่ายทั้งหมดมาด้วย
-    if (hospitalData.type === 'main') {
-      const { data: subHospitals } = await supabase
-        .from('hospitals')
-        .select('id')
-        .eq('parent_id', hospitalData.id)
-        .eq('is_active', true);
-      
-      if (subHospitals && subHospitals.length > 0) {
-        subHospitals.forEach(sub => accessibleIds.push(sub.id));
-      }
-    } 
-    // ✅ กรณีเป็นลูกข่าย: ต้องดึงแม่ข่ายมาด้วย (เพื่อดูภาพรวมเครือข่าย)
-    else if (hospitalData.type === 'sub' && hospitalData.parent_id) {
-      accessibleIds.push(hospitalData.parent_id);
+    // ✅ ถ้าเป็นลูกข่าย ให้หา ID ของแม่ข่ายก่อน
+    if (hospitalData.type === 'sub' && hospitalData.parent_id) {
+      mainHospitalId = hospitalData.parent_id;
+    }
+
+    // ✅ ดึงลูกข่ายทั้งหมดภายใต้แม่ข่ายนี้
+    const accessibleIds: string[] = [mainHospitalId];
+    const { data: subHospitals } = await supabase
+      .from('hospitals')
+      .select('id')
+      .eq('parent_id', mainHospitalId)
+      .eq('is_active', true);
+
+    if (subHospitals && subHospitals.length > 0) {
+      subHospitals.forEach(sub => accessibleIds.push(sub.id));
     }
 
     return accessibleIds;
@@ -231,7 +232,7 @@ export async function getPatientCount(
       }
     }
 
-    // ✅ กรองตามสิทธิ์โรงพยาบาล (Permission) - สำคัญมาก!
+    // ✅ กรองตามสิทธิ์โรงพยาบาล (Permission)
     if (hospitalIds && hospitalIds.length > 0) {
       query = query.in('hospital_id', hospitalIds);
     }
@@ -357,7 +358,7 @@ export async function getPatientListPaginated(
       console.error('❌ [getPatientListPaginated] Profiles Error:', profilesError);
       return { patients: [], total: 0 };
     }
-    if (!profiles || profiles.length === 0) {
+    if (!profiles || profiles.length === 0)  {
       return { patients: [], total: count || 0 };
     }
 
