@@ -10,91 +10,39 @@ import {
   getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  getPatientsByHospitalNetwork // ต้องมีฟังก์ชันนี้ใน queries.ts
+  getPatientsByHospitalNetwork
 } from '@/lib/supabase/queries';
 import {
-  CalendarPlus,
-  AlertCircle,
-  Loader2,
-  ArrowLeft,
-  User,
-  Stethoscope,
-  LogOut,
-  CheckCircle,
-  XCircle,
-  Search,
-  Users,
-  Clock,
-  FileText,
-  Hospital,
-  IdCard
+  CalendarPlus, AlertCircle, Loader2, ArrowLeft, User, Stethoscope, LogOut,
+  CheckCircle, XCircle, Search, Users, Clock, FileText, Hospital, IdCard
 } from 'lucide-react';
 
 // =====================================================
-// 📋 Interfaces
+//  Interfaces
 // =====================================================
 interface Hospital {
-  id: string;
-  name: string;
-  code: string;
-  type: 'main' | 'sub';
-  parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
+  id: string; name: string; code: string; type: 'main' | 'sub'; parent_id: string | null;
+  parent_hospital?: { id: string; name: string; code: string };
 }
 
 interface UserHospital {
-  id: string;
-  name: string;
-  code: string;
-  type: 'main' | 'sub';
-  parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
+  id: string; name: string; code: string; type: 'main' | 'sub'; parent_id: string | null;
+  parent_hospital?: { id: string; name: string; code: string };
 }
 
 interface Coach {
-  id: string;
-  user_id: string;
-  full_name_th: string;
-  specialization_th?: string;
-  is_active: boolean;
-  users?: {
-    hospital_id?: string;
-    role?: string;
-    hospitals?: {
-      id?: string;
-      name?: string;
-      code?: string;
-      type?: 'main' | 'sub';
-    };
-  };
+  id: string; user_id: string; full_name_th: string; specialization_th?: string; is_active: boolean;
+  users?: { hospital_id?: string; role?: string; hospitals?: { id?: string; name?: string; code?: string; type?: 'main' | 'sub'; } };
 }
 
 interface Patient {
-  id: string;
-  first_name: string;
-  last_name: string;
-  hospital_number: string;
-  id_card?: string; // เพิ่มเลขบัตรประชาชน
-  phone?: string;
-  hospital_id?: string;
-  hospitals?: { // เพิ่มข้อมูลโรงพยาบาลเพื่อแสดงชื่อ
-    name?: string;
-    code?: string;
-  };
+  id: string; first_name: string; last_name: string; hospital_number: string;
+  id_card?: string; phone?: string; hospital_id?: string;
+  hospitals?: { name?: string; code?: string };
 }
 
 export default function NewAppointmentPage() {
   const router = useRouter();
-  
-  // Refs สำหรับจัดการ Click Outside Dropdown
   const patientDropdownRef = useRef<HTMLDivElement>(null);
   const staffDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -116,62 +64,42 @@ export default function NewAppointmentPage() {
   // Search States
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
   const [isPatientDropdownOpen, setIsPatientDropdownOpen] = useState(false);
-  
   const [staffSearchTerm, setStaffSearchTerm] = useState('');
   const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
-    patient_id: '',
-    staff_id: '',
-    appointment_type: 'follow_up',
-    appointment_date: '',
-    appointment_time: '',
-    duration_minutes: 30,
-    location: 'clinic',
-    notes: '',
+    patient_id: '', staff_id: '', appointment_type: 'follow_up',
+    appointment_date: '', appointment_time: '', duration_minutes: 30,
+    location: 'clinic', notes: '',
   });
 
   // =====================================================
-  // 📥 AUTH & DATA LOADING
+  //  AUTH & DATA LOADING
   // =====================================================
   useEffect(() => {
     const userData = checkSession();
-    if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
-
+    if (!userData) { router.push('/admin/login'); return; }
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
-      router.push('/admin/login');
-      return;
+      alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
     }
-
     setUser(userData);
     loadUserHospital(userData.id);
     loadNetworkData(userData.id);
   }, [router]);
 
-  // Handle Click Outside to close dropdowns
+  // Handle Click Outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (patientDropdownRef.current && !patientDropdownRef.current.contains(event.target as Node)) {
-        setIsPatientDropdownOpen(false);
-      }
-      if (staffDropdownRef.current && !staffDropdownRef.current.contains(event.target as Node)) {
-        setIsStaffDropdownOpen(false);
-      }
+      if (patientDropdownRef.current && !patientDropdownRef.current.contains(event.target as Node)) setIsPatientDropdownOpen(false);
+      if (staffDropdownRef.current && !staffDropdownRef.current.contains(event.target as Node)) setIsStaffDropdownOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const loadUserHospital = async (userId: string) => {
-    try {
-      const info = await getUserHospitalInfo(userId);
-      setUserHospital(info);
-    } catch (err) { console.error(err); }
+    try { setUserHospital(await getUserHospitalInfo(userId)); } catch (e) { console.error(e); }
   };
 
   const loadNetworkData = async (userId: string) => {
@@ -179,54 +107,30 @@ export default function NewAppointmentPage() {
       setLoading(true);
       const uHospital = await getUserHospitalInfo(userId);
       const allHospitals = await getHospitalsWithHierarchy();
-
       let networkHospitals: Hospital[] = [];
       let rootId: string | null = null;
 
       if (uHospital) {
         rootId = uHospital.type === 'main' ? uHospital.id : uHospital.parent_id;
-        if (rootId) {
-          networkHospitals = allHospitals.filter(h => h.id === rootId || h.parent_id === rootId);
-        } else {
-          networkHospitals = [uHospital as Hospital];
-        }
-      } else {
-        networkHospitals = allHospitals;
-      }
+        if (rootId) networkHospitals = allHospitals.filter(h => h.id === rootId || h.parent_id === rootId);
+        else networkHospitals = [uHospital as Hospital];
+      } else { networkHospitals = allHospitals; }
 
       setHospitals(networkHospitals);
       const networkIds = networkHospitals.map(h => h.id);
-
-      // Load Coaches & Patients in parallel
-      await Promise.all([
-        loadCoaches(networkIds),
-        loadPatients(networkIds)
-      ]);
-
-    } catch (error) {
-      console.error('❌ Network Data Error:', error);
-      setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย');
-    } finally {
-      setLoading(false);
-    }
+      await Promise.all([loadCoaches(networkIds), loadPatients(networkIds)]);
+    } catch (err) { console.error('❌ Network Data Error:', err); setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย'); }
+    finally { setLoading(false); }
   };
 
   const loadCoaches = async (ids: string[]) => {
-    try {
-      const data = await getCoachesWithHospitals(ids);
-      setCoaches(data);
-    } catch (e) { console.error(e); }
+    try { setCoaches(await getCoachesWithHospitals(ids)); } catch (e) { console.error(e); }
   };
 
   const loadPatients = async (ids: string[]) => {
     try {
-      // ตรวจสอบว่าฟังก์ชันมีอยู่จริงก่อนเรียกใช้
-      if (typeof getPatientsByHospitalNetwork !== 'function') {
-        console.warn('getPatientsByHospitalNetwork not found');
-        return;
-      }
-      const data = await getPatientsByHospitalNetwork(ids);
-      setPatients(data);
+      if (typeof getPatientsByHospitalNetwork !== 'function') { console.warn('Function not found'); return; }
+      setPatients(await getPatientsByHospitalNetwork(ids));
     } catch (e) { console.error(e); }
   };
 
@@ -239,22 +143,20 @@ export default function NewAppointmentPage() {
     if (validationErrors[name]) setValidationErrors(prev => ({ ...prev, [name]: '' }));
   };
 
-  // Filter Patients Logic
   const filteredPatients = useMemo(() => {
     if (!patientSearchTerm.trim()) return patients.slice(0, 50);
     const term = patientSearchTerm.toLowerCase();
-    return patients.filter(p => 
+    return patients.filter(p =>
       `${p.first_name} ${p.last_name}`.toLowerCase().includes(term) ||
       p.hospital_number.toLowerCase().includes(term) ||
       (p.id_card && p.id_card.includes(term))
     ).slice(0, 50);
   }, [patients, patientSearchTerm]);
 
-  // Filter Staff Logic
   const filteredStaff = useMemo(() => {
     if (!staffSearchTerm.trim()) return coaches.slice(0, 50);
     const term = staffSearchTerm.toLowerCase();
-    return coaches.filter(c => 
+    return coaches.filter(c =>
       c.full_name_th.toLowerCase().includes(term) ||
       (c.specialization_th && c.specialization_th.toLowerCase().includes(term))
     ).slice(0, 50);
@@ -266,62 +168,42 @@ export default function NewAppointmentPage() {
     if (!formData.staff_id) errors.staff_id = 'กรุณาเลือกแพทย์/เจ้าหน้าที่';
     if (!formData.appointment_date) errors.appointment_date = 'กรุณาเลือกวันที่';
     if (!formData.appointment_time) errors.appointment_time = 'กรุณาเลือกเวลา';
-
     setValidationErrors(errors);
-    if (Object.keys(errors).length > 0) {
-      setError(Object.values(errors)[0]);
-      return false;
-    }
+    if (Object.keys(errors).length > 0) { setError(Object.values(errors)[0]); return false; }
     return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+    e.preventDefault(); setError('');
     if (!validateForm()) return;
-
     setLoading(true);
     try {
       const dateTimeStr = `${formData.appointment_date}T${formData.appointment_time}:00`;
       const result = await createAppointment({
-        patient_id: formData.patient_id,
-        staff_id: formData.staff_id,
-        appointment_type: formData.appointment_type,
-        appointment_datetime: dateTimeStr,
+        patient_id: formData.patient_id, staff_id: formData.staff_id,
+        appointment_type: formData.appointment_type, appointment_datetime: dateTimeStr,
         duration_minutes: parseInt(formData.duration_minutes.toString()),
-        location: formData.location,
-        notes: formData.notes || undefined,
-        created_by: user?.id,
-        status: 'scheduled'
+        location: formData.location, notes: formData.notes || undefined,
+        created_by: user?.id, status: 'scheduled'
       });
-
-      if (result.success) {
-        setSuccess(true);
-        setTimeout(() => router.push('/admin/appointments'), 2000);
-      } else {
-        setError(result.error || 'เกิดข้อผิดพลาด');
-      }
-    } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด');
-    } finally {
-      setLoading(false);
-    }
+      if (result.success) { setSuccess(true); setTimeout(() => router.push('/admin/appointments'), 2000); }
+      else { setError(result.error || 'เกิดข้อผิดพลาด'); }
+    } catch (err: any) { setError(err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด'); }
+    finally { setLoading(false); }
   };
 
   // =====================================================
   // RENDER
   // =====================================================
-  if (success) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center bg-white p-8 rounded-xl shadow-lg border border-green-100">
-          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">สร้างนัดหมายสำเร็จ!</h2>
-          <p className="text-gray-600">กำลังกลับไปยังหน้ารายการ...</p>
-        </div>
+  if (success) return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="text-center bg-white p-8 rounded-xl shadow-lg border border-green-100">
+        <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+        <h2 className="text-2xl font-bold text-gray-800 mb-2">สร้างนัดหมายสำเร็จ!</h2>
+        <p className="text-gray-600">กำลังกลับไปยังหน้ารายการ...</p>
       </div>
-    );
-  }
+    </div>
+  );
 
   if (!user) return <div className="min-h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
 
@@ -341,14 +223,12 @@ export default function NewAppointmentPage() {
               </h1>
               <p className="text-gray-600 mt-1">กำหนดนัดหมายผู้ป่วยกับแพทย์หรือเจ้าหน้าที่</p>
             </div>
-            
             {userHospital && (
               <div className="text-right bg-blue-50 px-4 py-3 rounded-xl border border-blue-200">
                 <p className="font-semibold text-gray-800">{user?.full_name_th}</p>
                 <p className="text-xs text-gray-500">{userHospital.name} ({userHospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'})</p>
               </div>
             )}
-            
             <button onClick={() => { logout(); router.push('/admin/login'); }} className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
               <LogOut className="w-4 h-4 inline mr-2" /> ออกจากระบบ
             </button>
@@ -368,7 +248,6 @@ export default function NewAppointmentPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6">
-        
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
@@ -383,40 +262,29 @@ export default function NewAppointmentPage() {
             <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
             ผู้ป่วย <span className="text-red-500">*</span>
           </h2>
-
           <div ref={patientDropdownRef} className="relative">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
-                type="text"
-                placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
+                type="text" placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
                 value={patientSearchTerm}
                 onChange={(e) => {
-                  setPatientSearchTerm(e.target.value);
-                  setIsPatientDropdownOpen(true);
-                  if (formData.patient_id) {
-                    setFormData(p => ({...p, patient_id: ''}));
-                    setPatientSearchTerm(''); // Clear display if selecting new
-                  }
+                  setPatientSearchTerm(e.target.value); setIsPatientDropdownOpen(true);
+                  if (formData.patient_id) { setFormData(p => ({...p, patient_id: ''})); setPatientSearchTerm(''); }
                 }}
                 onFocus={() => setIsPatientDropdownOpen(true)}
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${validationErrors.patient_id ? 'border-red-500' : 'border-gray-300'}`}
               />
             </div>
-
             {isPatientDropdownOpen && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
                 {filteredPatients.length > 0 ? (
                   filteredPatients.map((p) => (
-                    <div
-                      key={p.id}
-                      onClick={() => {
-                        setFormData(prev => ({ ...prev, patient_id: p.id }));
-                        setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
-                        setIsPatientDropdownOpen(false);
-                      }}
-                      className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
-                    >
+                    <div key={p.id} onClick={() => {
+                      setFormData(prev => ({ ...prev, patient_id: p.id }));
+                      setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
+                      setIsPatientDropdownOpen(false);
+                    }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
                       <div className="flex justify-between items-start">
                         <div>
                           <span className="font-bold text-gray-800">{p.first_name} {p.last_name}</span>
@@ -429,9 +297,7 @@ export default function NewAppointmentPage() {
                       </div>
                     </div>
                   ))
-                ) : (
-                  <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
-                )}
+                ) : (<div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>)}
               </div>
             )}
             {validationErrors.patient_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.patient_id}</p>}
@@ -444,40 +310,29 @@ export default function NewAppointmentPage() {
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">2</span>
             แพทย์/เจ้าหน้าที่ <span className="text-red-500">*</span>
           </h2>
-
           <div ref={staffDropdownRef} className="relative">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
-                type="text"
-                placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหาโค้ช..."
+                type="text" placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหาโค้ช..."
                 value={staffSearchTerm}
                 onChange={(e) => {
-                  setStaffSearchTerm(e.target.value);
-                  setIsStaffDropdownOpen(true);
-                  if (formData.staff_id) {
-                    setFormData(p => ({...p, staff_id: ''}));
-                    setStaffSearchTerm('');
-                  }
+                  setStaffSearchTerm(e.target.value); setIsStaffDropdownOpen(true);
+                  if (formData.staff_id) { setFormData(p => ({...p, staff_id: ''})); setStaffSearchTerm(''); }
                 }}
                 onFocus={() => setIsStaffDropdownOpen(true)}
                 className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${validationErrors.staff_id ? 'border-red-500' : 'border-gray-300'}`}
               />
             </div>
-
             {isStaffDropdownOpen && (
               <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
                 {filteredStaff.length > 0 ? (
                   filteredStaff.map((c) => (
-                    <div
-                      key={c.user_id}
-                      onClick={() => {
-                        setFormData(prev => ({ ...prev, staff_id: c.user_id }));
-                        setStaffSearchTerm(`${c.full_name_th} ${c.specialization_th ? `(${c.specialization_th})` : ''}`);
-                        setIsStaffDropdownOpen(false);
-                      }}
-                      className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
-                    >
+                    <div key={c.user_id} onClick={() => {
+                      setFormData(prev => ({ ...prev, staff_id: c.user_id }));
+                      setStaffSearchTerm(`${c.full_name_th} ${c.specialization_th ? `(${c.specialization_th})` : ''}`);
+                      setIsStaffDropdownOpen(false);
+                    }} className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
                       <div className="font-medium text-gray-800">{c.full_name_th}</div>
                       <div className="text-xs text-gray-500 mt-1 flex justify-between">
                         <span>{c.specialization_th || 'ไม่ระบุความเชี่ยวชาญ'}</span>
@@ -485,9 +340,7 @@ export default function NewAppointmentPage() {
                       </div>
                     </div>
                   ))
-                ) : (
-                  <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
-                )}
+                ) : (<div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>)}
               </div>
             )}
             {validationErrors.staff_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.staff_id}</p>}
@@ -500,28 +353,22 @@ export default function NewAppointmentPage() {
             <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">3</span>
             รายละเอียดนัดหมาย
           </h2>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทนัดหมาย *</label>
               <select name="appointment_type" value={formData.appointment_type} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none">
-                <option value="follow_up">ติดตามผล</option>
-                <option value="consultation">ปรึกษาแพทย์</option>
-                <option value="checkup">ตรวจสุขภาพ</option>
-                <option value="lab">เจาะเลือด/แลป</option>
+                <option value="follow_up">ติดตามผล</option><option value="consultation">ปรึกษาแพทย์</option>
+                <option value="checkup">ตรวจสุขภาพ</option><option value="lab">เจาะเลือด/แลป</option>
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">สถานที่</label>
               <select name="location" value={formData.location} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none">
-                <option value="clinic">คลินิก</option>
-                <option value="ward">หอผู้ป่วย</option>
-                <option value="online">ออนไลน์ (Telemed)</option>
-                <option value="home_visit">เยี่ยมบ้าน</option>
+                <option value="clinic">คลินิก</option><option value="ward">หอผู้ป่วย</option>
+                <option value="online">ออนไลน์ (Telemed)</option><option value="home_visit">เยี่ยมบ้าน</option>
               </select>
             </div>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">วันที่และเวลา *</label>
@@ -533,14 +380,11 @@ export default function NewAppointmentPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1"><Clock className="w-3 h-3 inline mr-1" /> ระยะเวลา (นาที)</label>
               <select name="duration_minutes" value={formData.duration_minutes} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none">
-                <option value="15">15 นาที</option>
-                <option value="30">30 นาที</option>
-                <option value="45">45 นาที</option>
-                <option value="60">1 ชั่วโมง</option>
+                <option value="15">15 นาที</option><option value="30">30 นาที</option>
+                <option value="45">45 นาที</option><option value="60">1 ชั่วโมง</option>
               </select>
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1"><FileText className="w-3 h-3 inline mr-1" /> หมายเหตุ</label>
             <textarea name="notes" value={formData.notes} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none resize-none" />
@@ -554,7 +398,6 @@ export default function NewAppointmentPage() {
           </button>
           <button type="button" onClick={() => router.back()} className="px-8 py-4 bg-gray-500 text-white font-bold rounded-xl hover:bg-gray-600 transition-all">ยกเลิก</button>
         </div>
-
       </form>
     </div>
   );

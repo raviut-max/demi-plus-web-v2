@@ -3100,23 +3100,39 @@ export async function updatePatientCoachesBatch(
   return results;
 }
 
-// เพิ่มฟังก์ชันนี้ต่อท้ายไฟล์ lib/supabase/queries.ts ของคุณ
+// lib/supabase/queries.ts
 
 export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
   try {
     console.log('🔍 [Queries] Fetching patients for hospitals:', hospitalIds);
     
     const { data, error } = await supabase
-      .from('profiles')           // ✅ ใช้ตาราง profiles ไม่ใช่ patients
-      .select('id, first_name, last_name, hospital_number, phone, hospital_id')
+      .from('profiles')
+      .select(`
+        id, 
+        first_name, 
+        last_name, 
+        hospital_number, 
+        phone, 
+        hospital_id,
+        users!inner ( id_card ),          -- ✅ ดึงเลขบัตรประชาชนจากตาราง users
+        hospitals:profiles_hospital_id_fkey ( name, code ) -- ✅ ดึงชื่อโรงพยาบาล
+      `)
       .in('hospital_id', hospitalIds)
-      .eq('is_active', true)      // ✅ เฉพาะผู้ป่วยที่ยัง active อยู่
+      .eq('is_active', true)
       .order('first_name', { ascending: true });
 
     if (error) throw error;
     
-    console.log(`✅ [Queries] Found ${data?.length || 0} patients`);
-    return data || [];
+    // จัดรูปแบบข้อมูลให้ใช้งานง่ายในหน้าเพจ
+    const formattedData = (data || []).map((p: any) => ({
+      ...p,
+      id_card: p.users?.id_card || '-',
+      hospitals: { name: p.hospitals?.name || 'ไม่ระบุรพ.', code: p.hospitals?.code }
+    }));
+
+    console.log(`✅ [Queries] Found ${formattedData.length} patients`);
+    return formattedData;
   } catch (error) {
     console.error('❌ [Queries] Error fetching patients:', error);
     return [];
