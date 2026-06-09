@@ -1,4 +1,3 @@
-// app/admin/patients/[id]/goals/setup/page.tsx
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -127,7 +126,7 @@ export default function PatientGoalsSetupPage() {
         console.log('📋 Loaded activities:', activitiesData?.length || 0);
         setActivities(activitiesData || []);
 
-        // ✅ 2. ดึง goals ปัจจุบัน
+        // ✅ 2. ดึง goals ปัจจุบัน  
         const { data: activeGoals, error: goalsError } = await supabase
           .from('goals')
           .select('*')
@@ -150,7 +149,7 @@ export default function PatientGoalsSetupPage() {
           }
         });
         const uniqueGoals = Array.from(uniqueGoalsMap.values());
-        
+         
         console.log('🎯 Loaded goals:', uniqueGoals.length);
         setGoals(uniqueGoals);
 
@@ -391,9 +390,9 @@ export default function PatientGoalsSetupPage() {
           .eq('user_id', patientId)
           .eq('goal_type', 'weekly_activity');
 
-        // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
+        // ✅ นับจำนวนวันที่ไม่ซ้ำ แล้วบวก 1 เพื่อให้เป็นรอบถัดไป
         const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
-        newRoundNumber = uniqueDates.size;  // ✅ แก้ไข: ไม่ต้องบวก 1
+        newRoundNumber = uniqueDates.size + 1;  // ✅ แก้ไข: บวก 1
         
         console.log('🔢 [DEBUG] Unique dates:', Array.from(uniqueDates));
          console.log('🔢 [DEBUG] New round number:', newRoundNumber);
@@ -662,11 +661,8 @@ export default function PatientGoalsSetupPage() {
                 const existingGoal = goals.find(g => g.goal_name === activity.activity_code);
                 const currentDays = editedGoals[activity.activity_code]?.target_days || existingGoal?.target_days || defaultDays;
 
-                // ✅ ตรวจสอบว่าต้องแสดงช่อง "ค่าเป้าหมาย" หรือไม่
-                // L2: ไม่แสดงค่าเป้าหมาย (เหมือน L3)
-                // L3: ไม่แสดงค่าเป้าหมาย
-                // L4: แสดงค่าเป้าหมาย
-                const showTargetValue = patientPamLevel === 'L4';
+                // ✅ L2 ไม่ต้องแสดงช่อง "ค่าเป้าหมาย" (ใช้แค่ วัน/สัปดาห์ เหมือน L3)
+                const showTargetValue = patientPamLevel !== 'L2' && !!activity.target_value;
 
                 return (
                   <div key={activity.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
@@ -677,7 +673,7 @@ export default function PatientGoalsSetupPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-4">
-                      {showTargetValue && activity.target_value && (
+                      {showTargetValue && (
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">ค่าเป้าหมาย</label>
                           <input
@@ -719,8 +715,8 @@ export default function PatientGoalsSetupPage() {
                 const existingGoal = goals.find(g => g.goal_name === activity.activity_code);
                 const currentDays = editedGoals[activity.activity_code]?.target_days || existingGoal?.target_days || defaultDays;
 
-                // ✅ ตรวจสอบว่าต้องแสดงช่อง "ค่าเป้าหมาย" หรือไม่
-                const showTargetValue = patientPamLevel === 'L4';
+                // ✅ L2 ไม่ต้องแสดงช่อง "นาที/วัน" (ใช้แค่ วัน/สัปดาห์ เหมือน L3)
+                const showMinutesInput = patientPamLevel !== 'L2';
 
                 return (
                   <div key={activity.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
@@ -731,7 +727,7 @@ export default function PatientGoalsSetupPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-4">
-                      {showTargetValue && (
+                      {showMinutesInput && (
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
                           <input
@@ -878,6 +874,5 @@ export default function PatientGoalsSetupPage() {
         </div>
       </div>
     </div>
-    
   );
 }

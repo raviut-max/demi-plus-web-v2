@@ -39,7 +39,7 @@ export default function PatientManagementPage() {
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ✅ Search States แยกกันชัดเจน
+  // ✅ Search States แยกกันชัดเจน เพื่อแก้ปัญหา Permission และ Search ผิดที่
   const [searchTermNameHN, setSearchTermNameHN] = useState('');
   const [searchTermIdCard, setSearchTermIdCard] = useState('');
   
@@ -53,11 +53,11 @@ export default function PatientManagementPage() {
   const [filterHospitals, setFilterHospitals] = useState<any[]>([]);
   const [filterCoaches, setFilterCoaches] = useState<any[]>([]);
   const [loadingFilters, setLoadingFilters] = useState(false);
-
+  
   // Sort State
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-
+  
   // Pagination State - แสดงหน้าละ 100 คน
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPatients, setTotalPatients] = useState(0);
@@ -204,12 +204,13 @@ export default function PatientManagementPage() {
   };
 
   // ✅ โหลดข้อมูลผู้ป่วยแบบ Pagination + Server-side Sort
+  // ส่ง Parameter แยกกันชัดเจนเพื่อรักษา Permission
   const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
-      
+
       const pamParam = isAllPam ? undefined : selectedPamLevel;
       const hospitalIdsParam = isAllHospitals ? undefined : hospitalIds;
       const hospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
@@ -217,8 +218,8 @@ export default function PatientManagementPage() {
 
       // ดึงจำนวนผู้ป่วยทั้งหมด
       const total = await getPatientCount(
-        searchTermNameHN, // search (ชื่อ/HN)
-        searchTermIdCard, // idCardSearch (ID Card)
+        searchTermNameHN,   // search (ชื่อ/HN)
+        searchTermIdCard,   // idCardSearch (ID Card)
         pamParam,
         hospitalIdsParam,
         hospitalIdParam,
@@ -230,12 +231,12 @@ export default function PatientManagementPage() {
       const fetchPageSize = forceFetchAll ? total : pageSize;
       const fetchCurrentPage = forceFetchAll ? 0 : currentPage;
 
-      // ดึงข้อมูลเฉพาะหน้าปัจจุบัน
+      // ดึงข้อมูลเฉพาะหน้าปัจจุบัน (หรือทั้งหมดถ้าเป็นโหมด Export All) พร้อม sort จาก database
       const { patients: data } = await getPatientListPaginated(
         fetchCurrentPage,
         fetchPageSize,
-        searchTermNameHN, // search
-        searchTermIdCard, // idCardSearch
+        searchTermNameHN,   // search
+        searchTermIdCard,   // idCardSearch
         pamParam,
         hospitalIdsParam,
         hospitalIdParam,
