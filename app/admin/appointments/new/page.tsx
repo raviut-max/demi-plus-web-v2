@@ -401,4 +401,5 @@ export default function NewAppointmentPage() {
       </form>
     </div>
   );
+  
 }
