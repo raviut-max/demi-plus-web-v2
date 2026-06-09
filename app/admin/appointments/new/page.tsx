@@ -30,7 +30,6 @@ import {
   Search,
   Users,
   Clock,
-  MapPin,
   FileText
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -132,7 +131,7 @@ export default function NewAppointmentPage() {
   });
 
   // =====================================================
-  // 📥 AUTH & DATA LOADING
+  //  AUTH & DATA LOADING
   // =====================================================
   useEffect(() => {
     const userData = checkSession();
@@ -214,28 +213,37 @@ export default function NewAppointmentPage() {
       console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
     }
   };
 
-  // ✅ โหลดผู้ป่วย
+  // ✅ โหลดผู้ป่วย (ปลอดภัย - ป้องกัน White Screen)
   const loadPatients = async (hospitalIds: string[]) => {
     try {
-      console.log('🧑‍🤝‍🧑 [loadPatients] Loading patients for hospitals:', hospitalIds);
+      console.log('🧑🤝‍🧑 [loadPatients] Loading patients for hospitals:', hospitalIds);
+
+      // เช็คว่าฟังก์ชันมีอยู่จริงก่อนเรียกใช้ (ป้องกัน Error ขาวโพลน)
+      if (typeof getPatientsByHospitalNetwork !== 'function') {
+        console.warn('⚠️ [loadPatients] getPatientsByHospitalNetwork not found. Skipping patient load.');
+        setPatients([]);
+        return;
+      }
+
       const allPatients = await getPatientsByHospitalNetwork(hospitalIds);
       setPatients(allPatients);
-      console.log('‍🤝‍ [loadPatients] Loaded:', allPatients.length, 'patients');
+      console.log('‍🤝‍🧑 [loadPatients] Loaded:', allPatients.length, 'patients');
     } catch (error) {
       console.error('❌ [loadPatients] Error:', error);
-      setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลผู้ป่วย');
+      // ไม่ setError ที่นี่เพื่อให้ฟอร์มยังใช้งานได้อยู่ แค่ไม่มีรายชื่อผู้ป่วย
+      setPatients([]);
     }
   };
 
   // =====================================================
-  // ️ HANDLERS
+  // HANDLERS
   // =====================================================
 
   // ✅ คลิกนอก Dropdown เพื่อปิด
@@ -391,7 +399,7 @@ export default function NewAppointmentPage() {
         if (result.error?.includes('23505') || result.error?.includes('duplicate key')) {
           thaiError = '❌ นัดหมายนี้ซ้ำกับที่มีอยู่ในระบบ กรุณาตรวจสอบ';
         } else if (result.error?.includes('23503')) {
-          thaiError = '❌ ข้อมูลที่อ้างอิงไม่มีในระบบ กรุณาตรวจสอบ';
+          thaiError = ' ข้อมูลที่อ้างอิงไม่มีในระบบ กรุณาตรวจสอบ';
         } else if (result.error?.includes('22007')) {
           thaiError = '❌ รูปแบบวันที่/เวลาไม่ถูกต้อง';
         } else if (result.error?.includes('22001')) {
@@ -484,7 +492,7 @@ export default function NewAppointmentPage() {
                   <div>
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                      {user?.role === 'admin' ? ' ผู้ดูแลระบบ' :
                         user?.role === 'doctor' ? '👨‍️ แพทย์' :
                           user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
@@ -502,7 +510,7 @@ export default function NewAppointmentPage() {
                     {userHospital.type === 'main' ? (
                       <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
                     ) : (
-                      <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold"> ลูกข่าย</span>
+                      <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">ลูกข่าย</span>
                     )}
                     {userHospital.type === 'sub' && userHospital.parent_hospital && (
                       <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -579,7 +587,7 @@ export default function NewAppointmentPage() {
               <input
                 type="text"
                 placeholder="พิมพ์ชื่อ หรือ HN เพื่อค้นหาผู้ป่วย..."
-                value={searchTerm}
+                value={patientSearchTerm}
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setIsPatientDropdownOpen(true);
