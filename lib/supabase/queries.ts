@@ -146,10 +146,7 @@ export async function filterDataByHospitalPermission<T>(
 // =====================================================
 // 👤 Super Admin & Permission System Functions
 // =====================================================
-export function isSuperAdmin(userData: any): boolean {
-  if (!userData) return false;
-  return userData.admin_type === 'super' || userData.role === 'super_admin';
-}
+
 
 export async function getAccessibleHospitalIds(userId: string): Promise<string[]> {
   try {
