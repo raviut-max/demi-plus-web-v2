@@ -1,17 +1,15 @@
 // app/admin/appointments/followup/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 10 มิถุนายน 2569
-// ✅ การแก้ไข:
-//    1. เพิ่ม Confirmation Dialog ก่อนบันทึกข้อมูล
-//    2. รองรับโหมดแก้ไข (Edit Mode) สำหรับผลการติดตามที่บันทึกไปแล้ว
-//    3. ปรับส่วนหัวให้กระชับ สวยงาม ประหยัดพื้นที่
-//    4. แสดงข้อมูลผู้ป่วย: ชื่อ, HN, โรงพยาบาล
-//    5. แสดงข้อมูลผู้ใช้งาน: ชื่อ, บทบาท, สังกัด
+// ✅ การปรับปรุง:
+//    1. ปรับ Logic สรุปผลอัตโนมัติ (ข้อ 7) ให้สอดคล้องกับข้อ 5 อย่างแม่นยำ
+//    2. เพิ่ม Confirmation Dialog ก่อนบันทึก/แก้ไข
+//    3. รองรับโหมดแก้ไข (Edit Mode) และสร้างใหม่ (Insert Mode)
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getUserHospitalInfo, isSuperAdmin, isHospitalAdmin } from '@/lib/supabase/queries';
-import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, User, Hospital, Shield, Building2, Edit3 } from 'lucide-react';
+import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, User, Hospital, Edit3 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export default function FollowupPage() {
@@ -19,10 +17,9 @@ export default function FollowupPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   
-  // appointmentId คือ ID ของ followup ถ้าเป็น 'new' คือการสร้างใหม่
-  // แต่ถ้าเป็นการแก้ไข จะเป็น UUID ของตาราง appointment_followups
   const appointmentId = params.id as string; 
   const patientIdFromQuery = searchParams.get('patient_id');
+  // ตรวจสอบโหมดแก้ไขจาก URL parameter หรือ ID ที่ไม่ใช่ 'new'
   const isEditMode = searchParams.get('edit') === 'true' || (appointmentId && appointmentId !== 'new');
 
   const [user, setUser] = useState<any>(null);
@@ -36,8 +33,6 @@ export default function FollowupPage() {
   const [followupRound, setFollowupRound] = useState(1);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  
-  // State เก็บ ID ของ followup ที่กำลังแก้ไข (ถ้ามี)
   const [editingFollowupId, setEditingFollowupId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
@@ -53,30 +48,29 @@ export default function FollowupPage() {
     adaptation_obstacles: '',
     adaptation_opportunities: '',
     adaptation_other: '',
-    // 3. กราฟวัดลอยจม (ใหม่)
+    // 3. กราฟวัดลอยจม
     floating_chart_image_url: '',
     floating_chart_summary: '',
-    // 4. การ์ดภาพความฝัน (ใหม่)
+    // 4. การ์ดภาพความฝัน
     dream_card_image_url: '',
     dream_card_description: '',
-    // 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5)
+    // 5. ติดตามแผนปฏิบัติกิจกรรม
     food_amount_status: 'not_in_plan',
     food_type_status: 'not_in_plan',
     movement_status: 'not_in_plan',
     food_amount_note: '',
     food_type_note: '',
     movement_note: '',
-    // 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6)
+    // 6. คะแนนไม้บรรทัดวัดใจ
     confidence_score: 5,
     confidence_improvement_plan: '',
-    // 7. สรุป (เดิม 5 → 7)
+    // 7. สรุป
     summary: '',
     recommendations: '',
-    // 8. สถานะการติดตาม (เดิม 6 → 8)
+    // 8. สถานะการติดตาม
     followup_status: 'fair',
   });
 
-  // ✅ useEffect สำหรับตรวจสอบ session และโหลดข้อมูลเริ่มต้น
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -102,14 +96,12 @@ export default function FollowupPage() {
     }
   };
 
-  // ✅ ฟังก์ชันโหลดข้อมูลหลัก (รวมทั้ง Appointment และ Followup เดิมถ้ามี)
   const loadData = async () => {
     try {
-      console.log(' Loading data...', { appointmentId, patientIdFromQuery, isEditMode });
       setError(null);
       let patientId = patientIdFromQuery;
 
-      // กรณีแก้ไข: appointmentId คือ ID ของ followup record
+      // โหลดข้อมูลเดิมถ้าเป็นโหมดแก้ไข
       if (isEditMode && appointmentId && appointmentId !== 'new') {
         const { data: existingFollowup, error: followupError } = await supabase
           .from('appointment_followups')
@@ -124,7 +116,6 @@ export default function FollowupPage() {
           setFollowupRound(existingFollowup.followup_round);
           patientId = existingFollowup.user_id;
           
-          // แปลงข้อมูลเก่าใส่ formData
           setFormData({
             weight: existingFollowup.weight?.toString() || '',
             waist_circumference: existingFollowup.waist_circumference?.toString() || '',
@@ -154,48 +145,35 @@ export default function FollowupPage() {
           });
         }
       } 
-      // กรณีสร้างใหม่ผ่าน Appointment
+      // โหลด Appointment ถ้าเป็นการสร้างใหม่ผ่านนัดหมาย
       else if (appointmentId && appointmentId !== 'new') {
         const { data: aptData, error: aptError } = await supabase
           .from('appointments')
           .select('*')
           .eq('id', appointmentId)
           .single();
-
         if (aptError) throw aptError;
         setAppointment(aptData);
         patientId = aptData.user_id;
       }
 
-      // โหลดข้อมูลคนไข้
+      // โหลดข้อมูลผู้ป่วย
       if (patientId) {
-        const { data: profileData, error: profileError } = await supabase
+        const { data: profileData } = await supabase
           .from('profiles')
-          .select(`
-            id, first_name, last_name, hospital_number,
-            hospitals (id, name, code, type, parent_hospital:hospitals!parent_id (id, name, code))
-          `)
+          .select(`id, first_name, last_name, hospital_number, hospitals (id, name, code, type, parent_hospital:hospitals!parent_id (id, name, code))`)
           .eq('id', patientId)
           .single();
+        if (profileData) setPatientProfile(profileData);
 
-        if (profileError) {
-          console.error('Error loading patient profile:', profileError);
-        } else if (profileData) {
-          setPatientProfile(profileData);
-        }
-
-        // โหลดประวัติย้อนหลัง (ไม่รวมอันที่กำลังแก้ไข)
+        // โหลดประวัติย้อนหลัง (ไม่รวมอันที่กำลังแก้)
         let query = supabase
           .from('appointment_followups')
           .select('*')
           .eq('user_id', patientId)
           .order('followup_date', { ascending: false })
           .limit(3);
-
-        if (editingFollowupId) {
-          query = query.neq('id', editingFollowupId);
-        }
-
+        if (editingFollowupId) query = query.neq('id', editingFollowupId);
         const { data: historyData } = await query;
         if (historyData) setPastFollowups(historyData);
       }
@@ -227,7 +205,6 @@ export default function FollowupPage() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // ✅ ฟังก์ชันอัปโหลดรูปภาพ
   const handleImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     fieldName: 'floating_chart_image_url' | 'dream_card_image_url' | 'life_schedule_image_url',
@@ -237,13 +214,12 @@ export default function FollowupPage() {
     if (!file) return;
     try {
       setUploading(true);
-      const maxSize = 5 * 1024 * 1024;
-      if (file.size > maxSize) {
-        alert(`❌ ไฟล์มีขนาดใหญ่เกิน 5MB (ขนาด: ${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      if (file.size > 5 * 1024 * 1024) {
+        alert('❌ ไฟล์มีขนาดใหญ่เกิน 5MB');
         return;
       }
       if (!file.type.startsWith('image/')) {
-        alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น (JPG, PNG, WEBP)');
+        alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น');
         return;
       }
 
@@ -256,50 +232,73 @@ export default function FollowupPage() {
       const { error: uploadError } = await supabase.storage
         .from('followup-images')
         .upload(fileName, file, { cacheControl: '3600', upsert: false, contentType: file.type });
-
       if (uploadError) throw uploadError;
 
       const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from('followup-images')
         .createSignedUrl(fileName, 60 * 60 * 24 * 365);
-
       if (signedUrlError || !signedUrlData?.signedUrl) throw new Error('ไม่สามารถสร้าง Signed URL ได้');
 
       setFormData({ ...formData, [fieldName]: signedUrlData.signedUrl });
       alert('✅ อัปโหลดรูปภาพสำเร็จ!');
     } catch (err: any) {
-      console.error('Error uploading image:', err);
-      alert(' เกิดข้อผิดพลาดในการอัปโหลด: ' + err.message);
+      alert('❌ เกิดข้อผิดพลาดในการอัปโหลด: ' + err.message);
     } finally {
       setUploading(false);
     }
   };
 
-  // ✅ Auto-generate summary
+  // ✅ Logic สรุปผลอัตโนมัติที่ปรับปรุงแล้ว (สอดคล้องกับข้อ 5)
   useEffect(() => {
     const successes: string[] = [];
+    const failures: string[] = [];
+
+    // ตรวจสอบ ปริมาณอาหาร
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
+    else if (formData.food_amount_status === 'not_completed') failures.push('ปรับปริมาณอาหาร');
+
+    // ตรวจสอบ ชนิดอาหาร
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
-    if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
+    else if (formData.food_type_status === 'not_completed') failures.push('ปรับชนิดอาหาร');
+
+    // ตรวจสอบ การเคลื่อนไหว
+    if (formData.movement_status === 'completed') successes.push('การออกกำลังกาย/เคลื่อนไหวร่างกาย');
+    else if (formData.movement_status === 'not_completed') failures.push('การออกกำลังกาย/เคลื่อนไหวร่างกาย');
+
+    let summaryText = '';
+    
     if (successes.length > 0) {
-      setFormData(prev => ({
-        ...prev,
-        summary: `ผู้ป่วยสามารถทำสำเร็จใน: ${successes.join(', ')}`,
-      }));
+      summaryText += `✅ สิ่งที่ทำได้สำเร็จ: ${successes.join(', ')}\n`;
     }
+    
+    if (failures.length > 0) {
+      summaryText += `⚠️ สิ่งที่ยังต้องปรับปรุง: ${failures.join(', ')}\n`;
+      summaryText += ` คำแนะนำ: ควรพยายามทำให้สม่ำเสมอมากขึ้นในเรื่องดังกล่าว`;
+    }
+
+    if (successes.length === 0 && failures.length === 0) {
+      summaryText = 'ยังไม่มีข้อมูลการประเมินผลการปฏิบัติกิจกรรม';
+    }
+
+    // อัปเดต summary ก็ต่อเมื่อมีการเปลี่ยนแปลงสถานะจริงๆ (ป้องกัน loop หรือ overwrite ตอน edit)
+    // แต่เพื่อให้ UX ดีที่สุด เราจะ update เสมอเมื่อ status เปลี่ยน
+    setFormData(prev => ({
+      ...prev,
+      summary: summaryText,
+    }));
   }, [formData.food_amount_status, formData.food_type_status, formData.movement_status]);
 
-  // ✅ handleSubmit ที่มีการยืนยันและรองรับทั้ง Insert/Update
+  // ✅ handleSubmit พร้อม Confirmation Dialog
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // ✅ ยืนยันก่อนบันทึก
+    // แสดง Dialog ยืนยัน
     const confirmMsg = isEditMode 
       ? '⚠️ ยืนยันการแก้ไข\n\nคุณต้องการแก้ไขผลการติดตามครั้งที่ ' + followupRound + ' ใช่หรือไม่?\nข้อมูลเดิมจะถูกแทนที่ด้วยข้อมูลใหม่'
       : '⚠️ ยืนยันการบันทึก\n\nคุณต้องการบันทึกผลการติดตามนี้ใช่หรือไม่?\nกรุณาตรวจสอบความถูกต้องของข้อมูลก่อนกดยืนยัน';
 
     const isConfirmed = window.confirm(confirmMsg);
-    if (!isConfirmed) return;
+    if (!isConfirmed) return; // หยุดการทำงานหากกด Cancel
 
     setSaving(true);
     setError(null);
@@ -308,37 +307,32 @@ export default function FollowupPage() {
       const currentUser = checkSession();
       if (!currentUser || !currentUser.id) throw new Error('กรุณาเข้าสู่ระบบใหม่');
 
-      const userId = patientIdFromQuery || appointment?.user_id || formData.user_id; // fallback for edit mode
+      const userId = patientIdFromQuery || appointment?.user_id || formData.user_id;
       
       const followupData = {
         appointment_id: (appointmentId && appointmentId !== 'new' && !isEditMode) ? appointmentId : (appointment?.id || null),
         user_id: userId,
         followup_date: appointment?.appointment_date || new Date().toISOString(),
-        followup_round: followupRound, // ใช้รอบเดิมเสมอไม่ว่าจะ insert หรือ update
+        followup_round: followupRound,
         
-        // 1. ข้อมูลสุขภาพ
         weight: formData.weight ? parseFloat(formData.weight) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
         blood_pressure_dia: formData.blood_pressure_dia ? parseInt(formData.blood_pressure_dia) : null,
         blood_sugar_dtx: formData.blood_sugar_dtx ? parseFloat(formData.blood_sugar_dtx) : null,
         
-        // 2. ความก้าวหน้าในการปรับตัว
         life_schedule_image_url: formData.life_schedule_image_url || null,
         adaptation_summary: formData.adaptation_summary || null,
         adaptation_obstacles: formData.adaptation_obstacles || null,
         adaptation_opportunities: formData.adaptation_opportunities || null,
         adaptation_other: formData.adaptation_other || null,
         
-        // 3. กราฟวัดลอยจม
         floating_chart_image_url: formData.floating_chart_image_url || null,
         floating_chart_summary: formData.floating_chart_summary || null,
         
-        // 4. การ์ดภาพความฝัน
         dream_card_image_url: formData.dream_card_image_url || null,
         dream_card_description: formData.dream_card_description || null,
         
-        // 5. ติดตามแผนปฏิบัติกิจกรรม
         food_amount_status: formData.food_amount_status,
         food_type_status: formData.food_type_status,
         movement_status: formData.movement_status,
@@ -346,15 +340,12 @@ export default function FollowupPage() {
         food_type_note: formData.food_type_note || null,
         movement_note: formData.movement_note || null,
         
-        // 6. คะแนนไม้บรรทัดวัดใจ
         confidence_score: parseInt(formData.confidence_score.toString()),
         confidence_improvement_plan: formData.confidence_improvement_plan || null,
         
-        // 7. สรุป
         summary: formData.summary || null,
         recommendations: formData.recommendations || null,
         
-        // 8. สถานะการติดตาม
         followup_status: formData.followup_status,
         
         conducted_by: currentUser.id,
@@ -364,24 +355,22 @@ export default function FollowupPage() {
       let saveResult;
       
       if (isEditMode && editingFollowupId) {
-        // ✅ โหมดแก้ไข: UPDATE
+        // UPDATE สำหรับโหมดแก้ไข
         const { data, error } = await supabase
           .from('appointment_followups')
           .update(followupData)
           .eq('id', editingFollowupId)
           .select()
           .single();
-        
         if (error) throw error;
         saveResult = data;
       } else {
-        // ✅ โหมดสร้างใหม่: INSERT
+        // INSERT สำหรับโหมดสร้างใหม่
         const { data, error } = await supabase
           .from('appointment_followups')
           .insert(followupData)
           .select()
           .single();
-        
         if (error) throw error;
         saveResult = data;
 
@@ -415,7 +404,7 @@ export default function FollowupPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ✅ Header */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
@@ -423,7 +412,6 @@ export default function FollowupPage() {
           </button>
           
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-            {/* ด้านซ้าย: ข้อมูลผู้ป่วย */}
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
                 <h1 className="text-2xl font-bold text-gray-800">
@@ -442,7 +430,6 @@ export default function FollowupPage() {
               </p>
             </div>
 
-            {/* ด้านขวา: การ์ดข้อมูลผู้ใช้งาน */}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3 shadow-sm min-w-[280px]">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
@@ -460,7 +447,7 @@ export default function FollowupPage() {
                     }`}>
                       {isSuperAdmin(user) ? '👑 Super Admin' :
                        isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
+                       user?.role === 'doctor' ? '⚕️ แพทย์' :
                        user?.role === 'helper' ? '👩‍💼 เจ้าหน้าที่' : 'ผู้ดูแล'}
                     </span>
                   </div>
@@ -480,14 +467,13 @@ export default function FollowupPage() {
         </div>
       </div>
 
-      {/* Error Alert */}
       {error && (
         <div className="max-w-5xl mx-auto px-4 mt-4">
           <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg">
             <div className="flex items-start gap-3">
               <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
               <div className="flex-1">
-                <h3 className="font-bold text-red-800 mb-2">️ เกิดข้อผิดพลาด</h3>
+                <h3 className="font-bold text-red-800 mb-2">⚠️ เกิดข้อผิดพลาด</h3>
                 <div className="text-red-700 text-sm">{error}</div>
               </div>
             </div>
@@ -495,7 +481,6 @@ export default function FollowupPage() {
         </div>
       )}
 
-      {/* Form */}
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         
         {/* 1. ข้อมูลสุขภาพ */}
@@ -542,9 +527,7 @@ export default function FollowupPage() {
                 <span>อัปโหลดรูปภาพ/ใบงาน</span>
                 <input type="file" accept="image/*" onChange={(e) => { if (e.target.files?.[0]) handleImageUpload(e, 'life_schedule_image_url', () => {}); }} className="hidden" />
               </label>
-              {formData.life_schedule_image_url && (
-                <div className="mt-2"><img src={formData.life_schedule_image_url} alt="Life Schedule" className="w-32 h-32 object-cover rounded border" /></div>
-              )}
+              {formData.life_schedule_image_url && <div className="mt-2"><img src={formData.life_schedule_image_url} alt="Life Schedule" className="w-32 h-32 object-cover rounded border" /></div>}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">สรุปการปรับตัว</label>
@@ -676,8 +659,15 @@ export default function FollowupPage() {
           </h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">สิ่งที่ทำได้สำเร็จ</label>
-              <textarea name="summary" value={formData.summary} onChange={handleChange} rows={3} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" placeholder="(ระบบจะสรุปอัตโนมัติจากข้อ 5)" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">สิ่งที่ทำได้สำเร็จ / ข้อควรปรับปรุง</label>
+              <textarea 
+                name="summary" 
+                value={formData.summary} 
+                onChange={handleChange} 
+                rows={4} 
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" 
+                placeholder="(ระบบจะสรุปอัตโนมัติจากข้อ 5)" 
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">คำแนะนำเพิ่มเติม</label>
@@ -706,7 +696,7 @@ export default function FollowupPage() {
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
               <Calendar className="w-6 h-6 text-gray-600" />
-               ประวัติการติดตาม (3 ครั้งล่าสุด)
+               📋 ประวัติการติดตาม (3 ครั้งล่าสุด)
             </h2>
             <div className="overflow-x-auto">
               <table className="w-full">
