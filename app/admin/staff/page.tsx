@@ -4,2029 +4,2085 @@
 // ✅ การแก้ไขรอบนี้:
 //    1.  ✅ ปุ่ม "แก้ไข" สำหรับ อสม.ชั่วคราว จะลิงก์ไปหน้า verify-temporary โดยตรง
 //    2.  ✅ ปุ่ม "ลบ" คงเดิมสำหรับทุกคน
-//    3.  ✅ AddStaffModal: ตั้งค่า 'osm' เป็น Default และย้ายขึ้นลำดับแรกใน Dropdown
-//    4.  ✅ ส่วนอื่นๆ คงเดิมทั้งหมด
+//    3.  ✅ ส่วนอื่นๆ คงเดิมทั้งหมด
 // =====================================================
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-checkSession,
-logout,
-getStaffList,
-addStaff,
-updateStaff,
-deactivateStaff,
-permanentlyDeleteStaff,
-restoreStaff,
-getDeactivatedStaff,
-getHospitalsWithHierarchy,
-getAccessibleHospitalIds,
-getUserHospitalInfo,
-isSuperAdmin,
-isHospitalAdmin
+  checkSession,
+  logout,
+  getStaffList,
+  addStaff,
+  updateStaff,
+  deactivateStaff,
+  permanentlyDeleteStaff,
+  restoreStaff,
+  getDeactivatedStaff,
+  getHospitalsWithHierarchy,
+  getAccessibleHospitalIds,
+  getUserHospitalInfo,
+  isSuperAdmin,
+  isHospitalAdmin
 } from '@/lib/supabase/queries';
 import {
-Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX,
-Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key,
-Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle,
-Search, ChevronUp, ChevronDown, ChevronsUpDown, Filter
+  Users, Plus, Edit, Trash2, LogOut, ArrowLeft, UserCheck, UserX,
+  Shield, Stethoscope, Heart, Archive, RotateCcw, Calendar, Key,
+  Save, Clock, CheckCircle, XCircle, Hospital, Building2, Lock, AlertCircle,
+  Search, ChevronUp, ChevronDown, ChevronsUpDown, Filter
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+
 // ============================ =========================
 // 📋 CONSTANTS & INTERFACES
 // =====================================================
 const THAI_MONTHS = [
-'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
-'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
 ];
+
 interface Hospital {
-id: string;
-name: string;
-code: string;
-type: 'main' | 'sub';
-parent_id: string | null;
-parent_hospital?: { id: string; name: string; code: string };
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: { id: string; name: string; code: string };
 }
+
 interface UserHospital {
-id: string;
-name: string;
-code: string;
-type: 'main' | 'sub';
-parent_id: string | null;
-parent_hospital?: { id: string; name: string; code: string };
+  id: string;
+  name: string;
+  code: string;
+  type: 'main' | 'sub';
+  parent_id: string | null;
+  parent_hospital?: { id: string; name: string; code: string };
 }
+
 interface PendingStaff {
-id: string;
-id_card: string;
-full_name_th: string;
-role: 'doctor' | 'helper' | 'admin' | 'osm';
-specialization_th?: string;
-phone?: string;
-email?: string;
-hospital_id?: string;
-birth_date?: string;
-status: 'pending' | 'approved' | 'rejected';
-rejection_reason?: string;
-created_at: string;
-reviewed_at?: string;
-reviewed_by?: string;
-hospitals?: { name: string; code: string };
-admin_type?: 'super' | 'hospital' | null;
+  id: string;
+  id_card: string;
+  full_name_th: string;
+  role: 'doctor' | 'helper' | 'admin' | 'osm';
+  specialization_th?: string;
+  phone?: string;
+  email?: string;
+  hospital_id?: string;
+  birth_date?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  rejection_reason?: string;
+  created_at: string;
+  reviewed_at?: string;
+  reviewed_by?: string;
+  hospitals?: { name: string; code: string };
+  admin_type?: 'super' | 'hospital' | null;
 }
+
 type SortDirection = 'asc' | 'desc';
 type SortField = 'name' | 'role' | 'hospital' | 'id_card' | 'specialization' | 'created_at';
+
 interface SortConfig {
-field: SortField;
-direction: SortDirection;
+  field: SortField;
+  direction: SortDirection;
 }
+
 // =====================================================
 //  MAIN COMPONENT
 // =====================================================
 export default function StaffManagementPage() {
-const router = useRouter();
-// ✅ States สำหรับข้อมูลหลัก
-const [user, setUser] = useState<any>(null);
-const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
-const [staffList, setStaffList] = useState<any[]>([]);
-const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
-const [pendingStaff, setPendingStaff] = useState<PendingStaff[]>([]);
-const [hospitals, setHospitals] = useState<Hospital[]>([]);
-const [loading, setLoading] = useState(true);
-const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-// ✅ States สำหรับ Search, Sort และ Filter
-const [searchTerm, setSearchTerm] = useState('');
-const [filterTempOnly, setFilterTempOnly] = useState(false); // 🆕 กรองเฉพาะชั่วคราว
-const [sortConfig, setSortConfig] = useState<SortConfig>({
-field: 'name',
-direction: 'asc'
-});
-// ✅ States สำหรับ Modal และ Tabs
-const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
-const [showAddModal, setShowAddModal] = useState(false);
-const [showEditModal, setShowEditModal] = useState(false);
-const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
-const [selectedStaff, setSelectedStaff] = useState<any>(null);
-// =====================================================
-// 🔄 INITIAL DATA LOADING
-// =====================================================
-useEffect(() => {
-const userData = checkSession();
-if (!userData) {
-router.push('/admin/login');
-return;
-}
-if (userData.role !== 'admin') {
-alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
-router.push('/admin/login');
-return;
-}
-console.log('👤 [StaffManagement] User:', userData);
-console.log(' [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
-console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
-setUser(userData);
-loadUserHospital(userData.id);
-loadHospitals();
-loadAccessibleHospitals(userData.id);
-}, [router]);
-// =====================================================
-// 📥 DATA LOADING FUNCTIONS
-// =====================================================
-const loadUserHospital = async (userId: string) => {
-try {
-const hospitalInfo = await getUserHospitalInfo(userId);
-setUserHospital(hospitalInfo);
-} catch (error) {
-console.error(' [loadUserHospital] Error:', error);
-}
-};
-const loadAccessibleHospitals = async (userId: string) => {
-try {
-const ids = await getAccessibleHospitalIds(userId);
-setAccessibleHospitalIds(ids);
-await loadStaffList(ids);
-await loadPendingStaff(ids);
-await loadDeactivatedStaff(ids);
-} catch (error) {
-console.error(' [loadAccessibleHospitals] Error:', error);
-setAccessibleHospitalIds([]);
-await loadStaffList([]);
-await loadPendingStaff([]);
-await loadDeactivatedStaff([]);
-} finally {
-setLoading(false);
-}
-};
-const loadHospitals = async () => {
-try {
-const data = await getHospitalsWithHierarchy();
-setHospitals(data);
-} catch (error) {
-console.error('❌ [loadHospitals] Error:', error);
-alert('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
-}
-};
-const loadStaffList = async (hospitalIds?: string[]) => {
-try {
-console.log(' [loadStaffList] Fetching staff list...');
-const allStaff = await getStaffList();
-console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
-  let filteredStaff = allStaff;
-  if (isSuperAdmin(user)) {
-    console.log('👑 [loadStaffList] Super Admin - showing all staff');
-  } else if (hospitalIds && hospitalIds.length > 0) {
-    filteredStaff = allStaff.filter(staff => {
-      if (!staff.hospital_id) return true;
-      return hospitalIds.includes(staff.hospital_id);
-    });
-    console.log('📊 [loadStaffList] Filtered staff for Hospital Admin:', filteredStaff.length);
-  }
-  setStaffList(filteredStaff);
-} catch (error) {
-  console.error('❌ [loadStaffList] Error:', error);
-  setStaffList([]);
-}
-};
-const loadPendingStaff = async (hospitalIds?: string[]) => {
-try {
-console.log('⏳ [loadPendingStaff] Fetching pending staff...');
-const { data, error } = await supabase
-.from('pending_staff')
-.select(`*, hospitals (name, code)`)
-.eq('status', 'pending')
-.order('created_at', { ascending: false });
-  if (error) {
-    console.error('❌ [loadPendingStaff] Error:', error);
-    setPendingStaff([]);
-    return;
-  }
+  const router = useRouter();
+  
+  // ✅ States สำหรับข้อมูลหลัก
+  const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
+  const [staffList, setStaffList] = useState<any[]>([]);
+  const [deactivatedStaff, setDeactivatedStaff] = useState<any[]>([]);
+  const [pendingStaff, setPendingStaff] = useState<PendingStaff[]>([]);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
-  let filteredPending = data || [];
-  if (isSuperAdmin(user)) {
-    console.log(' [loadPendingStaff] Super Admin - showing all pending');
-  } else if (hospitalIds && hospitalIds.length > 0) {
-    filteredPending = filteredPending.filter(pending => {
-      if (!pending.hospital_id) return true;
-      return hospitalIds.includes(pending.hospital_id);
-    });
-    console.log(' [loadPendingStaff] Filtered pending for Hospital Admin:', filteredPending.length);
-  }
-  setPendingStaff(filteredPending);
-} catch (error) {
-  console.error('❌ [loadPendingStaff] Exception:', error);
-  setPendingStaff([]);
-}
-};
-const loadDeactivatedStaff = async (hospitalIds?: string[]) => {
-try {
-console.log('️ [loadDeactivatedStaff] Fetching deactivated staff...');
-const data = await getDeactivatedStaff();
-  let filteredData = data;
-  if (isSuperAdmin(user)) {
-    console.log('👑 [loadDeactivatedStaff] Super Admin - showing all deactivated');
-  } else if (hospitalIds && hospitalIds.length > 0) {
-    filteredData = data.filter(staff => 
-      !staff.hospital_id || hospitalIds.includes(staff.hospital_id)
-    );
-    console.log('📊 [loadDeactivatedStaff] Filtered deactivated for Hospital Admin:', filteredData.length);
-  }
-  setDeactivatedStaff(filteredData);
-} catch (error) {
-  console.error('❌ [loadDeactivatedStaff] Error:', error);
-  setDeactivatedStaff([]);
-}
-};
-// =====================================================
-// 🔍 SEARCH & SORT FUNCTIONS
-// =====================================================
-const requestSort = (field: SortField) => {
-let direction: SortDirection = 'asc';
-if (sortConfig.field === field && sortConfig.direction === 'asc') {
-direction = 'desc';
-}
-setSortConfig({ field, direction });
-};
-const getSortedAndFilteredStaff = (staffData: any[]) => {
-if (!staffData) return [];
-let filtered = [...staffData];
-
-// ✅ กรองตามคำค้นหา
-if (searchTerm.trim()) {
-  const search = searchTerm.toLowerCase();
-  filtered = filtered.filter(staff => {
-    const name = (staff.doctors?.full_name_th || staff.full_name_th || '').toLowerCase();
-    const role = (staff.role || '').toLowerCase();
-    const hospital = (staff.hospitals?.name || '').toLowerCase();
-    const idCard = (staff.id_card || '').toLowerCase();
-    const specialization = (staff.doctors?.specialization_th || '').toLowerCase();
-    
-    return (
-      name.includes(search) ||
-      role.includes(search) ||
-      hospital.includes(search) ||
-      idCard.includes(search) ||
-      specialization.includes(search)
-    );
+  // ✅ States สำหรับ Search, Sort และ Filter
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterTempOnly, setFilterTempOnly] = useState(false); // 🆕 กรองเฉพาะชั่วคราว
+  const [sortConfig, setSortConfig] = useState<SortConfig>({
+    field: 'name',
+    direction: 'asc'
   });
-}
 
-// ✅ กรองเฉพาะชั่วคราว (ถ้าเปิดใช้งาน)
-if (filterTempOnly) {
-  filtered = filtered.filter(staff => staff.is_temporary_id === true);
-}
+  // ✅ States สำหรับ Modal และ Tabs
+  const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'deactivated'>('active');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeactivatedModal, setShowDeactivatedModal] = useState(false);
+  const [selectedStaff, setSelectedStaff] = useState<any>(null);
 
-// ✅ เรียงลำดับ
-const sorted = filtered.sort((a, b) => {
-  let aValue: any;
-  let bValue: any;
-  
-  switch (sortConfig.field) {
-    case 'name':
-      aValue = (a.doctors?.full_name_th || a.full_name_th || '').toLowerCase();
-      bValue = (b.doctors?.full_name_th || b.full_name_th || '').toLowerCase();
-      break;
-    case 'role':
-      aValue = (a.role || '').toLowerCase();
-      bValue = (b.role || '').toLowerCase();
-      break;
-    case 'hospital':
-      aValue = (a.hospitals?.name || '').toLowerCase();
-      bValue = (b.hospitals?.name || '').toLowerCase();
-      break;
-    case 'id_card':
-      aValue = a.id_card || '';
-      bValue = b.id_card || '';
-      break;
-    case 'specialization':
-      aValue = (a.doctors?.specialization_th || '').toLowerCase();
-      bValue = (b.doctors?.specialization_th || '').toLowerCase();
-      break;
-    case 'created_at':
-      aValue = new Date(a.created_at || 0);
-      bValue = new Date(b.created_at || 0);
-      break;
-    default:
-      return 0;
-  }
-
-  if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-  if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-  return 0;
-});
-
-return sorted;
-};
-const getSortIcon = (field: SortField) => {
-if (sortConfig.field !== field) {
-return <ChevronsUpDown className="w-4 h-4 text-gray-400" />;
-}
-return sortConfig.direction === 'asc'
-? <ChevronUp className="w-4 h-4 text-blue-600" />
-: <ChevronDown className="w-4 h-4 text-blue-600" />;
-};
-// =====================================================
-// 🎬 ACTION HANDLERS
-// =====================================================
-const handleLogout = () => {
-console.log(' [handleLogout] User logging out...');
-logout();
-router.push('/admin/login');
-};
-const canEditStaff = (staff: any): boolean => {
-if (isSuperAdmin(user)) return true;
-if (isHospitalAdmin(user)) {
-if (!staff.hospital_id) return false;
-return accessibleHospitalIds.includes(staff.hospital_id);
-}
-return false;
-};
-const canDeleteStaff = (staff: any): boolean => canEditStaff(staff);
-// ✅ ฟังก์ชันใหม่: จัดการปุ่มแก้ไขสำหรับอสม.ชั่วคราว
-const handleEditClick = (staff: any) => {
-if (!canEditStaff(staff)) {
-alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
-return;
-}
-// ถ้าเป็นอสม.ชั่วคราว ให้ไปที่หน้า verify-temporary แทน
-if (staff.role === 'osm' && staff.is_temporary_id) {
-  router.push('/admin/staff/verify-temporary');
-  return;
-}
-
-// กรณีปกติ เปิด Modal แก้ไข
-setSelectedStaff(staff);
-setShowEditModal(true);
-};
-const handleApprove = async (pendingId: string, staffName: string) => {
-if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
-try {
-  console.log('✅ [handleApprove] Approving pending staff:', pendingId);
-  const { data: pendingData, error: fetchError } = await supabase
-    .from('pending_staff')
-    .sele ct('*')
-    .eq('id', pendingId)
-    .single();
-
-  if (fetchError) throw fetchError;
-
-  // ✅ ตรวจสอบสิทธิ์การอนุมัติ
-  if (!isSuperAdmin(user)  & & pendingData.hospital_id  & & 
-      !accessibleHospitalIds.includes(pendingData.hospital_id)) {
-    alert('❌ คุณไม่มีสิทธิ์อนุมัติเจ้าหน้าที่โรงพยาบาลนี้');
-    return;
-  }
-
-  // ✅ 1. สร้าง user ในตาราง user s
-  const { data: userData, error: userError } = await supabase
-    .from('users')
-    .insert({
-      id_card: pendingData.id_card,
-      password_hash: pendingData.password_hash, 
-      role: pendingData.role,
-      is_active: true,
-      hospital_id: pendingData.hospital_id,
-      birth_date: pendingData.birth_date,
-      admin_type: pendingData.admin_type  || null,
-      created_by: user.id,
-    })
-    .select()
-    .single();
-
-  if (userError) throw userError;
-  console.log('✅ [handleApprove] User created in users table:', userData .id);
-
-  // ✅ 2. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm)
-  if (['doctor', 'helper', 'osm'].includes(pendingData.role)) {
-    console.log('💾 [handleApprove] Creatin g doctor record for role:', pendingData.role);
-    await supabase
-      .from('doctors')
-      .insert({
-        user_id: userData.id,
-        full_name: pendingData.full_name_th,
-         full_name_th: pendingData.full_name_th,
-        specialization_th: pendingData.specialization_th || (
-          pendingData.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
-           pendingData.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
-          'แพทย์'
-        ),
-        phone: pendingData.phone,
-        email: pendingData.email,
-        is_active: tru e,
-        is_verified: false,
-      });
-    
-    console.log('✅ [handleApprove] Doctor record created');
-  }
-
-  // ✅ 3. อัปเดตสถานะ pending_staff
-  await supabase
-    .from('pendi ng_staff')
-    .update({
-      status: 'approved',
-      reviewed_at: new Date().toISOString(),
-      reviewed_by: user.id,
-    })
-    .eq('id', pendingId);
-
-  alert(`✅ อนุมัติ  "${staffName} " สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
-  console.log('✅ [handleApprove] Approval completed');
-  loadPendingStaff(accessibleHospitalIds);
-  loadStaffList(accessibleHos pitalIds);
-} catch (error: any) {
-  console.error('❌ [handleApprove] Error:', error);
-  alert('เกิดข้อผิดพลาด: ' + error.message);
-}
-};
-const handleReject = async (pendingId: string, staffName: string) => {
-const reason = prompt('เหตุผลในการปฏิเสธ:', '');
-if (!reason) return;
-try {
-  await supabase
-    .from('pending_staff')
-    .update({
-      status: 'rejected',
-      rejection_reason: reason,
-      reviewed_at: new Date().toISOString(),
-      reviewed_by: user.id,
-    })
-    .eq('id', pendingId);
-  
-  alert(`❌ ปฏิเสธ "${staffName}" แล้ว`);
-  loadPendingStaff(accessibleHospitalIds);
-} catch (error) {
-  console.error('❌ [handleReject] Error:', error);
-  alert('เกิดข้อผิดพลาด');
-}
-};
-const handleDeactivate = async (staffId: string, staffName: string) => {
-const staff = staffList.find(s => s.id === staffId);
-if (!canDeleteStaff(staff)) {
-alert(' คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
-return;
-}
-if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
-try {
-  const result = await deactivateStaff(staffId);
-  if (result.success) {
-    alert('ปิดการใช้งานสำเร็จ!');
-    loadStaffList(accessibleHospitalIds);
-  } else {
-    alert('เกิดข้อผิดพลาด: ' + result.error);
-  }
-} catch (error) {
-  console.error('❌ [handleDeactivate] Error:', error);
-  alert('เกิดข้อผิดพลาด');
-}
-};
-const handleRestoreStaff = async (staffId: string, staffName: string) => {
-const staff = deactivatedStaff.find(s => s.id === staffId);
-if (!canEditStaff(staff)) {
-alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
-return;
-}
-if (!confirm(`กู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) return;
-try {
-  const result = await restoreStaff(staffId);
-  if (result.success) {
-    alert('กู้คืนสำเร็จ!');
-    loadDeactivatedStaff(accessibleHospitalIds);
-    loadStaffList(accessibleHospitalIds);
-  } else {
-    alert('เกิดข้อผิดพลาด: ' + result.error);
-  }
-} catch (error) {
-  console.error(' [handleRestoreStaff] Error:', error);
-  alert('เกิดข้อผิดพลาด');
-}
-};
-const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
-const staff = deactivatedStaff.find(s => s.id === staffId);
-if (!canDeleteStaff(staff)) {
-alert(' คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
-return;
-}
-if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
-if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
-try {
-  const result = await permanentlyDeleteStaff(staffId);
-  if (result.success) {
-    alert('ลบถาวรสำเร็จ!');
-    loadDeactivatedStaff(accessibleHospitalIds);
-    loadStaffList(accessibleHospitalIds);
-  } else {
-    alert('เกิดข้อผิดพลาด: ' + result.error);
-  }
-} catch (error) {
-  console.error('❌ [handlePermanentlyDeleteStaff] Error:', error);
-  alert('เกิดข้อผิดพลาด');
-}
-};
-const handleOpenDeactivatedModal = () => {
-setActiveTab('deactivated');
-loadDeactivatedStaff(accessibleHospitalIds);
-setShowDeactivatedModal(true);
-};
-// =====================================================
-//  HOSPITAL GROUPING FUNCTION
-// =====================================================
-const getGroupedHospitals = () => {
-const mainHospitals = hospitals.filter(h => h.type === 'main');
-const subHospitals = hospitals.filter(h => h.type === 'sub');
-const hospitalGroups = new Map<string, Hospital[]>();
-subHospitals.forEach(sub => {
-  if (sub.parent_id) {
-    if (!hospitalGroups.has(sub.parent_id)) {
-      hospitalGroups.set(sub.parent_id, []);
+  // =====================================================
+  // 🔄 INITIAL DATA LOADING
+  // =====================================================
+  useEffect(() => {
+    const userData = checkSession();
+    if (!userData) {
+      router.push('/admin/login');
+      return;
     }
-    hospitalGroups.get(sub.parent_id)!.push(sub);
+    if (userData.role !== 'admin') {
+      alert('เฉพาะผู้ดูแลระบบเท่านั้นที่เข้าถึงได้');
+      router.push('/admin/login');
+      return;
+    }
+    console.log('👤 [StaffManagement] User:', userData);
+    console.log(' [StaffManagement] Is Super Admin:', isSuperAdmin(userData));
+    console.log('🏥 [StaffManagement] Is Hospital Admin:', isHospitalAdmin(userData));
+    
+    setUser(userData);
+    loadUserHospital(userData.id);
+    loadHospitals();
+    loadAccessibleHospitals(userData.id);
+  }, [router]);
+
+  // =====================================================
+  // 📥 DATA LOADING FUNCTIONS
+  // =====================================================
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error(' [loadUserHospital] Error:', error);
+    }
+  };
+
+  const loadAccessibleHospitals = async (userId: string) => {
+    try {
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
+      await loadStaffList(ids);
+      await loadPendingStaff(ids);
+      await loadDeactivatedStaff(ids);
+    } catch (error) {
+      console.error(' [loadAccessibleHospitals] Error:', error);
+      setAccessibleHospitalIds([]);
+      await loadStaffList([]);
+      await loadPendingStaff([]);
+      await loadDeactivatedStaff([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadHospitals = async () => {
+    try {
+      const data = await getHospitalsWithHierarchy();
+      setHospitals(data);
+    } catch (error) {
+      console.error('❌ [loadHospitals] Error:', error);
+      alert('เกิดข้อผิดพลาดในการโหลดข้อมูลโรงพยาบาล');
+    }
+  };
+
+  const loadStaffList = async (hospitalIds?: string[]) => {
+    try {
+      console.log(' [loadStaffList] Fetching staff list...');
+      const allStaff = await getStaffList();
+      console.log('📊 [loadStaffList] Total staff from DB:', allStaff.length);
+      
+      let filteredStaff = allStaff;
+      if (isSuperAdmin(user)) {
+        console.log('👑 [loadStaffList] Super Admin - showing all staff');
+      } else if (hospitalIds && hospitalIds.length > 0) {
+        filteredStaff = allStaff.filter(staff => {
+          if (!staff.hospital_id) return true;
+          return hospitalIds.includes(staff.hospital_id);
+        });
+        console.log('📊 [loadStaffList] Filtered staff for Hospital Admin:', filteredStaff.length);
+      }
+      setStaffList(filteredStaff);
+    } catch (error) {
+      console.error('❌ [loadStaffList] Error:', error);
+      setStaffList([]);
+    }
+  };
+
+  const loadPendingStaff = async (hospitalIds?: string[]) => {
+    try {
+      console.log('⏳ [loadPendingStaff] Fetching pending staff...');
+      const { data, error } = await supabase
+        .from('pending_staff')
+        .select(`*, hospitals (name, code)`)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('❌ [loadPendingStaff] Error:', error);
+        setPendingStaff([]);
+        return;
+      }
+
+      let filteredPending = data || [];
+      if (isSuperAdmin(user)) {
+        console.log(' [loadPendingStaff] Super Admin - showing all pending');
+      } else if (hospitalIds && hospitalIds.length > 0) {
+        filteredPending = filteredPending.filter(pending => {
+          if (!pending.hospital_id) return true;
+          return hospitalIds.includes(pending.hospital_id);
+        });
+        console.log(' [loadPendingStaff] Filtered pending for Hospital Admin:', filteredPending.length);
+      }
+      setPendingStaff(filteredPending);
+    } catch (error) {
+      console.error('❌ [loadPendingStaff] Exception:', error);
+      setPendingStaff([]);
+    }
+  };
+
+  const loadDeactivatedStaff = async (hospitalIds?: string[]) => {
+    try {
+      console.log('️ [loadDeactivatedStaff] Fetching deactivated staff...');
+      const data = await getDeactivatedStaff();
+      
+      let filteredData = data;
+      if (isSuperAdmin(user)) {
+        console.log('👑 [loadDeactivatedStaff] Super Admin - showing all deactivated');
+      } else if (hospitalIds && hospitalIds.length > 0) {
+        filteredData = data.filter(staff => 
+          !staff.hospital_id || hospitalIds.includes(staff.hospital_id)
+        );
+        console.log('📊 [loadDeactivatedStaff] Filtered deactivated for Hospital Admin:', filteredData.length);
+      }
+      setDeactivatedStaff(filteredData);
+    } catch (error) {
+      console.error('❌ [loadDeactivatedStaff] Error:', error);
+      setDeactivatedStaff([]);
+    }
+  };
+
+  // =====================================================
+  // 🔍 SEARCH & SORT FUNCTIONS
+  // =====================================================
+  const requestSort = (field: SortField) => {
+    let direction: SortDirection = 'asc';
+    if (sortConfig.field === field && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ field, direction });
+  };
+
+  const getSortedAndFilteredStaff = (staffData: any[]) => {
+    if (!staffData) return [];
+    
+    let filtered = [...staffData];
+    
+    // ✅ กรองตามคำค้นหา
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase();
+      filtered = filtered.filter(staff => {
+        const name = (staff.doctors?.full_name_th || staff.full_name_th || '').toLowerCase();
+        const role = (staff.role || '').toLowerCase();
+        const hospital = (staff.hospitals?.name || '').toLowerCase();
+        const idCard = (staff.id_card || '').toLowerCase();
+        const specialization = (staff.doctors?.specialization_th || '').toLowerCase();
+        
+        return (
+          name.includes(search) ||
+          role.includes(search) ||
+          hospital.includes(search) ||
+          idCard.includes(search) ||
+          specialization.includes(search)
+        );
+      });
+    }
+
+    // ✅ กรองเฉพาะชั่วคราว (ถ้าเปิดใช้งาน)
+    if (filterTempOnly) {
+      filtered = filtered.filter(staff => staff.is_temporary_id === true);
+    }
+
+    // ✅ เรียงลำดับ
+    const sorted = filtered.sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+      
+      switch (sortConfig.field) {
+        case 'name':
+          aValue = (a.doctors?.full_name_th || a.full_name_th || '').toLowerCase();
+          bValue = (b.doctors?.full_name_th || b.full_name_th || '').toLowerCase();
+          break;
+        case 'role':
+          aValue = (a.role || '').toLowerCase();
+          bValue = (b.role || '').toLowerCase();
+          break;
+        case 'hospital':
+          aValue = (a.hospitals?.name || '').toLowerCase();
+          bValue = (b.hospitals?.name || '').toLowerCase();
+          break;
+        case 'id_card':
+          aValue = a.id_card || '';
+          bValue = b.id_card || '';
+          break;
+        case 'specialization':
+          aValue = (a.doctors?.specialization_th || '').toLowerCase();
+          bValue = (b.doctors?.specialization_th || '').toLowerCase();
+          break;
+        case 'created_at':
+          aValue = new Date(a.created_at || 0);
+          bValue = new Date(b.created_at || 0);
+          break;
+        default:
+          return 0;
+      }
+
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  };
+
+  const getSortIcon = (field: SortField) => {
+    if (sortConfig.field !== field) {
+      return <ChevronsUpDown className="w-4 h-4 text-gray-400" />;
+    }
+    return sortConfig.direction === 'asc' 
+      ? <ChevronUp className="w-4 h-4 text-blue-600" />
+      : <ChevronDown className="w-4 h-4 text-blue-600" />;
+  };
+
+  // =====================================================
+  // 🎬 ACTION HANDLERS
+  // =====================================================
+  const handleLogout = () => {
+    console.log(' [handleLogout] User logging out...');
+    logout();
+    router.push('/admin/login');
+  };
+
+  const canEditStaff = (staff: any): boolean => {
+    if (isSuperAdmin(user)) return true;
+    if (isHospitalAdmin(user)) {
+      if (!staff.hospital_id) return false;
+      return accessibleHospitalIds.includes(staff.hospital_id);
+    }
+    return false;
+  };
+
+  const canDeleteStaff = (staff: any): boolean => canEditStaff(staff);
+
+  // ✅ ฟังก์ชันใหม่: จัดการปุ่มแก้ไขสำหรับอสม.ชั่วคราว
+  const handleEditClick = (staff: any) => {
+    if (!canEditStaff(staff)) {
+      alert('❌ คุณไม่มีสิทธิ์แก้ไขเจ้าหน้าที่นี้');
+      return;
+    }
+
+    // ถ้าเป็นอสม.ชั่วคราว ให้ไปที่หน้า verify-temporary แทน
+    if (staff.role === 'osm' && staff.is_temporary_id) {
+      router.push('/admin/staff/verify-temporary');
+      return;
+    }
+
+    // กรณีปกติ เปิด Modal แก้ไข
+    setSelectedStaff(staff);
+    setShowEditModal(true);
+  };
+
+  const handleApprove = async (pendingId: string, staffName: string) => {
+    if (!confirm(`อนุมัติ "${staffName}" เข้าระบบหรือไม่?`)) return;
+    
+    try {
+      console.log('✅ [handleApprove] Approving pending staff:', pendingId);
+      const { data: pendingData, error: fetchError } = await supabase
+        .from('pending_staff')
+        .select('*')
+        .eq('id', pendingId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      // ✅ ตรวจสอบสิทธิ์การอนุมัติ
+      if (!isSuperAdmin(user) && pendingData.hospital_id && 
+          !accessibleHospitalIds.includes(pendingData.hospital_id)) {
+        alert('❌ คุณไม่มีสิทธิ์อนุมัติเจ้าหน้าที่โรงพยาบาลนี้');
+        return;
+      }
+
+      // ✅ 1. สร้าง user ในตาราง users
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .insert({
+          id_card: pendingData.id_card,
+          password_hash: pendingData.password_hash,
+          role: pendingData.role,
+          is_active: true,
+          hospital_id: pendingData.hospital_id,
+          birth_date: pendingData.birth_date,
+          admin_type: pendingData.admin_type || null,
+          created_by: user.id,
+        })
+        .select()
+        .single();
+
+      if (userError) throw userError;
+      console.log('✅ [handleApprove] User created in users table:', userData.id);
+
+      // ✅ 2. สร้าง record ในตาราง doctors (สำหรับ doctor/helper/osm)
+      if (['doctor', 'helper', 'osm'].includes(pendingData.role)) {
+        console.log('💾 [handleApprove] Creating doctor record for role:', pendingData.role);
+        await supabase
+          .from('doctors')
+          .insert({
+            user_id: userData.id,
+            full_name: pendingData.full_name_th,
+            full_name_th: pendingData.full_name_th,
+            specialization_th: pendingData.specialization_th || (
+              pendingData.role === 'osm' ? 'อาสาสมัครสาธารณสุข' : 
+              pendingData.role === 'helper' ? 'เจ้าหน้าที่สาธารณสุข' : 
+              'แพทย์'
+            ),
+            phone: pendingData.phone,
+            email: pendingData.email,
+            is_active: true,
+            is_verified: false,
+          });
+        
+        console.log('✅ [handleApprove] Doctor record created');
+      }
+
+      // ✅ 3. อัปเดตสถานะ pending_staff
+      await supabase
+        .from('pending_staff')
+        .update({
+          status: 'approved',
+          reviewed_at: new Date().toISOString(),
+          reviewed_by: user.id,
+        })
+        .eq('id', pendingId);
+
+      alert(`✅ อนุมัติ "${staffName}" สำเร็จ!\nรหัสผ่าน: ${pendingData.password_hash}`);
+      console.log('✅ [handleApprove] Approval completed');
+      loadPendingStaff(accessibleHospitalIds);
+      loadStaffList(accessibleHospitalIds);
+    } catch (error: any) {
+      console.error('❌ [handleApprove] Error:', error);
+      alert('เกิดข้อผิดพลาด: ' + error.message);
+    }
+  };
+
+  const handleReject = async (pendingId: string, staffName: string) => {
+    const reason = prompt('เหตุผลในการปฏิเสธ:', '');
+    if (!reason) return;
+    
+    try {
+      await supabase
+        .from('pending_staff')
+        .update({
+          status: 'rejected',
+          rejection_reason: reason,
+          reviewed_at: new Date().toISOString(),
+          reviewed_by: user.id,
+        })
+        .eq('id', pendingId);
+      
+      alert(`❌ ปฏิเสธ "${staffName}" แล้ว`);
+      loadPendingStaff(accessibleHospitalIds);
+    } catch (error) {
+      console.error('❌ [handleReject] Error:', error);
+      alert('เกิดข้อผิดพลาด');
+    }
+  };
+
+  const handleDeactivate = async (staffId: string, staffName: string) => {
+    const staff = staffList.find(s => s.id === staffId);
+    if (!canDeleteStaff(staff)) {
+      alert(' คุณไม่มีสิทธิ์ปิดการใช้งานเจ้าหน้าที่นี้');
+      return;
+    }
+    if (!confirm(`ปิดการใช้งาน "${staffName}" หรือไม่?`)) return;
+    
+    try {
+      const result = await deactivateStaff(staffId);
+      if (result.success) {
+        alert('ปิดการใช้งานสำเร็จ!');
+        loadStaffList(accessibleHospitalIds);
+      } else {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error) {
+      console.error('❌ [handleDeactivate] Error:', error);
+      alert('เกิดข้อผิดพลาด');
+    }
+  };
+
+  const handleRestoreStaff = async (staffId: string, staffName: string) => {
+    const staff = deactivatedStaff.find(s => s.id === staffId);
+    if (!canEditStaff(staff)) {
+      alert('❌ คุณไม่มีสิทธิ์กู้คืนเจ้าหน้าที่นี้');
+      return;
+    }
+    if (!confirm(`กู้คืน "${staffName}" กลับมาใช้งานหรือไม่?`)) return;
+    
+    try {
+      const result = await restoreStaff(staffId);
+      if (result.success) {
+        alert('กู้คืนสำเร็จ!');
+        loadDeactivatedStaff(accessibleHospitalIds);
+        loadStaffList(accessibleHospitalIds);
+      } else {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error) {
+      console.error(' [handleRestoreStaff] Error:', error);
+      alert('เกิดข้อผิดพลาด');
+    }
+  };
+
+  const handlePermanentlyDeleteStaff = async (staffId: string, staffName: string) => {
+    const staff = deactivatedStaff.find(s => s.id === staffId);
+    if (!canDeleteStaff(staff)) {
+      alert(' คุณไม่มีสิทธิ์ลบเจ้าหน้าที่นี้');
+      return;
+    }
+    if (!confirm(`⚠️ ลบ "${staffName}" ถาวร? การกระทำนี้ไม่สามารถย้อนกลับได้`)) return;
+    if (prompt('พิมพ์ "YES" เพื่อยืนยันการลบถาวร') !== 'YES') return;
+    
+    try {
+      const result = await permanentlyDeleteStaff(staffId);
+      if (result.success) {
+        alert('ลบถาวรสำเร็จ!');
+        loadDeactivatedStaff(accessibleHospitalIds);
+        loadStaffList(accessibleHospitalIds);
+      } else {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error) {
+      console.error('❌ [handlePermanentlyDeleteStaff] Error:', error);
+      alert('เกิดข้อผิดพลาด');
+    }
+  };
+
+  const handleOpenDeactivatedModal = () => {
+    setActiveTab('deactivated');
+    loadDeactivatedStaff(accessibleHospitalIds);
+    setShowDeactivatedModal(true);
+  };
+
+  // =====================================================
+  //  HOSPITAL GROUPING FUNCTION
+  // =====================================================
+  const getGroupedHospitals = () => {
+    const mainHospitals = hospitals.filter(h => h.type === 'main');
+    const subHospitals = hospitals.filter(h => h.type === 'sub');
+    
+    const hospitalGroups = new Map<string, Hospital[]>();
+    subHospitals.forEach(sub => {
+      if (sub.parent_id) {
+        if (!hospitalGroups.has(sub.parent_id)) {
+          hospitalGroups.set(sub.parent_id, []);
+        }
+        hospitalGroups.get(sub.parent_id)!.push(sub);
+      }
+    });
+    
+    return { mainHospitals, hospitalGroups };
+  };
+
+  // ✅ ข้อมูลที่กรองและเรียงลำดับแล้ว
+  const filteredStaffList = getSortedAndFilteredStaff(staffList);
+  const filteredPendingStaff = getSortedAndFilteredStaff(pendingStaff);
+  const filteredDeactivatedStaff = getSortedAndFilteredStaff(deactivatedStaff);
+
+  // =====================================================
+  // ⏳ LOADING STATE
+  // =====================================================
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">กำลังโหลดข้อมูล...</p>
+        </div>
+      </div>
+    );
   }
-});
 
-return { mainHospitals, hospitalGroups };
-};
-// ✅ ข้อมูลที่กรองและเรียงลำดับแล้ว
-const filteredStaffList = getSortedAndFilteredStaff(staffList);
-const filteredPendingStaff = getSortedAndFilteredStaff(pendingStaff);
-const filteredDeactivatedStaff = getSortedAndFilteredStaff(deactivatedStaff);
-// =====================================================
-// ⏳ LOADING STATE
-// =====================================================
-if (loading) {
-return (
- <div className= "min-h-screen flex items-center justify-center bg-gray-50 " >
- <div className= "text-center " >
- <div className= "animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4 " > </div >
- <p className= "text-gray-600 " >กำลังโหลดข้อมูล... </p >
- </div >
- </div >
-);
-}
-// =====================================================
-// 🎨 RENDER UI
-// =====================================================
-return (
- <div className= "min-h-screen bg-gray-50 " >
-{/* Header */}
- <div className= "bg-white shadow-sm border-b border-gray-200 " >
- <div className= "max-w-7xl mx-auto px-4 py-6 " >
- <button
-onClick={() = > router.push('/admin/dashboard')}
-className= "flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2 transition-colors "
- >
- <ArrowLeft className= "w-4 h-4 " / >
-กลับ Dashboard
- </button >
-<div className= "flex items-center justify-between flex-wrap gap-4 " >
-         <div >
-           <h1 className= "text-3xl font-bold text-gray-800 mb-2 " >👥 จัดการเจ้าหน้าที่ </h1 >
-           <p className= "text-gray-600 " >จัดการผู้ดูแลระบบ แพทย์ เจ้าหน้าที่ และ อสม. </p >
+  // =====================================================
+  // 🎨 RENDER UI
+  // =====================================================
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 py-6">
+          <button
+            onClick={() => router.push('/admin/dashboard')}
+            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            กลับ Dashboard
+          </button>
           
-           <div className= "flex items-center gap-2 mt-2 " >
-            {isSuperAdmin(user) ? (
-               <span className= "px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1 " >
-                 <Shield className= "w-3 h-3 " / >
-                Super Admin - เห็นทั้งหมด
-               </span >
-            ) : (
-               <span className= "px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold flex items-center gap-1 " >
-                 <Hospital className= "w-3 h-3 " / >
-                Hospital Admin - เห็นเฉพาะ {userHospital?.name || 'โรงพยาบาลตัวเอง'}
-               </span >
-            )}
-           </div >
-         </div >
-        
-         <div className= "flex gap-2 " >
-           <button
-            onClick={() = > setActiveTab('pending')}
-            className= "flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all "
-           >
-             <Clock className= "w-4 h-4 " / >
-            รออนุมัติ ({pendingStaff.length})
-           </button >
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการเจ้าหน้าที่</h1>
+              <p className="text-gray-600">จัดการผู้ดูแลระบบ อสม. เจ้าหน้าที่ และ แพทย์</p>
+              
+              <div className="flex items-center gap-2 mt-2">
+                {isSuperAdmin(user) ? (
+                  <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold flex items-center gap-1">
+                    <Shield className="w-3 h-3" />
+                    Super Admin - เห็นทั้งหมด
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold flex items-center gap-1">
+                    <Hospital className="w-3 h-3" />
+                    Hospital Admin - เห็นเฉพาะ {userHospital?.name || 'โรงพยาบาลตัวเอง'}
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            <div className="flex gap-2">
+              <button
+                onClick={() => setActiveTab('pending')}
+                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+              >
+                <Clock className="w-4 h-4" />
+                รออนุมัติ ({pendingStaff.length})
+              </button>
+              
+              <button
+                onClick={handleOpenDeactivatedModal}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+              >
+                <Archive className="w-4 h-4" />
+                ที่ปิดการใช้งาน ({deactivatedStaff.length})
+              </button>
+              
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                เพิ่มเจ้าหน้าที่
+              </button>
+              
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
+            </div>
+          </div>
           
-           <button
-            onClick={handleOpenDeactivatedModal}
-            className= "flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all "
-           >
-             <Archive className= "w-4 h-4 " / >
-            ที่ปิดการใช้งาน ({deactivatedStaff.length})
-           </button >
+          {/* Tabs */}
+          <div className="flex gap-2 mt-4 border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`px-4 py-2 font-semibold transition-colors ${
+                activeTab === 'active'
+                  ? 'text-blue-600 border-b-2 border-blue-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <UserCheck className="w-4 h-4 inline mr-2" />
+              ใช้งาน ({staffList.length})
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('pending')}
+              className={`px-4 py-2 font-semibold transition-colors ${
+                activeTab === 'pending'
+                  ? 'text-orange-600 border-b-2 border-orange-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Clock className="w-4 h-4 inline mr-2" />
+              รออนุมัติ ({pendingStaff.length})
+            </button>
+            
+            <button
+              onClick={() => setActiveTab('deactivated')}
+              className={`px-4 py-2 font-semibold transition-colors ${
+                activeTab === 'deactivated'
+                  ? 'text-gray-600 border-b-2 border-gray-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <Archive className="w-4 h-4 inline mr-2" />
+              ปิดการใช้งาน ({deactivatedStaff.length})
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Summary Cards */}
+        {activeTab === 'active' && (
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                  <Users className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">เจ้าหน้าที่ทั้งหมด</p>
+                  <p className="text-2xl font-bold text-gray-800">{staffList.length}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">ผู้ดูแลระบบ</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {staffList.filter(s => s.role === 'admin').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+                  <Stethoscope className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">แพทย์</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {staffList.filter(s => s.role === 'doctor').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center">
+                  <Heart className="w-5 h-5 text-yellow-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">เจ้าหน้าที่</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {staffList.filter(s => s.role === 'helper').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ การ์ดสรุป อสม. ทั้งหมด */}
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-gray-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                  <Users className="w-5 h-5 text-orange-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">อสม.</p>
+                  <p className="text-2xl font-bold text-gray-800">
+                    {staffList.filter(s => s.role === 'osm').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ การ์ดสรุป อสม. ชั่วคราว - ใหม่! */}
+            <div className="bg-white rounded-xl shadow-lg p-4 border border-amber-200">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+                  <Clock className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">อสม.ชั่วคราว</p>
+                  <p className="text-2xl font-bold text-amber-700">
+                    {staffList.filter(s => s.role === 'osm' && s.is_temporary_id).length}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ Search Box + Filter */}
+        <div className="mb-6">
+          <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+            <div className="relative flex-1 w-full">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="🔍 ค้นหาจาก ชื่อ-นามสกุล, บทบาท, โรงพยาบาล, ID Card, ความเชี่ยวชาญ..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            
+            {/* 🆕 ปุ่มกรองแสดงเฉพาะชั่วคราว */}
+            <button
+              onClick={() => setFilterTempOnly(!filterTempOnly)}
+              className={`px-4 py-3 rounded-lg border flex items-center gap-2 transition-all whitespace-nowrap ${
+                filterTempOnly 
+                  ? 'bg-amber-500 text-white border-amber-600' 
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-amber-50'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              {filterTempOnly ? 'แสดงทั้งหมด' : 'เฉพาะชั่วคราว'}
+            </button>
+          </div>
           
-           <button
-            onClick={() = > setShowAddModal(true)}
-            className= "flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all "
-           >
-             <Plus className= "w-4 h-4 " / >
-            เพิ่มเจ้าหน้าที่
-           </button >
-          
-           <button
-            onClick={handleLogout}
-            className= "flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all "
-           >
-             <LogOut className= "w-4 h-4 " / >
-            ออกจากระบบ
-           </button >
-         </div >
-       </div >
-      
-      {/* Tabs */}
-       <div className= "flex gap-2 mt-4 border-b border-gray-200 " >
-         <button
-          onClick={() = > setActiveTab('active')}
-          className={`px-4 py-2 font-semibold transition-colors ${
-            activeTab === 'active'
-              ? 'text-blue-600 border-b-2 border-blu e-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-         >
-           <UserCheck className= "w-4 h-4 inline mr-2 " / >
-          ใช้งาน ({staffList.length})
-         </button >
-        
-         <button
-          onClick={() = > setActiveTab('pending')}
-          className={`px-4 py-2 font-semibold transition-colors ${
-            activeTab === 'pending'
-              ? 'text-orange-600 border-b-2 border -orange-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-         >
-           <Clock className= "w-4 h-4 inline mr-2 " / >
-          รออนุมัติ ({pendingStaff.length})
-         </button >
-        
-         <button
-          onClick={() = > setActiveTab('deactivated')}
-          className={`px-4 py-2 font-semibold transition-colors ${
-            activeTab === 'deactivated'
-              ? 'text-gray-600 border-b-2  border-gray-600'
-              : 'text-gray-500 hover:text-gray-700'
-          }`}
-         >
-           <Archive className= "w-4 h-4 inline mr-2 " / >
-          ปิดการใช้งาน ({deactivatedStaff.length})
-         </button >
-       </div >
-     </div >
-   </div >
-
-  {/* Main Content */}
-   <div className= "max-w-7xl mx-auto px-4 py-8 " >
-    {/* Summary Cards */}
-    {activeTab === 'active'  & & (
-       <div className= "grid grid-cols-1 md:grid-cols-6 gap-4 mb-6 " >
-         <div className= "bg-white rounded-xl shadow-lg p-4 border border-gray-200 " >
-           <div className= "flex items-center gap-3 " >
-             <div className= "w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center " >
-               <Users className= "w-5 h-5 text-blue-600 " / >
-             </div >
-             <div >
-               <p className= "text-sm text-gray-500 " >เจ้าหน้าที่ทั้งหมด </p >
-               <p className= "text-2xl font-bold text-gray-800 " >{staffList.length} </p >
-             </div >
-           </div >
-         </div >
-        
-         <div className= "bg-white rounded-xl shadow-lg p-4 border border-gray-200 " >
-           <div className= "flex items-center gap-3 " >
-             <div className= "w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center " >
-               <Shield className= "w-5 h-5 text-purple-600 " / >
-             </div >
-             <div >
-               <p className= "text-sm text-gray-500 " >ผู้ดูแลระบบ </p >
-               <p className= "text-2xl font-bold text-gray-800 " >
-                {staffList.filter(s = > s.role === 'admin').length}
-               </p >
-             </div >
-           </div >
-         </div >
-        
-         <div className= "bg-white rounded-xl shadow-lg p-4 border border-gray-200 " >
-           <div className= "flex items-center gap-3 " >
-             <div className= "w-10 h-10 bg-green-100 rounded-full flex items-center justify-center " >
-               <Stethoscope className= "w-5 h-5 text-green-600 " / >
-             </div >
-             <div >
-               <p className= "text-sm text-gray-500 " >แพทย์ </p >
-               <p className= "text-2xl font-bold text-gray-800 " >
-                {staffList.filter(s = > s.role === 'doctor').length}
-               </p >
-             </div >
-           </div >
-         </div >
-        
-         <div className= "bg-white rounded-xl shadow-lg p-4 border border-gray-200 " >
-           <div className= "flex items-center gap-3 " >
-             <div className= "w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center " >
-               <Heart className= "w-5 h-5 text-yellow-600 " / >
-             </div >
-             <div >
-               <p className= "text-sm text-gray-500 " >เจ้าหน้าที่ </p >
-               <p className= "text-2xl font-bold text-gray-800 " >
-                {staffList.filter(s = > s.role === 'helper').length}
-               </p >
-             </div >
-           </div >
-         </div >
-
-        {/* ✅ การ์ดสรุป อสม. ทั้งหมด */}
-         <div className= "bg-white rounded-xl shadow-lg p-4 border border-gray-200 " >
-           <div className= "flex items-center gap-3 " >
-             <div className= "w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center " >
-               <Users className= "w-5 h-5 text-orange-600 " / >
-             </div >
-             <div >
-               <p className= "text-sm text-gray-500 " >อสม. </p >
-               <p className= "text-2xl font-bold text-gray-800 " >
-                {staffList.filter(s = > s.role === 'osm').length}
-               </p >
-             </div >
-           </div >
-         </div >
-
-        {/* ✅ การ์ดสรุป อสม. ชั่วคราว - ใหม่! */}
-         <div className= "bg-white rounded-xl shadow-lg p-4 border border-amber-200 " >
-           <div className= "flex items-center gap-3 " >
-             <div className= "w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center " >
-               <Clock className= "w-5 h-5 text-amber-600 " / >
-             </div >
-             <div >
-               <p className= "text-sm text-gray-500 " >อสม.ชั่วคราว </p >
-               <p className= "text-2xl font-bold text-amber-700 " >
-                {staffList.filter(s = > s.role === 'osm'  & & s.is_temporary_id).length}
-               </p >
-             </div >
-           </div >
-         </div >
-       </div >
-    )}
-
-    {/* ✅ Search Box + Filter */}
-     <div className= "mb-6 " >
-       <div className= "flex flex-col md:flex-row gap-4 items-start md:items-center " >
-         <div className= "relative flex-1 w-full " >
-           <Search className= "absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5 " / >
-           <input
-            type= "text "
-            placeholder= "🔍 ค้นหาจาก ชื่อ-นามสกุล, บทบาท, โรงพยาบาล, ID Card, ความเชี่ยวชาญ... "
-            value={searchTerm}
-            onChange={(e) = > setSearchTerm(e.target.value)}
-            className= "w-full pl-12 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent "
-          / >
-          {searchTerm  & & (
-             <button
-              onClick={() = > setSearchTerm('')}
-              className= "absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 "
-             >
-               <XCircle className= "w-5 h-5 " / >
-             </button >
+          {searchTerm && (
+            <p className="text-sm text-gray-500 mt-2">
+              พบ {activeTab === 'active' ? filteredStaffList.length : activeTab === 'pending' ? filteredPendingStaff.length : filteredDeactivatedStaff.length} รายการ
+            </p>
           )}
-         </div >
-        
-        {/* 🆕 ปุ่มกรองแสดงเฉพาะชั่วคราว */}
-         <button
-          onClick={() = > setFilterTempOnly(!filterTempOnly)}
-          className={`px-4 py-3 rounded-lg border flex items-center gap-2 transition-all whitespace-nowrap ${
-            filterTempOnly 
-               ? 'bg-amber-500 text-white border-amber-600' 
-              : 'bg-white text-gray-700 border-gray-300 hover:bg-amber-50'
-          }`}
-         >
-           <Clock className= "w-4 h-4 " / >
-          {filterTempOnly ? 'แสดงทั้งหมด' : 'เฉพาะชั่วคราว'}
-         </button >
-       </div >
-      
-      {searchTerm  & & (
-         <p className= "text-sm text-gray-500 mt-2 " >
-          พบ {activeTab === 'active' ? filteredStaffList.length : activeTab === 'pending' ? filteredPendingStaff.length : filteredDeactivatedStaff.length} รายการ
-         </p >
-      )}
-      {filterTempOnly  & & (
-         <p className= "text-sm text-amber-600 mt-1 " >
-          🔸 กำลังแสดงเฉพาะเจ้าหน้าที่ที่มีสถานะ  "ชั่วคราว "
-         </p >
-      )}
-     </div >
+          {filterTempOnly && (
+            <p className="text-sm text-amber-600 mt-1">
+              🔸 กำลังแสดงเฉพาะเจ้าหน้าที่ที่มีสถานะ "ชั่วคราว"
+            </p>
+          )}
+        </div>
 
-    {/* Active Staff Table */}
-    {activeTab === 'active'  & & (
-       <div className= "bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden " >
-         <div className= "overflow-x-auto " >
-           <table className= "w-full " >
-             <thead className= "bg-gray-50 border-b border-gray-200 " >
-               <tr >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >
-                   <button
-                    onClick={() = > requestSort('name')}
-                    className= "flex items-center gap-2 hover:text-blue-600 transition-colors "
-                   >
-                    ชื่อ-นามสกุล
-                    {getSortIcon('name')}
-                   </button >
-                 </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >
-                   <button
-                    onClick={() = > requestSort('role')}
-                    className= "flex items-center gap-2 hover:text-blue-600 transition-colors "
-                   >
-                    บทบาท
-                    {getSortIcon('role')}
-                   </button >
-                 </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >
-                   <button
-                    onClick={() = > requestSort('hospital')}
-                    className= "flex items-center gap-2 hover:text-blue-600 transition-colors "
-                   >
-                    โรงพยาบาล
-                    {getSortIcon('hospital')}
-                   </button >
-                 </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >
-                   <button
-                    onClick={() = > requestSort('id_card')}
-                    className= "flex items-center gap-2 hover:text-blue-600 transition-colors "
-                   >
-                    ID Card
-                    {getSortIcon('id_card')}
-                   </button >
-                 </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >
-                   <button
-                    onClick={() = > requestSort('specialization')}
-                    className= "flex items-center gap-2 hover:text-blue-600 transition-colors "
-                   >
-                    ความเชี่ยวชาญ
-                    {getSortIcon('specialization')}
-                   </button >
-                 </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >สถานะ </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >จัดการ </th >
-               </tr >
-             </thead >
-             <tbody className= "divide-y divide-gray-200 " >
-              {filteredStaffList.length === 0 ? (
-                 <tr >
-                   <td colSpan={7} className= "px-6 py-12 text-center text-gray-500 " >
-                     <Users className= "w-12 h-12 mx-auto mb-4 text-gray-300 " / >
-                     <p >ไม่พบข้อมูลเจ้าหน้าที่ </p >
-                    {!isSuperAdmin(user)  & & (
-                       <p className= "text-sm text-gray-400 mt-2 " >
-                        🔒 คุณเห็นเฉพาะเจ้าหน้าที่ในโรงพยาบาลของคุณ
-                       </p >
-                    )}
-                    {searchTerm  & & (
-                       <p className= "text-sm text-gray-400 mt-2 " >
-                        ไม่พบผลการค้นหา  "{searchTerm} "
-                       </p >
-                    )}
-                    {filterTempOnly  & & (
-                       <p className= "text-sm text-amber-600 mt-2 " >
-                        🔸 ไม่มีอสม.ชั่วคราวในระบบ
-                       </p >
-                    )}
-                     <button
-                      onClick={() = > setShowAddModal(true)}
-                      className= "mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 "
-                     >
-                      เพิ่มเจ้าหน้าที่คนแรก
-                     </button >
-                   </td >
-                 </tr >
-              ) : (
-                filteredStaffList.map((staff) = > {
-                  const canEdit = canEditStaff(staff);
-                  const isSuper = staff.admin_type === 'super' || staff.role === 'super_admin';
-                  
-                   return (
-                     <tr key={staff.id} className= "hover:bg-gray-50 transition-colors " >
-                       <td className= "px-6 py-4 " >
-                         <div className= "flex items-center gap-3 " >
-                           <div className= "w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center " >
-                             <Users className= "w-5 h-5 text-blue-600 " / >
-                           </div >
-                           <div >
-                             <div className= "flex items-center gap-2 " >
-                               <p className= "font-medium text-gray-800 " >
-                                {staff.doctors?.full_name_th || staff.full_name_th || '-'}
-                               </p >
-                              
-                              {/* 🟡 ป้ายชั่วคราว - ใหม่! */}
-                              {staff.is_temporary_id  & & (
-                                 <span className= "inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs font-bold " >
-                                   <Clock className= "w-3 h-3 " / >
-                                  ชั่วคราว
-                                 </span >
+        {/* Active Staff Table */}
+        {activeTab === 'active' && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('name')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ชื่อ-นามสกุล
+                        {getSortIcon('name')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('role')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        บทบาท
+                        {getSortIcon('role')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('hospital')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        โรงพยาบาล
+                        {getSortIcon('hospital')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('id_card')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ID Card
+                        {getSortIcon('id_card')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('specialization')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ความเชี่ยวชาญ
+                        {getSortIcon('specialization')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">สถานะ</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredStaffList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                        <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                        <p>ไม่พบข้อมูลเจ้าหน้าที่</p>
+                        {!isSuperAdmin(user) && (
+                          <p className="text-sm text-gray-400 mt-2">
+                            🔒 คุณเห็นเฉพาะเจ้าหน้าที่ในโรงพยาบาลของคุณ
+                          </p>
+                        )}
+                        {searchTerm && (
+                          <p className="text-sm text-gray-400 mt-2">
+                            ไม่พบผลการค้นหา "{searchTerm}"
+                          </p>
+                        )}
+                        {filterTempOnly && (
+                          <p className="text-sm text-amber-600 mt-2">
+                            🔸 ไม่มีอสม.ชั่วคราวในระบบ
+                          </p>
+                        )}
+                        <button
+                          onClick={() => setShowAddModal(true)}
+                          className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                        >
+                          เพิ่มเจ้าหน้าที่คนแรก
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStaffList.map((staff) => {
+                      const canEdit = canEditStaff(staff);
+                      const isSuper = staff.admin_type === 'super' || staff.role === 'super_admin';
+                      
+                      return (
+                        <tr key={staff.id} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                                <Users className="w-5 h-5 text-blue-600" />
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-medium text-gray-800">
+                                    {staff.doctors?.full_name_th || staff.full_name_th || '-'}
+                                  </p>
+                                  
+                                  {/* 🟡 ป้ายชั่วคราว - ใหม่! */}
+                                  {staff.is_temporary_id && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-800 rounded text-xs font-bold">
+                                      <Clock className="w-3 h-3" />
+                                      ชั่วคราว
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-gray-500">
+                                  {staff.doctors?.phone || '-'}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          
+                          {/* ✅ Badge บทบาท */}
+                          <td className="px-6 py-4">
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                              isSuper ? 'bg-purple-100 text-purple-700' :
+                              staff.role === 'admin' ? 'bg-indigo-100 text-indigo-700' :
+                              staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                              staff.role === 'osm' ? 'bg-orange-100 text-orange-700' :
+                              'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {isSuper ? '👑 Super Admin' :
+                               staff.role === 'admin' ? '🏥 Hospital Admin' :
+                               staff.role === 'doctor' ? '⚕️ แพทย์' :
+                               staff.role === 'osm' ? '️ อสม.' : '👩⚕️ เจ้าหน้าที่'}
+                            </span>
+                          </td>
+                          
+                          <td className="px-6 py-4">
+                            <span className="text-sm text-gray-600">
+                              {staff.hospitals?.name || (isSuper ? '-' : '-')}
+                            </span>
+                          </td>
+                          
+                          <td className="px-6 py-4">
+                            <span className="font-mono text-sm text-gray-600">
+                              {staff.id_card}
+                            </span>
+                          </td>
+                          
+                          <td className="px-6 py-4">
+                            <span className="text-sm text-gray-600">
+                              {staff.doctors?.specialization_th || '-'}
+                            </span>
+                          </td>
+                          
+                          <td className="px-6 py-4">
+                            {staff.is_active ? (
+                              <span className="flex items-center gap-1 text-green-600">
+                                <UserCheck className="w-4 h-4" />
+                                ใช้งาน
+                              </span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-gray-400">
+                                <UserX className="w-4 h-4" />
+                                ปิดการใช้งาน
+                              </span>
+                            )}
+                          </td>
+                          
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              {canEdit ? (
+                                <>
+                                  {/* ✅ ปุ่มแก้ไข: ถ้าเป็นอสม.ชั่วคราว จะลิงก์ไปหน้า verify-temporary */}
+                                  <button
+                                    onClick={() => handleEditClick(staff)}
+                                    className={`p-2 rounded-lg transition-colors ${
+                                      staff.role === 'osm' && staff.is_temporary_id
+                                        ? 'text-amber-600 hover:bg-amber-50'
+                                        : 'text-blue-600 hover:bg-blue-50'
+                                    }`}
+                                    title={staff.role === 'osm' && staff.is_temporary_id 
+                                      ? 'ยืนยันเป็นอสม.จริง' 
+                                      : 'แก้ไข'}
+                                  >
+                                    <Edit className="w-4 h-4" />
+                                  </button>
+                                  
+                                  {/* ✅ ปุ่มลบ: คงเดิมสำหรับทุกคน */}
+                                  <button
+                                    onClick={() => handleDeactivate(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
+                                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="ปิดการใช้งาน"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </>
+                              ) : (
+                                <span className="text-xs text-gray-400 flex items-center gap-1">
+                                  <Lock className="w-3 h-3" />
+                                  ไม่มีสิทธิ์
+                                </span>
                               )}
-                             </div >
-                             <p className= "text-sm text-gray-500 " >
-                              {staff.doctors?.phone || '-'}
-                             </p >
-                           </div >
-                         </div >
-                       </td >
-                      
-                      {/* ✅ Badge บทบาท */}
-                       <td className= "px-6 py-4 " >
-                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          isSuper ? 'bg-purple-100 text-purple-700' :
-                          staff.role === 'ad min' ? 'bg-indigo-100 text-indigo-700' :
-                          staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
-                          staff.role === 'osm' ? 'bg-or ange-100 text-orange-700' :
-                          'bg-yellow-100 text-yellow-700'
-                        }`} >
-                          {isSuper ? '👑 Super Admin' :
-                           staff.role === 'admin' ? '🏥 Hospital Admin' :
-                           staff.role === 'docto r' ? '⚕️ แพทย์' :
-                           staff.role === 'osm' ? '️ อสม.' : '👩⚕️ เจ้าหน้าที่'}
-                         </span >
-                       </td >
-                      
-                       <td className= "px-6 py-4 " >
-                         <span className= "text-sm text-gray-600 " >
-                          {staff.hospitals?.name || (isSuper ? '-' : '-')}
-                         </span >
-                       </td >
-                      
-                       <td className= "px-6 py-4 " >
-                         <span className= "font-mono text-sm text-gray-600 " >
-                          {staff.id_card}
-                         </span >
-                       </td >
-                      
-                       <td className= "px-6 py-4 " >
-                         <span className= "text-sm text-gray-600 " >
-                          {staff.doctors?.specialization_th || '-'}
-                         </span >
-                       </td >
-                      
-                       <td className= "px-6 py-4 " >
-                        {staff.is_active ? (
-                           <span className= "flex items-center gap-1 text-green-600 " >
-                             <UserCheck className= "w-4 h-4 " / >
-                            ใช้งาน
-                           </span >
-                        ) : (
-                           <span className= "flex items-center gap-1 text-gray-400 " >
-                             <UserX className= "w-4 h-4 " / >
-                            ปิดการใช้งาน
-                           </span >
-                        )}
-                       </td >
-                      
-                       <td className= "px-6 py-4 " >
-                         <div className= "flex items-center gap-2 " >
-                          {canEdit ? (
-                             < >
-                              {/* ✅ ปุ่มแก้ไข: ถ้าเป็นอสม.ชั่วคราว จะลิงก์ไปหน้า verify-temporary */}
-                               <button
-                                onClick={() = > handleEditClick(staff)}
-                                className={`p-2 rounded-lg transition-colors ${
-                                  staff.role === 'osm'  & & staff.is_temporary_id
-                                    ? 'text-amber-600 hover:bg-amber-50'
-                                    : 'text-blue-600 hover:bg-blue-50'
-                                 }`}
-                                title={staff.role === 'osm'  & & staff.is_temporary_id 
-                                  ? 'ยืนยันเป็นอสม.จริง' 
-                                  : 'แก้ไข'}
-                               >
-                                 <Edit className= "w-4 h-4 " / >
-                               </button >
-                              
-                              {/* ✅ ปุ่มลบ: คงเดิมสำหรับทุกคน */}
-                               <button
-                                onClick={() = > handleDeactivate(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
-                                className= "p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors "
-                                title= "ปิดการใช้งาน "
-                               >
-                                 <Trash2 className= "w-4 h-4 " / >
-                               </button >
-                             </ >
-                          ) : (
-                             <span className= "text-xs text-gray-400 flex items-center gap-1 " >
-                               <Lock className= "w-3 h-3 " / >
-                              ไม่มีสิทธิ์
-                             </span >
-                          )}
-                         </div >
-                       </td >
-                     </tr >
-                  );
-                })
-              )}
-             </tbody >
-           </table >
-         </div >
-       </div >
-    )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
-    {/* Pending Staff Table */}
-    {activeTab === 'pending'  & & (
-       <div className= "bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden " >
-         <div className= "overflow-x-auto " >
-           <table className= "w-full " >
-             <thead className= "bg-orange-50 border-b border-orange-200 " >
-               <tr >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >
-                   <button
-                    onClick={() = > requestSort('name')}
-                    className= "flex items-center gap-2 hover:text-blue-600 transition-colors "
-                   >
-                    ชื่อ-นามสกุล
-                    {getSortIcon('name')}
-                   </button >
-                 </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >บทบาท </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >โรงพยาบาล </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >ID Card </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >วันที่ลงทะเบียน </th >
-                 <th className= "px-6 py-4 text-left text-sm font-semibold text-gray-700 " >จัดการ </th >
-               </tr >
-             </thead >
-             <tbody className= "divide-y divide-gray-200 " >
-              {filteredPendingStaff.length === 0 ? (
-                 <tr >
-                   <td colSpan={6} className= "px-6 py-12 text-center text-gray-500 " >
-                     <Clock className= "w-12 h-12 mx-auto mb-4 text-gray-300 " / >
-                     <p >ไม่มีคำขอรออนุมัติ </p >
-                     <p className= "text-sm text-gray-400 mt-2 " >
-                      บุคลากรสามารถลงทะเบียนได้ที่ /admin/register
-                     </p >
-                    {!isSuperAdmin(user)  & & (
-                       <p className= "text-sm text-blue-600 mt-2 " >
-                        🔒 คุณเห็นเฉพาะคำขอจากโรงพยาบาลในเครือข่ายของคุณ
-                       </p >
-                    )}
-                    {searchTerm  & & (
-                       <p className= "text-sm text-gray-400 mt-2 " >
-                        ไม่พบผลการค้นหา  "{searchTerm} "
-                       </p >
-                    )}
-                   </td >
-                 </tr >
-              ) : (
-                filteredPendingStaff.map((pending) = > (
-                   <tr key={pending.id} className= "hover:bg-orange-50 transition-colors " >
-                     <td className= "px-6 py-4 " >
-                       <div className= "flex items-center gap-3 " >
-                         <div className= "w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center " >
-                           <Clock className= "w-5 h-5 text-orange-600 " / >
-                         </div >
-                         <div >
-                           <p className= "font-medium text-gray-800 " >
-                            {pending.full_name_th}
-                           </p >
-                           <p className= "text-sm text-gray-500 " >
-                            {pending.email || '-'}
-                           </p >
-                         </div >
-                       </div >
-                     </td >
-                    
-                    {/* ✅ Badge บทบาท Pending */}
-                     <td className= "px-6 py-4 " >
-                       <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                        pending.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                        pendi ng.role === 'doctor' ? 'bg-green-100 text-green-700' :
-                        pending.role === 'osm' ? 'bg-orange-100 text-orange-700' :
-                        'bg-yellow-100 tex t-yellow-700'
-                      }`} >
-                        {pending.role === 'admin' ? 'ผู้ดูแลระบบ' :
-                         pending.role === 'doctor' ? 'แพทย์' :
-                         pending.role === 'osm'  ? 'อสม.' : 'เจ้าหน้าที่'}
-                       </span >
-                     </td >
-                    
-                     <td className= "px-6 py-4 " >
-                       <span className= "text-sm text-gray-600 " >
-                        {pending.hospitals?.name || '-'}
-                       </span >
-                     </td >
-                    
-                     <td className= "px-6 py-4 " >
-                       <span className= "font-mono text-sm text-gray-600 " >
-                        {pending.id_card}
-                       </span >
-                     </td >
-                    
-                     <td className= "px-6 py-4 text-sm text-gray-600 " >
-                      {new Date(pending.created_at).toLocaleDateString('th-TH')}
-                     </td >
-                    
-                     <td className= "px-6 py-4 " >
-                       <div className= "flex items-center gap-2 " >
-                         <button
-                          onClick={() = > handleApprove(pending.id, pending.full_name_th)}
-                          className= "flex items-center gap-2 px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all "
-                          title= "อนุมัติ "
-                         >
-                           <CheckCircle className= "w-4 h-4 " / >
-                          อนุมัติ
-                         </button >
+        {/* Pending Staff Table */}
+        {activeTab === 'pending' && (
+          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-orange-50 border-b border-orange-200">
+                  <tr>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">
+                      <button
+                        onClick={() => requestSort('name')}
+                        className="flex items-center gap-2 hover:text-blue-600 transition-colors"
+                      >
+                        ชื่อ-นามสกุล
+                        {getSortIcon('name')}
+                      </button>
+                    </th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">บทบาท</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">โรงพยาบาล</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ID Card</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">วันที่ลงทะเบียน</th>
+                    <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredPendingStaff.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                        <Clock className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                        <p>ไม่มีคำขอรออนุมัติ</p>
+                        <p className="text-sm text-gray-400 mt-2">
+                          บุคลากรสามารถลงทะเบียนได้ที่ /admin/register
+                        </p>
+                        {!isSuperAdmin(user) && (
+                          <p className="text-sm text-blue-600 mt-2">
+                            🔒 คุณเห็นเฉพาะคำขอจากโรงพยาบาลในเครือข่ายของคุณ
+                          </p>
+                        )}
+                        {searchTerm && (
+                          <p className="text-sm text-gray-400 mt-2">
+                            ไม่พบผลการค้นหา "{searchTerm}"
+                          </p>
+                        )}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredPendingStaff.map((pending) => (
+                      <tr key={pending.id} className="hover:bg-orange-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                              <Clock className="w-5 h-5 text-orange-600" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-800">
+                                {pending.full_name_th}
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                {pending.email || '-'}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
                         
-                         <button
-                          onClick={() = > handleReject(pending.id, pending.full_name_th)}
-                          className= "flex items-center gap-2 px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition-all "
-                          title= "ปฏิเสธ "
-                         >
-                           <XCircle className= "w-4 h-4 " / >
-                          ปฏิเสธ
-                         </button >
-                       </div >
-                     </td >
-                   </tr >
-                ))
-              )}
-             </tbody >
-           </table >
-         </div >
-       </div >
-    )}
-   </div >
-
-  {/* Modals */}
-  {showAddModal  & & (
-     <AddStaffModal
-      hospitals={hospitals}
-      getGroupedHospitals={getGroupedHospitals}
-      accessibleHospitalIds={accessibleHospitalIds}
-      currentUser={user}
-      onClos e={() = > setShowAddModal(false)}
-      onSuccess={() = > {
-        setShowAddModal(false);
-        loadStaffList(accessibleHospitalIds);
-      }}
-      userId={user?.id}
-    / >
-  )}
-  
-  {showEditModal  & & selectedStaff  & & (
-     <EditStaffModal
-      staff={selectedStaff}
-      hospitals={hospitals}
-      getGroupedHospitals={getGroupedHospitals}
-      accessibleHospitalIds={accessibleHospitalIds}
-      cu rrentUser={user}
-      onClose={() = > {
-        setShowEditModal(false);
-        setSelectedStaff(null);
-      }}
-      onSuccess={() = > {
-        setShowEditModal(false);
-        setSelectedStaff(null);
-        loadStaffList(accessibleHospitalIds);
-      }}
-    / >
-  )}
-  
-  {showDeactivatedModal  & & (
-     <div className= "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 " >
-       <div className= "bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto " >
-         <div className= "p-6 border-b border-gray-200 " >
-           <div className= "flex items-center justify-between " >
-             <h2 className= "text-2xl font-bold text-gray-800 flex items-center gap-2 " >
-               <Archive className= "w-6 h-6 text-gray-600 " / >
-              เจ้าหน้าที่ที่ปิดการใช้งาน ({deactivatedStaff.length})
-             </h2 >
-             <button
-              onClick={() = > setShowDeactivatedModal(false)}
-              className= "text-gray-400 hover:text-gray-600 text-2xl "
-             >
-              ×
-             </button >
-           </div >
-         </div >
-        
-         <div className= "p-6 " >
-          {filteredDeactivatedStaff.length === 0 ? (
-             <div className= "text-center py-12 " >
-               <Archive className= "w-16 h-16 mx-auto mb-4 text-gray-300 " / >
-               <p className= "text-gray-500 " >ไม่มีเจ้าหน้าที่ที่ปิดการใช้งาน </p >
-              {searchTerm  & & (
-                 <p className= "text-sm text-gray-400 mt-2 " >
-                  ไม่พบผลการค้นหา  "{searchTerm} "
-                 </p >
-              )}
-             </div >
-          ) : (
-             <div className= "space-y-4 " >
-              {filteredDeactivatedStaff.map((staff) = > {
-                const canRestore = canEditStaff(staff);
-                return (
-                   <div key={staff.id} className= "border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors " >
-                     <div className= "flex items-center justify-between " >
-                       <div className= "flex-1 " >
-                         <div className= "flex items-center gap-3 mb-2 " >
-                           <h3 className= "font-semibold text-gray-800 " >
-                            {staff.doctors?.full_name_th || staff.full_name_th || '-'}
-                           </h3 >
-                           <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                            staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                             staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
-                            staff.role === 'osm' ? 'bg-orange-100 text-orange-700' :
-                            'bg-yell ow-100 text-yellow-700'
-                          }`} >
-                            {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
-                             staff.role === 'doctor' ? 'แพทย์' :
-                             staff.role ===  'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
-                           </span >
-                         </div >
-                         <div className= "text-sm text-gray-600 space-y-1 " >
-                           <p >ID Card: {staff.id_card} </p >
-                           <p >ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'} </p >
-                           <p >โรงพยาบาล: {staff.hospitals?.name || '-'} </p >
-                         </div >
-                       </div >
-                      
-                       <div className= "flex items-center gap-2 ml-4 " >
-                        {canRestore ? (
-                           < >
-                             <button
-                              onClick={() = > handleRestoreStaff(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
-                              className= "flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all "
-                             >
-                               <RotateCcw className= "w-4 h-4 " / >
-                              กู้คืน
-                             </button >
+                        {/* ✅ Badge บทบาท Pending */}
+                        <td className="px-6 py-4">
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            pending.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                            pending.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                            pending.role === 'osm' ? 'bg-orange-100 text-orange-700' :
+                            'bg-yellow-100 text-yellow-700'
+                          }`}>
+                            {pending.role === 'admin' ? 'ผู้ดูแลระบบ' :
+                             pending.role === 'doctor' ? 'แพทย์' :
+                             pending.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
+                          </span>
+                        </td>
+                        
+                        <td className="px-6 py-4">
+                          <span className="text-sm text-gray-600">
+                            {pending.hospitals?.name || '-'}
+                          </span>
+                        </td>
+                        
+                        <td className="px-6 py-4">
+                          <span className="font-mono text-sm text-gray-600">
+                            {pending.id_card}
+                          </span>
+                        </td>
+                        
+                        <td className="px-6 py-4 text-sm text-gray-600">
+                          {new Date(pending.created_at).toLocaleDateString('th-TH')}
+                        </td>
+                        
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleApprove(pending.id, pending.full_name_th)}
+                              className="flex items-center gap-2 px-3 py-1 bg-green-500 text-white text-xs rounded-lg hover:bg-green-600 transition-all"
+                              title="อนุมัติ"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              อนุมัติ
+                            </button>
                             
-                             <button
-                              onClick={() = > handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
-                              className= "flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all "
-                             >
-                               <Trash2 className= "w-4 h-4 " / >
-                              ลบถาวร
-                             </button >
-                           </ >
-                        ) : (
-                           <span className= "text-xs text-gray-400 flex items-center gap-1 " >
-                             <Lock className= "w-3 h-3 " / >
-                            ไม่มีสิทธิ์
-                           </span >
-                        )}
-                       </div >
-                     </div >
-                   </div >
-                );
-              })}
-             </div >
-          )}
-         </div >
-        
-         <div className= "p-6 border-t border-gray-200 bg-gray-50 " >
-           <button
-            onClick={() = > setShowDeactivatedModal(false)}
-            className= "w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all "
-           >
-            ปิด
-           </button >
-         </div >
-       </div >
-     </div >
-  )}
- </div >
-);
+                            <button
+                              onClick={() => handleReject(pending.id, pending.full_name_th)}
+                              className="flex items-center gap-2 px-3 py-1 bg-red-500 text-white text-xs rounded-lg hover:bg-red-600 transition-all"
+                              title="ปฏิเสธ"
+                            >
+                              <XCircle className="w-4 h-4" />
+                              ปฏิเสธ
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      {showAddModal && (
+        <AddStaffModal
+          hospitals={hospitals}
+          getGroupedHospitals={getGroupedHospitals}
+          accessibleHospitalIds={accessibleHospitalIds}
+          currentUser={user}
+          onClose={() => setShowAddModal(false)}
+          onSuccess={() => {
+            setShowAddModal(false);
+            loadStaffList(accessibleHospitalIds);
+          }}
+          userId={user?.id}
+        />
+      )}
+      
+      {showEditModal && selectedStaff && (
+        <EditStaffModal
+          staff={selectedStaff}
+          hospitals={hospitals}
+          getGroupedHospitals={getGroupedHospitals}
+          accessibleHospitalIds={accessibleHospitalIds}
+          currentUser={user}
+          onClose={() => {
+            setShowEditModal(false);
+            setSelectedStaff(null);
+          }}
+          onSuccess={() => {
+            setShowEditModal(false);
+            setSelectedStaff(null);
+            loadStaffList(accessibleHospitalIds);
+          }}
+        />
+      )}
+      
+      {showDeactivatedModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                  <Archive className="w-6 h-6 text-gray-600" />
+                  เจ้าหน้าที่ที่ปิดการใช้งาน ({deactivatedStaff.length})
+                </h2>
+                <button
+                  onClick={() => setShowDeactivatedModal(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6">
+              {filteredDeactivatedStaff.length === 0 ? (
+                <div className="text-center py-12">
+                  <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p className="text-gray-500">ไม่มีเจ้าหน้าที่ที่ปิดการใช้งาน</p>
+                  {searchTerm && (
+                    <p className="text-sm text-gray-400 mt-2">
+                      ไม่พบผลการค้นหา "{searchTerm}"
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredDeactivatedStaff.map((staff) => {
+                    const canRestore = canEditStaff(staff);
+                    return (
+                      <div key={staff.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-semibold text-gray-800">
+                                {staff.doctors?.full_name_th || staff.full_name_th || '-'}
+                              </h3>
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                staff.role === 'admin' ? 'bg-purple-100 text-purple-700' :
+                                staff.role === 'doctor' ? 'bg-green-100 text-green-700' :
+                                staff.role === 'osm' ? 'bg-orange-100 text-orange-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {staff.role === 'admin' ? 'ผู้ดูแลระบบ' :
+                                 staff.role === 'doctor' ? 'แพทย์' :
+                                 staff.role === 'osm' ? 'อสม.' : 'เจ้าหน้าที่'}
+                              </span>
+                            </div>
+                            <div className="text-sm text-gray-600 space-y-1">
+                              <p>ID Card: {staff.id_card}</p>
+                              <p>ความเชี่ยวชาญ: {staff.doctors?.specialization_th || '-'}</p>
+                              <p>โรงพยาบาล: {staff.hospitals?.name || '-'}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2 ml-4">
+                            {canRestore ? (
+                              <>
+                                <button
+                                  onClick={() => handleRestoreStaff(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
+                                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                  กู้คืน
+                                </button>
+                                
+                                <button
+                                  onClick={() => handlePermanentlyDeleteStaff(staff.id, staff.doctors?.full_name_th || staff.full_name_th || 'เจ้าหน้าที่')}
+                                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  ลบถาวร
+                                </button>
+                              </>
+                            ) : (
+                              <span className="text-xs text-gray-400 flex items-center gap-1">
+                                <Lock className="w-3 h-3" />
+                                ไม่มีสิทธิ์
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            
+            <div className="p-6 border-t border-gray-200 bg-gray-50">
+              <button
+                onClick={() => setShowDeactivatedModal(false)}
+                className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-all"
+              >
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
+
 // =====================================================
-// ➕ ADD STAFF MODAL COMPONENT (แก้ไขแล้ว: อสม. เป็น Default)
+// ➕ ADD STAFF MODAL COMPONENT
 // =====================================================
 function AddStaffModal({
-hospitals,
-getGroupedHospitals,
-accessibleHospitalIds,
-currentUser,
-onClose,
-onSuccess,
-userId
+  hospitals,
+  getGroupedHospitals,
+  accessibleHospitalIds,
+  currentUser,
+  onClose,
+  onSuccess,
+  userId
 }: {
-hospitals: Hospital[];
-getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
-accessibleHospitalIds: string[];
-currentUser: any;
-onClose: () => void;
-onSuccess: () => void;
-userId: string;
+  hospitals: Hospital[];
+  getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
+  accessibleHospitalIds: string[];
+  currentUser: any;
+  onClose: () => void;
+  onSuccess: () => void;
+  userId: string;
 }) {
-// ✅ แก้ไข: เปลี่ยน role เริ่มต้นจาก 'doctor' เป็น 'osm'
-const [formData, setFormData] = useState({
-id_card: '',
-birth_day: '',
-birth_month: '',
-birth_year: '',
-full_name_th: '',
-role: 'osm' as 'admin' | 'doctor' | 'helper' | 'osm', 
-specialization_th: '',
-phone: '',
-email: '',
-hospital_id: '',
-admin_type: null as 'super' | 'hospital' | null,
-});
-const [loading, setLoading] = useState(false);
-const [showAdminTypeField, setShowAdminTypeField] = useState(false);
-
-const isSuper = isSuperAdmin(currentUser);
-const isHospAdmin = isHospitalAdmin(currentUser);
-
-const generatePassword = () => {
-if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
-return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
-};
-
-const handleSubmit = async (e: React.FormEvent) => {
-e.preventDefault();
-
-// ✅ Validate: ต้องกรอกวันเกิดครบ
-if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
-  alert('กรุณากรอกวันเกิดให้ครบถ้วน');
-  return;
-}
-
-// ✅ Validate: Hospital Admin ไม่สามารถสร้าง Admin ใหม่ได้
-if (!isSuper && formData.role === 'admin') {
-  alert('คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
-  return;
-}
-
-// ✅ Validate: ต้องเลือกโรงพยาบาลสำหรับบทบาทที่ต้องการ
-if ((formData.role === 'admin' || formData.role === 'doctor' || 
-     formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
-  alert('กรุณาเลือกโรงพยาบาลสังกัด');
-  return;
-}
-
-// ✅ Validate: Hospital Admin สร้างได้เฉพาะในโรงพยาบาลที่ตัวเองดูแล
-if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
-  alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
-  return;
-}
-
-setLoading(true);
-try {
-  const password = generatePassword();
-  const birthYearAD = parseInt(formData.birth_year) - 543;
-  const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-
-  // ✅ ส่งข้อมูลพร้อม admin_type ไปยัง backend
-  const result = await addStaff({
-    id_card: formData.id_card,
-    password: password,
-    full_name_th: formData.full_name_th.trim(),  // ✅ trim ชื่อป้องกันช่องว่าง
-    role: formData.role,
-    specialization_th: formData.specialization_th?.trim() || undefined,
-    phone: formData.phone || undefined,
-    email: formData.email || undefined,
-    hospital_id: formData.hospital_id || undefined,
-    birth_date: birthDate,
-    created_by: userId,
-    // ✅ สำคัญ: ส่ง admin_type เมื่อสร้าง Admin
-    admin_type: formData.role === 'admin' ? formData.admin_type : null,
+  const [formData, setFormData] = useState({
+    id_card: '',
+    birth_day: '',
+    birth_month: '',
+    birth_year: '',
+    full_name_th: '',
+    role: 'doctor' as 'admin' | 'doctor' | 'helper' | 'osm',
+    specialization_th: '',
+    phone: '',
+    email: '',
+    hospital_id: '',
+    admin_type: null as 'super' | 'hospital' | null,
   });
+  const [loading, setLoading] = useState(false);
+  const [showAdminTypeField, setShowAdminTypeField] = useState(false);
+  
+  const isSuper = isSuperAdmin(currentUser);
+  const isHospAdmin = isHospitalAdmin(currentUser);
 
-  if (result.success) {
-    alert(`✅ เพิ่มเจ้าหน้าที่สำเร็จ!\n\nชื่อ: ${formData.full_name_th}\nบทบาท: ${formData.role === 'admin' ? (formData.admin_type === 'super' ? 'Super Admin' : 'Hospital Admin') : formData.role}\nรหัสผ่าน: ${password}\n(วัน-เดือน-ปีเกิด)`);
-    onSuccess();
-  } else {
-    alert('❌ เกิดข้อผิดพลาด: ' + result.error);
-  }
-} catch (error: any) {
-  console.error('❌ [AddStaffModal] Error:', error);
-  alert('เกิดข้อผิดพลาด: ' + (error.message || 'ไม่สามารถเพิ่มเจ้าหน้าที่ได้'));
-} finally {
-  setLoading(false);
+  const generatePassword = () => {
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
+    return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // ✅ Validate: ต้องกรอกวันเกิดครบ
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
+      alert('กรุณากรอกวันเกิดให้ครบถ้วน');
+      return;
+    }
+    
+    // ✅ Validate: Hospital Admin ไม่สามารถสร้าง Admin ใหม่ได้
+    if (!isSuper && formData.role === 'admin') {
+      alert('คุณไม่มีสิทธิ์สร้างผู้ดูแลระบบใหม่');
+      return;
+    }
+    
+    // ✅ Validate: ต้องเลือกโรงพยาบาลสำหรับบทบาทที่ต้องการ
+    if ((formData.role === 'admin' || formData.role === 'doctor' || 
+         formData.role === 'helper' || formData.role === 'osm') && !formData.hospital_id) {
+      alert('กรุณาเลือกโรงพยาบาลสังกัด');
+      return;
+    }
+    
+    // ✅ Validate: Hospital Admin สร้างได้เฉพาะในโรงพยาบาลที่ตัวเองดูแล
+    if (!isSuper && formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
+      alert('❌ คุณไม่มีสิทธิ์สร้างเจ้าหน้าที่ในโรงพยาบาลนี้');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const password = generatePassword();
+      const birthYearAD = parseInt(formData.birth_year) - 543;
+      const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
+
+      // ✅ ส่งข้อมูลพร้อม admin_type ไปยัง backend
+      const result = await addStaff({
+        id_card: formData.id_card,
+        password: password,
+        full_name_th: formData.full_name_th.trim(),  // ✅ trim ชื่อป้องกันช่องว่าง
+        role: formData.role,
+        specialization_th: formData.specialization_th?.trim() || undefined,
+        phone: formData.phone || undefined,
+        email: formData.email || undefined,
+        hospital_id: formData.hospital_id || undefined,
+        birth_date: birthDate,
+        created_by: userId,
+        // ✅ สำคัญ: ส่ง admin_type เมื่อสร้าง Admin
+        admin_type: formData.role === 'admin' ? formData.admin_type : null,
+      });
+
+      if (result.success) {
+        alert(`✅ เพิ่มเจ้าหน้าที่สำเร็จ!\n\nชื่อ: ${formData.full_name_th}\nบทบาท: ${formData.role === 'admin' ? (formData.admin_type === 'super' ? 'Super Admin' : 'Hospital Admin') : formData.role}\nรหัสผ่าน: ${password}\n(วัน-เดือน-ปีเกิด)`);
+        onSuccess();
+      } else {
+        alert('❌ เกิดข้อผิดพลาด: ' + result.error);
+      }
+    } catch (error: any) {
+      console.error('❌ [AddStaffModal] Error:', error);
+      alert('เกิดข้อผิดพลาด: ' + (error.message || 'ไม่สามารถเพิ่มเจ้าหน้าที่ได้'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const { mainHospitals, hospitalGroups } = getGroupedHospitals();
+  
+  const getAvailableHospitals = () => {
+    if (isSuper) return hospitals;
+    return hospitals.filter(h => accessibleHospitalIds.includes(h.id));
+  };
+  
+  const availableHospitals = getAvailableHospitals();
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* ✅ Box แสดงสิทธิ์ */}
+          <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
+            <div className="flex items-center gap-2 mb-2">
+              <Lock className={`w-4 h-4 ${isSuper ? 'text-purple-600' : 'text-blue-600'}`} />
+              <h3 className="text-sm font-semibold text-gray-800">สิทธิ์การสร้างเจ้าหน้าที่</h3>
+            </div>
+            <ul className="text-sm text-gray-700 space-y-1">
+              {isSuper ? (
+                <>
+                  <li>👑 <strong>Super Admin:</strong> สร้างได้ทุกระดับ (Admin/Doctor/Helper/อสม.)</li>
+                  <li>สามารถกำหนดโรงพยาบาลและประเภท Admin ได้</li>
+                </>
+              ) : (
+                <>
+                  <li>🏥 <strong>Hospital Admin:</strong> สร้างได้เฉพาะ แพทย์/เจ้าหน้าที่/อสม.</li>
+                  <li>สร้างได้เฉพาะในโรงพยาบาลที่ตัวเองดูแล ({accessibleHospitalIds.length} แห่ง)</li>
+                  <li>❌ ไม่สามารถสร้างผู้ดูแลระบบใหม่ได้</li>
+                </>
+              )}
+            </ul>
+          </div>
+
+          {/* ID Card & Password */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ID Card *</label>
+              <input
+                type="text"
+                value={formData.id_card}
+                onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
+                required
+                maxLength={13}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">🔐 รหัสผ่าน (อัตโนมัติ)</label>
+              <input
+                type="text"
+                value={generatePassword() || 'ระบุวันเกิดเพื่อสร้างรหัสผ่าน'}
+                readOnly
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-mono"
+              />
+              <p className="text-xs text-gray-500 mt-1">💡 รหัสผ่าน = วัน-เดือน-ปีเกิด (dd-mm-yyyy)</p>
+            </div>
+          </div>
+
+          {/* Birth Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              วันเกิด *
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={formData.birth_day}
+                onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">วัน</option>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <option key={day} value={day}>{day}</option>
+                ))}
+              </select>
+              
+              <select
+                value={formData.birth_month}
+                onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">เดือน</option>
+                {THAI_MONTHS.map((month, index) => (
+                  <option key={index + 1} value={index + 1}>{month}</option>
+                ))}
+              </select>
+              
+              <select
+                value={formData.birth_year}
+                onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
+                required
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">ปี พ.ศ.</option>
+                {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Full Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล *</label>
+            <input
+              type="text"
+              value={formData.full_name_th}
+              onChange={(e) => setFormData({ ...formData, full_name_th: e.target.value })}
+              required
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              placeholder="เช่น สมชาย ใจดี"
+            />
+          </div>
+
+          {/* ✅ Role Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">บทบาท *</label>
+            <select
+              value={formData.role}
+              onChange={(e) => {
+                const newRole = e.target.value as 'admin' | 'doctor' | 'helper' | 'osm';
+                setFormData({ ...formData, role: newRole });
+                setShowAdminTypeField(newRole === 'admin' && isSuper);
+                if (newRole !== 'admin') {
+                  setFormData(prev => ({ ...prev, admin_type: null }));
+                }
+              }}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            >
+              {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
+              <option value="doctor">👨‍⚕️ แพทย์</option>
+              <option value="helper">‍⚕️ เจ้าหน้าที่</option>
+              {/* ✅ เพิ่มตัวเลือก อสม. */}
+              <option value="osm">️ อสม. (อาสาสมัครสาธารณสุข)</option>
+            </select>
+            {!isSuper && (
+              <p className="text-xs text-blue-600 mt-1">
+                ℹ️ Hospital Admin สามารถสร้างได้เฉพาะ แพทย์, เจ้าหน้าที่ และ อสม.
+              </p>
+            )}
+          </div>
+
+          {/* Admin Type Field */}
+          {showAdminTypeField && isSuper && (
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <label className="block text-sm font-medium text-purple-800 mb-2">
+                <Shield className="w-4 h-4 inline mr-1" />
+                ประเภทผู้ดูแลระบบ *
+              </label>
+              <select
+                value={formData.admin_type || ''}
+                onChange={(e) => setFormData({ 
+                  ...formData, 
+                  admin_type: (e.target.value as 'super' | 'hospital') || null 
+                })}
+                required
+                className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">-- เลือกประเภท --</option>
+                <option value="super">Super Admin (เข้าถึงทั้งหมด)</option>
+                <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
+              </select>
+              <p className="text-xs text-purple-600 mt-1">
+                💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
+                Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
+              </p>
+            </div>
+          )}
+
+          {/* Specialization */}
+          {(formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
+              <input
+                type="text"
+                value={formData.specialization_th}
+                onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder={formData.role === 'osm' ? 'เช่น อาสาสมัครสาธารณสุขประจำหมู่บ้าน' : formData.role === 'helper' ? 'เช่น เจ้าหน้าที่สาธารณสุข, พยาบาล' : 'เช่น อายุรกรรม, ศัลยกรรม'}
+              />
+            </div>
+          )}
+
+          {/* Hospital Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              โรงพยาบาลสังกัด {formData.role !== 'admin' ? '*' : ''}
+            </label>
+            <select
+              value={formData.hospital_id}
+              onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+              required={formData.role !== 'admin' || !isSuper}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
+            >
+              <option value="">-- เลือกโรงพยาบาล --</option>
+              {availableHospitals.map((hospital) => (
+                <optgroup key={hospital.id} label={`${hospital.name} (${hospital.code})`}>
+                  <option value={hospital.id}>
+                    └ {hospital.name} ({hospital.code}) - {hospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'}
+                  </option>
+                  {hospitalGroups.get(hospital.id)?.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {'   '}└─ {sub.name} ({sub.code})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              💡 แสดงโรงพยาบาลที่คุณมีสิทธิ์ ({availableHospitals.length} แห่ง)
+            </p>
+            {!isSuper && accessibleHospitalIds.length > 0 && (
+              <p className="text-xs text-blue-600 mt-1">
+                🔒 จำกัดเฉพาะโรงพยาบาลในขอบเขตของคุณ
+              </p>
+            )}
+          </div>
+
+          {/* Phone & Email */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-4 pt-4 border-t border-gray-200">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  กำลังบันทึก...
+                </>
+              ) : (
+                <>
+                  <Save className="w-5 h-5" />
+                  บันทึก
+                </>
+              )}
+            </button>
+            
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all"
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
-};
 
-const { mainHospitals, hospitalGroups } = getGroupedHospitals();
-
-const getAvailableHospitals = () => {
-if (isSuper) return hospitals;
-return hospitals.filter(h => accessibleHospitalIds.includes(h.id));
-};
-
-const availableHospitals = getAvailableHospitals();
-
-return (
- <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-   <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-     <div className="p-6 border-b border-gray-200">
-       <h2 className="text-2xl font-bold text-gray-800">เพิ่มเจ้าหน้าที่ใหม่</h2>
-     </div>
-     
-     <form onSubmit={handleSubmit} className="p-6 space-y-4">
-       {/* ✅ Box แสดงสิทธิ์ */}
-       <div className={`rounded-lg p-4 border ${isSuper ? 'bg-purple-50 border-purple-200' : 'bg-blue-50 border-blue-200'}`}>
-         <div className="flex items-center gap-2 mb-2">
-           <Lock className={`w-4 h-4 ${isSuper ? 'text-purple-600' : 'text-blue-600'}`} />
-           <h3 className="text-sm font-semibold text-gray-800">สิทธิ์การสร้างเจ้าหน้าที่</h3>
-         </div>
-         <ul className="text-sm text-gray-700 space-y-1">
-           {isSuper ? (
-             <>
-               <li>👑 <strong>Super Admin:</strong> สร้างได้ทุกระดับ (Admin/Doctor/Helper/อสม.)</li>
-               <li>สามารถกำหนดโรงพยาบาลและประเภท Admin ได้</li>
-             </>
-           ) : (
-             <>
-               <li>🏥 <strong>Hospital Admin:</strong> สร้างได้เฉพาะ แพทย์/เจ้าหน้าที่/อสม.</li>
-               <li>สร้างได้เฉพาะในโรงพยาบาลที่ตัวเองดูแล ({accessibleHospitalIds.length} แห่ง)</li>
-               <li>❌ ไม่สามารถสร้างผู้ดูแลระบบใหม่ได้</li>
-             </>
-           )}
-         </ul>
-       </div>
-
-       {/* ID Card & Password */}
-       <div className="grid grid-cols-2 gap-4">
-         <div>
-           <label className="block text-sm font-medium text-gray-700 mb-1">ID Card *</label>
-           <input
-             type="text"
-             value={formData.id_card}
-             onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
-             required
-             maxLength={13}
-             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           />
-         </div>
-         
-         <div>
-           <label className="block text-sm font-medium text-gray-700 mb-1">🔐 รหัสผ่าน (อัตโนมัติ)</label>
-           <input
-             type="text"
-             value={generatePassword() || 'ระบุวันเกิดเพื่อสร้างรหัสผ่าน'}
-             readOnly
-             className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 cursor-not-allowed font-mono"
-           />
-           <p className="text-xs text-gray-500 mt-1">💡 รหัสผ่าน = วัน-เดือน-ปีเกิด (dd-mm-yyyy)</p>
-         </div>
-       </div>
-
-       {/* Birth Date */}
-       <div>
-         <label className="block text-sm font-medium text-gray-700 mb-1">
-           <Calendar className="w-4 h-4 inline mr-1" />
-           วันเกิด *
-         </label>
-         <div className="grid grid-cols-3 gap-2">
-           <select
-             value={formData.birth_day}
-             onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
-             required
-             className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           >
-             <option value="">วัน</option>
-             {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-               <option key={day} value={day}>{day}</option>
-             ))}
-           </select>
-           
-           <select
-             value={formData.birth_month}
-             onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
-             required
-             className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           >
-             <option value="">เดือน</option>
-             {THAI_MONTHS.map((month, index) => (
-               <option key={index + 1} value={index + 1}>{month}</option>
-             ))}
-           </select>
-           
-           <select
-             value={formData.birth_year}
-             onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
-             required
-             className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           >
-             <option value="">ปี พ.ศ.</option>
-             {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
-               <option key={year} value={year}>{year}</option>
-             ))}
-           </select>
-         </div>
-       </div>
-
-       {/* Full Name */}
-       <div>
-         <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล *</label>
-         <input
-           type="text"
-           value={formData.full_name_th}
-           onChange={(e) => setFormData({ ...formData, full_name_th: e.target.value })}
-           required
-           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           placeholder="เช่น สมชาย ใจดี"
-         />
-       </div>
-
-       {/* ✅ Role Selection (แก้ไข: ย้าย อสม. ขึ้นมาเป็นคนแรก) */}
-       <div>
-         <label className="block text-sm font-medium text-gray-700 mb-1">บทบาท *</label>
-         <select
-           value={formData.role}
-           onChange={(e) => {
-             const newRole = e.target.value as 'admin' | 'doctor' | 'helper' | 'osm';
-             setFormData({ ...formData, role: newRole });
-             setShowAdminTypeField(newRole === 'admin' && isSuper);
-             if (newRole !== 'admin') {
-               setFormData(prev => ({ ...prev, admin_type: null }));
-             }
-           }}
-           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-         >
-           {/* 🟢 อสม. ถูกย้ายขึ้นมาเป็นตัวเลือกแรก และจะเป็น Default เนื่องจาก state เริ่มต้นเป็น 'osm' */}
-           <option value="osm">🏘️ อสม. (อาสาสมัครสาธารณสุข)</option>
-           <option value="helper">‍⚕️ เจ้าหน้าที่</option>
-           <option value="doctor">👨‍⚕️ แพทย์</option>
-           {isSuper && <option value="admin">👑 ผู้ดูแลระบบ (Admin)</option>}
-         </select>
-         {!isSuper && (
-           <p className="text-xs text-blue-600 mt-1">
-             ℹ️ Hospital Admin สามารถสร้างได้เฉพาะ แพทย์, เจ้าหน้าที่ และ อสม.
-           </p>
-         )}
-       </div>
-
-       {/* Admin Type Field */}
-       {showAdminTypeField && isSuper && (
-         <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-           <label className="block text-sm font-medium text-purple-800 mb-2">
-             <Shield className="w-4 h-4 inline mr-1" />
-             ประเภทผู้ดูแลระบบ *
-           </label>
-           <select
-             value={formData.admin_type || ''}
-             onChange={(e) => setFormData({ 
-               ...formData, 
-               admin_type: (e.target.value as 'super' | 'hospital') || null 
-             })}
-             required
-             className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-           >
-             <option value="">-- เลือกประเภท --</option>
-             <option value="super">Super Admin (เข้าถึงทั้งหมด)</option>
-             <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
-           </select>
-           <p className="text-xs text-purple-600 mt-1">
-             💡 Super Admin: เข้าถึงข้อมูลทั้งหมดในระบบ<br/>
-             Hospital Admin: เข้าถึงเฉพาะโรงพยาบาลที่มอบหมาย
-           </p>
-         </div>
-       )}
-
-       {/* Specialization */}
-       {(formData.role === 'doctor' || formData.role === 'helper' || formData.role === 'osm') && (
-         <div>
-           <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
-           <input
-             type="text"
-             value={formData.specialization_th}
-             onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
-             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-             placeholder={formData.role === 'osm' ? 'เช่น อาสาสมัครสาธารณสุขประจำหมู่บ้าน' : formData.role === 'helper' ? 'เช่น เจ้าหน้าที่สาธารณสุข, พยาบาล' : 'เช่น อายุรกรรม, ศัลยกรรม'}
-           />
-         </div>
-       )}
-
-       {/* Hospital Selection */}
-       <div>
-         <label className="block text-sm font-medium text-gray-700 mb-1">
-           โรงพยาบาลสังกัด {formData.role !== 'admin' ? '*' : ''}
-         </label>
-         <select
-           value={formData.hospital_id}
-           onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
-           required={formData.role !== 'admin' || !isSuper}
-           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
-         >
-           <option value="">-- เลือกโรงพยาบาล --</option>
-           {availableHospitals.map((hospital) => (
-             <optgroup key={hospital.id} label={`${hospital.name} (${hospital.code})`}>
-               <option value={hospital.id}>
-                 └ {hospital.name} ({hospital.code}) - {hospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'}
-               </option>
-               {hospitalGroups.get(hospital.id)?.map((sub) => (
-                 <option key={sub.id} value={sub.id}>
-                   {'   '}└─ {sub.name} ({sub.code})
-                 </option>
-               ))}
-             </optgroup>
-           ))}
-         </select>
-         <p className="text-xs text-gray-500 mt-1">
-           💡 แสดงโรงพยาบาลที่คุณมีสิทธิ์ ({availableHospitals.length} แห่ง)
-         </p>
-         {!isSuper && accessibleHospitalIds.length > 0 && (
-           <p className="text-xs text-blue-600 mt-1">
-             🔒 จำกัดเฉพาะโรงพยาบาลในขอบเขตของคุณ
-           </p>
-         )}
-       </div>
-
-       {/* Phone & Email */}
-       <div className="grid grid-cols-2 gap-4">
-         <div>
-           <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
-           <input
-             type="tel"
-             value={formData.phone}
-             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           />
-         </div>
-         
-         <div>
-           <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
-           <input
-             type="email"
-             value={formData.email}
-             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-           />
-         </div>
-       </div>
-
-       {/* Action Buttons */}
-       <div className="flex gap-4 pt-4 border-t border-gray-200">
-         <button
-           type="submit"
-           disabled={loading}
-           className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-         >
-           {loading ? (
-             <>
-               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-               กำลังบันทึก...
-             </>
-           ) : (
-             <>
-               <Save className="w-5 h-5" />
-               บันทึก
-             </>
-           )}
-         </button>
-         
-         <button
-           type="button"
-           onClick={onClose}
-           className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all"
-         >
-           ยกเลิก
-         </button>
-       </div>
-     </form>
-   </div>
- </div>
-);
-}
 // =====================================================
 // ✏️ EDIT STAFF MODAL COMPONENT
 // =====================================================
 function EditStaffModal({
-staff,
-hospitals,
-getGroupedHospitals,
-accessibleHospitalIds,
-currentUser,
-onClose,
-onSuccess
+  staff,
+  hospitals,
+  getGroupedHospitals,
+  accessibleHospitalIds,
+  currentUser,
+  onClose,
+  onSuccess
 }: {
-staff: any;
-hospitals: Hospital[];
-getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
-accessibleHospitalIds: string[];
-currentUser: any;
-onClose: () => void;
-onSuccess: () => void;
+  staff: any;
+  hospitals: Hospital[];
+  getGroupedHospitals: () => { mainHospitals: Hospital[]; hospitalGroups: Map<string, Hospital[]> };
+  accessibleHospitalIds: string[];
+  currentUser: any;
+  onClose: () => void;
+  onSuccess: () => void;
 }) {
-const parseBirthDate = (dateString: string | null) => {
-if (!dateString) return { day: '', month: '', year: '' };
-const date = new Date(dateString);
-return {
-day: date.getDate().toString(),
-month: (date.getMonth() + 1).toString(),
-year: (date.getFullYear() + 543).toString(),
-};
-};
-const initialBirthDate = parseBirthDate(staff.birth_date);
-const [formData, setFormData] = useState({
-id_card: staff.id_card || '', // ✅ เพิ่ม ID Card เข้าไปใน state ของฟอร์ม
-full_name_th: staff.doctors?.full_name_th || staff.full_name_th || '',
-specialization_th: staff.doctors?.specialization_th || '',
-phone: staff.doctors?.phone || '',
-email: staff.doctors?.email || '',
-hospital_id: staff.hospital_id || '',
-birth_day: initialBirthDate.day,
-birth_month: initialBirthDate.month,
-birth_year: initialBirthDate.year,
-admin_type: staff.admin_type || null,
-});
-const [loading, setLoading] = useState(false);
-const [resetPassword, setResetPassword] = useState(false);
-const isSuper = isSuperAdmin(currentUser);
-const isHospAdmin = isHospitalAdmin(currentUser);
-const canEditHospital = isSuper || !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id);
-const generatePassword = () => {
-if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
-return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
-};
-const handleSubmit = async (e: React.FormEvent) => {
-e.preventDefault();
-if (!isSuper  & & staff.role === 'admin'  & & formData.admin_type !== staff.admin_type) {
-  alert('❌ คุณไม่มีสิทธิ์แก้ไขประเภทผู้ดูแลระบบ');
-  return;
-}
-
-if (!isSuper  & & formData.hospital_id !== staff.hospital_id  & & 
-    formData.hospital_id  & & !accessibleHospitalIds.includes(formData.hospital_id)) {
-  alert('❌ คุณไม่มีสิทธิ์ย้ายเจ้าหน้าที่ไปโรงพยาบาลนี้');
-  return;
-}
-
-setLoading(true);
-try {
-  const birthYearAD = pars eInt(formData.birth_year) - 543;
-  const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-
-  // ✅ เตรียมข้อมูลที่จะอัปเ ดต
-  const updatePayload: any = {
-    full_name_th: formData.full_name_th,
-    specialization_th: formData.specialization_th,
-    phone: formData.phone,
-    email: formData.email,
-     birth_date: birthDate,
-    admin_type: staff.role === 'admin' ? formData.admin_type : null,
+  const parseBirthDate = (dateString: string | null) => {
+    if (!dateString) return { day: '', month: '', year: '' };
+    const date = new Date(dateString);
+    return {
+      day: date.getDate().toString(),
+      month: (date.getMonth() + 1).toString(),
+      year: (date.getFullYear() + 543).toString(),
+    };
   };
 
-  // ✅ ถ้ามีการเปลี่ยนโรงพยาบาล และผู้ใช้มีสิทธิ์
-  if (canEditHospital  & & formData.hospital_id !== staff.hospital_id) {
-    updatePayload.hospital_id = formData.hospital_id;
-  }
-
-  // ✅ ถ้ามีการเปลี่ยน ID Card (สำคัญมากสำหรับการแก้ชั่วคราวเป็นปกติ)
-  i f (formData.id_card !== staff.id_card) {
-    updatePayload.id_card = formData.id_card;
-  }
-
-  // ✅ รีเซ็ตรหัสผ่านถ้าติ๊กถูก
-  if (resetPassword) {
-    updatePayload.password_hash =  generatePassword();
-  }
-
-  // ✅ เรียกใช้ฟังก์ชัน updateStaff ที่มีอยู่
-  const result = await updateStaff(staff.id, updatePayload);
+  const initialBirthDate = parseBirthDate(staff.birth_date);
   
-  if (!result.success) {
-    alert('เกิดข้อผ ิดพลาด: ' + result.error);
-    setLoading(false);
-    return;
-  }
-
-  // ✅ อัปเดตตาราง users โดยตรงสำหรับบางฟิลด์ที่อาจต้อง sync (เช่น password หรือ id_card ถ้า updateStaff ไม่ทำ)
-   // หมายเหตุ: updateStaff ควรจัดการเรื่องนี้แล้ว แต่ถ้าต้องการความชัวร์สามารถใส่เพิ่มได้ที่นี่
-  // ในโค้ดเดิมมีการ update users แยกไว้ ผมจะคง logic เดิมไว้แต่รวม payload ให้ครบ
-   
-  let message = 'แก้ไขข้อมูลสำเร็จ!';
-  if (resetPassword) {
-    message += `\nรีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}`;
-  }
-  if (formData.id_card !== staff.id_card) {
-     message += `\nอัปเดตเลขบัตรประชาชนเรียบร้อย`;
-  }
+  const [formData, setFormData] = useState({
+    id_card: staff.id_card || '', // ✅ เพิ่ม ID Card เข้าไปใน state ของฟอร์ม
+    full_name_th: staff.doctors?.full_name_th || staff.full_name_th || '',
+    specialization_th: staff.doctors?.specialization_th || '',
+    phone: staff.doctors?.phone || '',
+    email: staff.doctors?.email || '',
+    hospital_id: staff.hospital_id || '',
+    birth_day: initialBirthDate.day,
+    birth_month: initialBirthDate.month,
+    birth_year: initialBirthDate.year,
+    admin_type: staff.admin_type || null,
+  });
+  const [loading, setLoading] = useState(false);
+  const [resetPassword, setResetPassword] = useState(false);
   
-  alert(message);
-  onSuccess();
-} catch (error: any) {
-  console.error('❌ [EditStaffModal] Error:', error);
-  alert('เกิดข้อผิ ดพลาด: ' + error.message);
-} finally {
-  setLoading(false);
-}
-};
-const { mainHospitals, hospitalGroups } = getGroupedHospitals();
-const availableHospitals = isSuper ? hospitals : hospitals.filter(h => accessibleHospitalIds.includes(h.id));
-return (
- <div className= "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 " >
- <div className= "bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto " >
- <div className= "p-6 border-b border-gray-200 " >
- <h2 className= "text-2xl font-bold text-gray-800 " >✏️ แก้ไขข้อมูลเจ้าหน้าที่ </h2 >
- <p className= "text-sm text-gray-500 mt-1 " >
-{staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
- </p >
- </div >
-<form onSubmit={handleSubmit} className= "p-6 space-y-4 " >
-      {/* ✅ เพิ่มช่อง ID Card ให้แก้ไขได้ */}
-       <div >
-         <label className= "block text-sm font-medium text-gray-700 mb-1 " >
-          เลขบัตรประชาชน (ID Card)
-          {staff.is_temporary_id  & &  <span className= "ml-2 text-xs text-amber-600 font-normal " >(แก้ไขเพื่อเปลี่ยนสถานะจากชั่วคราวเป็นปกติ) </span >}
-         </label >
-         <input
-          type= "text "
-          value={formData.id_card}
-          onChange={(e) = > setFormData({ ...formData, id_card: e.target.value })}
-          maxLength={13}
-          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${staff. is_temporary_id ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`}
-          placeholder= "13 หลัก "
-        / >
-       </div >
+  const isSuper = isSuperAdmin(currentUser);
+  const isHospAdmin = isHospitalAdmin(currentUser);
+  const canEditHospital = isSuper || !staff.hospital_id || accessibleHospitalIds.includes(staff.hospital_id);
 
-      {/* Full Name */}
-       <div >
-         <label className= "block text-sm font-medium text-gray-700 mb-1 " >ชื่อ-นามสกุล </label >
-         <input
-          type= "text "
-          value={formData.full_name_th}
-          onChange={(e) = > setFormData({ ...formData, full_name_th: e.target.value })}
-          className= "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-        / >
-       </div >
+  const generatePassword = () => {
+    if (!formData.birth_day || !formData.birth_month || !formData.birth_year) return '';
+    return `${formData.birth_day.padStart(2, '0')}-${formData.birth_month.padStart(2, '0')}-${formData.birth_year}`;
+  };
 
-      {/* Birth Date */}
-       <div >
-         <label className= "block text-sm font-medium text-gray-700 mb-1 " >
-           <Calendar className= "w-4 h-4 inline mr-1 " / >
-          วันเกิด
-         </label >
-         <div className= "grid grid-cols-3 gap-2 " >
-           <select
-            value={formData.birth_day}
-            onChange={(e) = > setFormData({ ...formData, birth_day: e.target.value })}
-            className= "px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-           >
-             <option value= " " >วัน </option >
-            {Array.from({ length: 31 }, (_, i) = > i + 1).map((day) = > (
-               <option key={day} value={day} >{day} </option >
-            ))}
-           </select >
-          
-           <select
-            value={formData.birth_month}
-            onChange={(e) = > setFormData({ ...formData, birth_month: e.target.value })}
-            className= "px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-           >
-             <option value= " " >เดือน </option >
-            {THAI_MONTHS.map((month, index) = > (
-               <option key={index + 1} value={index + 1} >{month} </option >
-            ))}
-           </select >
-          
-           <select
-            value={formData.birth_year}
-            onChange={(e) = > setFormData({ ...formData, birth_year: e.target.value })}
-            className= "px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-           >
-             <option value= " " >ปี พ.ศ. </option >
-            {Array.from({ length: 80 }, (_, i) = > 2567 - i).map((year) = > (
-               <option key={year} value={year} >{year} </option >
-            ))}
-           </select >
-         </div >
-       </div >
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!isSuper && staff.role === 'admin' && formData.admin_type !== staff.admin_type) {
+      alert('❌ คุณไม่มีสิทธิ์แก้ไขประเภทผู้ดูแลระบบ');
+      return;
+    }
+    
+    if (!isSuper && formData.hospital_id !== staff.hospital_id && 
+        formData.hospital_id && !accessibleHospitalIds.includes(formData.hospital_id)) {
+      alert('❌ คุณไม่มีสิทธิ์ย้ายเจ้าหน้าที่ไปโรงพยาบาลนี้');
+      return;
+    }
 
-      {/* Reset Password Checkbox */}
-       <div className= "flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg " >
-         <input
-          type= "checkbox "
-          id= "resetPassword "
-          checked={resetPassword}
-          onChange={(e) = > setResetPassword(e.target.checked)}
-          className= "w-4 h-4 text-blue-600 rounded focus:ring-blue-500 "
-        / >
-         <label htmlFor= "resetPassword " className= "text-sm text-gray-700 flex items-center gap-2 flex-1 cursor-pointer " >
-           <Key className= "w-4 h-4 " / >
-           <span >รีเซ็ตรหัสผ่านให้ตรงกับวันเกิดใหม่ </span >
-          {generatePassword()  & & (
-             <span className= "font-mono font-bold text-blue-600 " >({generatePassword()}) </span >
-          )}
-         </label >
-       </div >
+    setLoading(true);
+    try {
+      const birthYearAD = parseInt(formData.birth_year) - 543;
+      const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
 
-      {/* Specialization */}
-      {(staff.role === 'doctor' || staff.role === 'helper' || staff.role === 'osm')  & & (
-         <div >
-           <label className= "block text-sm font-medium text-gray-700 mb-1 " >ความเชี่ยวชาญ </label >
-           <input
-            type= "text "
-            value={formData.specialization_th}
-            onChange={(e) = > setFormData({ ...formData, specialization_th: e.target.value })}
-            className= "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-            placeholder= "เช่น อายุรกรรม, ศัลยกรรม, เจ้าหน้าที่สาธารณสุข, อสม. "
-          / >
-         </div >
-      )}
+      // ✅ เตรียมข้อมูลที่จะอัปเดต
+      const updatePayload: any = {
+        full_name_th: formData.full_name_th,
+        specialization_th: formData.specialization_th,
+        phone: formData.phone,
+        email: formData.email,
+        birth_date: birthDate,
+        admin_type: staff.role === 'admin' ? formData.admin_type : null,
+      };
 
-      {/* Hospital Selection */}
-      {canEditHospital  & & (
-         <div >
-           <label className= "block text-sm font-medium text-gray-700 mb-1 " >โรงพยาบาลสังกัด </label >
-           <select
-            value={formData.hospital_id}
-            onChange={(e) = > setFormData({ ...formData, hospital_id: e.target.value })}
-            className= "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto "
-            disabled={!isSuper  & & staff.role === 'admin'}
-           >
-             <option value= " " >-- เลือกโรงพยาบาล --</option >
-            {availableHospitals.map((hospital) = > (
-               <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`} >
-                 <option value={hospital.id} >
-                  └ {hospital.name} ({hospital.code}) - {hospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'}
-                 </option >
-                {hospitalGroups.get(hospital.id)?.map((sub) = > (
-                   <option key={sub.id} value={sub.id} >
-                    {'   '}└─ {sub.name} ({sub.code})
-                   </option >
+      // ✅ ถ้ามีการเปลี่ยนโรงพยาบาล และผู้ใช้มีสิทธิ์
+      if (canEditHospital && formData.hospital_id !== staff.hospital_id) {
+        updatePayload.hospital_id = formData.hospital_id;
+      }
+
+      // ✅ ถ้ามีการเปลี่ยน ID Card (สำคัญมากสำหรับการแก้ชั่วคราวเป็นปกติ)
+      if (formData.id_card !== staff.id_card) {
+        updatePayload.id_card = formData.id_card;
+      }
+
+      // ✅ รีเซ็ตรหัสผ่านถ้าติ๊กถูก
+      if (resetPassword) {
+        updatePayload.password_hash = generatePassword();
+      }
+
+      // ✅ เรียกใช้ฟังก์ชัน updateStaff ที่มีอยู่
+      const result = await updateStaff(staff.id, updatePayload);
+      
+      if (!result.success) {
+        alert('เกิดข้อผิดพลาด: ' + result.error);
+        setLoading(false);
+        return;
+      }
+
+      // ✅ อัปเดตตาราง users โดยตรงสำหรับบางฟิลด์ที่อาจต้อง sync (เช่น password หรือ id_card ถ้า updateStaff ไม่ทำ)
+      // หมายเหตุ: updateStaff ควรจัดการเรื่องนี้แล้ว แต่ถ้าต้องการความชัวร์สามารถใส่เพิ่มได้ที่นี่
+      // ในโค้ดเดิมมีการ update users แยกไว้ ผมจะคง logic เดิมไว้แต่รวม payload ให้ครบ
+      
+      let message = 'แก้ไขข้อมูลสำเร็จ!';
+      if (resetPassword) {
+        message += `\nรีเซ็ตรหัสผ่านใหม่แล้ว: ${generatePassword()}`;
+      }
+      if (formData.id_card !== staff.id_card) {
+        message += `\nอัปเดตเลขบัตรประชาชนเรียบร้อย`;
+      }
+      
+      alert(message);
+      onSuccess();
+    } catch (error: any) {
+      console.error('❌ [EditStaffModal] Error:', error);
+      alert('เกิดข้อผิดพลาด: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const { mainHospitals, hospitalGroups } = getGroupedHospitals();
+  const availableHospitals = isSuper ? hospitals : hospitals.filter(h => accessibleHospitalIds.includes(h.id));
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b border-gray-200">
+          <h2 className="text-2xl font-bold text-gray-800">✏️ แก้ไขข้อมูลเจ้าหน้าที่</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {staff.doctors?.full_name_th || staff.full_name_th || '-'} | {staff.id_card}
+          </p>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          {/* ✅ เพิ่มช่อง ID Card ให้แก้ไขได้ */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              เลขบัตรประชาชน (ID Card)
+              {staff.is_temporary_id && <span className="ml-2 text-xs text-amber-600 font-normal">(แก้ไขเพื่อเปลี่ยนสถานะจากชั่วคราวเป็นปกติ)</span>}
+            </label>
+            <input
+              type="text"
+              value={formData.id_card}
+              onChange={(e) => setFormData({ ...formData, id_card: e.target.value })}
+              maxLength={13}
+              className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${staff.is_temporary_id ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`}
+              placeholder="13 หลัก"
+            />
+          </div>
+
+          {/* Full Name */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อ-นามสกุล</label>
+            <input
+              type="text"
+              value={formData.full_name_th}
+              onChange={(e) => setFormData({ ...formData, full_name_th: e.target.value })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* Birth Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Calendar className="w-4 h-4 inline mr-1" />
+              วันเกิด
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={formData.birth_day}
+                onChange={(e) => setFormData({ ...formData, birth_day: e.target.value })}
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">วัน</option>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+                  <option key={day} value={day}>{day}</option>
                 ))}
-               </optgroup >
-            ))}
-           </select >
-          {!isSuper  & & (
-             <p className= "text-xs text-blue-600 mt-1 " >
-              🔒 จำกัดเฉพาะโรงพยาบาลในขอบเขตของคุณ
-             </p >
+              </select>
+              
+              <select
+                value={formData.birth_month}
+                onChange={(e) => setFormData({ ...formData, birth_month: e.target.value })}
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">เดือน</option>
+                {THAI_MONTHS.map((month, index) => (
+                  <option key={index + 1} value={index + 1}>{month}</option>
+                ))}
+              </select>
+              
+              <select
+                value={formData.birth_year}
+                onChange={(e) => setFormData({ ...formData, birth_year: e.target.value })}
+                className="px-2 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">ปี พ.ศ.</option>
+                {Array.from({ length: 80 }, (_, i) => 2567 - i).map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Reset Password Checkbox */}
+          <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <input
+              type="checkbox"
+              id="resetPassword"
+              checked={resetPassword}
+              onChange={(e) => setResetPassword(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+            />
+            <label htmlFor="resetPassword" className="text-sm text-gray-700 flex items-center gap-2 flex-1 cursor-pointer">
+              <Key className="w-4 h-4" />
+              <span>รีเซ็ตรหัสผ่านให้ตรงกับวันเกิดใหม่</span>
+              {generatePassword() && (
+                <span className="font-mono font-bold text-blue-600">({generatePassword()})</span>
+              )}
+            </label>
+          </div>
+
+          {/* Specialization */}
+          {(staff.role === 'doctor' || staff.role === 'helper' || staff.role === 'osm') && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ความเชี่ยวชาญ</label>
+              <input
+                type="text"
+                value={formData.specialization_th}
+                onChange={(e) => setFormData({ ...formData, specialization_th: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="เช่น อายุรกรรม, ศัลยกรรม, เจ้าหน้าที่สาธารณสุข, อสม."
+              />
+            </div>
           )}
-         </div >
-      )}
 
-      {/* Admin Type Field */}
-      {staff.role === 'admin'  & & isSuper  & & (
-         <div className= "bg-purple-50 border border-purple-200 rounded-lg p-4 " >
-           <label className= "block text-sm font-medium text-purple-800 mb-2 " >
-             <Shield className= "w-4 h-4 inline mr-1 " / >
-            ประเภทผู้ดูแลระบบ
-           </label >
-           <select
-            value={formData.admin_type || ''}
-            onChange={(e) = > setFormData({ 
-              ...formData, 
-              admin_type: (e.target.value as 'super' | 'hospital') || null 
-            })}
-            className= "w-full px-4 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 "
-           >
-             <option value= " " >-- เลือกประเภท --</option >
-             <option value= "super " >👑 Super Admin (เข้าถึงทั้งหมด) </option >
-             <option value= "hospital " >🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล) </option >
-           </select >
-         </div >
-      )}
-
-      {/* Phone  & Email */}
-       <div className= "grid grid-cols-2 gap-4 " >
-         <div >
-           <label className= "block text-sm font-medium text-gray-700 mb-1 " >เบอร์โทรศัพท์ </label >
-           <input
-            type= "tel "
-            value={formData.phone}
-            onChange={(e) = > setFormData({ ...formData, phone: e.target.value })}
-            className= "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-            placeholder= "0812345678 "
-          / >
-         </div >
-        
-         <div >
-           <label className= "block text-sm font-medium text-gray-700 mb-1 " >อีเมล </label >
-           <input
-            type= "email "
-            value={formData.email}
-            onChange={(e) = > setFormData({ ...formData, email: e.target.value })}
-            className= "w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 "
-            placeholder= "email@example.com "
-          / >
-         </div >
-       </div >
-
-      {/* Action Buttons */}
-       <div className= "flex gap-4 pt-4 border-t border-gray-200 " >
-         <button
-          type= "submit "
-          disabled={loading}
-          className= "flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2 "
-         >
-          {loading ? (
-             < >
-               <div className= "animate-spin rounded-full h-5 w-5 border-b-2 border-white " > </div >
-              กำลังบันทึก...
-             </ >
-          ) : (
-             < >
-               <Save className= "w-5 h-5 " / >
-              บันทึก
-             </ >
+          {/* Hospital Selection */}
+          {canEditHospital && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">โรงพยาบาลสังกัด</label>
+              <select
+                value={formData.hospital_id}
+                onChange={(e) => setFormData({ ...formData, hospital_id: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 max-h-64 overflow-y-auto"
+                disabled={!isSuper && staff.role === 'admin'}
+              >
+                <option value="">-- เลือกโรงพยาบาล --</option>
+                {availableHospitals.map((hospital) => (
+                  <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
+                    <option value={hospital.id}>
+                      └ {hospital.name} ({hospital.code}) - {hospital.type === 'main' ? 'แม่ข่าย' : 'ลูกข่าย'}
+                    </option>
+                    {hospitalGroups.get(hospital.id)?.map((sub) => (
+                      <option key={sub.id} value={sub.id}>
+                        {'   '}└─ {sub.name} ({sub.code})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              {!isSuper && (
+                <p className="text-xs text-blue-600 mt-1">
+                  🔒 จำกัดเฉพาะโรงพยาบาลในขอบเขตของคุณ
+                </p>
+              )}
+            </div>
           )}
-         </button >
-        
-         <button
-          type= "button "
-          onClick={onClose}
-          className= "flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all "
-         >
-          ยกเลิก
-         </button >
-       </div >
-     </form >
-   </div >
- </div >
-);
+
+          {/* Admin Type Field */}
+          {staff.role === 'admin' && isSuper && (
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <label className="block text-sm font-medium text-purple-800 mb-2">
+                <Shield className="w-4 h-4 inline mr-1" />
+                ประเภทผู้ดูแลระบบ
+              </label>
+              <select
+                value={formData.admin_type || ''}
+                onChange={(e) => setFormData({ 
+                  ...formData, 
+                  admin_type: (e.target.value as 'super' | 'hospital') || null 
+                })}
+                className="w-full px-4 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="">-- เลือกประเภท --</option>
+                <option value="super">👑 Super Admin (เข้าถึงทั้งหมด)</option>
+                <option value="hospital">🏥 Hospital Admin (เข้าถึงเฉพาะโรงพยาบาล)</option>
+              </select>
+            </div>
+          )}
+
+          {/* Phone & Email */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เบอร์โทรศัพท์</label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="0812345678"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">อีเมล</label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                placeholder="email@example.com"
+              />
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-4 pt-4 border-t border-gray-200">
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  กำลังบันทึก...
+                </>
+              ) : (
+                <>
+                  <Save className="w-5 h-5" />
+                  บันทึก
+                </>
+              )}
+            </button>
+            
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 bg-gray-500 text-white font-bold py-3 rounded-lg hover:bg-gray-600 transition-all"
+            >
+              ยกเลิก
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }
