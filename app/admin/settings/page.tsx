@@ -1,5 +1,4 @@
 // app/admin/settings/page.tsx
-// ✅ แก้ไขล่าสุด: เพิ่มลิงก์ไปหน้า Update Coach จาก Excel
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
@@ -34,7 +33,7 @@ import {
   Stethoscope,
   Heart,
   Wrench,
-  RefreshCw // ✅ เพิ่มไอคอนสำหรับอัปเดต
+  RefreshCw
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -364,7 +363,7 @@ export default function SettingsPage() {
             {/* ✅ เมนูจัดการ - แบ่งเป็น 3 หมวดหมู่ */}
             <div className="space-y-8">
               
-              {/* 🚨 หมวดเร่งด่วน - เพิ่มปุ่ม Correct Data และ Update Coach */}
+              {/* 🚨 หมวดเร่งด่วน */}
               <div>
                 <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-orange-600" />
@@ -395,7 +394,7 @@ export default function SettingsPage() {
                     </p>
                   </button>
 
-                  {/* 🔄 ปุ่มอัปเดตโค้ชให้ผู้ป่วยจาก Excel (ใหม่!) */}
+                  {/* 🔄 ปุ่มอัปเดตโค้ชให้ผู้ป่วยจาก Excel */}
                   <button
                     onClick={() => router.push('/admin/patients/update-coach')}
                     className="bg-gradient-to-br from-teal-500 to-cyan-600 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
@@ -514,6 +513,29 @@ export default function SettingsPage() {
                     <p className="text-white/90 text-sm">
                       สร้างบัญชีอสม.ชั่วคราวพร้อมเลขบัตรที่ตรวจสอบได้ 
                       รหัสผ่านอัตโนมัติจากวันเกิด แก้ไขเป็นเลขจริงภายหลังได้
+                    </p>
+                  </button>
+
+                  {/* 🔓 ปุ่มแก้ไขอสม.ชั่วคราวเป็นจริง (NEW) */}
+                  <button
+                    onClick={() => router.push('/admin/staff/verify-temporary')}
+                    className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl shadow-lg p-6 hover:shadow-xl transition-all text-left group text-white relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 px-2 py-1 bg-white/20 backdrop-blur rounded-md text-xs font-bold">
+                      แนะนำ ✨
+                    </div>
+                    <div className="flex items-center gap-4 mb-4">
+                      <div className="w-14 h-14 bg-white/20 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <UserCheck className="w-7 h-7" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-bold">🔓 ยืนยันอสม.จริง</h3>
+                        <p className="text-white/90 text-sm">แก้ไขจากชั่วคราว</p>
+                      </div>
+                    </div>
+                    <p className="text-white/90 text-sm">
+                      เลือกอสม.ที่ใช้เลขชั่วคราว แล้วกรอกเลขบัตรประชาชนจริง 
+                      พร้อมอัปเดตวันเกิดให้ถูกต้อง
                     </p>
                   </button>
 
