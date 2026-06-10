@@ -1,9 +1,10 @@
 // app/admin/appointments/followup/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 10 มิถุนายน 2569
 // ✅ การแก้ไข:
-//    1. ปรับส่วนหัวให้กระชับ สวยงาม ประหยัดพื้นที่
-//    2. แสดงข้อมูลผู้ป่วย: ชื่อ, HN, โรงพยาบาล
-//    3. แสดงข้อมูลผู้ใช้งาน: ชื่อ, บทบาท, สังกัด
+//    1. เพิ่ม Confirmation Dialog ก่อนบันทึกข้อมูล
+//    2. ปรับส่วนหัวให้กระชับ สวยงาม ประหยัดพื้นที่
+//    3. แสดงข้อมูลผู้ป่วย: ชื่อ, HN, โรงพยาบาล
+//    4. แสดงข้อมูลผู้ใช้งาน: ชื่อ, บทบาท, สังกัด
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -17,7 +18,7 @@ export default function FollowupPage() {
   const searchParams = useSearchParams();
   const appointmentId = params.id as string;
   const patientIdFromQuery = searchParams.get('patient_id');
-  
+
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -29,7 +30,7 @@ export default function FollowupPage() {
   const [followupRound, setFollowupRound] = useState(1);
   const [pastFollowups, setPastFollowups] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [formData, setFormData] = useState({
     // 1. ข้อมูลสุขภาพ
     weight: '',
@@ -37,22 +38,21 @@ export default function FollowupPage() {
     blood_pressure_sys: '',
     blood_pressure_dia: '',
     blood_sugar_dtx: '',
-    
     // 2. ความก้าวหน้าในการปรับตัว
     life_schedule_image_url: '',
     adaptation_summary: '',
     adaptation_obstacles: '',
     adaptation_opportunities: '',
     adaptation_other: '',
-    
+
     // 3. กราฟวัดลอยจม (ใหม่)
     floating_chart_image_url: '',
     floating_chart_summary: '',
-    
+
     // 4. การ์ดภาพความฝัน (ใหม่)
     dream_card_image_url: '',
     dream_card_description: '',
-    
+
     // 5. ติดตามแผนปฏิบัติกิจกรรม (ย้ายจาก 3 → 5)
     food_amount_status: 'not_in_plan',
     food_type_status: 'not_in_plan',
@@ -60,15 +60,15 @@ export default function FollowupPage() {
     food_amount_note: '',
     food_type_note: '',
     movement_note: '',
-    
+
     // 6. คะแนนไม้บรรทัดวัดใจ (เดิม 4 → 6)
     confidence_score: 5,
     confidence_improvement_plan: '',
-    
+
     // 7. สรุป (เดิม 5 → 7)
     summary: '',
     recommendations: '',
-    
+
     // 8. สถานะการติดตาม (เดิม 6 → 8)
     followup_status: 'fair',
   });
@@ -110,9 +110,8 @@ export default function FollowupPage() {
     try {
       console.log('🔍 Loading appointment:', appointmentId, 'Patient ID from query:', patientIdFromQuery);
       setError(null);
-      
       let patientId = patientIdFromQuery;
-      
+
       // ถ้ามี appointment_id ให้โหลดข้อมูล appointment
       if (appointmentId && appointmentId !== 'new') {
         const { data: aptData, error: aptError } = await supabase
@@ -125,7 +124,7 @@ export default function FollowupPage() {
         setAppointment(aptData);
         patientId = aptData.user_id;
       }
-      
+
       // โหลดข้อมูลคนไข้
       if (patientId) {
         const { data: profileData, error: profileError } = await supabase
@@ -197,12 +196,11 @@ export default function FollowupPage() {
   // ✅ ฟังก์ชันอัปโหลดรูปภาพ (ใช้สำหรับทั้ง 2 รูป)
   const handleImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    fieldName: 'floating_chart_image_url' | 'dream_card_image_url',
+    fieldName: 'floating_chart_image_url' | 'dream_card_image_url' | 'life_schedule_image_url',
     setUploading: React.Dispatch<React.SetStateAction<boolean>>
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     try {
       setUploading(true);
 
@@ -227,7 +225,7 @@ export default function FollowupPage() {
 
       // อัปโหลดไฟล์
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('followup-images') // ✅ ต้องสร้าง bucket นี้ใน Supabase Storage
+        .from('followup-images')
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false,
@@ -265,7 +263,6 @@ export default function FollowupPage() {
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
     if (formData.movement_status === 'completed') successes.push('ปรับการเคลื่อนไหว');
-    
     if (successes.length > 0) {
       setFormData(prev => ({
         ...prev,
@@ -274,8 +271,19 @@ export default function FollowupPage() {
     }
   }, [formData.food_amount_status, formData.food_type_status, formData.movement_status]);
 
+  // ✅ handleSubmit ที่มีการยืนยันก่อนบันทึก
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // ✅ เพิ่มส่วนยืนยันก่อนบันทึก
+    const isConfirmed = window.confirm(
+      '⚠️ ยืนยันการบันทึก\n\nคุณต้องการบันทึกผลการติดตามนี้ใช่หรือไม่?\nกรุณาตรวจสอบความถูกต้องของข้อมูลก่อนกดยืนยัน'
+    );
+
+    if (!isConfirmed) {
+      return; // หยุดการทำงานหากผู้ใช้กด Cancel
+    }
+
     setSaving(true);
     setError(null);
 
@@ -286,35 +294,35 @@ export default function FollowupPage() {
       }
 
       const userId = patientIdFromQuery || appointment?.user_id;
-      
+
       const followupData = {
         appointment_id: appointmentId && appointmentId !== 'new' ? appointmentId : null,
         user_id: userId,
         followup_date: appointment?.appointment_date || new Date().toISOString(),
         followup_round: followupRound,
-        
+
         // 1. ข้อมูลสุขภาพ
         weight: formData.weight ? parseFloat(formData.weight) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
         blood_pressure_dia: formData.blood_pressure_dia ? parseInt(formData.blood_pressure_dia) : null,
         blood_sugar_dtx: formData.blood_sugar_dtx ? parseFloat(formData.blood_sugar_dtx) : null,
-        
+
         // 2. ความก้าวหน้าในการปรับตัว
         life_schedule_image_url: formData.life_schedule_image_url || null,
         adaptation_summary: formData.adaptation_summary || null,
         adaptation_obstacles: formData.adaptation_obstacles || null,
         adaptation_opportunities: formData.adaptation_opportunities || null,
         adaptation_other: formData.adaptation_other || null,
-        
+
         // 3. กราฟวัดลอยจม
         floating_chart_image_url: formData.floating_chart_image_url || null,
         floating_chart_summary: formData.floating_chart_summary || null,
-        
+
         // 4. การ์ดภาพความฝัน
         dream_card_image_url: formData.dream_card_image_url || null,
         dream_card_description: formData.dream_card_description || null,
-        
+
         // 5. ติดตามแผนปฏิบัติกิจกรรม
         food_amount_status: formData.food_amount_status,
         food_type_status: formData.food_type_status,
@@ -322,18 +330,18 @@ export default function FollowupPage() {
         food_amount_note: formData.food_amount_note || null,
         food_type_note: formData.food_type_note || null,
         movement_note: formData.movement_note || null,
-        
+
         // 6. คะแนนไม้บรรทัดวัดใจ
         confidence_score: parseInt(formData.confidence_score.toString()),
         confidence_improvement_plan: formData.confidence_improvement_plan || null,
-        
+
         // 7. สรุป
         summary: formData.summary || null,
         recommendations: formData.recommendations || null,
-        
+
         // 8. สถานะการติดตาม
         followup_status: formData.followup_status,
-        
+
         conducted_by: currentUser.id,
       };
 
@@ -383,18 +391,16 @@ export default function FollowupPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
           {/* ✅ Layout: ข้อมูลผู้ป่วย (ซ้าย) | ข้อมูลผู้ใช้งาน (ขวา - การ์ด) */}
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-            
             {/* ✅ ด้านซ้าย: ข้อมูลผู้ป่วย - แบบธรรมดา */}
             <div className="flex-1">
               <h1 className="text-2xl font-bold text-gray-800 mb-2">
                 บันทึกผลการติดตามนัดหมาย
               </h1>
               <p className="text-sm text-gray-600">
-                ผู้ป่วย: <span className="font-medium">{patientProfile?.first_name} {patientProfile?.last_name}</span> | 
-                HN: <span className="font-mono font-medium">{patientProfile?.hospital_number}</span> | 
+                ผู้ป่วย: <span className="font-medium">{patientProfile?.first_name} {patientProfile?.last_name}</span> |
+                HN: <span className="font-mono font-medium">{patientProfile?.hospital_number}</span> |
                 ครั้งที่: <span className="font-medium">{followupRound}</span>
               </p>
             </div>
@@ -419,8 +425,8 @@ export default function FollowupPage() {
                     }`}>
                       {isSuperAdmin(user) ? '👑 Super Admin' :
                        isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                       user?.role === 'doctor' ? '👨‍️ แพทย์' :
-                       user?.role === 'helper' ? '👩‍️ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
+                       user?.role === 'helper' ? '👩‍💼 เจ้าหน้าที่' : 'ผู้ดูแล'}
                     </span>
                   </div>
                   {userHospital && (
@@ -458,7 +464,6 @@ export default function FollowupPage() {
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        
         {/* 1. ข้อมูลสุขภาพ */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -620,7 +625,7 @@ export default function FollowupPage() {
               <label className="block text-sm font-medium text-gray-700 mb-2">รูปภาพความฝัน</label>
               <label className={`flex items-center gap-2 px-4 py-2 bg-pink-500 text-white rounded-lg cursor-pointer hover:bg-pink-600 transition-all w-fit ${uploadingDream ? 'opacity-50 cursor-not-allowed' : ''}`}>
                 <Upload className="w-5 h-5" />
-                <span>{uploadingDream ? '⏳ กำลังอัปโหลด...' : 'อัปโหลดรูปภาพ'}</span>
+                <span>{uploadingDream ? ' กำลังอัปโหลด...' : 'อัปโหลดรูปภาพ'}</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -705,7 +710,7 @@ export default function FollowupPage() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               ความมั่นใจ (0-10): <span className="text-indigo-600 font-bold text-lg">{formData.confidence_score}</span>
             </label>
-           
+
             {/* Slider Container */}
             <div className="relative w-full mb-2">
               <input
@@ -722,15 +727,15 @@ export default function FollowupPage() {
                 }}
               />
             </div>
-           
+
             {/* Number Scale */}
             <div className="relative w-full mt-2">
               <div className="flex justify-between items-center px-1">
                 {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
                   <div key={num} className="flex flex-col items-center flex-1">
                     <span className={`text-xs font-bold ${
-                      num === formData.confidence_score 
-                        ? 'text-indigo-600 bg-indigo-100 rounded-full w-6 h-6 flex items-center justify-center' 
+                      num === formData.confidence_score
+                        ? 'text-indigo-600 bg-indigo-100 rounded-full w-6 h-6 flex items-center justify-center'
                         : 'text-gray-600'
                     }`}>
                       {num}
@@ -738,7 +743,7 @@ export default function FollowupPage() {
                   </div>
                 ))}
               </div>
-             
+
               {/* Labels */}
               <div className="flex justify-between mt-2 text-xs text-gray-500 px-1">
                 <span>น้อยมาก</span>
@@ -746,7 +751,7 @@ export default function FollowupPage() {
                 <span>มากที่สุด</span>
               </div>
             </div>
-           
+
             <textarea
               name="confidence_improvement_plan"
               value={formData.confidence_improvement_plan}
