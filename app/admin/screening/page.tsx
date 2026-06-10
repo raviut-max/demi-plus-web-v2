@@ -13,7 +13,7 @@ import {
   getUserHospitalInfo,
   isSuperAdmin
 } from '@/lib/supabase/queries';
-import { FileText, Save, ArrowLeft, LogOut, User, Hospital, Building2, UserCheck } from 'lucide-react';
+import { FileText, Save, ArrowLeft, LogOut, User, Hospital, Building2, UserCheck, XCircle } from 'lucide-react'; // ✅ เพิ่ม XCircle icon
 import { supabase } from '@/lib/supabase/client';
 
 interface UserHospital {
@@ -89,7 +89,7 @@ export default function ScreeningPage() {
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
     } catch (error) {
-      console.error('❌ [loadUserHospital] Error:', error);
+      console.error(' [loadUserHospital] Error:', error);
     }
   };
 
@@ -167,6 +167,18 @@ export default function ScreeningPage() {
     setPromsAnswers(prev => ({ ...prev, [questionId]: score }));
   };
 
+  // ✅ ฟังก์ชันยกเลิกการประเมิน (Reset State)
+  const handleCancelAssessment = () => {
+    if (confirm('คุณต้องการยกเลิกการประเมินนี้หรือไม่? ข้อมูลทั้งหมดจะหายไป')) {
+      setSelectedPatient('');
+      setPatientData(null);
+      setPamAnswers({});
+      setPromsAnswers({});
+      setConfidenceScore(0);
+      setConfidencePlan('');
+    }
+  };
+
   // =====================================================
   // CALCULATE PATIENT LEVEL
   // =====================================================
@@ -200,6 +212,18 @@ export default function ScreeningPage() {
     if (!selectedPatient) return alert('กรุณาเลือกผู้ป่วย');
     if (Object.keys(pamAnswers).length === 0) return alert('กรุณาตอบคำถาม PAM ให้ครบ');
     if (Object.keys(promsAnswers).length < 4) return alert('กรุณาตอบคำถาม PROMs ให้ครบทั้ง 4 ข้อ');
+    
+    // ✅ ยืนยันก่อนบันทึกจริง
+    const isConfirmed = confirm(
+      '️ คุณแน่ใจหรือไม่ว่าต้องการบันทึกผลการประเมินนี้?\n\n' +
+      'โปรดตรวจสอบว่า:\n' +
+      '- ตอบคำถาม PAM ครบทุกข้อ\n' +
+      '- ตอบคำถาม PROMs ครบทุกข้อ\n' +
+      '- ระบุระดับความมั่นใจเรียบร้อยแล้ว\n\n' +
+      'เมื่อบันทึกแล้วจะไม่สามารถแก้ไขย้อนหลังได้'
+    );
+
+    if (!isConfirmed) return; // ✅ ยกเลิกถ้า user กด Cancel
     
     setSaving(true);
     try {
@@ -244,7 +268,7 @@ export default function ScreeningPage() {
         }
 
         const confirmGoToGoals = confirm(
-          `✅ บันทึกแบบประเมินสำเร็จ!\n\nระดับผู้ป่วย: ${patientLevel.level} - ${patientLevel.zone}\nเหตุผล: ${patientLevel.reason}${goalsMessage}\n\n🎯 ไปหน้าบันทึกเป้าหมายเลยหรือไม่?`
+          `✅ บันทึกแบบประเมินสำเร็จ!\n\nระดับผู้ป่วย: ${patientLevel.level} - ${patientLevel.zone}\nเหตุผล: ${patientLevel.reason}${goalsMessage}\n\n ไปหน้าบันทึกเป้าหมายเลยหรือไม่?`
         );
 
         if (confirmGoToGoals) router.push(`/admin/patients/${selectedPatient}/goals/setup`);
@@ -304,7 +328,7 @@ export default function ScreeningPage() {
                     <div>
                       <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                       <p className="text-xs text-gray-500">
-                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
@@ -473,7 +497,7 @@ export default function ScreeningPage() {
               {patientLevel.promsTotal > 0 && (
                 <div className={`mt-6 p-4 rounded-lg border ${patientLevel.zone === 'Green Zone' ? 'bg-green-50 border-green-200' : patientLevel.zone === 'Yellow Zone' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`}>
                   <p className={`text-sm font-medium ${patientLevel.zone === 'Green Zone' ? 'text-green-800' : patientLevel.zone === 'Yellow Zone' ? 'text-yellow-800' : 'text-red-800'}`}>
-                    คะแนน PROMs: {patientLevel.promsTotal} / {patientLevel.promsMax} (เฉลี่ย {patientLevel.promsAvg.toFixed(2)} / 6){patientLevel.promsMin <= 2 && ' ️ มีข้อที่คะแนนต่ำมาก'}
+                    คะแนน PROMs: {patientLevel.promsTotal} / {patientLevel.promsMax} (เฉลี่ย {patientLevel.promsAvg.toFixed(2)} / 6){patientLevel.promsMin <= 2 && ' ⚠️ มีข้อที่คะแนนต่ำมาก'}
                   </p>
                 </div>
               )}
@@ -564,7 +588,7 @@ export default function ScreeningPage() {
               </div>
             </div>
 
-            {/* Submit Button */}
+            {/* Submit Button & Cancel Button */}
             <div className="flex items-center gap-4">
               <button
                 onClick={handleSubmit}
@@ -576,6 +600,15 @@ export default function ScreeningPage() {
                 ) : (
                   <><Save className="w-5 h-5" /> บันทึกแบบประเมิน</>
                 )}
+              </button>
+              
+              {/* ✅ ปุ่มยกเลิกการประเมิน */}
+              <button
+                onClick={handleCancelAssessment}
+                disabled={saving}
+                className="px-6 py-4 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 border border-gray-300"
+              >
+                <XCircle className="w-5 h-5" /> ยกเลิก
               </button>
             </div>
           </>
