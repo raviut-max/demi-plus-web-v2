@@ -2858,37 +2858,37 @@ export async function checkIdCardExists(idCard: string, excludeUserId?: string):
 /**
  * ดึงรายการอสม. ที่ใช้บัตรประชาชนชั่วคราว
  */
+
+// lib/supabase/queries.ts
+
 export async function getTemporaryOSMCards(hospitalIds?: string[]) {
   try {
     let query = supabase
       .from('users')
       .select(`
-        id,
-        id_card,
-        role,
-        is_active,
-        created_at,
-        is_temporary_id,
-        temp_id_notes,
-        id_card_updated_at,
-        id_card_updated_by,
-        hospital_id,
-        doctors (
-          full_name_th,
-          phone,
-          specialization_th,
-          email
-        ),
-        hospitals (
-          id,
-          name,
-          code,
-          type
-        ),
-        created_by_user:users!created_by (
-          full_name_th
+        id, 
+        id_card, 
+        role, 
+        is_active, 
+        created_at, 
+        is_temporary_id, 
+        temp_id_notes, 
+        id_card_updated_at, 
+        id_card_updated_by, 
+        hospital_id, 
+        doctors ( 
+          full_name_th, 
+          phone, 
+          specialization_th, 
+          email 
+        ), 
+        hospitals ( 
+          id, 
+          name, 
+          code, 
+          type 
         )
-      `)
+      `) // ✅ ลบ created_by_user:users!created_by (...) ออกไปแล้ว
       .eq('role', 'osm')
       .eq('is_temporary_id', true)
       .order('created_at', { ascending: false });
@@ -2908,6 +2908,7 @@ export async function getTemporaryOSMCards(hospitalIds?: string[]) {
     return [];
   }
 }
+
 
 /**
  * อัปเดตเลขบัตรอสม. จากชั่วคราวเป็นเลขจริง

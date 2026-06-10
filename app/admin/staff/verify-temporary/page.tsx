@@ -56,6 +56,7 @@ export default function VerifyTemporaryStaffPage() {
     setLoading(true);
     try {
       const ids = await getAccessibleHospitalIds(user?.id);
+      // ✅ แก้ไข: ส่ง hospitalIds ไปให้ query ทำงานถูกต้อง
       const data = await getTemporaryOSMCards(isSuperAdmin(user) ? [] : ids);
       setStaffList(data);
     } catch (error) {
@@ -70,12 +71,17 @@ export default function VerifyTemporaryStaffPage() {
     setRealIdCard('');
     setConfirmNotes('');
     
-    // แยกวันเกิดเดิมเพื่อเตรียมใส่ในฟอร์ม
-    if (staff.users?.birth_date) {
-      const [y, m, d] = staff.users.birth_date.split('-');
+    // ✅ แก้ไข: ดึงวันเกิดจาก staff.birth_date โดยตรง (เพราะ Query ใหม่ดึงมาแล้ว)
+    if (staff.birth_date) {
+      const [y, m, d] = staff.birth_date.split('-');
       setBirthDay(d);
       setBirthMonth(m);
       setBirthYear((parseInt(y) + 543).toString());
+    } else {
+      // Fallback ถ้าไม่มีวันเกิดเดิม ให้ใช้ค่าเริ่มต้น
+      setBirthDay('01');
+      setBirthMonth('01');
+      setBirthYear('2501');
     }
   };
 
@@ -101,13 +107,13 @@ export default function VerifyTemporaryStaffPage() {
         throw new Error(updateResult.error);
       }
 
-      // 2. อัปเดตวันเกิดถ้ามีการเปลี่ยนแปลง (Optional ตามโจทย์)
+      // 2. อัปเดตวันเกิดถ้ามีการเปลี่ยนแปลง
       const newBirthDate = toISODate(birthDay, birthMonth, birthYear);
-      if (newBirthDate !== selectedStaff.users?.birth_date) {
+      if (newBirthDate !== selectedStaff.birth_date) {
         await updateStaff(selectedStaff.id, { birth_date: newBirthDate });
       }
 
-      alert('✅ อัปเดตข้อมูลสำเร็จ! บัญชีนี้现在是อสม.เต็มรูปแบบแล้ว');
+      alert('✅ อัปเดตข้อมูลสำเร็จ! บัญชีนี้เป็นอสม.เต็มรูปแบบแล้ว');
       setSelectedStaff(null);
       loadTemporaryStaff(); // โหลดรายการใหม่
       
