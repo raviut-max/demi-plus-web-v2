@@ -2,18 +2,32 @@
 // ✅ แก้ไขล่าสุด: 18 พฤษภาคม 2569
 import { supabase } from './client';
 
+// lib/supabase/queries.ts
+
 // =====================================================
 // 🔐 Authentication Functions
 // =====================================================
 export async function login(idCard: string, password: string) {
   try {
+    // ✅ 1. ค้นหาเฉพาะ User ที่มีบทบาทเป็นบุคลากร (Admin, Doctor, Helper, OSM)
+    // การทำเช่นนี้จะข้ามแถวที่เป็น 'patient' ไปโดยอัตโนมัติ แม้ ID Card จะเดียวกัน
     const { data, error } = await supabase
       .from('users')
-      .select('id, id_card, password_hash, role, admin_type, is_active, hospital_id')
+      .select(`
+        id, 
+        id_card, 
+        password_hash, 
+        role, 
+        admin_type, 
+        is_active, 
+        hospital_id,
+        created_at
+      `)
       .eq('id_card', idCard)
       .eq('password_hash', password)
       .eq('is_active', true)
-      .single();
+      .in('role', ['admin', 'doctor', 'helper', 'osm']) // ✅ สำคัญ: กรองเฉพาะ Staff
+      .maybeSingle(); // ✅ ใช้ maybeSingle เพื่อป้องกัน Error ถ้าไม่พบข้อมูลเลย
 
     if (error || !data) {
       return null;
@@ -25,41 +39,57 @@ export async function login(idCard: string, password: string) {
     let zone = 'Green Zone';
     let current_step = 'Starter';
 
+    // ✅ 2. ดึงข้อมูลเพิ่มเติมตามบทบาท
     if (['admin', 'doctor', 'helper', 'osm'].includes(data.role)) {
       const { data: doctor } = await supabase
         .from('doctors')
         .select('full_name_th, specialization_th')
         .eq('user_id', data.id)
-        .single();
+        .maybeSingle(); // เปลี่ยนเป็น maybeSingle ป้องกัน Error ถ้ายังไม่มีข้อมูลในตาราง doctors
+      
       full_name_th = doctor?.full_name_th || 'ผู้ดูแลระบบ';
+      
+      // ถ้าต้องการดึงชื่อโรงพยาบาลด้วย (Optional)
+      if (data.hospital_id) {
+         const { data: hosp } = await supabase
+            .from('hospitals')
+            .select('name')
+            .eq('id', data.hospital_id)
+            .maybeSingle();
+         // สามารถเก็บไว้ใช้ภายหลังได้ถ้าจำเป็น
+      }
     } else {
+      // กรณีนี้ไม่น่าจะเกิดขึ้นเพราะเรากรอง role ไว้ข้างบนแล้ว แต่ใส่ไว้เพื่อความสมบูรณ์
       const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, last_name, hospital_number, pam_level, pam_score, zone, current_step')
         .eq('id', data.id)
-        .single();
-      full_name_th = profile?.first_name && profile?.last_name 
-        ? `${profile.first_name} ${profile.last_name}` 
-        : 'ผู้ใช้';
-      hospital_number = profile?.hospital_number || '';
-      pam_level = profile?.pam_level || 'L2';
-      zone = profile?.zone || 'Green Zone';
-      current_step = profile?.current_step || 'Starter';
+        .maybeSingle();
+        
+      if (profile) {
+        full_name_th = `${profile.first_name} ${profile.last_name}`;
+        hospital_number = profile.hospital_number || '';
+        pam_level = profile.pam_level || 'L0';
+        zone = profile.zone || 'Zero Zone';
+        current_step = profile.current_step || 'Starter';
+      }
     }
 
+    // ✅ 3. ส่งคืนข้อมูลพร้อมใช้งาน
     return {
       id: data.id,
       id_card: data.id_card,
+      role: data.role,
+      admin_type: data.admin_type || 'hospital',
+      is_active: data.is_active,
+      hospital_id: data.hospital_id,
       full_name_th: full_name_th,
       hospital_number: hospital_number,
       pam_level: pam_level,
-      pam_score: 0,
       zone: zone,
       current_step: current_step,
-      role: data.role,
-      admin_type: data.admin_type || 'hospital',
-      hospital_id: data.hospital_id,
     };
+
   } catch (err) {
     console.error('Login error:', err);
     return null;
