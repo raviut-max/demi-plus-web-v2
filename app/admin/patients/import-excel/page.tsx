@@ -129,8 +129,8 @@ const formatThaiDate = (input: any): string => {
   if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
     const [y, m, d] = str.split('-');
     year = String(parseInt(y) + 543); month = m; day = d;
-  } else if (str.match(/^[\d\/.\-]+$/)) {
-    const parts = str.split(/[/.\-]/).map(p => p.trim());
+  } else if (str.match(/^[\d/.-]+$/)) {
+    const parts = str.split(/[/.-]/).map(p => p.trim());
     if (parts.length === 3) {
       const [p1, p2, p3] = parts;
       if (parseInt(p1) > 31) { year = p1; month = p2; day = p3; }
@@ -363,8 +363,8 @@ export default function ImportExcelPage() {
           // ✅ แปลงเพศอัตโนมัติ
           if (dbKey === 'gender' && val) {
             const v = String(val).trim();
-            if (['ช', 'ช.'].includes(v)) newRow[dbKey] = 'ชาย';
-            else if (['ญ', 'ญ.'].includes(v)) newRow[dbKey] = 'หญิง';
+            if (['ช', 'ช.', '1'].includes(v)) newRow[dbKey] = 'ชาย';
+            else if (['ญ', 'ญ.', '2'].includes(v)) newRow[dbKey] = 'หญิง';
             else newRow[dbKey] = v;
           } 
           // ✅ แปลงวันที่อัตโนมัติ
@@ -575,7 +575,6 @@ export default function ImportExcelPage() {
         'ข้อผิดพลาด': hasErrors ? validationErrors[idx]?.join('; ') : ''
       };
     });
-
     const readyData = exportData.filter(r => r['สถานะ'] === '⏳ พร้อมนำเข้า' || r['สถานะ'] === '🟡 ซ้ำในระบบ(ผ่าน)');
     if (readyData.length > 0) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(readyData), '✅ แก้ไขถูกต้องแล้ว');
 
@@ -628,12 +627,14 @@ export default function ImportExcelPage() {
       const idx = row._rowIndex;
       const hospMatch = findBestHospitalMatch(row.hospital_name, hospitals);
       const netHospId = hospMatch?.hospital.id;
-      const networkCoaches = coaches.filter(c => {
+      
+      // ✅ ดึงโค้ชในเครือข่ายเดียวกัน (แม่ข่าย + ลูกข่าย)
+      const networkCoaches = netHospId ? coaches.filter(c => {
         const cHospId = c.users?.hospital_id;
-        const targetHosp = hospitals.find(h => h.id === netHospId);
-        const netIds = getNetworkHospitalIds(netHospId || '', hospitals);
+        const netIds = getNetworkHospitalIds(netHospId, hospitals);
         return netIds.includes(cHospId);
-      });
+      }) : [];
+
       const isCoachEmpty = !row.coach_name || String(row.coach_name).trim() === '';
       const coachMatch = isCoachEmpty ? null : findBestCoachMatch(row.coach_name, networkCoaches);
       const needsFix = !hospMatch || (!isCoachEmpty && !coachMatch) || (coachMatch && coachMatch.similarity < 0.95);
