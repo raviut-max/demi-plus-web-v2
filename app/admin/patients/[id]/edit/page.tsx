@@ -1,10 +1,9 @@
 // app/admin/patients/[id]/edit/page.tsx
-// ✅ แก้ไขล่าสุด: 17 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 10 มิถุนายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ ลบการตรวจสอบสิทธิ์ - อนุญาตทุกบทบาท
-//    2. ✅ เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานส่วนหัว
-//    3. ✅ ปรับ Dropdown โรงพยาบาล: แสดงเฉพาะเครือข่าย (แม่ข่าย+ลูกข่าย)
-//    4. ✅ ปรับ Dropdown โค้ช: แสดงโค้ชจากเครือข่าย พร้อมชื่อ รพ.
+//    1. ✅ เพิ่ม 'osm' ใน validRoles ของ loadCoachesFromNetwork เพื่อให้ อสม. แสดงใน Dropdown โค้ช
+//    2. ✅ ย้าย Logic กรอง hospitalIds มาเป็น JavaScript filter เพื่อแก้ปัญหา Supabase Nested Join ไม่ครบถ้วน
+//    3. ✅ เพิ่มเช็ค users.is_active เพื่อป้องกัน User ที่ถูกปิดใช้งานโผล่มาให้เลือก
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -44,6 +43,7 @@ interface CoachData {
   users?: {
     hospital_id?: string;
     role?: string;
+    is_active?: boolean;
     hospitals?: {
       id?: string;
       name?: string;
@@ -57,18 +57,19 @@ export default function EditPatientPage() {
   const router = useRouter();
   const params = useParams();
   const patientId = params.id as string;
-  
+
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [patient, setPatient] = useState<any>(null);
   const [hospitals, setHospitals] = useState<HospitalData[]>([]);
   const [coaches, setCoaches] = useState<CoachData[]>([]);
+  
   const [userHospitalNetwork, setUserHospitalNetwork] = useState<{
     mainHospitalId: string | null;
     networkHospitalIds: string[];
   }>({ mainHospitalId: null, networkHospitalIds: [] });
-  
+
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [validationSuccess, setValidationSuccess] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
@@ -136,7 +137,6 @@ export default function EditPatientPage() {
       router.push('/admin/login');
       return;
     }
-    
     // ✅ ไม่ตรวจสอบ role - อนุญาตทั้งหมด
     setUser(userData);
     loadPatientData();
@@ -146,9 +146,9 @@ export default function EditPatientPage() {
   // ✅ 2. โหลดรายการโรงพยาบาลตามเครือข่ายของผู้ใช้
   const loadHospitalsWithNetwork = async (userData: any) => {
     try {
-      console.log('🏥 Loading hospitals with network logic...');
+      console.log(' Loading hospitals with network logic...');
       const allHospitals = await getHospitalsWithHierarchy();
-      
+
       // ✅ หาเครือข่ายโรงพยาบาลของผู้ใช้
       let networkHospitalIds: string[] = [];
       let mainHospitalId: string | null = null;
@@ -204,11 +204,12 @@ export default function EditPatientPage() {
     }
   };
 
-  // ✅ 4. โหลดโค้ชจากเครือข่ายโรงพยาบาล
+  // ✅ 4. โหลดโค้ชจากเครือข่ายโรงพยาบาล (แก้ไขแล้ว: รองรับ OSM และกรองด้วย JS)
   const loadCoachesFromNetwork = async (hospitalIds: string[]) => {
     try {
       console.log('👨‍⚕️ Loading coaches from network hospitals:', hospitalIds);
       
+      // ✅ ปรับปรุง Query: ดึงข้อมูลให้ครอบคลุม และป้องกันปัญหา Join
       const { data, error } = await supabase
         .from('doctors')
         .select(`
@@ -219,8 +220,10 @@ export default function EditPatientPage() {
           is_active,
           is_verified,
           users!doctors_user_id_fkey (
+            id,
             hospital_id,
             role,
+            is_active,
             hospitals (
               id,
               name,
@@ -229,7 +232,8 @@ export default function EditPatientPage() {
             )
           )
         `)
-        .in('users.hospital_id', hospitalIds)
+        // ✅ เพิ่มเงื่อนไข: ต้องเป็นผู้ใช้ที่ Active ด้วย (ป้องกันกรณี User ถูกปิดแต่ Doctors ยังอยู่)
+        .eq('users.is_active', true) 
         .eq('is_active', true)
         .order('full_name_th', { ascending: true });
       
@@ -238,13 +242,29 @@ export default function EditPatientPage() {
         setCoaches([]);
         return;
       }
+
+      // ✅ แก้ไขจุดสำคัญ: เพิ่ม 'osm' เข้าไปในรายการ Role ที่ยอมรับ
+      // เพื่อให้ อสม. ถูกแสดงในรายการเลือกโค้ชด้วย
+      const validRoles = ['doctor', 'helper', 'osm']; 
+
+      // ✅ กรองข้อมูล: 
+      // 1. ต้องมีข้อมูล users และ hospital_id (เพื่อเช็คว่าอยู่ในเครือข่าย)
+      // 2. Role ต้องตรงกับที่กำหนด (รวม osm แล้ว)
+      // 3. ผู้ใช้ต้อง Active
+      const filteredCoaches = (data || []).filter((coach: any) => {
+        const userRole = coach.users?.role;
+        const userHospId = coach.users?.hospital_id;
+        const isUserActive = coach.users?.is_active;
+
+        return (
+          validRoles.includes(userRole) &&
+          hospitalIds.includes(userHospId) && // ✅ กรองด้วย JavaScript เพื่อความชัวร์เรื่อง Network
+          coach.is_active &&
+          isUserActive
+        );
+      });
       
-      // ✅ กรองเฉพาะแพทย์/เจ้าหน้าที่ ที่ใช้งานอยู่
-      const filteredCoaches = (data || []).filter((coach: any) => 
-        ['doctor', 'helper'].includes(coach.users?.role) && coach.is_active
-      );
-      
-      console.log('✅ Coaches loaded:', filteredCoaches.length);
+      console.log(`✅ Coaches loaded: ${filteredCoaches.length} (Roles included: ${validRoles.join(', ')})`);
       setCoaches(filteredCoaches);
       
     } catch (error) {
@@ -259,7 +279,6 @@ export default function EditPatientPage() {
       const data = await getPatientDetail(patientId);
       if (data) {
         setPatient(data);
-        
         let birthDay = '';
         let birthMonth = '';
         let birthYear = '';
@@ -483,7 +502,7 @@ export default function EditPatientPage() {
       return '❌ รอบเอวต้องอยู่ระหว่าง 26-200 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่ารอบเอวที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
     if (error.message?.includes('current_weight')) {
-      return '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 กก.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าน้ำหนักที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
+      return '❌ น้ำหนักต้องอยู่ระหว่าง 30-200 กก.\n\n วิธีแก้ไข:\n- ตรวจสอบค่าน้ำหนักที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
     }
     if (error.message?.includes('height')) {
       return '❌ ส่วนสูงต้องอยู่ระหว่าง 100-250 ซม.\n\n💡 วิธีแก้ไข:\n- ตรวจสอบค่าส่วนสูงที่กรอก\n- เว้นว่างไว้ถ้าไม่มีข้อมูล';
@@ -699,8 +718,8 @@ export default function EditPatientPage() {
                     <div className="flex items-center gap-1 text-xs text-gray-600 mb-2">
                       <span className="px-2 py-0.5 bg-blue-200 text-blue-800 rounded font-semibold">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : 
-                         user?.role === 'doctor' ? '👨‍️ แพทย์' : 
-                         user?.role === 'helper' ? '👩‍ เจ้าหน้าที่' : 'ผู้ใช้งาน'}
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
+                         user?.role === 'helper' ? '👩‍⚕️ เจ้าหน้าที่' : 'ผู้ใช้งาน'}
                       </span>
                     </div>
                     {userHospitalNetwork.mainHospitalId && (
@@ -1108,25 +1127,25 @@ export default function EditPatientPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                     {originalData.province && (
                       <div>
-                        <span className="text-gray-500">จังหวัด:</span>
+                        <span className="text-gray-500">จังหวัด: </span>
                         <span className="ml-2 font-medium text-gray-800">{originalData.province}</span>
                       </div>
                     )}
                     {originalData.district && (
                       <div>
-                        <span className="text-gray-500">อำเภอ/เขต:</span>
+                        <span className="text-gray-500">อำเภอ/เขต: </span>
                         <span className="ml-2 font-medium text-gray-800">{originalData.district}</span>
                       </div>
                     )}
                     {originalData.subdistrict && (
                       <div>
-                        <span className="text-gray-500">ตำบล/แขวง:</span>
+                        <span className="text-gray-500">ตำบล/แขวง: </span>
                         <span className="ml-2 font-medium text-gray-800">{originalData.subdistrict}</span>
                       </div>
                     )}
                     {originalData.postalCode && (
                       <div>
-                        <span className="text-gray-500">รหัสไปรษณีย์:</span>
+                        <span className="text-gray-500">รหัสไปรษณีย์: </span>
                         <span className="ml-2 font-medium text-gray-800">{originalData.postalCode}</span>
                       </div>
                     )}
@@ -1164,7 +1183,7 @@ export default function EditPatientPage() {
                       <option value={hospital.id}>└ {hospital.name} ({hospital.code}) - แม่ข่าย</option>
                       {hospitalGroups.get(hospital.id)?.map((sub) => (
                         <option key={sub.id} value={sub.id}>
-                          {'   '}└─ {sub.name} ({sub.code})
+                          {'   '}─ {sub.name} ({sub.code})
                         </option>
                       ))}
                     </optgroup>
@@ -1206,7 +1225,7 @@ export default function EditPatientPage() {
                 })}
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                👨‍⚕️ แสดงโค้ชจากโรงพยาบาลในเครือข่ายเดียวกัน ({coaches.length} คน)
+                👨‍️ แสดงโค้ชจากโรงพยาบาลในเครือข่ายเดียวกัน ({coaches.length} คน)
               </p>
               {coaches.length === 0 && (
                 <p className="text-xs text-orange-500 mt-1">⚠️ ไม่พบโค้ชในโรงพยาบาลเครือข่าย</p>
