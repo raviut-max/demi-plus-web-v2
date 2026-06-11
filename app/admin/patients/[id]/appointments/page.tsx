@@ -1,11 +1,11 @@
 // app/admin/patients/[id]/appointments/page.tsx
-// ✅ แก้ไขล่าสุด: 3 มิถุนายน 2569
+// ✅ แก้ไขล่าสุด: 11 มิถุนายน 2569
 // ✅ การแก้ไข:
-//    1. แก้ไขปัญหา Bad Request ใน loadDoctors โดยใช้ !inner join
-//    2. แก้ไขปัญหา Timezone (+7 ชั่วโมง)
-//    3. แปลงเวลาให้ถูกต้องก่อนบันทึก
-//    4. แสดงเวลาให้ถูกต้องตาม timezone ประเทศไทย
+//    1. แก้ไขลิงก์ "บันทึกติดตาม" ให้ส่งไปยัง /followup/new?patient_id=...&appointment_id=...
+//       เพื่อป้องกัน Error เมื่อเข้าหน้า Followup ในโหมดแก้ไข
+//    2. รักษา Logic การตรวจสอบ Timezone และการกรองแพทย์ตามโรงพยาบาลไว้เหมือนเดิม
 'use client';
+
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { checkSession, getPatientDetail, getAppointments, createAppointment, getUserHospitalInfo } from '@/lib/supabase/queries';
@@ -98,7 +98,7 @@ export default function PatientAppointmentsPage() {
   const loadData = async () => {
     try {
       console.log('📥 [loadData] Loading patient detail for ID:', patientId);
-
+      
       // ✅ 1. โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       console.log('✅ [loadData] Patient detail loaded:', patientData);
@@ -139,7 +139,7 @@ export default function PatientAppointmentsPage() {
   const loadAccessibleHospitalsForPatient = async (patientHospitalId: string) => {
     try {
       console.log('🏥 [loadAccessibleHospitalsForPatient] Patient hospital:', patientHospitalId);
-
+      
       // ✅ ดึงข้อมูลโรงพยาบาลของผู้ป่วย
       const { data: patientHospital, error: hospError } = await supabase
         .from('hospitals')
@@ -173,13 +173,13 @@ export default function PatientAppointmentsPage() {
           .eq('is_active', true);
         
         if (subError) {
-          console.error('❌ [loadAccessibleHospitalsForPatient] Error fetching sub hospitals:', subError);
+           console.error('❌ [loadAccessibleHospitalsForPatient] Error fetching sub hospitals:', subError);
         } else if (subHospitals && subHospitals.length > 0) {
           hospitalIds = [...hospitalIds, ...subHospitals.map(h => h.id)];
           console.log('✅ [loadAccessibleHospitalsForPatient] Found', subHospitals.length, 'sub hospitals');
         }
       }
-      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ  
+      // ✅ ถ้าผู้ป่วยอยู่ลูกข่าย → รวมแม่ข่ายและลูกข่ายอื่นๆ   
       else if (patientHospital.type === 'sub' && patientHospital.parent_id) {
         console.log('🏥 [loadAccessibleHospitalsForPatient] Patient is in SUB hospital');
         console.log('🏥 [loadAccessibleHospitalsForPatient] Parent hospital:', patientHospital.parent_id);
@@ -194,7 +194,7 @@ export default function PatientAppointmentsPage() {
           .eq('parent_id', patientHospital.parent_id)
           .eq('is_active', true);
         
-        if (sibError) {
+         if (sibError) {
           console.error('❌ [loadAccessibleHospitalsForPatient] Error fetching sibling hospitals:', sibError);
         } else if (siblingHospitals && siblingHospitals.length > 0) {
           hospitalIds = [...hospitalIds, ...siblingHospitals.map(h => h.id)];
@@ -215,10 +215,10 @@ export default function PatientAppointmentsPage() {
   // ✅ โหลดแพทย์ (แก้ไขแล้ว - ใช้ inner join กับ users table แก้ Bad Request)
   const loadDoctors = async (hospitalIds: string[]) => {
     try {
-      console.log('👨‍⚕️ [loadDoctors] Starting...');
+      console.log('👨‍️ [loadDoctors] Starting...');
       console.log('🏥 [loadDoctors] Hospital IDs to filter:', hospitalIds);
       console.log('👤 [loadDoctors] Current user role:', user?.role);
-
+      
       let doctorsData: any[] = [];
 
       if (hospitalIds && hospitalIds.length > 0) {
@@ -234,7 +234,7 @@ export default function PatientAppointmentsPage() {
             specialization_th,
             is_active,
             users!inner (
-              id,
+               id,
               hospital_id,
               is_active
             )
@@ -246,7 +246,7 @@ export default function PatientAppointmentsPage() {
         if (error) {
           console.error('❌ [loadDoctors] Error fetching doctors:', error);
           console.error('❌ [loadDoctors] Error details: ', JSON.stringify(error, null, 2));
-          setDoctors([]);
+           setDoctors([]);
           return;
         }
 
@@ -260,12 +260,12 @@ export default function PatientAppointmentsPage() {
 
         doctorsData = data;
       } else {
-        // ✅ ถ้าไม่มี hospitalIds ให้ดึงแพทย์ทั้งหมด
+        // ✅ ถ้าไม่มี hospitalIds ให้ดึงแพทย์ทั้งหมด 
         console.log('🔍 [loadDoctors] No hospital filter, fetching all active doctors');
         const { data, error } = await supabase
           .from('doctors')
           .select(`
-            id, 
+            id,  
             user_id, 
             full_name_th, 
             specialization_th,
@@ -308,16 +308,16 @@ export default function PatientAppointmentsPage() {
               hospitalId = userData?.hospital_id || null;
             }
 
-            if (!hospitalId) {
+             if (!hospitalId) {
               console.log(`ℹ️ [loadDoctors] Doctor ${doctor.full_name_th} has no hospital_id`);
               return { ...doctor, hospitals: null };
             }
 
-            // ✅ ดึงข้อมูลโรงพยาบาล
+             // ✅ ดึงข้อมูลโรงพยาบาล
             const { data: hospData, error: hospError } = await supabase
               .from('hospitals')
               .select('id, name, code, type')
-              .eq('id', hospitalId)
+               .eq('id', hospitalId)
               .single();
 
             if (hospError) {
@@ -351,7 +351,6 @@ export default function PatientAppointmentsPage() {
   const loadFollowupStatus = async (appointmentsList: any[]) => {
     try {
       const followupSet = new Set<string>();
-
       for (const apt of appointmentsList) {
         const { count } = await supabase
           .from('appointment_followups')
@@ -380,7 +379,6 @@ export default function PatientAppointmentsPage() {
       alert('กรุณาระบุวันที่และเวลานัดหมาย');
       return;
     }
-
     const selectedDoctor = doctors.find(d => d.id === formData.doctor_id);
     if (!selectedDoctor) {
       alert('ไม่พบข้อมูลแพทย์ที่เลือก');
@@ -389,13 +387,8 @@ export default function PatientAppointmentsPage() {
 
     try {
       // ✅ แก้ไขปัญหา Timezone: สร้าง DateTime object ที่ถูกต้อง
-      // ตัวอย่าง: 2026-05-22 + 11:00 = 2026-05-22T11:00:00
       const dateTimeString = `${formData.appointment_date}T${formData.appointment_time}:00`;
-      
-      // ✅ สร้าง Date object จาก local time (ประเทศไทย UTC+7)
       const appointmentDate = new Date(dateTimeString);
-      
-      // ✅ แปลงเป็น ISO string เพื่อเก็บใน database (UTC)
       const appointmentDateTime = appointmentDate.toISOString();
       
       console.log('🕐 [handleCreateAppointment] Original input:', dateTimeString);
@@ -429,9 +422,7 @@ export default function PatientAppointmentsPage() {
 
   const handleUpdateAppointment = async () => {
     if (!selectedAppointment) return;
-
     try {
-      // ✅ แก้ไขปัญหา Timezone เช่นเดียวกัน
       const dateTimeString = `${formData.appointment_date}T${formData.appointment_time}:00`;
       const appointmentDate = new Date(dateTimeString);
       const appointmentDateTime = appointmentDate.toISOString();
@@ -463,7 +454,6 @@ export default function PatientAppointmentsPage() {
 
   const handleCancelAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการยกเลิกนัดหมายนี้หรือไม่?')) return;
-
     try {
       const { error } = await supabase
         .from('appointments')
@@ -485,7 +475,6 @@ export default function PatientAppointmentsPage() {
 
   const handleCompleteAppointment = async (appointmentId: string) => {
     if (!confirm('คุณต้องการทำเครื่องหมายว่านัดหมายนี้เสร็จสิ้นแล้วหรือไม่?')) return;
-
     try {
       const { error } = await supabase
         .from('appointments')
@@ -510,7 +499,6 @@ export default function PatientAppointmentsPage() {
     const dateTime = new Date(appointment.appointment_date);
     const date = dateTime.toISOString().split('T')[0];
     const time = dateTime.toTimeString().split(' ')[0].substring(0, 5);
-
     setFormData({
       doctor_id: appointment.doctor_id || '',
       appointment_type: appointment.appointment_type || 'followup',
@@ -520,7 +508,6 @@ export default function PatientAppointmentsPage() {
       location_detail: appointment.location_detail || '',
       notes: appointment.notes || '',
     });
-
     setShowEditModal(true);
   };
 
@@ -586,7 +573,7 @@ export default function PatientAppointmentsPage() {
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | HN: {patient?.hospital_number}
               </p>
             </div>
-            
+           
             <button 
               onClick={() => { resetForm(); setShowCreateModal(true); }} 
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -610,7 +597,7 @@ export default function PatientAppointmentsPage() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 Admin' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -731,7 +718,7 @@ export default function PatientAppointmentsPage() {
               รายการนัดหมายทั้งหมด
             </h2>
           </div>
-          
+         
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
@@ -802,7 +789,7 @@ export default function PatientAppointmentsPage() {
                             <span className="text-gray-700">
                               {appointment.location_type === 'clinic' ? 'คลินิก' : 
                                appointment.location_type === 'online' ? 'ออนไลน์' : 
-                                appointment.location_type === 'home' ? 'บ้าน' : 
+                                 appointment.location_type === 'home' ? 'บ้าน' : 
                                appointment.location_detail || '-'}
                             </span>
                           </div>
@@ -824,9 +811,10 @@ export default function PatientAppointmentsPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2 flex-wrap">
+                            {/* ✅ จุดที่แก้ไข: เปลี่ยนลิงก์ให้เป็น /followup/new?patient_id=...&appointment_id=... */}
                             {needsFollowup && (
                               <button
-                                onClick={() => router.push(`/admin/appointments/followup/${appointment.id}`)}
+                                onClick={() => router.push(`/admin/appointments/followup/new?patient_id=${patientId}&appointment_id=${appointment.id}`)}
                                 className="flex items-center gap-1 px-3 py-1.5 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600 transition-colors font-medium"
                                 title="บันทึกผลการติดตาม"
                               >

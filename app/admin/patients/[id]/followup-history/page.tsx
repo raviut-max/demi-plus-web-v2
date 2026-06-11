@@ -1,10 +1,10 @@
 // app/admin/patients/[id]/followup-history/page.tsx
-// ✅ แก้ไขล่าสุด: 10 มิถุนายน 2569
+// ✅ แก้ไขล่าสุด: 11 มิถุนายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มปุ่ม "แก้ไข" ในตารางประวัติการติดตาม
-//    2. ลิงก์ไปยังหน้าฟอร์มพร้อม parameter edit=true
+//    1. แก้ไขลิงก์ "บันทึกติดตามใหม่" ให้ส่งไปยัง /followup/new?patient_id=...&appointment_id=...
+//       เพื่อป้องกัน Error เมื่อเข้าหน้า Followup ในโหมดแก้ไข
+//    2. เพิ่มปุ่ม "แก้ไข" ในตารางประวัติการติดตาม (จากเวอร์ชันก่อนหน้า)
 //    3. กรองข้อมูล Soft Delete (deleted_at is null) ใน Query ประวัติ
-//    4. เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานในส่วนหัว
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -60,7 +60,8 @@ export default function FollowupHistoryPage() {
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
 
-      // โหลดประวัติการติดตาม (กรอง Soft Delete)
+      // โหลดประวัติการติดตาม (กรอง Soft Delete ถ้ามี column deleted_at)
+      // หมายเหตุ: หากยังไม่มี column นี้ใน DB ระบบจะดึงมาทั้งหมดตามปกติ
       const followupData = await getPatientFollowupHistory(patientId);
       setFollowups(followupData);
 
@@ -79,7 +80,7 @@ export default function FollowupHistoryPage() {
   // ✅ ฟังก์ชันตรวจสอบการนัดหมายที่ยังไม่ได้ติดตาม
   const checkUnfollowedAppointments = async (pid: string) => {
     try {
-      console.log(' Checking unfollowed appointments for:', pid);
+      console.log('🔍 Checking unfollowed appointments for:', pid);
       // ดึงนัดหมายที่เสร็จสิ้นแล้วทั้งหมด
       const { data: appointmentsData } = await supabase
         .from('appointments')
@@ -116,18 +117,20 @@ export default function FollowupHistoryPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่
+  // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่ (แก้ไขแล้ว - ส่งลิงก์ที่ถูกต้อง)
   const handleNewFollowup = () => {
     console.log('🔴 New Followup button clicked');
     console.log('hasUnfollowedAppointment:', hasUnfollowedAppointment);
     console.log('latestAppointmentId:', latestAppointmentId);
     
     if (hasUnfollowedAppointment && latestAppointmentId) {
-      // ✅ มีการนัดหมายที่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม
-      console.log('🔗 Has unfollowed appointment → Navigate to followup form');
-      router.push(`/admin/appointments/followup/${latestAppointmentId}`);
+      // ✅ มีการนัดหมายที่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม (สร้างใหม่)
+      console.log('🔗 Has unfollowed appointment → Navigate to followup form (NEW)');
+      
+      // ✅ แก้ไขตรงนี้: ใช้ /new?patient_id=...&appointment_id=... แทนการส่ง ID ตรงๆ
+      router.push(`/admin/appointments/followup/new?patient_id=${patientId}&appointment_id=${latestAppointmentId}`);
     } else {
-      // ✅ ยังไม่มีการนัดหมาย → แสดง confirm dialog
+      // ✅ ยังไม่มีการนัดหมาย → แสดง confirm dialog (แบบง่าย)
       console.log('🔗 No unfollowed appointment → Show confirm dialog');
       const confirmCreate = confirm(
         'คุณต้องการบันทึกข้อมูลการติดตาม (ก่อนนัดหมาย) ตอนนี้เลยหรือไม่?\n\n' +
@@ -181,11 +184,11 @@ export default function FollowupHistoryPage() {
     }
   };
 
-  // ✅ คำนวณความก้าวหน้า
+  // ✅ คำนวณความก้าวหน้า (เปรียบเทียบครั้งล่าสุดกับครั้งแรก)
   const calculateProgress = () => {
     if (followups.length < 2) return null;
-    const first = followups[followups.length - 1];
-    const latest = followups[0];
+    const first = followups[followups.length - 1]; // ครั้งแรก
+    const latest = followups[0]; // ครั้งล่าสุด
     const progress: any = {};
 
     if (first.weight && latest.weight) {
@@ -263,7 +266,7 @@ export default function FollowupHistoryPage() {
               </p>
             </div>
 
-            {/* ✅ User Info Card */}
+            {/* ✅ User Info Card - การ์ดแสดงข้อมูลผู้ใช้งาน */}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm min-w-[280px]">
               <div className="flex items-start gap-3">
                 <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
@@ -572,7 +575,7 @@ export default function FollowupHistoryPage() {
           </div>
         )}
 
-        {/* โหมดกราฟ */}
+        {/* โหมดกราฟ (แสดงข้อมูลแนวโน้ม) */}
         {viewMode === 'chart' && followups.length > 0 && (
           <div className="space-y-6">
             {/* กราฟน้ำหนัก */}
