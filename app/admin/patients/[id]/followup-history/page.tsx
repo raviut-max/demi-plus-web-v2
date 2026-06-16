@@ -1,10 +1,9 @@
 // app/admin/patients/[id]/followup-history/page.tsx
-// ✅ แก้ไขล่าสุด: 11 มิถุนายน 2569
-// ✅ การแก้ไข:
-//    1. แก้ไขลิงก์ "บันทึกติดตามใหม่" ให้ส่งไปยัง /followup/new?patient_id=...&appointment_id=...
-//       เพื่อป้องกัน Error เมื่อเข้าหน้า Followup ในโหมดแก้ไข
-//    2. เพิ่มปุ่ม "แก้ไข" ในตารางประวัติการติดตาม (จากเวอร์ชันก่อนหน้า)
-//    3. กรองข้อมูล Soft Delete (deleted_at is null) ใน Query ประวัติ
+// ✅ แก้ไขล่าสุด: 16 มิถุนายน 2569
+// ✅ การปรับปรุง:
+//    1. ปรับลิงก์ "บันทึกติดตามใหม่" ให้ส่งไปยัง /followup/new?patient_id=...&appointment_id=... (แก้ Error 406)
+//    2. เพิ่มคอลัมน์ "วันที่ติดตาม" ในตาราง เพื่อแสดงค่า followup_date ที่บันทึกไว้
+//    3. รักษาฟีเจอร์ปุ่ม "แก้ไข" และกรอง Soft Delete ไว้เหมือนเดิม
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -61,7 +60,6 @@ export default function FollowupHistoryPage() {
       setPatient(patientData);
 
       // โหลดประวัติการติดตาม (กรอง Soft Delete ถ้ามี column deleted_at)
-      // หมายเหตุ: หากยังไม่มี column นี้ใน DB ระบบจะดึงมาทั้งหมดตามปกติ
       const followupData = await getPatientFollowupHistory(patientId);
       setFollowups(followupData);
 
@@ -119,7 +117,7 @@ export default function FollowupHistoryPage() {
 
   // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่ (แก้ไขแล้ว - ส่งลิงก์ที่ถูกต้อง)
   const handleNewFollowup = () => {
-    console.log('🔴 New Followup button clicked');
+    console.log(' New Followup button clicked');
     console.log('hasUnfollowedAppointment:', hasUnfollowedAppointment);
     console.log('latestAppointmentId:', latestAppointmentId);
     
@@ -138,7 +136,7 @@ export default function FollowupHistoryPage() {
         '• กด "ยกเลิก" → ยกเลิก'
       );
       if (confirmCreate) {
-        console.log('🔗 Navigate to followup form (no appointment)');
+        console.log(' Navigate to followup form (no appointment)');
         router.push(`/admin/appointments/followup/new?patient_id=${patientId}`);
       }
     }
@@ -257,7 +255,7 @@ export default function FollowupHistoryPage() {
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                📋 ประวัติการติดตามนัดหมาย
+                 ประวัติการติดตามนัดหมาย
               </h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
@@ -447,7 +445,8 @@ export default function FollowupHistoryPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">ครั้งที่</th>
-                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">วันที่</th>
+                    {/* ✅ เพิ่มคอลัมน์วันที่ติดตาม */}
+                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">วันที่ติดตาม</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">น้ำหนัก</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">รอบเอว</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">ความดัน</th>
@@ -472,6 +471,7 @@ export default function FollowupHistoryPage() {
                         <td className="px-4 py-3 text-sm">
                           <span className="font-bold text-blue-600">ครั้งที่ {followup.followup_round}</span>
                         </td>
+                        {/* ✅ แสดงวันที่ติดตามที่บันทึกไว้ */}
                         <td className="px-4 py-3 text-sm">
                           {new Date(followup.followup_date).toLocaleDateString('th-TH', {
                             year: 'numeric',

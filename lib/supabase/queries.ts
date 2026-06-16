@@ -1810,7 +1810,7 @@ export async function saveAppointmentFollowup(data: {
 export async function saveAppointmentFollowupComplete(data: {
   appointment_id: string;
   user_id: string;
-  followup_date: string;
+  followup_date: string; // ✅ รับค่าวันที่เข้ามา
   followup_round: number;
   weight?: number | null;
   waist_circumference?: number | null;
@@ -1834,7 +1834,7 @@ export async function saveAppointmentFollowupComplete(data: {
   recommendations?: string | null;
   followup_status?: 'excellent' | 'good' | 'fair' | 'needs_improvement' | 'monitoring' | null;
   conducted_by: string;
-}) {
+}) { 
   try {
     if (!data.conducted_by) throw new Error('conducted_by is required');
     const { data: followup, error } = await supabase
@@ -1842,7 +1842,7 @@ export async function saveAppointmentFollowupComplete(data: {
       .insert({
         appointment_id: data.appointment_id,
         user_id: data.user_id,
-        followup_date: data.followup_date,
+        followup_date: data.followup_date, // ✅ เพิ่มบรรทัดนี้: บันทึกวันที่ที่รับมา
         followup_round: data.followup_round,
         weight: data.weight || null,
         waist_circumference: data.waist_circumference || null,

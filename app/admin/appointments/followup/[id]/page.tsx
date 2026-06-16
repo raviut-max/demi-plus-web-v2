@@ -1,9 +1,10 @@
 // app/admin/appointments/followup/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 10 มิถุนายน 2569
+// ✅ แก้ไขล่าสุด: 16 มิถุนายน 2569
 // ✅ การปรับปรุง:
-//    1. ปรับ Logic สรุปผลอัตโนมัติ (ข้อ 7) ให้สอดคล้องกับข้อ 5 อย่างแม่นยำ
-//    2. เพิ่ม Confirmation Dialog ก่อนบันทึก/แก้ไข
+//    1. เพิ่มฟิลด์ "วันที่ทำการติดตาม" (Default: วันปัจจุบัน, แก้ไขได้)
+//    2. ย้ายตำแหน่ง Input วันที่ไปไว้ส่วนที่ 1 (ข้อมูลสุขภาพ)
 //    3. รองรับโหมดแก้ไข (Edit Mode) และสร้างใหม่ (Insert Mode)
+//    4. Confirmation Dialog ก่อนบันทึก
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -19,7 +20,6 @@ export default function FollowupPage() {
   
   const appointmentId = params.id as string; 
   const patientIdFromQuery = searchParams.get('patient_id');
-  // ตรวจสอบโหมดแก้ไขจาก URL parameter หรือ ID ที่ไม่ใช่ 'new'
   const isEditMode = searchParams.get('edit') === 'true' || (appointmentId && appointmentId !== 'new');
 
   const [user, setUser] = useState<any>(null);
@@ -35,7 +35,19 @@ export default function FollowupPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingFollowupId, setEditingFollowupId] = useState<string | null>(null);
 
+  // ✅ Helper function สำหรับจัดรูปแบบวันที่เป็น YYYY-MM-DD สำหรับ input type="date"
+  const getTodayDateString = () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const [formData, setFormData] = useState({
+    // ✅ เพิ่มฟิลด์วันที่ทำการติดตาม (Default: วันนี้)
+    followup_date: getTodayDateString(), 
+    
     // 1. ข้อมูลสุขภาพ
     weight: '',
     waist_circumference: '',
@@ -116,7 +128,13 @@ export default function FollowupPage() {
           setFollowupRound(existingFollowup.followup_round);
           patientId = existingFollowup.user_id;
           
+          // แปลงวันที่จาก ISO เป็น YYYY-MM-DD สำหรับ input date
+          const followupDateStr = existingFollowup.followup_date 
+            ? new Date(existingFollowup.followup_date).toISOString().split('T')[0] 
+            : getTodayDateString();
+
           setFormData({
+            followup_date: followupDateStr, // ✅ โหลดวันที่เดิม
             weight: existingFollowup.weight?.toString() || '',
             waist_circumference: existingFollowup.waist_circumference?.toString() || '',
             blood_pressure_sys: existingFollowup.blood_pressure_sys?.toString() || '',
@@ -155,6 +173,9 @@ export default function FollowupPage() {
         if (aptError) throw aptError;
         setAppointment(aptData);
         patientId = aptData.user_id;
+        
+        // ✅ ถ้ามีนัดหมาย ให้ใช้วันนัดหมายเป็นค่าเริ่มต้น (หรือจะคงเป็นวันนี้ก็ได้ตามต้องการ)
+        // ในที่นี้ผมตั้งเป็นวันปัจจุบันตามที่ขอ แต่ถ้าอยากใช้วันนัดหมายให้แก้ตรง getTodayDateString()
       }
 
       // โหลดข้อมูลผู้ป่วย
@@ -166,7 +187,7 @@ export default function FollowupPage() {
           .single();
         if (profileData) setPatientProfile(profileData);
 
-        // โหลดประวัติย้อนหลัง (ไม่รวมอันที่กำลังแก้)
+        // โหลดประวัติย้อนหลัง
         let query = supabase
           .from('appointment_followups')
           .select('*')
@@ -248,57 +269,35 @@ export default function FollowupPage() {
     }
   };
 
-  // ✅ Logic สรุปผลอัตโนมัติที่ปรับปรุงแล้ว (สอดคล้องกับข้อ 5)
+  // Auto-generate summary logic
   useEffect(() => {
     const successes: string[] = [];
     const failures: string[] = [];
-
-    // ตรวจสอบ ปริมาณอาหาร
     if (formData.food_amount_status === 'completed') successes.push('ปรับปริมาณอาหาร');
     else if (formData.food_amount_status === 'not_completed') failures.push('ปรับปริมาณอาหาร');
-
-    // ตรวจสอบ ชนิดอาหาร
     if (formData.food_type_status === 'completed') successes.push('ปรับชนิดอาหาร');
     else if (formData.food_type_status === 'not_completed') failures.push('ปรับชนิดอาหาร');
-
-    // ตรวจสอบ การเคลื่อนไหว
     if (formData.movement_status === 'completed') successes.push('การออกกำลังกาย/เคลื่อนไหวร่างกาย');
     else if (formData.movement_status === 'not_completed') failures.push('การออกกำลังกาย/เคลื่อนไหวร่างกาย');
 
     let summaryText = '';
-    
-    if (successes.length > 0) {
-      summaryText += `✅ สิ่งที่ทำได้สำเร็จ: ${successes.join(', ')}\n`;
-    }
-    
+    if (successes.length > 0) summaryText += `✅ สิ่งที่ทำได้สำเร็จ: ${successes.join(', ')}\n`;
     if (failures.length > 0) {
       summaryText += `⚠️ สิ่งที่ยังต้องปรับปรุง: ${failures.join(', ')}\n`;
       summaryText += ` คำแนะนำ: ควรพยายามทำให้สม่ำเสมอมากขึ้นในเรื่องดังกล่าว`;
     }
+    if (successes.length === 0 && failures.length === 0) summaryText = 'ยังไม่มีข้อมูลการประเมินผลการปฏิบัติกิจกรรม';
 
-    if (successes.length === 0 && failures.length === 0) {
-      summaryText = 'ยังไม่มีข้อมูลการประเมินผลการปฏิบัติกิจกรรม';
-    }
-
-    // อัปเดต summary ก็ต่อเมื่อมีการเปลี่ยนแปลงสถานะจริงๆ (ป้องกัน loop หรือ overwrite ตอน edit)
-    // แต่เพื่อให้ UX ดีที่สุด เราจะ update เสมอเมื่อ status เปลี่ยน
-    setFormData(prev => ({
-      ...prev,
-      summary: summaryText,
-    }));
+    setFormData(prev => ({ ...prev, summary: summaryText }));
   }, [formData.food_amount_status, formData.food_type_status, formData.movement_status]);
 
-  // ✅ handleSubmit พร้อม Confirmation Dialog
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // แสดง Dialog ยืนยัน
     const confirmMsg = isEditMode 
-      ? '⚠️ ยืนยันการแก้ไข\n\nคุณต้องการแก้ไขผลการติดตามครั้งที่ ' + followupRound + ' ใช่หรือไม่?\nข้อมูลเดิมจะถูกแทนที่ด้วยข้อมูลใหม่'
-      : '⚠️ ยืนยันการบันทึก\n\nคุณต้องการบันทึกผลการติดตามนี้ใช่หรือไม่?\nกรุณาตรวจสอบความถูกต้องของข้อมูลก่อนกดยืนยัน';
+      ? '⚠️ ยืนยันการแก้ไข\n\nคุณต้องการแก้ไขผลการติดตามครั้งที่ ' + followupRound + ' ใช่หรือไม่?'
+      : '⚠️ ยืนยันการบันทึก\n\nคุณต้องการบันทึกผลการติดตามนี้ใช่หรือไม่?';
 
-    const isConfirmed = window.confirm(confirmMsg);
-    if (!isConfirmed) return; // หยุดการทำงานหากกด Cancel
+    if (!window.confirm(confirmMsg)) return;
 
     setSaving(true);
     setError(null);
@@ -309,10 +308,13 @@ export default function FollowupPage() {
 
       const userId = patientIdFromQuery || appointment?.user_id || formData.user_id;
       
+      // ✅ แปลงวันที่จาก input (YYYY-MM-DD) เป็น ISO String สำหรับเก็บลง DB
+      const isoFollowupDate = formData.followup_date ? new Date(formData.followup_date).toISOString() : new Date().toISOString();
+
       const followupData = {
         appointment_id: (appointmentId && appointmentId !== 'new' && !isEditMode) ? appointmentId : (appointment?.id || null),
         user_id: userId,
-        followup_date: appointment?.appointment_date || new Date().toISOString(),
+        followup_date: isoFollowupDate, // ✅ ใช้วันที่ที่เลือก
         followup_round: followupRound,
         
         weight: formData.weight ? parseFloat(formData.weight) : null,
@@ -352,34 +354,15 @@ export default function FollowupPage() {
         updated_at: new Date().toISOString(),
       };
 
-      let saveResult;
-      
       if (isEditMode && editingFollowupId) {
-        // UPDATE สำหรับโหมดแก้ไข
-        const { data, error } = await supabase
-          .from('appointment_followups')
-          .update(followupData)
-          .eq('id', editingFollowupId)
-          .select()
-          .single();
+        const { error } = await supabase.from('appointment_followups').update(followupData).eq('id', editingFollowupId);
         if (error) throw error;
-        saveResult = data;
       } else {
-        // INSERT สำหรับโหมดสร้างใหม่
-        const { data, error } = await supabase
-          .from('appointment_followups')
-          .insert(followupData)
-          .select()
-          .single();
+        const { error } = await supabase.from('appointment_followups').insert(followupData);
         if (error) throw error;
-        saveResult = data;
 
-        // อัปเดตสถานะนัดหมายเฉพาะตอนสร้างใหม่
         if (appointmentId && appointmentId !== 'new') {
-          await supabase
-            .from('appointments')
-            .update({ status: 'completed', updated_at: new Date().toISOString() })
-            .eq('id', appointmentId);
+          await supabase.from('appointments').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', appointmentId);
         }
       }
 
@@ -483,12 +466,29 @@ export default function FollowupPage() {
 
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         
-        {/* 1. ข้อมูลสุขภาพ */}
+        {/* 1. ข้อมูลสุขภาพ (เพิ่ม Input วันที่ตรงนี้) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
             บันทึกข้อมูลสุขภาพ
           </h2>
+          
+          {/* ✅ ส่วนเพิ่มใหม่: วันที่ทำการติดตาม */}
+          <div className="mb-6 pb-6 border-b border-gray-100">
+            <label className="block text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              วันที่ทำการติดตามนัดหมาย
+            </label>
+            <input 
+              type="date" 
+              name="followup_date" 
+              value={formData.followup_date} 
+              onChange={handleChange} 
+              className="w-full md:w-1/3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+            <p className="text-xs text-gray-500 mt-1">* สามารถเปลี่ยนแปลงได้ หากวันที่ติดตามไม่ตรงกับวันที่บันทึก</p>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">น้ำหนัก (กก.)</label>
@@ -660,14 +660,7 @@ export default function FollowupPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">สิ่งที่ทำได้สำเร็จ / ข้อควรปรับปรุง</label>
-              <textarea 
-                name="summary" 
-                value={formData.summary} 
-                onChange={handleChange} 
-                rows={4} 
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" 
-                placeholder="(ระบบจะสรุปอัตโนมัติจากข้อ 5)" 
-              />
+              <textarea name="summary" value={formData.summary} onChange={handleChange} rows={4} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-50" placeholder="(ระบบจะสรุปอัตโนมัติจากข้อ 5)" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">คำแนะนำเพิ่มเติม</label>
