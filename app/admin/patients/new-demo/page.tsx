@@ -5,6 +5,8 @@
 //    2. ✅ สร้าง HN อัตโนมัติ (ขึ้นต้นด้วย DEMO-)
 //    3. ✅ ลบฟิลด์ diabetes_type, blood_sugar, hba1c_level
 //    4. ✅ เพิ่มฟิลด์ is_demo, demo_group_id, demo_scenario, demo_expires_at
+
+
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
