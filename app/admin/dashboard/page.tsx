@@ -1,12 +1,9 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 9 กรกฎาคม 2569
+// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
 // ✅ การแก้ไข:
 //    1. เพิ่มสิทธิ์ 'osm' ให้เข้าถึงหน้าแดชบอร์ดได้
 //    2. กำหนดเมนูที่ อสม. เข้าถึงได้ (ยกเว้น จัดการเจ้าหน้าที่ และ ตั้งค่า)
 //    3. ปรับ Badge แสดงบทบาทให้แสดง "🏘️ อสม." เมื่อเป็น role osm
-//    4. ✨ [ใหม่] เพิ่มปุ่ม "ลงทะเบียนผู้ป่วยใหม่เดโม" ในส่วนดำเนินการด่วน
-//       - เห็นและใช้ได้เฉพาะผู้ดูแลระบบสูงสุด (admin) เท่านั้น
-//       - เชื่อมต่อไปยังหน้า /admin/patients/demo-new
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -25,8 +22,7 @@ import {
   BarChart3,
   Settings,
   Hospital,
-  Building2,
-  FlaskConical
+  Building2
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -78,14 +74,12 @@ export default function AdminDashboard() {
       router.push('/admin/login');
       return;
     }
-
     // ✅ แก้ไข: เพิ่ม 'osm' ในการตรวจสอบสิทธิ์
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
@@ -111,7 +105,6 @@ export default function AdminDashboard() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-
       // ✅ โหลดสถิติหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไปด้วย)
       loadDashboardStats(ids);
     } catch (error) {
@@ -297,6 +290,7 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+        
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {/* Total Patients */}
@@ -368,21 +362,6 @@ export default function AdminDashboard() {
               <UserPlus className="w-4 h-4" />
               ลงทะเบียนผู้ป่วยใหม่
             </button>
-
-            {/* ✅ [ใหม่] ปุ่มลงทะเบียนผู้ป่วยใหม่เดโม - เฉพาะ Admin */}
-            {user?.role === 'admin' && (
-              <button
-                onClick={() => router.push('/admin/patients/demo-new')}
-                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 text-white rounded-lg hover:from-amber-600 hover:to-yellow-600 transition-all shadow-md hover:shadow-lg group relative"
-              >
-                <FlaskConical className="w-4 h-4" />
-                <span>ลงทะเบียนผู้ป่วยใหม่เดโม</span>
-                <span className="ml-1 px-1.5 py-0.5 bg-white/25 text-white text-[10px] font-bold rounded uppercase tracking-wider">
-                  Demo
-                </span>
-              </button>
-            )}
-
             <button
               onClick={() => router.push('/admin/screening')}
               className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -390,7 +369,6 @@ export default function AdminDashboard() {
               <FileText className="w-4 h-4" />
               ทำแบบประเมิน
             </button>
-
             {user?.role === 'admin' && (
               <button
                 onClick={() => router.push('/admin/staff')}
@@ -400,7 +378,6 @@ export default function AdminDashboard() {
                 จัดการเจ้าหน้าที่
               </button>
             )}
-
             <button
               onClick={() => router.push('/admin/goals')}
               className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
@@ -409,14 +386,6 @@ export default function AdminDashboard() {
               จัดการเป้าหมาย
             </button>
           </div>
-
-          {/* ✅ [ใหม่] คำอธิบายปุ่มเดโม - แสดงเฉพาะ Admin */}
-          {user?.role === 'admin' && (
-            <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              💡 <strong>หมายเหตุ:</strong> ปุ่ม "ลงทะเบียนผู้ป่วยใหม่เดโม" ใช้สำหรับสร้างข้อมูลตัวอย่างเพื่อทดสอบระบบ
-              (เฉพาะผู้ดูแลระบบสูงสุดเท่านั้น)
-            </p>
-          )}
         </div>
 
         {/* Menu Grid - แสดงเมนูตามสิทธิ์ */}
@@ -445,7 +414,7 @@ export default function AdminDashboard() {
 
         {/* Footer */}
         <div className="mt-8 text-center text-sm text-gray-500">
-          <p>DeMi+ Admin Dashboard v2.1 | © 2024 All rights reserved</p>
+          <p>DeMi+ Admin Dashboard v2.0 | © 2024 All rights reserved</p>
         </div>
       </div>
     </div>
