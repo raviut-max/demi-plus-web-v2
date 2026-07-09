@@ -3187,3 +3187,224 @@ export const getPatientsByHospitalNetwork = async (hospitalIds: string[]) => {
     return [];
   }
 };
+
+// =====================================================
+// 🧪 DEMO PATIENT FUNCTIONS
+// =====================================================
+
+// ✅ ดึงรายการ Demo Groups
+export async function getDemoGroups() {
+  try {
+    const { data, error } = await supabase
+      .from('demo_groups')
+      .select('*')
+      .eq('is_active', true)
+      .order('group_name');
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching demo groups:', error);
+    return [];
+  }
+}
+
+// ✅ สร้างเลขบัตรประชาชน Demo (ขึ้นต้นด้วย D)
+export async function generateDemoIdCard() {
+  try {
+    // สร้างเลขสุ่ม 12 หลัก
+    const randomSuffix = Math.floor(Math.random() * 999999999999)
+      .toString()
+      .padStart(12, '0');
+    
+    const demoIdCard = `D${randomSuffix}`;
+    
+    // ตรวจสอบว่าไม่ซ้ำ
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id_card')
+      .eq('id_card', demoIdCard)
+      .single();
+    
+    if (existing) {
+      // ถ้าซ้ำ ให้เรียกใหม่ (recursive)
+      return generateDemoIdCard();
+    }
+    
+    return demoIdCard;
+  } catch (error) {
+    console.error('Error generating demo ID card:', error);
+    return `D${Date.now().toString().slice(-12)}`;
+  }
+}
+
+// ✅ สร้าง HN Demo (DEMO-XXXXXX)
+export async function generateDemoHN() {
+  try {
+    const randomNum = Math.floor(Math.random() * 999999)
+      .toString()
+      .padStart(6, '0');
+    
+    const demoHN = `DEMO-${randomNum}`;
+    
+    // ตรวจสอบว่าไม่ซ้ำ
+    const { data: existing } = await supabase
+      .from('profiles')
+      .select('hospital_number')
+      .eq('hospital_number', demoHN)
+      .single();
+    
+    if (existing) {
+      return generateDemoHN();
+    }
+    
+    return demoHN;
+  } catch (error) {
+    console.error('Error generating demo HN:', error);
+    return `DEMO-${Date.now().toString().slice(-6)}`;
+  }
+}
+
+// ✅ ลงทะเบียนผู้ป่วยเดโม
+export async function registerDemoPatient(patientData: {
+  id_card: string;
+  password: string;
+  first_name: string;
+  last_name: string;
+  hospital_number: string;
+  birth_date: string;
+  gender: string;
+  phone?: string;
+  email?: string;
+  current_weight?: number;
+  height?: number;
+  waist_circumference?: number;
+  coach_id?: string;
+  notes?: string;
+  house_number?: string;
+  address_line1?: string;
+  soi?: string;
+  road?: string;
+  village_no?: string;
+  village_name?: string;
+  subdistrict?: string;
+  district?: string;
+  province?: string;
+  postal_code?: string;
+  hospital_id?: string;
+  emergency_contact_name?: string;
+  emergency_contact_phone?: string;
+  emergency_contact_relationship?: string;
+  occupation?: string;
+  education_level?: string;
+  demo_group_id?: string;
+  demo_scenario?: string;
+  demo_expires_days?: number;
+  pam_level: string;
+  pam_score: number;
+  zone: string;
+  created_by?: string;
+}) {
+  try {
+    console.log('[registerDemoPatient] Starting registration...');
+    
+    // 1. สร้าง user
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id_card: patientData.id_card,
+        password_hash: patientData.password, // ⚠️ ควร hash ก่อนใน production
+        role: 'patient',
+        is_active: true,
+        is_demo: true,
+        demo_group_id: patientData.demo_group_id,
+        demo_notes: `Demo patient created on ${new Date().toLocaleString('th-TH')}`,
+        birth_date: patientData.birth_date,
+        hospital_id: patientData.hospital_id,
+        created_by: patientData.created_by,
+      })
+      .select()
+      .single();
+    
+    if (userError) {
+      console.error('[registerDemoPatient] User creation error:', userError);
+      throw userError;
+    }
+    
+    console.log('[registerDemoPatient] User created:', userData.id);
+    
+    // 2. สร้าง profile
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .insert({
+        id: userData.id,
+        first_name: patientData.first_name,
+        last_name: patientData.last_name,
+        full_name_backup: `${patientData.first_name} ${patientData.last_name}`,
+        hospital_number: patientData.hospital_number,
+        birth_date: patientData.birth_date,
+        age: new Date().getFullYear() - new Date(patientData.birth_date).getFullYear(),
+        gender: patientData.gender,
+        phone: patientData.phone,
+        email: patientData.email,
+        current_weight: patientData.current_weight,
+        height: patientData.height,
+        waist_circumference: patientData.waist_circumference,
+        coach_id: patientData.coach_id,
+        pam_level: patientData.pam_level,
+        pam_score: patientData.pam_score,
+        zone: patientData.zone,
+        current_step: 'Starter',
+        notes: patientData.notes,
+        house_number: patientData.house_number,
+        address_line1: patientData.address_line1,
+        soi: patientData.soi,
+        road: patientData.road,
+        village_no: patientData.village_no,
+        village_name: patientData.village_name,
+        subdistrict: patientData.subdistrict,
+        district: patientData.district,
+        province: patientData.province,
+        postal_code: patientData.postal_code,
+        hospital_id: patientData.hospital_id,
+        emergency_contact_name: patientData.emergency_contact_name,
+        emergency_contact_phone: patientData.emergency_contact_phone,
+        emergency_contact_relationship: patientData.emergency_contact_relationship,
+        occupation: patientData.occupation,
+        education_level: patientData.education_level,
+        is_demo: true,
+        demo_scenario: patientData.demo_scenario,
+        demo_expires_at: patientData.demo_expires_days 
+          ? new Date(Date.now() + patientData.demo_expires_days * 24 * 60 * 60 * 1000).toISOString()
+          : null,
+        is_active: true,
+        status: 'active',
+      })
+      .select()
+      .single();
+    
+    if (profileError) {
+      console.error('[registerDemoPatient] Profile creation error:', profileError);
+      // Rollback user
+      await supabase.from('users').delete().eq('id', userData.id);
+      throw profileError;
+    }
+    
+    console.log('[registerDemoPatient] Profile created:', profileData.id);
+    
+    return {
+      success: true,
+      data: {
+        user: userData,
+        profile: profileData,
+      },
+    };
+  } catch (error: any) {
+    console.error('[registerDemoPatient] Registration error:', error);
+    return {
+      success: false,
+      error: error.message,
+    };
+  }
+}
+
