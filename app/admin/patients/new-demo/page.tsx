@@ -1,25 +1,20 @@
-// app/admin/patients/new-demo/page.tsx
-// ✅ สำหรับลงทะเบียนผู้ป่วยเดโม (Demo Patient)
-// ✅ การแก้ไขจากหน้าผู้ป่วยปกติ:
-//    1. ✅ สร้างเลขบัตรประชาชนอัตโนมัติ (ขึ้นต้นด้วย D)
-//    2. ✅ สร้าง HN อัตโนมัติ (ขึ้นต้นด้วย DEMO-)
-//    3. ✅ ลบฟิลด์ diabetes_type, blood_sugar, hba1c_level
-//    4. ✅ เพิ่มฟิลด์ is_demo, demo_group_id, demo_scenario, demo_expires_at
-
-
+// app/admin/patients/new/page.tsx
+// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
+// ✅ การแก้ไข:
+//    1. ✅ อนุญาตให้อสม. (osm) ใช้งานหน้านี้ได้
+//    2. ✅ แสดงโรงพยาบาลทั้งแม่ข่ายและลูกข่ายที่เกี่ยวข้องกับผู้ใช้เท่านั้น (Network-based)
+//    3. ✅ แสดงโค้ชที่อยู่ในเครือข่ายโรงพยาบาลของผู้ใช้ พร้อมชื่อโรงพยาบาลสังกัด
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   checkSession,
   logout,
+  registerPatient,
   getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  getDemoGroups,
-  generateDemoIdCard,
-  generateDemoHN,
-  registerDemoPatient
+  isSuperAdmin
 } from '@/lib/supabase/queries';
 import {
   UserPlus,
@@ -31,9 +26,7 @@ import {
   Building2,
   LogOut,
   CheckCircle,
-  XCircle,
-  Sparkles,
-  Database
+  XCircle
 } from 'lucide-react';
 import ThaiAddressSelector from '@/components/ThaiAddressSelector';
 import { supabase } from '@/lib/supabase/client';
@@ -96,26 +89,13 @@ interface Coach {
   };
 }
 
-// ✅ Interface สำหรับ Demo Groups
-interface DemoGroup {
-  id: string;
-  group_code: string;
-  group_name: string;
-  group_name_th: string;
-  description: string;
-  group_type: 'training' | 'testing' | 'showcase' | 'workshop';
-  max_participants: number;
-  current_participants: number;
-}
-
-export default function NewDemoPatientPage() {
+export default function NewPatientPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [loading, setLoading] = useState(false);
   const [coaches, setCoaches] = useState<Coach[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [demoGroups, setDemoGroups] = useState<DemoGroup[]>([]);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
   const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
@@ -125,24 +105,26 @@ export default function NewDemoPatientPage() {
     subdistrict: '',
     postalCode: '',
   });
-  
+
   const [formData, setFormData] = useState({
-    // ไม่ใช้ id_card (สร้างอัตโนมัติ)
+    id_card: '',
     password: '',
     confirmPassword: '',
     first_name: '',
     last_name: '',
-    // ไม่ใช้ hospital_number (สร้างอัตโนมัติ)
+    hospital_number: '',
     birth_day: '',
     birth_month: '',
     birth_year: '',
-    gender: 'female',
+    gender: 'male',
     phone: '',
     email: '',
     current_weight: '',
     height: '',
     waist_circumference: '',
-    // ❌ ลบ diabetes_type, blood_sugar, hba1c_level
+    diabetes_type: '',
+    blood_sugar: '',
+    hba1c_level: '',
     notes: '',
     house_number: '',
     address_line1: '',
@@ -157,15 +139,6 @@ export default function NewDemoPatientPage() {
     occupation: '',
     education_level: '',
     coach_id: '',
-    // ✅ ฟิลด์เฉพาะ Demo
-    demo_group_id: '',
-    demo_scenario: '',
-    demo_expires_days: '30',
-  });
-
-  const [generatedData, setGeneratedData] = useState({
-    id_card: '',
-    hospital_number: '',
   });
 
   useEffect(() => {
@@ -175,27 +148,26 @@ export default function NewDemoPatientPage() {
       return;
     }
     
-    // ✅ เฉพาะ admin, doctor, helper เท่านั้นที่สร้าง Demo ได้
-    if (!['admin', 'doctor', 'helper'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง (เฉพาะ Admin, Doctor, Helper)');
+    // ✅ แก้ไข: อนุญาตให้ osm เข้าถึงหน้านี้ได้
+    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
+      alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-    
-    console.log('👤 [NewDemoPatient] User:', userData);
+
+    console.log('👤 [NewPatient] User:', userData);
     setUser(userData);
     
     // โหลดข้อมูลโรงพยาบาลของผู้ใช้ และ ข้อมูลเครือข่าย
     loadUserHospital(userData.id);
     loadNetworkData(userData.id);
-    loadDemoGroups();
-    generateDemoData();
   }, [router]);
 
   // =====================================================
   // 📥 DATA LOADING FUNCTIONS
   // =====================================================
-  
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้ (สำหรับแสดง Header)
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -205,30 +177,46 @@ export default function NewDemoPatientPage() {
     }
   };
 
+  // ✅ โหลดข้อมูลเครือข่ายโรงพยาบาลและโค้ช (Network-based)
   const loadNetworkData = async (userId: string) => {
     try {
       setLoading(true);
-      const uHospital = await getUserHospitalInfo(userId);
-      const allHospitals = await getHospitalsWithHierarchy();
-      let networkHospitals: Hospital[] = [];
       
+      // 1. โหลดข้อมูลโรงพยาบาลของผู้ใช้เพื่อหา Parent/Network
+      const uHospital = await getUserHospitalInfo(userId);
+      
+      // 2. โหลดโรงพยาบาลทั้งหมดมากรอง
+      const allHospitals = await getHospitalsWithHierarchy();
+      
+      let networkHospitals: Hospital[] = [];
+
       if (uHospital) {
+        // หา Root ของเครือข่าย (แม่ข่ายสูงสุด)
+        // ถ้า user อยู่แม่ข่าย -> root คือตัวมันเอง
+        // ถ้า user อยู่ลูกข่าย -> root คือ parent_id ของมัน
         let rootId = uHospital.type === 'main' ? uHospital.id : uHospital.parent_id;
+
         if (rootId) {
+          // กรองเอาเฉพาะ รพ. ที่เป็นแม่ข่ายนี้ (rootId) หรือ เป็นลูกข่ายของแม่ข่ายนี้
           networkHospitals = allHospitals.filter(h => 
             h.id === rootId || h.parent_id === rootId
           );
           console.log('🏥 [loadNetworkData] Network Hospitals:', networkHospitals.length);
         } else {
-          networkHospitals = [uHospital as Hospital];
+           // กรณีไม่มี parent (และไม่ใช่ main?) 
+           networkHospitals = [uHospital as Hospital]; 
         }
       } else {
+        // กรณีผู้ใช้ไม่มีสังกัด (เช่น Super Admin ที่อาจจะไม่ได้ผูก hospital) แสดงทั้งหมด
         networkHospitals = allHospitals;
       }
-      
+
       setHospitals(networkHospitals);
+
+      // 3. โหลดโค้ชเฉพาะในเครือข่ายนี้
       const networkHospitalIds = networkHospitals.map(h => h.id);
       await loadCoaches(networkHospitalIds);
+
     } catch (error) {
       console.error('❌ [loadNetworkData] Error:', error);
     } finally {
@@ -236,38 +224,16 @@ export default function NewDemoPatientPage() {
     }
   };
 
+  // ✅ โหลดโค้ช (แก้ไขแล้ว - join กับ hospitals และ users)
   const loadCoaches = async (hospitalIds: string[]) => {
     try {
       console.log('👨‍⚕️ [loadCoaches] Loading coaches for hospitals:', hospitalIds);
       const allCoaches = await getCoachesWithHospitals(hospitalIds);
       setCoaches(allCoaches);
-      console.log('👨‍⚕️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
+      console.log('👨‍️ [loadCoaches] Loaded:', allCoaches.length, 'coaches');
     } catch (error) {
       console.error('❌ [loadCoaches] Error:', error);
       setError('⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูลโค้ช');
-    }
-  };
-
-  const loadDemoGroups = async () => {
-    try {
-      const groups = await getDemoGroups();
-      setDemoGroups(groups);
-      console.log('📋 [loadDemoGroups] Loaded:', groups.length, 'demo groups');
-    } catch (error) {
-      console.error('❌ [loadDemoGroups] Error:', error);
-    }
-  };
-
-  const generateDemoData = async () => {
-    try {
-      const idCard = await generateDemoIdCard();
-      const hn = await generateDemoHN();
-      setGeneratedData({
-        id_card: idCard,
-        hospital_number: hn,
-      });
-    } catch (error) {
-      console.error('❌ [generateDemoData] Error:', error);
     }
   };
 
@@ -287,7 +253,6 @@ export default function NewDemoPatientPage() {
       ...formData,
       [name]: value,
     });
-    
     // ✅ ล้าง error เมื่อผู้ใช้เริ่มแก้ไข
     if (validationErrors[name]) {
       setValidationErrors({
@@ -321,11 +286,12 @@ export default function NewDemoPatientPage() {
     setAddressData(data);
   };
 
+  // ✅ ฟังก์ชันจัดกลุ่มโรงพยาบาล (แม่ข่าย → ลูกข่าย)
   const getGroupedHospitals = () => {
     const mainHospitals = hospitals.filter((h) => h.type === 'main');
     const subHospitals = hospitals.filter((h) => h.type === 'sub');
     const hospitalGroups = new Map<string, Hospital[]>();
-    
+
     subHospitals.forEach((sub) => {
       if (sub.parent_id) {
         if (!hospitalGroups.has(sub.parent_id)) {
@@ -334,51 +300,58 @@ export default function NewDemoPatientPage() {
         hospitalGroups.get(sub.parent_id)!.push(sub);
       }
     });
-    
+
     return { mainHospitals, hospitalGroups };
   };
 
   // ✅ Validate ฟอร์มก่อนส่ง
   const validateForm = (): boolean => {
     const errors: { [key: string]: string } = {};
-    
+
+    // ✅ ตรวจสอบเลขบัตรประชาชน
+    if (!formData.id_card) {
+      errors.id_card = 'กรุณากรอกเลขบัตรประชาชน';
+    } else if (formData.id_card.replace(/\D/g, '').length !== 13) {
+      errors.id_card = 'เลขบัตรประชาชนต้อง 13 หลัก';
+    }
+
     // ✅ ตรวจสอบชื่อ-นามสกุล
     if (!formData.first_name) errors.first_name = 'กรุณากรอกชื่อ';
     if (!formData.last_name) errors.last_name = 'กรุณากรอกนามสกุล';
-    
+
+    // ✅ ตรวจสอบ HN
+    if (!formData.hospital_number) {
+      errors.hospital_number = 'กรุณากรอกเลขที่ผู้ป่วย (HN)';
+    }
+
     // ✅ ตรวจสอบวันเกิด
     if (!formData.birth_day || !formData.birth_month || !formData.birth_year) {
       errors.birth_date = 'กรุณากรอกวันเกิดให้ครบถ้วน';
     }
-    
+
     // ✅ ตรวจสอบที่อยู่
     if (!addressData.province || !addressData.district || !addressData.subdistrict) {
       errors.address = 'กรุณาเลือกที่อยู่ให้ครบถ้วน';
     }
-    
+
     // ✅ ตรวจสอบโรงพยาบาล
     if (!formData.hospital_id) {
       errors.hospital_id = 'กรุณาเลือกโรงพยาบาลสังกัด';
     }
-    
-    // ✅ ตรวจสอบกลุ่ม Demo
-    if (!formData.demo_group_id) {
-      errors.demo_group_id = 'กรุณาเลือกกลุ่ม Demo';
-    }
-    
+
     // ✅ ตรวจสอบรหัสผ่าน
     if (formData.password !== formData.confirmPassword) {
       errors.password = 'รหัสผ่านไม่ตรงกัน';
     }
-    
+
     setValidationErrors(errors);
-    
+
     if (Object.keys(errors).length > 0) {
       const firstError = Object.values(errors)[0];
       setError(`❌ ${firstError}`);
       return false;
     }
-    
+
     return true;
   };
 
@@ -387,27 +360,26 @@ export default function NewDemoPatientPage() {
     setError('');
     setValidationErrors({});
     
-    console.log('📝 [handleSubmit] Demo Patient form submitted');
+    console.log('📝 [handleSubmit] Form submitted');
     console.log('📋 [handleSubmit] Form data:', formData);
-    console.log('🔢 [handleSubmit] Generated data:', generatedData);
-    
+
     // ✅ Validate ฟอร์มก่อน
     if (!validateForm()) {
       return;
     }
-    
+
     setLoading(true);
-    
+
     try {
       const birthYearAD = parseInt(formData.birth_year) - 543;
       const birthDate = `${birthYearAD}-${formData.birth_month.padStart(2, '0')}-${formData.birth_day.padStart(2, '0')}`;
-      
-      const result = await registerDemoPatient({
-        id_card: generatedData.id_card,
+
+      const result = await registerPatient({
+        id_card: formData.id_card,
         password: formData.password,
         first_name: formData.first_name,
         last_name: formData.last_name,
-        hospital_number: generatedData.hospital_number,
+        hospital_number: formData.hospital_number,
         birth_date: birthDate,
         gender: formData.gender,
         phone: formData.phone || undefined,
@@ -416,7 +388,11 @@ export default function NewDemoPatientPage() {
         height: formData.height ? parseFloat(formData.height) : undefined,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : undefined,
         coach_id: formData.coach_id || undefined,
+        diabetes_type: formData.diabetes_type || undefined,
+        blood_sugar: formData.blood_sugar ? parseFloat(formData.blood_sugar) : undefined,
+        hba1c_level: formData.hba1c_level ? parseFloat(formData.hba1c_level) : undefined,
         notes: formData.notes || undefined,
+        
         house_number: formData.house_number || undefined,
         address_line1: formData.address_line1 || undefined,
         soi: formData.soi || undefined,
@@ -427,38 +403,42 @@ export default function NewDemoPatientPage() {
         district: addressData.district || undefined,
         province: addressData.province || undefined,
         postal_code: addressData.postalCode || undefined,
+        
+        // ✅ บันทึก hospital_id
         hospital_id: formData.hospital_id || undefined,
+        
         emergency_contact_name: formData.emergency_contact_name || undefined,
         emergency_contact_phone: formData.emergency_contact_phone || undefined,
         emergency_contact_relationship: formData.emergency_contact_relationship || undefined,
         occupation: formData.occupation || undefined,
         education_level: formData.education_level || undefined,
-        demo_group_id: formData.demo_group_id || undefined,
-        demo_scenario: formData.demo_scenario || undefined,
-        demo_expires_days: parseInt(formData.demo_expires_days) || 30,
+        
         pam_level: 'L0',
         pam_score: 0,
         zone: 'Zero Zone',
+        
         created_by: user?.id,
       });
-      
+
       setLoading(false);
-      
+
       if (result.success) {
-        console.log('✅ [handleSubmit] Demo patient registered successfully');
+        console.log('✅ [handleSubmit] Patient registered successfully');
         setSuccess(true);
         setTimeout(() => {
-          router.push('/admin/patients?filter=demo');
+          router.push('/admin/patients');
         }, 2000);
       } else {
         console.error('❌ [handleSubmit] Registration failed:', result.error);
+        
+        // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย 
         let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
         
         if (result.error?.includes('23505') || result.error?.includes('duplicate key')) {
           if (result.error?.includes('id_card')) {
-            thaiError = '❌ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว กรุณาลองใหม่อีกครั้ง';
+            thaiError = '❌ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว กรุณาตรวจสอบหรือใช้เลขอื่น';
           } else if (result.error?.includes('hospital_number')) {
-            thaiError = '❌ เลข HN นี้มีอยู่ในระบบแล้ว กรุณาลองใหม่อีกครั้ง';
+            thaiError = '❌ เลขที่ผู้ป่วย (HN) นี้มีอยู่ในระบบแล้ว กรุณาใช้เลขใหม่';
           } else {
             thaiError = '❌ ข้อมูลนี้ซ้ำกับที่มีอยู่ในระบบ กรุณาตรวจสอบ';
           }
@@ -470,13 +450,15 @@ export default function NewDemoPatientPage() {
       }
     } catch (err: any) {
       console.error('❌ [handleSubmit] Registration error:', err);
+      
+      // ✅ แปลงข้อผิดพลาดเป็นภาษาไทย
       let thaiError = 'เกิดข้อผิดพลาดในการลงทะเบียน';
       
       if (err.message?.includes('23505') || err.message?.includes('duplicate key')) {
         if (err.message?.includes('id_card')) {
           thaiError = '❌ เลขบัตรประชาชนนี้มีอยู่ในระบบแล้ว';
         } else if (err.message?.includes('hospital_number')) {
-          thaiError = '❌ เลข HN นี้มีอยู่ในระบบแล้ว';
+          thaiError = '❌ เลขที่ผู้ป่วย (HN) นี้มีอยู่ในระบบแล้ว';
         } else {
           thaiError = '❌ ข้อมูลซ้ำกับที่มีอยู่ในระบบ';
         }
@@ -505,8 +487,8 @@ export default function NewDemoPatientPage() {
           <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <CheckCircle className="w-8 h-8 text-green-500" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">ลงทะเบียนผู้ป่วยเดโมสำเร็จ!</h2>
-          <p className="text-gray-600">กำลังไปยังหน้ารายการผู้ป่วยเดโม...</p>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">ลงทะเบียนสำเร็จ!</h2>
+          <p className="text-gray-600">กำลังไปยังหน้ารายการผู้ป่วย...</p>
           <p className="text-sm text-gray-500 mt-2">กรุณารอสักครู่</p>
         </div>
       </div>
@@ -524,7 +506,7 @@ export default function NewDemoPatientPage() {
   const { mainHospitals, hospitalGroups } = getGroupedHospitals();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-cyan-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
@@ -535,28 +517,24 @@ export default function NewDemoPatientPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ
           </button>
-          
+
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold text-gray-800">
-                  🧪 ลงทะเบียนผู้ป่วยเดโมใหม่
-                </h1>
-                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm font-semibold">
-                  DEMO MODE
-                </span>
-              </div>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                📝 ลงทะเบียนผู้ป่วยใหม่
+              </h1>
               <p className="text-gray-600">
-                สร้างข้อมูลผู้ป่วยจำลองสำหรับการฝึกซ้อมหรือทดสอบระบบ
+                กรอกข้อมูลผู้ป่วยเพื่อสร้างบัญชีและโปรไฟล์
               </p>
             </div>
-            
+
             <div className="flex items-center gap-4">
+              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               {userHospital && (
-                <div className="text-right bg-gradient-to-l from-purple-50 to-pink-50 px-4 py-3 rounded-xl border border-purple-200">
+                <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                      <UserCheck className="w-5 h-5 text-purple-600" />
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                      <UserCheck className="w-5 h-5 text-blue-600" />
                     </div>
                     <div>
                       <p className="font-semibold text-gray-800">
@@ -564,17 +542,22 @@ export default function NewDemoPatientPage() {
                       </p>
                       <p className="text-xs text-gray-500">
                         {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
+                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : 
+                         user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                       </p>
                     </div>
                   </div>
-                  <div className="border-t border-purple-200 pt-2 mt-2">
+
+                  {/* ✅ แสดงข้อมูลโรงพยาบาล */}
+                  <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
-                      <Hospital className="w-3 h-3 text-purple-600" />
+                      <Hospital className="w-3 h-3 text-blue-600" />
                       <span className="text-xs text-gray-600 font-medium">
                         {userHospital.name}
                       </span>
                     </div>
+
+                    {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2 justify-end">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -585,6 +568,8 @@ export default function NewDemoPatientPage() {
                           🏥 ลูกข่าย
                         </span>
                       )}
+
+                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -595,9 +580,12 @@ export default function NewDemoPatientPage() {
                   </div>
                 </div>
               )}
-              
+
               <button
-                onClick={handleLogout}
+                onClick={() => {
+                  logout();
+                  router.push('/admin/login');
+                }}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
               >
                 <LogOut className="w-4 h-4" />
@@ -608,23 +596,29 @@ export default function NewDemoPatientPage() {
         </div>
       </div>
 
-      {/* Info Banner */}
+      {/* Info Banner - ✅ แสดงโรงพยาบาลของผู้จัดทำ */}
       <div className="max-w-5xl mx-auto px-4 py-4">
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-xl p-4 flex items-start gap-3">
-          <Sparkles className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-purple-800">
-            <p className="font-semibold mb-1">🎯 ข้อมูลสำคัญ - ผู้ป่วยเดโม</p>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+          <div className="text-sm text-blue-800">
+            <p className="font-semibold mb-1">📋 ข้อมูลการลงทะเบียน</p>
             <ul className="space-y-1">
-              <li>• <strong>เลขบัตรประชาชน:</strong> ระบบสร้างอัตโนมัติ (ขึ้นต้นด้วย D) - {generatedData.id_card}</li>
-              <li>• <strong>HN:</strong> ระบบสร้างอัตโนมัติ (DEMO-XXXXXX) - {generatedData.hospital_number}</li>
-              <li>• <strong>รหัสผ่าน:</strong> สร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
-              <li>• <strong>ข้อมูลนี้จะไม่ถูกนับในสถิติโรงพยาบาลจริง</strong></li>
+              {/* ✅ แสดงโรงพยาบาลของผู้จัดทำ */}
+              <li>
+                • ผู้จัดทำสังกัดโรงพยาบาล: <strong>
+                  {userHospital?.name || 'ไม่ได้กำหนด'}
+                  {userHospital?.type === 'main' ? ' (แม่ข่าย)' : userHospital?.type === 'sub' ? ' (ลูกข่าย)' : ''}
+                </strong>
+              </li>
+              <li>• รหัสผ่านจะถูกสร้างอัตโนมัติจากวันเกิด (dd-mm-yyyy)</li>
+              <li>• โรงพยาบาลที่เลือกได้: {hospitals.length} แห่ง (ในเครือข่ายของคุณ)</li>
+              <li>• โค้ชที่เลือกได้: {coaches.length} คน (ในเครือข่ายของคุณ)</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6 pb-8">
+      <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6">
+        
         {/* ✅ แสดงข้อผิดพลาด (ถ้ามี) */}
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
@@ -643,46 +637,41 @@ export default function NewDemoPatientPage() {
           </div>
         )}
 
-        {/* 1. ข้อมูลบัญชี (Auto-generated) */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-purple-200">
+        {/* 1. ข้อมูลบัญชี */}
+        <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">1</span>
-            ข้อมูลบัญชีผู้ใช้ (สร้างอัตโนมัติ)
-            <Database className="w-4 h-4 text-purple-500" />
+            <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
+            ข้อมูลบัญชีผู้ใช้
           </h2>
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                เลขบัตรประชาชน (Auto)
+                เลขบัตรประชาชน <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
-                value={generatedData.id_card}
-                readOnly
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-purple-50 cursor-not-allowed font-mono"
+                name="id_card"
+                value={formData.id_card}
+                onChange={handleChange}
+                maxLength={13}
+                required
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  validationErrors.id_card ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="กรุณากรอกเลขบัตรประชาชน 13 หลัก"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
               />
+              {validationErrors.id_card && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.id_card}</p>
+              )}
               <p className="text-xs text-gray-500 mt-1">
-                💡 ขึ้นต้นด้วย D (Demo) 13 หลัก
+                💡 กรอกเลขบัตรประชาชน 13 หลัก (ไม่มีช่องว่าง)
               </p>
             </div>
-            
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                HN (Auto)
-              </label>
-              <input
-                type="text"
-                value={generatedData.hospital_number}
-                readOnly
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-purple-50 cursor-not-allowed font-mono"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                💡 DEMO-XXXXXX
-              </p>
-            </div>
-            
-            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 รหัสผ่าน <span className="text-red-500">*</span>
               </label>
@@ -700,6 +689,27 @@ export default function NewDemoPatientPage() {
                 💡 รหัสผ่านเริ่มต้น: วันเกิดในรูปแบบ dd-mm-yyyy (ปี พ.ศ.)
               </p>
             </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ยืนยันรหัสผ่าน <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                required
+                readOnly
+                className={`w-full px-4 py-2 border rounded-lg bg-gray-50 cursor-not-allowed ${
+                  validationErrors.password ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="ระบบจะสร้างอัตโนมัติ"
+              />
+              {validationErrors.password && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.password}</p>
+              )}
+            </div>
           </div>
         </div>
 
@@ -709,7 +719,6 @@ export default function NewDemoPatientPage() {
             <span className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-green-600 text-sm font-bold">2</span>
             ข้อมูลส่วนตัว
           </h2>
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -730,7 +739,7 @@ export default function NewDemoPatientPage() {
                 <p className="text-xs text-red-600 mt-1">💡 {validationErrors.first_name}</p>
               )}
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 นามสกุล <span className="text-red-500">*</span>
@@ -750,7 +759,30 @@ export default function NewDemoPatientPage() {
                 <p className="text-xs text-red-600 mt-1">💡 {validationErrors.last_name}</p>
               )}
             </div>
-            
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                HN (เลขที่ผู้ป่วย) <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="hospital_number"
+                value={formData.hospital_number}
+                onChange={handleChange}
+                required
+                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent ${
+                  validationErrors.hospital_number ? 'border-red-500' : 'border-gray-300'
+                }`}
+                placeholder="HN-001"
+              />
+              {validationErrors.hospital_number && (
+                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.hospital_number}</p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                ⚠️ ต้องไม่ซ้ำกับผู้ป่วยคนอื่นในโรงพยาบาลเดียวกัน
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 วันเกิด <span className="text-red-500">*</span>
@@ -768,7 +800,7 @@ export default function NewDemoPatientPage() {
                     <option key={day} value={day}>{day}</option>
                   ))}
                 </select>
-                
+
                 <select
                   name="birth_month"
                   value={formData.birth_month}
@@ -781,7 +813,7 @@ export default function NewDemoPatientPage() {
                     <option key={index + 1} value={index + 1}>{month}</option>
                   ))}
                 </select>
-                
+
                 <select
                   name="birth_year"
                   value={formData.birth_year}
@@ -799,7 +831,7 @@ export default function NewDemoPatientPage() {
                 <p className="text-xs text-red-600 mt-1">💡 {validationErrors.birth_date}</p>
               )}
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เพศ <span className="text-red-500">*</span>
@@ -815,7 +847,7 @@ export default function NewDemoPatientPage() {
                 <option value="female">หญิง</option>
               </select>
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เบอร์โทรศัพท์
@@ -829,8 +861,8 @@ export default function NewDemoPatientPage() {
                 placeholder="0812345678"
               />
             </div>
-            
-            <div>
+
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 อีเมล
               </label>
@@ -846,13 +878,12 @@ export default function NewDemoPatientPage() {
           </div>
         </div>
 
-        {/* 3. ข้อมูลสุขภาพ (ไม่มี diabetes_type, blood_sugar, hba1c_level) */}
+        {/* 3. ข้อมูลสุขภาพ */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">3</span>
             ข้อมูลสุขภาพ
           </h2>
-          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -868,7 +899,7 @@ export default function NewDemoPatientPage() {
                 placeholder="75.5"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ส่วนสูง (cm)
@@ -883,7 +914,7 @@ export default function NewDemoPatientPage() {
                 placeholder="170"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 รอบเอว (cm)
@@ -898,16 +929,62 @@ export default function NewDemoPatientPage() {
                 placeholder="92"
               />
             </div>
-            
-            <div className="md:col-span-3">
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ประเภทเบาหวาน
+              </label>
+              <select
+                name="diabetes_type"
+                value={formData.diabetes_type}
+                onChange={handleChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              >
+                <option value="">-- เลือก --</option>
+                <option value="กลุ่มเสี่ยง">กลุ่มเสี่ยง</option>
+                <option value="เบาหวาน">เบาหวาน</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ค่าน้ำตาลในเลือด (mg/dL)
+              </label>
+              <input
+                type="number"
+                name="blood_sugar"
+                value={formData.blood_sugar}
+                onChange={handleChange}
+                step="0.1"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="เช่น 110"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ค่า HbA1c ล่าสุด
+              </label>
+              <input
+                type="number"
+                name="hba1c_level"
+                value={formData.hba1c_level}
+                onChange={handleChange}
+                step="0.1"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                placeholder="7.5"
+              />
+            </div>
+
+            <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 หมายเหตุ (คำแนะนำเพิ่มเติม)
               </label>
-              <textarea
+              <input
+                type="text"
                 name="notes"
                 value={formData.notes}
                 onChange={handleChange}
-                rows={3}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                 placeholder="เช่น แพ้ถั่ว แพ้นม เป็นต้น"
               />
@@ -915,14 +992,14 @@ export default function NewDemoPatientPage() {
           </div>
         </div>
 
-        {/* 4. ที่อยู่และโรงพยาบาลสังกัด */}
+        {/* 4. ที่อยู่และโรงพยาบาล */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 text-sm font-bold">4</span>
             ที่อยู่และโรงพยาบาลสังกัด
           </h2>
-          
-          {/* ✅ Dropdown เลือกโรงพยาบาล */}
+        
+          {/* ✅ Dropdown เลือกโรงพยาบาล - แสดงเฉพาะเครือข่ายที่เกี่ยวข้อง */}
           <div className="mb-6">
             <label className="block text-sm font-medium text-gray-700 mb-1">
               🏥 โรงพยาบาลสังกัด <span className="text-red-500">*</span>
@@ -937,11 +1014,14 @@ export default function NewDemoPatientPage() {
               }`}
             >
               <option value="">-- เลือกโรงพยาบาล --</option>
+            
+              {/* ✅ แม่ข่าย */}
               {mainHospitals.map((hospital) => (
                 <optgroup key={hospital.id} label={`🏥 ${hospital.name} (${hospital.code})`}>
                   <option value={hospital.id}>
                     └ {hospital.name} ({hospital.code}) - แม่ข่าย
                   </option>
+                  {/* ✅ ลูกข่ายของแม่ข่ายนี้ */}
                   {hospitalGroups.get(hospital.id)?.map((sub) => (
                     <option key={sub.id} value={sub.id}>
                       {'   '}└─ {sub.name} ({sub.code})
@@ -953,8 +1033,11 @@ export default function NewDemoPatientPage() {
             {validationErrors.hospital_id && (
               <p className="text-xs text-red-600 mt-1">💡 {validationErrors.hospital_id}</p>
             )}
+            <p className="text-xs text-gray-500 mt-1">
+              💡 เลือกโรงพยาบาลที่ผู้ป่วยสังกัด (แม่ข่ายหรือลูกข่าย)
+            </p>
           </div>
-          
+        
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="md:col-span-2">
               <div className="grid grid-cols-3 gap-4">
@@ -971,6 +1054,7 @@ export default function NewDemoPatientPage() {
                     placeholder="123"
                   />
                 </div>
+
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     ที่อยู่เพิ่มเติม (ถ้ามี)
@@ -981,12 +1065,12 @@ export default function NewDemoPatientPage() {
                     value={formData.address_line1}
                     onChange={handleChange}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                    placeholder="เช่น อพาร์ทเมนท์, อาคาร, ชั้น"
+                    placeholder="เช่น อพาร์ทเมนท์, อาคาร, ชั้น, รายละเอียดเพิ่มเติม"
                   />
                 </div>
               </div>
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 หมู่ที่/ชุมชน
@@ -1000,7 +1084,7 @@ export default function NewDemoPatientPage() {
                 placeholder="หมู่ 5"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 หมู่บ้าน
@@ -1014,7 +1098,7 @@ export default function NewDemoPatientPage() {
                 placeholder="หมู่บ้านสุขใจ"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ซอย
@@ -1028,7 +1112,7 @@ export default function NewDemoPatientPage() {
                 placeholder="ซอย 5"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ถนน
@@ -1042,7 +1126,7 @@ export default function NewDemoPatientPage() {
                 placeholder="ถนนสุขุมวิท"
               />
             </div>
-            
+
             <div className="md:col-span-2">
               <ThaiAddressSelector 
                 onAddressChange={handleAddressChange}
@@ -1060,7 +1144,6 @@ export default function NewDemoPatientPage() {
             <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">5</span>
             ผู้ติดต่อฉุกเฉิน
           </h2>
-          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1075,7 +1158,7 @@ export default function NewDemoPatientPage() {
                 placeholder="ชื่อ-นามสกุล"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 เบอร์โทรศัพท์
@@ -1089,7 +1172,7 @@ export default function NewDemoPatientPage() {
                 placeholder="0812345678"
               />
             </div>
-            
+
             <div className="md:col-span-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 ความสัมพันธ์
@@ -1106,13 +1189,12 @@ export default function NewDemoPatientPage() {
           </div>
         </div>
 
-        {/* 6. กำหนดโค้ช */}
+        {/* 6. กำหนดโค้ช (แก้ไขแล้ว - แสดงโค้ชจากโรงพยาบาลเครือข่าย) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
             กำหนดโค้ช/หมอผู้ดูแล
           </h2>
-          
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               โค้ช/หมอผู้ดูแล
@@ -1125,8 +1207,10 @@ export default function NewDemoPatientPage() {
             >
               <option value="">-- เลือกโค้ช --</option>
               {coaches.map((coach) => {
+                // ✅ แสดงข้อมูลโค้ช: ชื่อ + ความเชี่ยวชาญ + ชื่อโรงพยาบาล
                 const hospitalName = coach.users?.hospitals?.name || 'ไม่มีโรงพยาบาล';
                 const specialization = coach.specialization_th || 'ไม่ระบุ';
+                
                 return (
                   <option key={coach.id} value={coach.user_id}>
                     {coach.full_name_th} | {specialization} | {hospitalName}
@@ -1135,110 +1219,30 @@ export default function NewDemoPatientPage() {
               })}
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              👨⚕️ แสดงโค้ช: {coaches.length} คน
+              👨‍⚕️ แสดงโค้ช: {coaches.length} คน (จากโรงพยาบาลในเครือข่ายของคุณ)
             </p>
           </div>
         </div>
 
-        {/* 7. การตั้งค่า Demo (ใหม่) */}
-        <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-purple-200">
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">7</span>
-            การตั้งค่าผู้ป่วยเดโม
-            <Sparkles className="w-4 h-4 text-purple-500" />
-          </h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                กลุ่ม Demo <span className="text-red-500">*</span>
-              </label>
-              <select
-                name="demo_group_id"
-                value={formData.demo_group_id}
-                onChange={handleChange}
-                required
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent ${
-                  validationErrors.demo_group_id ? 'border-red-500' : 'border-gray-300'
-                }`}
-              >
-                <option value="">-- เลือกกลุ่ม Demo --</option>
-                {demoGroups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.group_name_th} ({group.group_type})
-                  </option>
-                ))}
-              </select>
-              {validationErrors.demo_group_id && (
-                <p className="text-xs text-red-600 mt-1">💡 {validationErrors.demo_group_id}</p>
-              )}
-              <p className="text-xs text-gray-500 mt-1">
-                💡 ใช้สำหรับจัดกลุ่มผู้ป่วยเดโม
-              </p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                สถานการณ์ Demo
-              </label>
-              <select
-                name="demo_scenario"
-                value={formData.demo_scenario}
-                onChange={handleChange}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              >
-                <option value="">-- ไม่ระบุ --</option>
-                <option value="NEW_DM">เพิ่งวินิจฉัยใหม่</option>
-                <option value="NON_COMPLIANT">คนไข้ไม่ร่วมมือ</option>
-                <option value="WELL_CONTROLLED">ควบคุมได้ดี</option>
-                <option value="ELDERLY_COMPLEX">ผู้สูงอายุที่มีโรคแทรกซ้อน</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">
-                💡 สถานการณ์จำลองสำหรับฝึกหัด
-              </p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                วันหมดอายุ (วัน)
-              </label>
-              <input
-                type="number"
-                name="demo_expires_days"
-                value={formData.demo_expires_days}
-                onChange={handleChange}
-                min="1"
-                max="365"
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                placeholder="30"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                💡 ข้อมูลจะถูกลบอัตโนมัติหลังจากนี้ (ค่าเริ่มต้น: 30 วัน)
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Submit Buttons */}
         <div className="flex items-center gap-4">
           <button
             type="submit"
             disabled={loading}
-            className="flex-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-bold py-4 rounded-xl hover:from-purple-600 hover:to-pink-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
+            className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {loading ? (
               <>
                 <Loader2 className="w-5 h-5 animate-spin" />
-                กำลังลงทะเบียนผู้ป่วยเดโม...
+                กำลังลงทะเบียน...
               </>
             ) : (
               <>
                 <UserPlus className="w-5 h-5" />
-                ลงทะเบียนผู้ป่วยเดโม
+                ลงทะเบียนผู้ป่วย
               </>
             )}
           </button>
-          
+        
           <button
             type="button"
             onClick={() => router.back()}
