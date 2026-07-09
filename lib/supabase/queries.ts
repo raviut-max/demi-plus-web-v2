@@ -3209,63 +3209,141 @@ export async function getDemoGroups() {
   }
 }
 
-// ✅ สร้างเลขบัตรประชาชน Demo (ขึ้นต้นด้วย D)
-export async function generateDemoIdCard() {
+
+
+// =====================================================
+// 🧪 DEMO PATIENT FUNCTIONS (ปรับปรุง)
+// =====================================================
+
+/**
+ * ✅ สร้างเลขบัตรประชาชนเดโม (ขึ้นต้นด้วย D + 12 หลัก)
+ * ใช้ timestamp + random เพื่อลดโอกาสซ้ำ
+ */
+export async function generateDemoIdCard(): Promise<string> {
   try {
-    // สร้างเลขสุ่ม 12 หลัก
-    const randomSuffix = Math.floor(Math.random() * 999999999999)
-      .toString()
-      .padStart(12, '0');
-    
-    const demoIdCard = `D${randomSuffix}`;
-    
-    // ตรวจสอบว่าไม่ซ้ำ
-    const { data: existing } = await supabase
-      .from('users')
-      .select('id_card')
-      .eq('id_card', demoIdCard)
-      .single();
-    
-    if (existing) {
-      // ถ้าซ้ำ ให้เรียกใหม่ (recursive)
-      return generateDemoIdCard();
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    while (attempts < maxAttempts) {
+      // สร้างเลข 12 หลัก: timestamp 8 หลัก + random 4 หลัก
+      const timestamp = Date.now().toString().slice(-8);
+      const random = Math.floor(Math.random() * 10000)
+        .toString()
+        .padStart(4, '0');
+      const demoIdCard = `D${timestamp}${random}`;
+
+      // ตรวจสอบว่าไม่ซ้ำ
+      const { data: existing, error } = await supabase
+        .from('users')
+        .select('id_card')
+        .eq('id_card', demoIdCard)
+        .maybeSingle();
+
+      if (error) {
+        console.error('❌ [generateDemoIdCard] Check error:', error);
+      }
+
+      if (!existing) {
+        console.log('🎫 [generateDemoIdCard] Generated:', demoIdCard);
+        return demoIdCard;
+      }
+
+      attempts++;
+      // รอเล็กน้อยเพื่อเปลี่ยน timestamp
+      await new Promise(resolve => setTimeout(resolve, 10));
     }
-    
-    return demoIdCard;
+
+    // Fallback: ใช้ random ล้วน
+    const fallback = `D${Date.now().toString().slice(-10)}${Math.floor(Math.random() * 100)
+      .toString()
+      .padStart(2, '0')}`;
+    return fallback;
   } catch (error) {
-    console.error('Error generating demo ID card:', error);
+    console.error('❌ [generateDemoIdCard] Exception:', error);
     return `D${Date.now().toString().slice(-12)}`;
   }
 }
 
-// ✅ สร้าง HN Demo (DEMO-XXXXXX)
-export async function generateDemoHN() {
+/**
+ * ✅ สร้าง HN เดโม (ขึ้นต้นด้วย D + รันเลขเพิ่ม)
+ * ค้นเลขเดิมในฐานข้อมูล แล้วรันเพิ่มอีก 1 เลข
+ */
+export async function generateDemoHN(): Promise<string> {
   try {
-    const randomNum = Math.floor(Math.random() * 999999)
-      .toString()
-      .padStart(6, '0');
-    
-    const demoHN = `DEMO-${randomNum}`;
-    
-    // ตรวจสอบว่าไม่ซ้ำ
+    // ✅ ค้น HN ที่ขึ้นต้นด้วย D และตามด้วยตัวเลข
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('hospital_number')
+      .like('hospital_number', 'D%')
+      .order('hospital_number', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error('❌ [generateDemoHN] Query error:', error);
+    }
+
+    let nextNum = 1; // เริ่มต้นที่ D000001
+
+    if (data && data.length > 0) {
+      const lastHN = data[0].hospital_number; // เช่น "D000042"
+      const numPart = lastHN.substring(1); // เอาเฉพาะตัวเลข "000042"
+      const lastNum = parseInt(numPart, 10);
+
+      if (!isNaN(lastNum)) {
+        nextNum = lastNum + 1;
+      }
+    }
+
+    // สร้าง HN ใหม่ (D + 6 หลัก)
+    const demoHN = `D${nextNum.toString().padStart(6, '0')}`;
+
+    // ✅ ตรวจสอบซ้ำอีกครั้ง (ป้องกัน race condition)
     const { data: existing } = await supabase
       .from('profiles')
       .select('hospital_number')
       .eq('hospital_number', demoHN)
-      .single();
-    
+      .maybeSingle();
+
     if (existing) {
-      return generateDemoHN();
+      // ถ้าซ้ำ ให้ลองเลขถัดไป (recursive แบบปลอดภัย)
+      console.warn(`⚠️ [generateDemoHN] ${demoHN} ซ้ำ ลองเลขถัดไป`);
+      return generateDemoHNRecursive(nextNum + 1);
     }
-    
+
+    console.log('🏥 [generateDemoHN] Generated:', demoHN);
     return demoHN;
   } catch (error) {
-    console.error('Error generating demo HN:', error);
-    return `DEMO-${Date.now().toString().slice(-6)}`;
+    console.error('❌ [generateDemoHN] Exception:', error);
+    return `D${Date.now().toString().slice(-6)}`;
   }
 }
 
-// ✅ ลงทะเบียนผู้ป่วยเดโม
+/**
+ * ✅ ฟังก์ชันช่วย: ลองสร้าง HN จากเลขที่กำหนด (กรณีซ้ำ)
+ */
+async function generateDemoHNRecursive(startNum: number, attempts: number = 0): Promise<string> {
+  if (attempts > 10) {
+    // Fallback: ใช้ timestamp
+    return `D${Date.now().toString().slice(-6)}`;
+  }
+
+  const demoHN = `D${startNum.toString().padStart(6, '0')}`;
+  const { data: existing } = await supabase
+    .from('profiles')
+    .select('hospital_number')
+    .eq('hospital_number', demoHN)
+    .maybeSingle();
+
+  if (existing) {
+    return generateDemoHNRecursive(startNum + 1, attempts + 1);
+  }
+
+  return demoHN;
+}
+
+/**
+ * ✅ ลงทะเบียนผู้ป่วยเดโม (คงเดิม)
+ */
 export async function registerDemoPatient(patientData: {
   id_card: string;
   password: string;
@@ -3307,13 +3385,13 @@ export async function registerDemoPatient(patientData: {
 }) {
   try {
     console.log('[registerDemoPatient] Starting registration...');
-    
+
     // 1. สร้าง user
     const { data: userData, error: userError } = await supabase
       .from('users')
       .insert({
         id_card: patientData.id_card,
-        password_hash: patientData.password, // ⚠️ ควร hash ก่อนใน production
+        password_hash: patientData.password,
         role: 'patient',
         is_active: true,
         is_demo: true,
@@ -3325,14 +3403,12 @@ export async function registerDemoPatient(patientData: {
       })
       .select()
       .single();
-    
+
     if (userError) {
       console.error('[registerDemoPatient] User creation error:', userError);
       throw userError;
     }
-    
-    console.log('[registerDemoPatient] User created:', userData.id);
-    
+
     // 2. สร้าง profile
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
@@ -3374,37 +3450,28 @@ export async function registerDemoPatient(patientData: {
         education_level: patientData.education_level,
         is_demo: true,
         demo_scenario: patientData.demo_scenario,
-        demo_expires_at: patientData.demo_expires_days 
+        demo_expires_at: patientData.demo_expires_days
           ? new Date(Date.now() + patientData.demo_expires_days * 24 * 60 * 60 * 1000).toISOString()
           : null,
         is_active: true,
         status: 'active',
+        // ✅ ไม่บันทึก diabetes_type, blood_sugar, hba1c_level
       })
       .select()
       .single();
-    
+
     if (profileError) {
       console.error('[registerDemoPatient] Profile creation error:', profileError);
-      // Rollback user
       await supabase.from('users').delete().eq('id', userData.id);
       throw profileError;
     }
-    
-    console.log('[registerDemoPatient] Profile created:', profileData.id);
-    
+
     return {
       success: true,
-      data: {
-        user: userData,
-        profile: profileData,
-      },
+      data: { user: userData, profile: profileData },
     };
   } catch (error: any) {
     console.error('[registerDemoPatient] Registration error:', error);
-    return {
-      success: false,
-      error: error.message,
-    };
+    return { success: false, error: error.message };
   }
 }
-
