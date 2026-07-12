@@ -332,7 +332,7 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก และรูปแบบวันที่ พ.ศ.
+  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก และแก้ไขการดึงคะแนน PROM
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
     
@@ -347,30 +347,36 @@ export default function PatientManagementPage() {
       const userId = patient.id;
       
       // 1. ดึงข้อมูลการประเมินทั้งหมดเพื่อนับจำนวนและหาล่าสุด
+      // ✅ แก้ไข: ดึง screening_responses มาด้วยเพื่อคำนวณคะแนน PROM ให้ถูกต้อง
       const { data: screenings } = await supabase
         .from('screenings')
-        .select('*')
+        .select(`
+          *,
+          screening_responses (
+            question_type,
+            score
+          )
+        `)
         .eq('user_id', userId)
         .order('screening_date', { ascending: false });
 
       const totalScreenings = screenings?.length || 0;
       const latestScreening = screenings && screenings.length > 0 ? screenings[0] : null;
 
-      // คำนวณคะแนน PROM รวม (q1-q4)
-      const promsTotal = latestScreening 
-        ? (latestScreening.proms_q1_score || 0) + (latestScreening.proms_q2_score || 0) + 
-          (latestScreening.proms_q3_score || 0) + (latestScreening.proms_q4_score || 0)
-        : '';
+      // ✅ คำนวณคะแนน PROM รวมจาก responses ของครั้งล่าสุด
+      let promsTotal = 0;
+      if (latestScreening && latestScreening.screening_responses) {
+        const promsResponses = latestScreening.screening_responses.filter(
+          (r: any) => r.question_type === 'proms'
+        );
+        promsTotal = promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
+      }
 
       // 2. ดึงข้อมูลการติดตาม (Follow-ups) สูงสุด 4 ครั้งล่าสุดตามวันที่
-      // ต้อง Join กับ appointments เพื่อให้ได้ user_id ที่ถูกต้อง
       const { data: followups } = await supabase
         .from('appointment_followups')
-        .select(`
-          *,
-          appointments!inner(user_id)
-        `)
-        .eq('appointments.user_id', userId)
+        .select('*')
+        .eq('user_id', userId)
         .order('followup_date', { ascending: false })
         .limit(4);
 
@@ -399,7 +405,7 @@ export default function PatientManagementPage() {
         // --- ส่วนที่ 2: การประเมินล่าสุด (14-17) ---
         'จำนวนครั้งที่ประเมิน': totalScreenings,
         'วันที่ประเมินล่าสุด': formatThaiDate(latestScreening?.screening_date),
-        'คะแนน PROM': promsTotal,
+        'คะแนน PROM': promsTotal, // ใช้ค่าที่คำนวณได้จาก responses
         'คะแนน PAM': latestScreening?.pam_total_score || '',
 
         // --- ส่วนที่ 3: รายละเอียดการติดตาม (เรียงตาม Round 1-4 ล่าสุด) ---
