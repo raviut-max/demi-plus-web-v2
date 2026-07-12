@@ -346,33 +346,48 @@ export default function PatientManagementPage() {
     const exportData = await Promise.all(dataToExport.map(async (patient) => {
       const userId = patient.id;
       
-      // 1. ดึงข้อมูลการประเมินทั้งหมดเพื่อนับจำนวนและหาล่าสุด
+      // 1. ดึงข้อมูลการประเมินทั้งหมด
       const { data: screenings } = await supabase
         .from('screenings')
-        .select('*')
-        .eq('user_id', userId)
-        .order('screening_date', { ascending: false });
-
-      const totalScreenings = screenings?.length || 0;
-      const latestScreening = screenings && screenings.length > 0 ? screenings[0] : null;
-
-      // คำนวณคะแนน PROM รวม (q1-q4)
-      const promsTotal = latestScreening 
-        ? (latestScreening.proms_q1_score || 0) + (latestScreening.proms_q2_score || 0) + 
-          (latestScreening.proms_q3_score || 0) + (latestScreening.proms_q4_score || 0)
-        : '';
-
-      // 2. ดึงข้อมูลการติดตาม (Follow-ups) สูงสุด 4 ครั้งล่าสุดตามวันที่
-      // ต้อง Join กับ appointments เพื่อให้ได้ user_id ที่ถูกต้อง
-      const { data: followups } = await supabase
-        .from('appointment_followups')
         .select(`
           *,
-          appointments!inner(user_id)
+          screening_responses (
+            question_type,
+            score
+          )
         `)
-        .eq('appointments.user_id', userId)
-        .order('followup_date', { ascending: false })
-        .limit(4);
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: true }); // เรียงจากเก่าสุดไปล่าสุดตาม status update time
+
+      const totalScreenings = screenings?.length || 0;
+      
+      // หาการประเมินครั้งแรกและครั้งล่าสุด
+      const firstScreening = screenings && screenings.length > 0 ? screenings[0] : null;
+      const lastScreening = screenings && screenings.length > 0 ? screenings[screenings.length - 1] : null;
+
+      // ฟังก์ชันช่วยคำนวณคะแนน PROM จาก responses
+      const calculatePromsScore = (screening: any) => {
+        if (!screening || !screening.screening_responses) return '';
+        const promsResponses = screening.screening_responses.filter(
+          (r: any) => r.question_type === 'proms'
+        );
+        return promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
+      };
+
+      const firstPromsScore = calculatePromsScore(firstScreening);
+      const lastPromsScore = calculatePromsScore(lastScreening);
+      const firstPamScore = firstScreening?.pam_total_score || '';
+      const lastPamScore = lastScreening?.pam_total_score || '';
+
+      // 2. ดึงข้อมูลการติดตาม (Follow-ups) สูงสุด 6 ครั้งล่าสุด
+      // เรียงจากเก่าสุดไปล่าสุด (Ascending) เพื่อให้ F1 เป็นครั้งแรกสุดใน 6 ครั้งล่าสุด หรือเรียงตามความต้องการ
+      // ตามข้อกำหนด: "เรียงจากเก่าสุดไปล่าสุด" สำหรับส่วนการติดตามด้วย
+      const { data: followups } = await supabase
+        .from('appointment_followups')
+        .select('*')
+        .eq('user_id', userId)
+        .order('followup_date', { ascending: true }) // เก่าสุด -> ล่าสุด
+        .limit(6);
 
       // Helper สำหรับจัดรูปแบบความดัน
       const formatBP = (sys: number | null, dia: number | null) => {
@@ -380,7 +395,7 @@ export default function PatientManagementPage() {
       };
 
       // สร้าง Object ข้อมูลตามโครงสร้างที่กำหนด
-      return {
+      const rowData: any = {
         // --- ส่วนที่ 1: ข้อมูลส่วนตัว (1-13) ---
         'ID Card': patient.users?.id_card || '',
         'ชื่อ': patient.first_name || '',
@@ -396,70 +411,50 @@ export default function PatientManagementPage() {
         'ค่าน้ำตาล': patient.blood_sugar || '',
         'ค่า HbA1C': patient.hba1c_level || '',
 
-        // --- ส่วนที่ 2: การประเมินล่าสุด (14-17) ---
+        // --- ส่วนที่ 2: การประเมิน (14-20) ---
         'จำนวนครั้งที่ประเมิน': totalScreenings,
-        'วันที่ประเมินล่าสุด': formatThaiDate(latestScreening?.screening_date),
-        'คะแนน PROM': promsTotal,
-        'คะแนน PAM': latestScreening?.pam_total_score || '',
-
-        // --- ส่วนที่ 3: รายละเอียดการติดตาม (เรียงตาม Round 1-4 ล่าสุด) ---
-        // รอบที่ 1 (ล่าสุด)
-        'F1 วันที่': formatThaiDate(followups?.[0]?.followup_date),
-        'F1 น้ำหนัก': followups?.[0]?.weight || '',
-        'F1 รอบเอว': followups?.[0]?.waist_circumference || '',
-        'F1 ความดัน': formatBP(followups?.[0]?.blood_pressure_sys, followups?.[0]?.blood_pressure_dia),
-        'F1 น้ำตาล': followups?.[0]?.blood_sugar_dtx || '',
-        'F1 ความมั่นใจ': followups?.[0]?.confidence_score || '',
-        'F1 แผนอาหาร(ปริมาณ)': followups?.[0]?.food_amount_status || '',
-        'F1 แผนอาหาร(ชนิด)': followups?.[0]?.food_type_status || '',
-        'F1 แผนเคลื่อนไหว': followups?.[0]?.movement_status || '',
-
-        // รอบที่ 2
-        'F2 วันที่': formatThaiDate(followups?.[1]?.followup_date),
-        'F2 น้ำหนัก': followups?.[1]?.weight || '',
-        'F2 รอบเอว': followups?.[1]?.waist_circumference || '',
-        'F2 ความดัน': formatBP(followups?.[1]?.blood_pressure_sys, followups?.[1]?.blood_pressure_dia),
-        'F2 น้ำตาล': followups?.[1]?.blood_sugar_dtx || '',
-        'F2 ความมั่นใจ': followups?.[1]?.confidence_score || '',
-        'F2 แผนอาหาร(ปริมาณ)': followups?.[1]?.food_amount_status || '',
-        'F2 แผนอาหาร(ชนิด)': followups?.[1]?.food_type_status || '',
-        'F2 แผนเคลื่อนไหว': followups?.[1]?.movement_status || '',
-
-        // รอบที่ 3
-        'F3 วันที่': formatThaiDate(followups?.[2]?.followup_date),
-        'F3 น้ำหนัก': followups?.[2]?.weight || '',
-        'F3 รอบเอว': followups?.[2]?.waist_circumference || '',
-        'F3 ความดัน': formatBP(followups?.[2]?.blood_pressure_sys, followups?.[2]?.blood_pressure_dia),
-        'F3 น้ำตาล': followups?.[2]?.blood_sugar_dtx || '',
-        'F3 ความมั่นใจ': followups?.[2]?.confidence_score || '',
-        'F3 แผนอาหาร(ปริมาณ)': followups?.[2]?.food_amount_status || '',
-        'F3 แผนอาหาร(ชนิด)': followups?.[2]?.food_type_status || '',
-        'F3 แผนเคลื่อนไหว': followups?.[2]?.movement_status || '',
-
-        // รอบที่ 4
-        'F4 วันที่': formatThaiDate(followups?.[3]?.followup_date),
-        'F4 น้ำหนัก': followups?.[3]?.weight || '',
-        'F4 รอบเอว': followups?.[3]?.waist_circumference || '',
-        'F4 ความดัน': formatBP(followups?.[3]?.blood_pressure_sys, followups?.[3]?.blood_pressure_dia),
-        'F4 น้ำตาล': followups?.[3]?.blood_sugar_dtx || '',
-        'F4 ความมั่นใจ': followups?.[3]?.confidence_score || '',
-        'F4 แผนอาหาร(ปริมาณ)': followups?.[3]?.food_amount_status || '',
-        'F4 แผนอาหาร(ชนิด)': followups?.[3]?.food_type_status || '',
-        'F4 แผนเคลื่อนไหว': followups?.[3]?.movement_status || '',
+        'วันที่ประเมินครั้งแรก': formatThaiDate(firstScreening?.screening_date),
+        'คะแนน PROM (ครั้งแรก)': firstPromsScore,
+        'คะแนน PAM (ครั้งแรก)': firstPamScore,
+        'วันที่ประเมินครั้งล่าสุด': formatThaiDate(lastScreening?.screening_date),
+        'คะแนน PROM (ล่าสุด)': lastPromsScore,
+        'คะแนน PAM (ล่าสุด)': lastPamScore,
       };
+
+      // --- ส่วนที่ 3: รายละเอียดการติดตาม (สูงสุด 6 ครั้ง) ---
+      // สร้างคอลัมน์ F1 ถึง F6
+      for (let i = 0; i < 6; i++) {
+        const followup = followups?.[i];
+        const prefix = `F${i + 1}`;
+        
+        rowData[`${prefix} วันที่ติดตาม`] = formatThaiDate(followup?.followup_date);
+        rowData[`${prefix} น้ำหนัก`] = followup?.weight || '';
+        rowData[`${prefix} รอบเอว`] = followup?.waist_circumference || '';
+        rowData[`${prefix} ความดัน`] = formatBP(followup?.blood_pressure_sys, followup?.blood_pressure_dia);
+        rowData[`${prefix} น้ำตาล`] = followup?.blood_sugar_dtx || '';
+        rowData[`${prefix} ความมั่นใจ`] = followup?.confidence_score || '';
+        rowData[`${prefix} แผนปฏิบัติอาหาร`] = followup?.food_amount_status || ''; // ใช้ status
+        rowData[`${prefix} แผนปฏิบัติชนิดอาหาร`] = followup?.food_type_status || ''; // ใช้ status
+        rowData[`${prefix} แผนปฏิบัติการเคลื่อนไหว`] = followup?.movement_status || ''; // ใช้ status
+      }
+
+      return rowData;
     }));
 
     // สร้าง Worksheet และ Workbook
     const ws = XLSX.utils.json_to_sheet(exportData);
     
     // ตั้งค่าความกว้างคอลัมน์ให้เหมาะสมกับข้อมูลภาษาไทยและตัวเลข
-    ws['!cols'] = [
+    // คอลัมน์พื้นฐาน 20 คอลัมน์ + (9 คอลัมน์ต่อรอบ x 6 รอบ = 54 คอลัมน์) = รวม 74 คอลัมน์
+    const baseCols = [
       { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 8 }, // 1-6
       { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, // 7-13
-      { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, // 14-17
-      // Follow-up 1-4 (9 คอลัมน์ต่อรอบ x 4 รอบ = 36 คอลัมน์)
-      ...Array(36).fill({ wch: 15 }) 
+      { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, // 14-20
     ];
+    
+    const followupCols = Array(54).fill({ wch: 15 }); // 6 rounds * 9 cols
+    
+    ws['!cols'] = [...baseCols, ...followupCols];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
