@@ -43,7 +43,6 @@ export default function PatientManagementPage() {
   // ✅ Search States แยกกันชัดเจน เพื่อแก้ปัญหา Permission และ Search ผิดที่
   const [searchTermNameHN, setSearchTermNameHN] = useState('');
   const [searchTermIdCard, setSearchTermIdCard] = useState('');
-  
   const [selectedPamLevel, setSelectedPamLevel] = useState<string>('all');
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
@@ -76,7 +75,9 @@ export default function PatientManagementPage() {
       .select('id, type, parent_id')
       .eq('id', hospitalIdFilter)
       .single();
+    
     if (error || !hospital) return [hospitalIdFilter];
+    
     if (hospital.type === 'main') {
       const { data: subHospitals } = await supabase
         .from('hospitals')
@@ -209,51 +210,45 @@ export default function PatientManagementPage() {
   };
 
   // ✅ โหลดข้อมูลผู้ป่วยแบบ Pagination + Server-side Sort
-  // ส่ง Parameter แยกกันชัดเจนเพื่อรักษา Permission
   const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
-
+      
       const pamParam = isAllPam ? undefined : selectedPamLevel;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
-
-      // ✅ ใช้ accessibleHospitalIds สำหรับสิทธิ์เสมอ
       const accessibleIdsParam = hospitalIds;
-      // ✅ ใช้ selectedHospitalFilter สำหรับการกรองย่อยเสมอ
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
 
-      // ดึงจำนวนผู้ป่วยทั้งหมด (สำหรับแสดง summary และ pagination)
       const total = await getPatientCount(
         searchTermNameHN,
         searchTermIdCard,
         pamParam,
-        accessibleIdsParam, // ✅ ใช้สำหรับนับตามสิทธิ์
-        filterHospitalIdParam, // ✅ ใช้สำหรับกรองย่อย
+        accessibleIdsParam,
+        filterHospitalIdParam,
         coachIdParam
       );
       setTotalPatients(total);
 
-      // กำหนดขนาดหน้าสำหรับการดึงข้อมูล
       const fetchPageSize = forceFetchAll ? total : pageSize;
       const fetchCurrentPage = forceFetchAll ? 0 : currentPage;
 
-      // ดึงข้อมูลเฉพาะหน้าปัจจุบัน (หรือทั้งหมดถ้าเป็นโหมด Export All) พร้อม sort จาก database
       const { patients: data } = await getPatientListPaginated(
         fetchCurrentPage,
         fetchPageSize,
         searchTermNameHN,
         searchTermIdCard,
         pamParam,
-        accessibleIdsParam, // ✅ ใช้สำหรับบังคับสิทธิ์เสมอ
-        filterHospitalIdParam, // ✅ ใช้สำหรับกรองย่อยเสมอ
+        accessibleIdsParam,
+        filterHospitalIdParam,
         coachIdParam,
         sortColumn,
         sortDirection
       );
 
       setPatients(data);
+      
       if (!forceFetchAll) {
         console.log(`📊 [loadPatients] Page ${currentPage + 1}/${totalPages || 1}, Loaded: ${data.length}, Total: ${total}`);
       }
@@ -277,7 +272,6 @@ export default function PatientManagementPage() {
     }
   };
 
-  // รีเซ็ตไปหน้าแรกเมื่อเปลี่ยน filter/search
   useEffect(() => {
     const timer = setTimeout(() => {
       setCurrentPage(0);
@@ -285,7 +279,6 @@ export default function PatientManagementPage() {
     return () => clearTimeout(timer);
   }, [searchTermNameHN, searchTermIdCard, selectedHospitalFilter, selectedCoachFilter, selectedPamLevel]);
 
-  // โหลดข้อมูลใหม่เมื่อ currentPage หรือ filter ใดๆ เปลี่ยน
   useEffect(() => {
     if (!user) return;
     loadPatients(accessibleHospitalIds);
@@ -301,7 +294,6 @@ export default function PatientManagementPage() {
     router.push('/admin/login');
   };
 
-  // Sort: เปลี่ยน column/direction + reset กลับหน้าแรก
   const handleSort = (column: string) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -322,52 +314,139 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ Export Excel with Selection
+  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
-    // ถ้าเลือก Export ทั้งหมด ให้ดึงข้อมูลใหม่โดยไม่จำกัดจำนวนแถว
+    
+    // ถ้าเลือก Export ทั้งหมด ให้ดึงข้อมูลใหม่โดยไม่จำกัดจำนวนแถว (Force Fetch All)
     if (mode === 'all') {
       await loadPatients(accessibleHospitalIds, true);
-      dataToExport = patients; // ใช้ข้อมูลที่เพิ่งโหลดมาทั้งหมด
+      dataToExport = patients; 
     }
 
-    const exportData = dataToExport.map((patient, idx) => {
-      let genderThai = '';
-      if (patient.gender === 'male') genderThai = 'ชาย';
-      else if (patient.gender === 'female') genderThai = 'หญิง';
+    // เตรียมข้อมูลสำหรับสร้าง Excel
+    const exportData = await Promise.all(dataToExport.map(async (patient) => {
+      const userId = patient.id;
+      
+      // 1. ดึงข้อมูลการประเมินทั้งหมดเพื่อนับจำนวนและหาล่าสุด
+      const { data: screenings } = await supabase
+        .from('screenings')
+        .select('*')
+        .eq('user_id', userId)
+        .order('screening_date', { ascending: false });
 
-      let birthDateStr = '';
-      if (patient.birth_date) {
-        const date = new Date(patient.birth_date);
-        if (!isNaN(date.getTime())) {
-          birthDateStr = date.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
-        }
-      }
+      const totalScreenings = screenings?.length || 0;
+      const latestScreening = screenings && screenings.length > 0 ? screenings[0] : null;
 
-      return {
-        'ลำดับ': mode === 'current' ? (currentPage * pageSize) + idx + 1 : idx + 1,
-        'ชื่อ-นามสกุล': `${patient.first_name || ''} ${patient.last_name || ''}`.trim(),
-        'HN': patient.hospital_number || '',
-        'เลขบัตรประชาชน': patient.users?.id_card || '',
-        'วันเกิด': birthDateStr,
-        'เพศ': genderThai,
-        'โทรศัพท์': patient.phone || '',
-        'โรงพยาบาล': patient.hospitals?.name || '',
-        'โค้ช': patient.coach_name || '',
-        'PAM Level': patient.pam_level || '',
-        'Zone': patient.zone || '',
+      // คำนวณคะแนน PROM รวม (q1-q4)
+      const promsTotal = latestScreening 
+        ? (latestScreening.proms_q1_score || 0) + (latestScreening.proms_q2_score || 0) + 
+          (latestScreening.proms_q3_score || 0) + (latestScreening.proms_q4_score || 0)
+        : '';
+
+      // 2. ดึงข้อมูลการติดตาม (Follow-ups) สูงสุด 4 ครั้งล่าสุดตามวันที่
+      // ต้อง Join กับ appointments เพื่อให้ได้ user_id ที่ถูกต้อง
+      const { data: followups } = await supabase
+        .from('appointment_followups')
+        .select(`
+          *,
+          appointments!inner(user_id)
+        `)
+        .eq('appointments.user_id', userId)
+        .order('followup_date', { ascending: false })
+        .limit(4);
+
+      // Helper สำหรับจัดรูปแบบความดัน
+      const formatBP = (sys: number | null, dia: number | null) => {
+        return (sys && dia) ? `${sys}/${dia}` : '';
       };
-    });
 
+      // สร้าง Object ข้อมูลตามโครงสร้างที่กำหนด
+      return {
+        // --- ส่วนที่ 1: ข้อมูลส่วนตัว (1-13) ---
+        'ID Card': patient.users?.id_card || '',
+        'ชื่อ': patient.first_name || '',
+        'นามสกุล': patient.last_name || '',
+        'HN': patient.hospital_number || '',
+        'วันเกิด': patient.birth_date || '',
+        'อายุ': patient.age || '',
+        'น้ำหนัก': patient.current_weight || '',
+        'ส่วนสูง': patient.height || '',
+        'รอบเอว': patient.waist_circumference || '',
+        'BMI': patient.bmi || '',
+        'กลุ่มเสี่ยง/เบาหวาน': patient.diabetes_type || '',
+        'ค่าน้ำตาล': patient.blood_sugar || '',
+        'ค่า HbA1C': patient.hba1c_level || '',
+
+        // --- ส่วนที่ 2: การประเมินล่าสุด (14-17) ---
+        'จำนวนครั้งที่ประเมิน': totalScreenings,
+        'วันที่ประเมินล่าสุด': latestScreening?.screening_date || '',
+        'คะแนน PROM': promsTotal,
+        'คะแนน PAM': latestScreening?.pam_total_score || '',
+
+        // --- ส่วนที่ 3: รายละเอียดการติดตาม (เรียงตาม Round 1-4 ล่าสุด) ---
+        // รอบที่ 1 (ล่าสุด)
+        'F1 วันที่': followups?.[0]?.followup_date || '',
+        'F1 น้ำหนัก': followups?.[0]?.weight || '',
+        'F1 รอบเอว': followups?.[0]?.waist_circumference || '',
+        'F1 ความดัน': formatBP(followups?.[0]?.blood_pressure_sys, followups?.[0]?.blood_pressure_dia),
+        'F1 น้ำตาล': followups?.[0]?.blood_sugar_dtx || '',
+        'F1 ความมั่นใจ': followups?.[0]?.confidence_score || '',
+        'F1 แผนอาหาร(ปริมาณ)': followups?.[0]?.food_amount_status || '',
+        'F1 แผนอาหาร(ชนิด)': followups?.[0]?.food_type_status || '',
+        'F1 แผนเคลื่อนไหว': followups?.[0]?.movement_status || '',
+
+        // รอบที่ 2
+        'F2 วันที่': followups?.[1]?.followup_date || '',
+        'F2 น้ำหนัก': followups?.[1]?.weight || '',
+        'F2 รอบเอว': followups?.[1]?.waist_circumference || '',
+        'F2 ความดัน': formatBP(followups?.[1]?.blood_pressure_sys, followups?.[1]?.blood_pressure_dia),
+        'F2 น้ำตาล': followups?.[1]?.blood_sugar_dtx || '',
+        'F2 ความมั่นใจ': followups?.[1]?.confidence_score || '',
+        'F2 แผนอาหาร(ปริมาณ)': followups?.[1]?.food_amount_status || '',
+        'F2 แผนอาหาร(ชนิด)': followups?.[1]?.food_type_status || '',
+        'F2 แผนเคลื่อนไหว': followups?.[1]?.movement_status || '',
+
+        // รอบที่ 3
+        'F3 วันที่': followups?.[2]?.followup_date || '',
+        'F3 น้ำหนัก': followups?.[2]?.weight || '',
+        'F3 รอบเอว': followups?.[2]?.waist_circumference || '',
+        'F3 ความดัน': formatBP(followups?.[2]?.blood_pressure_sys, followups?.[2]?.blood_pressure_dia),
+        'F3 น้ำตาล': followups?.[2]?.blood_sugar_dtx || '',
+        'F3 ความมั่นใจ': followups?.[2]?.confidence_score || '',
+        'F3 แผนอาหาร(ปริมาณ)': followups?.[2]?.food_amount_status || '',
+        'F3 แผนอาหาร(ชนิด)': followups?.[2]?.food_type_status || '',
+        'F3 แผนเคลื่อนไหว': followups?.[2]?.movement_status || '',
+
+        // รอบที่ 4
+        'F4 วันที่': followups?.[3]?.followup_date || '',
+        'F4 น้ำหนัก': followups?.[3]?.weight || '',
+        'F4 รอบเอว': followups?.[3]?.waist_circumference || '',
+        'F4 ความดัน': formatBP(followups?.[3]?.blood_pressure_sys, followups?.[3]?.blood_pressure_dia),
+        'F4 น้ำตาล': followups?.[3]?.blood_sugar_dtx || '',
+        'F4 ความมั่นใจ': followups?.[3]?.confidence_score || '',
+        'F4 แผนอาหาร(ปริมาณ)': followups?.[3]?.food_amount_status || '',
+        'F4 แผนอาหาร(ชนิด)': followups?.[3]?.food_type_status || '',
+        'F4 แผนเคลื่อนไหว': followups?.[3]?.movement_status || '',
+      };
+    }));
+
+    // สร้าง Worksheet และ Workbook
     const ws = XLSX.utils.json_to_sheet(exportData);
+    
+    // ตั้งค่าความกว้างคอลัมน์ให้เหมาะสมกับข้อมูลภาษาไทยและตัวเลข
     ws['!cols'] = [
-      { wch: 8 }, { wch: 25 }, { wch: 15 }, { wch: 18 }, { wch: 15 },
-      { wch: 8 }, { wch: 15 }, { wch: 25 }, { wch: 20 }, { wch: 10 }, { wch: 12 }
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, // 1-6
+      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, // 7-13
+      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, // 14-17
+      // Follow-up 1-4 (9 คอลัมน์ต่อรอบ x 4 รอบ = 36 คอลัมน์)
+      ...Array(36).fill({ wch: 12 }) 
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'ผู้ป่วย');
-    const fileName = `patients_${mode === 'current' ? `page${currentPage + 1}_` : 'all_'}${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
+    XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
+    
+    const fileName = `patients_export_${mode}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
@@ -605,7 +684,6 @@ export default function PatientManagementPage() {
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            
             {/* ✅ ช่องค้นหาแยก: ID Card */}
             <div className="lg:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -620,7 +698,6 @@ export default function PatientManagementPage() {
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Building2 className="w-4 h-4 inline mr-1" /> โรงพยาบาล
@@ -671,7 +748,6 @@ export default function PatientManagementPage() {
               </select>
             </div>
           </div>
-          
           <div className="flex justify-end">
              <button
               onClick={handleSearch}
@@ -688,7 +764,6 @@ export default function PatientManagementPage() {
            <div className="text-sm text-gray-600">
             📄 แสดงหน้าที่ {currentPage + 1} จาก {totalPages || 1} (หน้าละ {pageSize} รายการ)
            </div>
-           
            {/* ✅ ปุ่ม Export แบบเลือกโหมด */}
             <div className="flex items-center gap-2">
                <button
@@ -813,14 +888,13 @@ export default function PatientManagementPage() {
               </tbody>
             </table>
           </div>
-
+          
           {/* ✅ Pagination Controls with Jump to Page */}
           {totalPages > 1 && (
              <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
                <div className="text-sm text-gray-600">
                 แสดง {currentPage * pageSize + 1} - {Math.min((currentPage + 1) * pageSize, totalPatients)} จาก {totalPatients.toLocaleString()} รายการ
                </div>
-              
                <div className="flex items-center gap-3 flex-wrap">
                 {/* Jump to Page Input */}
                  <div className="flex items-center gap-2">
@@ -842,7 +916,6 @@ export default function PatientManagementPage() {
                     ไป
                    </button>
                  </div>
-
                 {/* Navigation Buttons */}
                  <div className="flex items-center gap-2">
                    <button
@@ -860,7 +933,6 @@ export default function PatientManagementPage() {
                    >
                      <ChevronLeft className="w-4 h-4" /> ก่อนหน้า
                    </button>
-
                    <div className="flex gap-1">
                     {getPageNumbers().map((pageNum, idx) => {
                       if (pageNum === '...') {
@@ -880,7 +952,6 @@ export default function PatientManagementPage() {
                       );
                     })}
                    </div>
-
                    <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                     disabled={currentPage >= totalPages - 1}
