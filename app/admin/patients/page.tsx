@@ -33,6 +33,24 @@ const debugLog = (module: string, message: string, data?: any) => {
   }
 };
 
+// Helper function to format date to Thai Buddhist Era (DD MMMM YYYY)
+const formatThaiDate = (dateString: string | null) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return '';
+  
+  const thaiMonths = [
+    'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+    'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+  ];
+  
+  const day = date.getDate();
+  const month = thaiMonths[date.getMonth()];
+  const yearBE = date.getFullYear() + 543;
+  
+  return `${day} ${month} ${yearBE}`;
+};
+
 export default function PatientManagementPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -314,7 +332,7 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก
+  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก และรูปแบบวันที่ พ.ศ.
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
     
@@ -368,7 +386,7 @@ export default function PatientManagementPage() {
         'ชื่อ': patient.first_name || '',
         'นามสกุล': patient.last_name || '',
         'HN': patient.hospital_number || '',
-        'วันเกิด': patient.birth_date || '',
+        'วันเกิด': formatThaiDate(patient.birth_date),
         'อายุ': patient.age || '',
         'น้ำหนัก': patient.current_weight || '',
         'ส่วนสูง': patient.height || '',
@@ -380,13 +398,13 @@ export default function PatientManagementPage() {
 
         // --- ส่วนที่ 2: การประเมินล่าสุด (14-17) ---
         'จำนวนครั้งที่ประเมิน': totalScreenings,
-        'วันที่ประเมินล่าสุด': latestScreening?.screening_date || '',
+        'วันที่ประเมินล่าสุด': formatThaiDate(latestScreening?.screening_date),
         'คะแนน PROM': promsTotal,
         'คะแนน PAM': latestScreening?.pam_total_score || '',
 
         // --- ส่วนที่ 3: รายละเอียดการติดตาม (เรียงตาม Round 1-4 ล่าสุด) ---
         // รอบที่ 1 (ล่าสุด)
-        'F1 วันที่': followups?.[0]?.followup_date || '',
+        'F1 วันที่': formatThaiDate(followups?.[0]?.followup_date),
         'F1 น้ำหนัก': followups?.[0]?.weight || '',
         'F1 รอบเอว': followups?.[0]?.waist_circumference || '',
         'F1 ความดัน': formatBP(followups?.[0]?.blood_pressure_sys, followups?.[0]?.blood_pressure_dia),
@@ -397,7 +415,7 @@ export default function PatientManagementPage() {
         'F1 แผนเคลื่อนไหว': followups?.[0]?.movement_status || '',
 
         // รอบที่ 2
-        'F2 วันที่': followups?.[1]?.followup_date || '',
+        'F2 วันที่': formatThaiDate(followups?.[1]?.followup_date),
         'F2 น้ำหนัก': followups?.[1]?.weight || '',
         'F2 รอบเอว': followups?.[1]?.waist_circumference || '',
         'F2 ความดัน': formatBP(followups?.[1]?.blood_pressure_sys, followups?.[1]?.blood_pressure_dia),
@@ -408,7 +426,7 @@ export default function PatientManagementPage() {
         'F2 แผนเคลื่อนไหว': followups?.[1]?.movement_status || '',
 
         // รอบที่ 3
-        'F3 วันที่': followups?.[2]?.followup_date || '',
+        'F3 วันที่': formatThaiDate(followups?.[2]?.followup_date),
         'F3 น้ำหนัก': followups?.[2]?.weight || '',
         'F3 รอบเอว': followups?.[2]?.waist_circumference || '',
         'F3 ความดัน': formatBP(followups?.[2]?.blood_pressure_sys, followups?.[2]?.blood_pressure_dia),
@@ -419,7 +437,7 @@ export default function PatientManagementPage() {
         'F3 แผนเคลื่อนไหว': followups?.[2]?.movement_status || '',
 
         // รอบที่ 4
-        'F4 วันที่': followups?.[3]?.followup_date || '',
+        'F4 วันที่': formatThaiDate(followups?.[3]?.followup_date),
         'F4 น้ำหนัก': followups?.[3]?.weight || '',
         'F4 รอบเอว': followups?.[3]?.waist_circumference || '',
         'F4 ความดัน': formatBP(followups?.[3]?.blood_pressure_sys, followups?.[3]?.blood_pressure_dia),
@@ -436,11 +454,11 @@ export default function PatientManagementPage() {
     
     // ตั้งค่าความกว้างคอลัมน์ให้เหมาะสมกับข้อมูลภาษาไทยและตัวเลข
     ws['!cols'] = [
-      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, // 1-6
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 8 }, // 1-6
       { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, // 7-13
-      { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, // 14-17
+      { wch: 12 }, { wch: 20 }, { wch: 10 }, { wch: 10 }, // 14-17
       // Follow-up 1-4 (9 คอลัมน์ต่อรอบ x 4 รอบ = 36 คอลัมน์)
-      ...Array(36).fill({ wch: 12 }) 
+      ...Array(36).fill({ wch: 15 }) 
     ];
 
     const wb = XLSX.utils.book_new();
