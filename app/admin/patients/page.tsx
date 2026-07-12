@@ -1042,4 +1042,5 @@ export default function PatientManagementPage() {
       )}
     </div>
   );
+  
 }
