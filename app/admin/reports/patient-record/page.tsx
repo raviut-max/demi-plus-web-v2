@@ -1,14 +1,6 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ ฟีเจอร์ทั้งหมด:
-//    1. เลือกโรงพยาบาล + สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม
-//    2. ปุ่ม Export PDF อยู่ด้านบน (เห็นชัดเจน)
-//    3. Pagination แสดงทีละ 10 คน
-//    4. คอลัมน์ "ข้อมูลติดตาม" พร้อม Badge
-//    5. ดึงค่าน้ำหนัก/FPG จาก Follow-up ล่าสุด
-//    6. Modal "บันทึกรวม" พร้อมปุ่ม "เริ่มบันทึกรวม"
-//    7. Sequential print (เปิดทีละคนในแท็บเดิม + auto-download)
-//    8. คง state เมื่อเปลี่ยน filter (URL params)
+// ✅ บันทึกรวม PDF - เลือกโฟลเดอร์ + บันทึกทีเดียว + แยกชื่อไฟล์
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -18,10 +10,13 @@ import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
   CheckSquare, Square, Activity, AlertCircle,
-  X, FileArchive, CheckCircle, Printer,
+  X, FileArchive, CheckCircle, FolderOpen,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Loader2, ExternalLink
+  Loader2, Info, HardDrive
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import JSZip from 'jszip';
 
 interface Patient {
   id: string;
@@ -50,6 +45,45 @@ interface HospitalData {
   patientCount?: number;
 }
 
+interface FollowupRecord {
+  id: string;
+  followup_date: string;
+  followup_round: number;
+  weight: number | null;
+  waist_circumference: number | null;
+  blood_pressure_sys: number | null;
+  blood_pressure_dia: number | null;
+  blood_sugar_dtx: number | null;
+  confidence_score: number | null;
+  followup_status: string | null;
+  food_amount_status: string | null;
+  food_type_status: string | null;
+  movement_status: string | null;
+  adaptation_summary: string | null;
+  adaptation_obstacles: string | null;
+  adaptation_opportunities: string | null;
+  summary: string | null;
+  recommendations: string | null;
+  life_schedule_image_url: string | null;
+  floating_chart_image_url: string | null;
+  dream_card_image_url: string | null;
+  floating_chart_summary: string | null;
+  dream_card_description: string | null;
+}
+
+interface ScreeningRecord {
+  id: string;
+  screening_date: string;
+  pam_total_score: number | null;
+  pam_level_result: string | null;
+  proms_zone: string | null;
+  proms_q1_score: number | null;
+  proms_q2_score: number | null;
+  proms_q3_score: number | null;
+  proms_q4_score: number | null;
+  confidence_score: number | null;
+}
+
 function PatientRecordContent() {
   const router = useRouter();
   const pathname = usePathname();
@@ -73,12 +107,18 @@ function PatientRecordContent() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(10);
   
-  const [exportQueue, setExportQueue] = useState<Patient[]>([]);
   const [showExportList, setShowExportList] = useState(false);
-  const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
+  const [exportQueue, setExportQueue] = useState<Patient[]>([]);
   
-  const [isSequentialRecording, setIsSequentialRecording] = useState(false);
-  const [sequentialProgress, setSequentialProgress] = useState(0);
+  // ✅ State สำหรับ Batch Recording
+  const [isBatchRecording, setIsBatchRecording] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchSuccess, setBatchSuccess] = useState(0);
+  const [batchFailed, setBatchFailed] = useState(0);
+  const [batchCurrentName, setBatchCurrentName] = useState('');
+  const [batchStatus, setBatchStatus] = useState<'idle' | 'selecting' | 'recording' | 'done' | 'error'>('idle');
+  const [batchErrorMessage, setBatchErrorMessage] = useState('');
 
   const updateUrlParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -266,57 +306,561 @@ function PatientRecordContent() {
   };
 
   // ✅ เปิด Modal แสดงรายการที่จะบันทึก
-  const handleExport = (mode: 'individual' | 'zip') => {
+  const handleExport = () => {
     if (selectedPatients.size === 0) {
       alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
       return;
     }
 
     const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
-    setExportMode(mode);
     setExportQueue(selectedPatientData);
-    setSequentialProgress(0);
+    setBatchProgress(0);
+    setBatchSuccess(0);
+    setBatchFailed(0);
+    setBatchStatus('idle');
+    setBatchErrorMessage('');
     setShowExportList(true);
   };
 
-  // ✅ Sequential Recording - เปิดทีละคนในแท็บเดิม + auto-download
-  const handleSequentialRecord = async () => {
+  // ✅ ฟังก์ชันดึงข้อมูลผู้ป่วยแบบเต็ม (สำหรับสร้าง PDF)
+  const fetchPatientFullData = async (patientId: string) => {
+    const { data: patientData, error: patientError } = await supabase
+      .from('profiles')
+      .select(`
+        id, first_name, last_name, hospital_number, age, gender,
+        pam_level, pam_score, zone, current_weight, waist_circumference,
+        blood_sugar, height, bmi, hba1c_level, program_start_date,
+        hospital_id, coach_id,
+        hospitals:hospital_id (name)
+      `)
+      .eq('id', patientId)
+      .single();
+
+    if (patientError) throw patientError;
+
+    const { data: followupData } = await supabase
+      .from('appointment_followups')
+      .select('*')
+      .eq('user_id', patientId)
+      .order('followup_date', { ascending: false });
+
+    const { data: screeningData } = await supabase
+      .from('screenings')
+      .select('*')
+      .eq('user_id', patientId)
+      .order('screening_date', { ascending: false });
+
+    return {
+      patient: patientData,
+      followups: followupData || [],
+      screenings: screeningData || [],
+    };
+  };
+
+  // ✅ ฟังก์ชันสร้าง HTML สำหรับ PDF (off-screen)
+  const renderPatientHTML = (patient: any, followups: FollowupRecord[], screenings: ScreeningRecord[]) => {
+    const latestFollowup = followups[0];
+    const latestScreening = screenings[0];
+    
+    const formatThaiDate = (dateString: string | null) => {
+      if (!dateString) return '-';
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return '-';
+      const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+      return `${date.getDate()} ${thaiMonths[date.getMonth()]} ${date.getFullYear() + 543}`;
+    };
+
+    const getStatusBadge = (status: string | null) => {
+      const map: any = {
+        'excellent': { text: 'ดีเยี่ยม', class: 'bg-green-100 text-green-700' },
+        'good': { text: 'ดี', class: 'bg-blue-100 text-blue-700' },
+        'fair': { text: 'พอใช้', class: 'bg-yellow-100 text-yellow-700' },
+        'needs_improvement': { text: 'ต้องปรับปรุง', class: 'bg-red-100 text-red-700' },
+        'monitoring': { text: 'เฝ้าระวัง', class: 'bg-purple-100 text-purple-700' }
+      };
+      return map[status || ''] || { text: status || '-', class: 'bg-gray-100 text-gray-700' };
+    };
+
+    const latestWeight = latestFollowup?.weight ?? patient?.current_weight ?? '-';
+    const latestWaist = latestFollowup?.waist_circumference ?? patient?.waist_circumference ?? '-';
+    const latestFpg = latestFollowup?.blood_sugar_dtx ?? patient?.blood_sugar ?? '-';
+    const latestHba1c = patient?.hba1c_level ?? '-';
+
+    return `
+      <div style="font-family: 'Sarabun', 'TH Sarabun New', sans-serif; padding: 20px; background: white; width: 800px;">
+        <!-- Page 1 -->
+        <div style="min-height: 1100px; margin-bottom: 20px;">
+          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between;">
+            <div>
+              <h1 style="font-size: 24px; font-weight: bold; color: #2563eb; margin: 0;">Community Bridge</h1>
+              <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">ระบบดูแลผู้ป่วยกลุ่มเสี่ยงเบาหวาน (PreDM)</p>
+            </div>
+            <div style="text-align: right;">
+              <h2 style="font-size: 20px; font-weight: bold; color: #111; margin: 0;">ระเบียนติดตามผล</h2>
+              <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">Follow-up Record</p>
+            </div>
+          </div>
+
+          <div style="background: #eff6ff; padding: 16px; margin-bottom: 24px; border-left: 4px solid #3b82f6; border-radius: 8px;">
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;">👤 ข้อมูลผู้ป่วย</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+              <div><p style="font-size: 12px; color: #666; margin: 0;">ชื่อ-นามสกุล</p><p style="font-weight: 600; margin: 4px 0 0 0;">${patient.first_name || ''} ${patient.last_name || ''}</p></div>
+              <div><p style="font-size: 12px; color: #666; margin: 0;">HN</p><p style="font-weight: 600; margin: 4px 0 0 0;">${patient.hospital_number || '-'}</p></div>
+              <div><p style="font-size: 12px; color: #666; margin: 0;">อายุ / เพศ</p><p style="font-weight: 600; margin: 4px 0 0 0;">${patient.age || '-'} ปี / ${patient.gender === 'female' ? 'หญิง' : 'ชาย'}</p></div>
+              <div><p style="font-size: 12px; color: #666; margin: 0;">PAM Level</p><p style="font-weight: 600; margin: 4px 0 0 0;"><span style="background: #dbeafe; color: #1d4ed8; padding: 4px 8px; border-radius: 4px; font-size: 14px;">${patient.pam_level || 'L0'}</span></p></div>
+              <div><p style="font-size: 12px; color: #666; margin: 0;">PROMS Zone</p><p style="font-weight: 600; margin: 4px 0 0 0;"><span style="background: ${patient.zone === 'Green Zone' ? '#dcfce7' : patient.zone === 'Yellow Zone' ? '#fef9c3' : patient.zone === 'Red Zone' ? '#fee2e2' : '#f3f4f6'}; color: ${patient.zone === 'Green Zone' ? '#15803d' : patient.zone === 'Yellow Zone' ? '#a16207' : patient.zone === 'Red Zone' ? '#b91c1c' : '#374151'}; padding: 4px 8px; border-radius: 4px; font-size: 14px;">${patient.zone || '-'}</span></p></div>
+              <div><p style="font-size: 12px; color: #666; margin: 0;">โรงพยาบาล</p><p style="font-weight: 600; margin: 4px 0 0 0;">${patient.hospitals?.name || '-'}</p></div>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 24px;">
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">📊 ผลการประเมินตนเอง</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+              <div style="background: #eff6ff; padding: 16px; text-align: center; border: 2px solid #bfdbfe; border-radius: 8px;">
+                <p style="font-size: 14px; color: #666; margin: 0 0 8px 0;">PAM Score</p>
+                <p style="font-size: 36px; font-weight: bold; color: #2563eb; margin: 0;">${latestScreening?.pam_total_score || '-'}</p>
+                <p style="font-size: 14px; color: #374151; margin: 8px 0 0 0;">${patient.pam_level || '-'}</p>
+                <p style="font-size: 12px; color: #9ca3af; margin: 4px 0 0 0;">${latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</p>
+              </div>
+              <div style="background: #faf5ff; padding: 16px; text-align: center; border: 2px solid #e9d5ff; border-radius: 8px;">
+                <p style="font-size: 14px; color: #666; margin: 0 0 8px 0;">PROMS Zone</p>
+                <p style="font-size: 36px; font-weight: bold; color: #9333ea; margin: 0;">${latestScreening?.proms_zone || '-'}</p>
+                <p style="font-size: 14px; color: #374151; margin: 8px 0 0 0;">Q1:${latestScreening?.proms_q1_score || 0} Q2:${latestScreening?.proms_q2_score || 0}</p>
+                <p style="font-size: 12px; color: #9ca3af; margin: 4px 0 0 0;">${latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</p>
+              </div>
+              <div style="background: #f0fdf4; padding: 16px; text-align: center; border: 2px solid #bbf7d0; border-radius: 8px;">
+                <p style="font-size: 14px; color: #666; margin: 0 0 8px 0;">Confidence Score</p>
+                <p style="font-size: 36px; font-weight: bold; color: #16a34a; margin: 0;">${latestScreening?.confidence_score || latestFollowup?.confidence_score || '-'}/10</p>
+                <p style="font-size: 12px; color: #9ca3af; margin: 12px 0 0 0;">${latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 24px;">
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">📊 ค่าสุขภาพปัจจุบัน</h3>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+              <div style="border: 1px solid #e5e7eb; padding: 12px; text-align: center; border-radius: 8px;">
+                <p style="font-size: 12px; color: #666; margin: 0;">น้ำหนัก</p>
+                <p style="font-size: 24px; font-weight: bold; margin: 8px 0 0 0;">${latestWeight} <span style="font-size: 14px;">กก.</span></p>
+              </div>
+              <div style="border: 1px solid #e5e7eb; padding: 12px; text-align: center; border-radius: 8px;">
+                <p style="font-size: 12px; color: #666; margin: 0;">รอบเอว</p>
+                <p style="font-size: 24px; font-weight: bold; margin: 8px 0 0 0;">${latestWaist} <span style="font-size: 14px;">ซม.</span></p>
+              </div>
+              <div style="border: 1px solid #e5e7eb; padding: 12px; text-align: center; border-radius: 8px;">
+                <p style="font-size: 12px; color: #666; margin: 0;">FPG</p>
+                <p style="font-size: 24px; font-weight: bold; margin: 8px 0 0 0;">${latestFpg} <span style="font-size: 14px;">mg/dL</span></p>
+              </div>
+              <div style="border: 1px solid #e5e7eb; padding: 12px; text-align: center; border-radius: 8px;">
+                <p style="font-size: 12px; color: #666; margin: 0;">HbA1c</p>
+                <p style="font-size: 24px; font-weight: bold; margin: 8px 0 0 0;">${latestHba1c} <span style="font-size: 14px;">%</span></p>
+              </div>
+            </div>
+          </div>
+
+          ${latestFollowup ? `
+          <div style="margin-bottom: 24px;">
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">📅 การติดตามล่าสุด (รอบที่ ${latestFollowup.followup_round})</h3>
+            <div style="background: #f9fafb; padding: 16px; border-radius: 8px;">
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px;">
+                <div><p style="font-size: 12px; color: #666; margin: 0;">วันที่ติดตาม</p><p style="font-weight: 600; margin: 4px 0 0 0;">${formatThaiDate(latestFollowup.followup_date)}</p></div>
+                <div><p style="font-size: 12px; color: #666; margin: 0;">สถานะ</p><p style="font-weight: 600; margin: 4px 0 0 0;">${getStatusBadge(latestFollowup.followup_status).text}</p></div>
+                <div><p style="font-size: 12px; color: #666; margin: 0;">ความมั่นใจ</p><p style="font-weight: 600; margin: 4px 0 0 0;">${latestFollowup.confidence_score || '-'}/10</p></div>
+              </div>
+            </div>
+          </div>
+          ` : ''}
+
+          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
+            <span>Community Bridge v1.0</span>
+            <span>หน้า 1</span>
+          </div>
+        </div>
+
+        <!-- Page 2 -->
+        <div style="min-height: 1100px; margin-bottom: 20px;">
+          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
+            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">📋 ประวัติการติดตาม</h2>
+            <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">แสดงข้อมูลย้อนหลังทุกครั้งที่มีการบันทึก</p>
+          </div>
+
+          ${followups.length === 0 ? '<p style="text-align: center; color: #9ca3af; padding: 48px 0;">ยังไม่มีประวัติการติดตาม</p>' : `
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            ${followups.map((f: any, i: number) => `
+              <div style="border: 1px solid ${i === 0 ? '#3b82f6' : '#e5e7eb'}; background: ${i === 0 ? '#eff6ff' : 'white'}; padding: 16px; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                  <span style="font-size: 18px; font-weight: bold;">รอบที่ ${f.followup_round}</span>
+                  <span style="font-size: 14px; color: #666;">${formatThaiDate(f.followup_date)}</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+                  <div style="background: white; padding: 8px; border-radius: 4px;">
+                    <p style="font-size: 12px; color: #666; margin: 0;">น้ำหนัก</p>
+                    <p style="font-weight: 600; margin: 4px 0 0 0;">${f.weight || '-'} กก.</p>
+                  </div>
+                  <div style="background: white; padding: 8px; border-radius: 4px;">
+                    <p style="font-size: 12px; color: #666; margin: 0;">ความดัน</p>
+                    <p style="font-weight: 600; margin: 4px 0 0 0;">${f.blood_pressure_sys && f.blood_pressure_dia ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : '-'} mmHg</p>
+                  </div>
+                  <div style="background: white; padding: 8px; border-radius: 4px;">
+                    <p style="font-size: 12px; color: #666; margin: 0;">FPG</p>
+                    <p style="font-weight: 600; margin: 4px 0 0 0;">${f.blood_sugar_dtx || '-'} mg/dL</p>
+                  </div>
+                  <div style="background: white; padding: 8px; border-radius: 4px;">
+                    <p style="font-size: 12px; color: #666; margin: 0;">ความมั่นใจ</p>
+                    <p style="font-weight: 600; margin: 4px 0 0 0;">${f.confidence_score || '-'}/10</p>
+                  </div>
+                </div>
+                ${f.summary ? `<div style="background: white; padding: 8px; border-radius: 4px; margin-top: 12px;"><p style="font-size: 12px; color: #666; font-weight: 600; margin: 0 0 4px 0;">สรุป:</p><p style="font-size: 14px; margin: 0;">${f.summary}</p></div>` : ''}
+              </div>
+            `).join('')}
+          </div>
+          `}
+
+          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
+            <span>Community Bridge v1.0</span>
+            <span>หน้า 2</span>
+          </div>
+        </div>
+
+        <!-- Page 3: Life Schedule -->
+        ${latestFollowup?.life_schedule_image_url ? `
+        <div style="min-height: 1100px; margin-bottom: 20px;">
+          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
+            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">📋 Life Schedule - ตารางชีวิตประจำวัน</h2>
+            <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">${formatThaiDate(latestFollowup.followup_date)} • รอบที่ ${latestFollowup.followup_round}</p>
+          </div>
+          <div style="border: 2px solid #d1d5db; border-radius: 8px; overflow: hidden;">
+            <img src="${latestFollowup.life_schedule_image_url}" style="width: 100%; height: auto; max-height: 900px;" crossorigin="anonymous" />
+          </div>
+          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
+            <span>Community Bridge v1.0</span>
+            <span>หน้า 3</span>
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Page 4: Charts -->
+        ${(latestFollowup?.floating_chart_image_url || latestFollowup?.dream_card_image_url) ? `
+        <div style="min-height: 1100px; margin-bottom: 20px;">
+          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
+            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">📈 รูปภาพประกอบ</h2>
+            <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">${formatThaiDate(latestFollowup?.followup_date || '')} • รอบที่ ${latestFollowup?.followup_round || '-'}</p>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 24px;">
+            ${latestFollowup?.floating_chart_image_url ? `
+              <div>
+                <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;">📈 Floating Chart - กราฟแนวโน้ม</h3>
+                <div style="border: 2px solid #d1d5db; border-radius: 8px; overflow: hidden; margin-bottom: 8px;">
+                  <img src="${latestFollowup.floating_chart_image_url}" style="width: 100%; height: auto; max-height: 420px;" crossorigin="anonymous" />
+                </div>
+                ${latestFollowup.floating_chart_summary ? `<p style="font-size: 14px; color: #374151; background: #f9fafb; padding: 12px; border-radius: 4px;">${latestFollowup.floating_chart_summary}</p>` : ''}
+              </div>
+            ` : ''}
+            ${latestFollowup?.dream_card_image_url ? `
+              <div>
+                <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;"> Dream Card - บัตรความฝัน</h3>
+                <div style="border: 2px solid #d1d5db; border-radius: 8px; overflow: hidden; margin-bottom: 8px;">
+                  <img src="${latestFollowup.dream_card_image_url}" style="width: 100%; height: auto; max-height: 420px;" crossorigin="anonymous" />
+                </div>
+                ${latestFollowup.dream_card_description ? `<p style="font-size: 14px; color: #374151; background: #f9fafb; padding: 12px; border-radius: 4px;">${latestFollowup.dream_card_description}</p>` : ''}
+              </div>
+            ` : ''}
+          </div>
+          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
+            <span>Community Bridge v1.0</span>
+            <span>หน้า 4</span>
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Page 5: Summary -->
+        <div style="min-height: 1100px;">
+          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
+            <h2 style="font-size: 20px; font-weight: bold; margin: 0;"> สรุปและคำแนะนำ</h2>
+          </div>
+
+          ${latestFollowup ? `
+            ${latestFollowup.summary ? `<div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 16px;"><p style="font-size: 12px; color: #666; font-weight: 600; margin: 0 0 8px 0;">สรุปผลการติดตาม:</p><p style="font-size: 14px; margin: 0;">${latestFollowup.summary}</p></div>` : ''}
+            ${latestFollowup.recommendations ? `<div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 24px;"><p style="font-size: 12px; color: #666; font-weight: 600; margin: 0 0 8px 0;">คำแนะนำ:</p><p style="font-size: 14px; margin: 0; white-space: pre-line;">${latestFollowup.recommendations}</p></div>` : ''}
+          ` : ''}
+
+          <div style="margin-top: 48px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px;">
+            <div style="text-align: center;">
+              <div style="border-bottom: 1px solid #9ca3af; height: 64px; margin-bottom: 8px;"></div>
+              <p style="font-size: 14px; font-weight: 600; margin: 0;">ผู้บันทึก (อสม./เจ้าหน้าที่)</p>
+            </div>
+            <div style="text-align: center;">
+              <div style="border-bottom: 1px solid #9ca3af; height: 64px; margin-bottom: 8px;"></div>
+              <p style="font-size: 14px; font-weight: 600; margin: 0;">ผู้ป่วย/ญาติ</p>
+            </div>
+          </div>
+
+          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
+            <span>Community Bridge v1.0 • ระบบดูแลผู้ป่วย PreDM</span>
+            <span>หน้า 5</span>
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  // ✅ ฟังก์ชันสร้าง PDF จากข้อมูลผู้ป่วย
+  const generatePatientPDF = async (patientId: string): Promise<Blob> => {
+    const { patient, followups, screenings } = await fetchPatientFullData(patientId);
+    
+    // สร้าง container ชั่วคราวสำหรับ render HTML
+    const container = document.createElement('div');
+    container.style.position = 'absolute';
+    container.style.left = '-10000px';
+    container.style.top = '0';
+    container.style.width = '800px';
+    container.innerHTML = renderPatientHTML(patient, followups, screenings);
+    document.body.appendChild(container);
+
+    // รอให้รูปภาพโหลดเสร็จ
+    const images = container.querySelectorAll('img');
+    await Promise.all(
+      Array.from(images).map(img => {
+        return new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve();
+          } else {
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+          }
+        });
+      })
+    );
+
+    // รอเพิ่มเล็กน้อยให้ render เสร็จ
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    try {
+      const canvas = await html2canvas(container, {
+        scale: 1.5,
+        useCORS: true,
+        allowTaint: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 800,
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = pdfWidth / imgWidth;
+      const scaledHeight = imgHeight * ratio;
+
+      let heightLeft = scaledHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+      heightLeft -= pdfHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - scaledHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+        heightLeft -= pdfHeight;
+      }
+
+      return pdf.output('blob');
+    } finally {
+      document.body.removeChild(container);
+    }
+  };
+
+  // ✅ ฟังก์ชันบันทึกรวม - เลือกโฟลเดอร์แล้วบันทึกทั้งหมด
+  const handleBatchRecord = async () => {
     if (exportQueue.length === 0) {
       alert('ไม่มีรายการที่จะบันทึก');
       return;
     }
 
-    const confirmed = window.confirm(
-      `จะบันทึกรายการ ${exportQueue.length} คน ลงเครื่องอัตโนมัติ\n\n` +
-      `วิธีทำงาน:\n` +
-      `1. ระบบจะเปิดหน้าระเบียนและบันทึก PDF ลงเครื่องทันที\n` +
-      `2. เมื่อบันทึกเสร็จ กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไปและบันทึกอัตโนมัติ\n` +
-      `3. ทำเช่นนี้จนครบทุกคนที่เลือก\n\n` +
-      `ต้องการเริ่มต้นการบันทึกรวมหรือไม่?`
-    );
+    // ตรวจสอบว่า browser รองรับ File System Access API หรือไม่
+    const supportsFileSystemAccess = 'showDirectoryPicker' in window;
 
-    if (!confirmed) {
+    if (!supportsFileSystemAccess) {
+      // Fallback: ใช้ ZIP
+      const confirmed = window.confirm(
+        `เบราว์เซอร์ของคุณไม่รองรับการเลือกโฟลเดอร์โดยตรง\n\n` +
+        `ระบบจะบันทึกรวมเป็นไฟล์ ZIP (${exportQueue.length} ไฟล์) แทน\n\n` +
+        `ต้องการดำเนินการต่อหรือไม่?`
+      );
+      if (!confirmed) return;
+      await handleBatchRecordAsZip();
       return;
     }
 
-    setIsSequentialRecording(true);
-    setSequentialProgress(0);
+    // ✅ ใช้ File System Access API
+    const confirmed = window.confirm(
+      `จะบันทึกรายการ ${exportQueue.length} คน ลงในโฟลเดอร์ที่คุณเลือก\n\n` +
+      `• ระบบจะเปิดหน้าต่างเลือกโฟลเดอร์\n` +
+      `• PDF จะถูกบันทึกลงโฟลเดอร์นั้นโดยตรง\n` +
+      `• ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf\n\n` +
+      `ต้องการดำเนินการต่อหรือไม่?`
+    );
 
-    if (exportQueue.length > 0) {
-      const firstPatient = exportQueue[0];
-      router.push(`/admin/reports/patient-record/${firstPatient.id}?print=true&auto=true&batch=true&batchIndex=0&batchTotal=${exportQueue.length}`);
+    if (!confirmed) return;
+
+    try {
+      // เปิด Directory Picker
+      const dirHandle = await (window as any).showDirectoryPicker({
+        mode: 'readwrite',
+        startIn: 'downloads',
+      });
+
+      setIsBatchRecording(true);
+      setBatchStatus('recording');
+      setBatchProgress(0);
+      setBatchTotal(exportQueue.length);
+      setBatchSuccess(0);
+      setBatchFailed(0);
+
+      let successCount = 0;
+      let failedCount = 0;
+
+      for (let i = 0; i < exportQueue.length; i++) {
+        const patient = exportQueue[i];
+        const patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim();
+        
+        setBatchCurrentName(patientName);
+        setBatchProgress(i + 1);
+
+        try {
+          // สร้าง PDF
+          const pdfBlob = await generatePatientPDF(patient.id);
+
+          // สร้างชื่อไฟล์
+          const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
+          const hn = patient.hospital_number || 'ไม่มีHN';
+          const firstName = patient.first_name || 'ไม่ระบุชื่อ';
+          const lastName = patient.last_name || '';
+          const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_') + '.pdf';
+
+          // บันทึกไฟล์ลงในโฟลเดอร์
+          const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(pdfBlob);
+          await writable.close();
+
+          successCount++;
+          setBatchSuccess(successCount);
+          console.log(`✅ [Batch] บันทึกสำเร็จ: ${fileName}`);
+        } catch (error) {
+          console.error(`❌ [Batch] บันทึก失敗: ${patientName}`, error);
+          failedCount++;
+          setBatchFailed(failedCount);
+        }
+      }
+
+      setBatchStatus('done');
+      alert(
+        `✅ บันทึกรายการเสร็จสิ้น!\n\n` +
+        `✓ สำเร็จ: ${successCount} ไฟล์\n` +
+        `✗ ล้มเหลว: ${failedCount} ไฟล์\n\n` +
+        `ไฟล์ถูกบันทึกในโฟลเดอร์: ${dirHandle.name}`
+      );
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        alert('❌ ยกเลิกการเลือกโฟลเดอร์');
+      } else {
+        console.error(' [Batch] Error:', error);
+        setBatchStatus('error');
+        setBatchErrorMessage(error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
+        alert('❌ เกิดข้อผิดพลาด: ' + (error.message || 'กรุณาลองใหม่อีกครั้ง'));
+      }
+    } finally {
+      setIsBatchRecording(false);
     }
   };
 
-  const openPatientRecord = (patientId: string) => {
-    router.push(`/admin/reports/patient-record/${patientId}?print=true&auto=true`);
+  // ✅ Fallback: บันทึกรวมเป็น ZIP
+  const handleBatchRecordAsZip = async () => {
+    setIsBatchRecording(true);
+    setBatchStatus('recording');
+    setBatchProgress(0);
+    setBatchTotal(exportQueue.length);
+    setBatchSuccess(0);
+    setBatchFailed(0);
+
+    const zip = new JSZip();
+    let successCount = 0;
+    let failedCount = 0;
+
+    try {
+      for (let i = 0; i < exportQueue.length; i++) {
+        const patient = exportQueue[i];
+        const patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim();
+        
+        setBatchCurrentName(patientName);
+        setBatchProgress(i + 1);
+
+        try {
+          const pdfBlob = await generatePatientPDF(patient.id);
+
+          const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
+          const hn = patient.hospital_number || 'ไม่มีHN';
+          const firstName = patient.first_name || 'ไม่ระบุชื่อ';
+          const lastName = patient.last_name || '';
+          const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_') + '.pdf';
+
+          zip.file(fileName, pdfBlob);
+          successCount++;
+          setBatchSuccess(successCount);
+        } catch (error) {
+          console.error(`❌ [ZIP] Error: ${patientName}`, error);
+          failedCount++;
+          setBatchFailed(failedCount);
+        }
+      }
+
+      setBatchCurrentName('กำลังสร้างไฟล์ ZIP...');
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      
+      // ดาวน์โหลด ZIP
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ระเบียนคนไข้_${new Date().toISOString().slice(0, 10)}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setBatchStatus('done');
+      alert(
+        `✅ บันทึกรายการเสร็จสิ้น!\n\n` +
+        `✓ สำเร็จ: ${successCount} ไฟล์\n` +
+        `✗ ล้มเหลว: ${failedCount} ไฟล์\n\n` +
+        `ไฟล์ ZIP ถูกดาวน์โหลดแล้ว`
+      );
+    } catch (error: any) {
+      console.error('❌ [ZIP] Error:', error);
+      setBatchStatus('error');
+      setBatchErrorMessage(error.message);
+      alert('❌ เกิดข้อผิดพลาด: ' + (error.message || 'กรุณาลองใหม่อีกครั้ง'));
+    } finally {
+      setIsBatchRecording(false);
+    }
   };
 
   const closeExportList = () => {
+    if (isBatchRecording) {
+      if (!confirm('กำลังบันทึกรายการอยู่ ต้องการยกเลิกหรือไม่?')) {
+        return;
+      }
+    }
     setShowExportList(false);
     setExportQueue([]);
-    setSequentialProgress(0);
-    setIsSequentialRecording(false);
+    setBatchProgress(0);
+    setBatchSuccess(0);
+    setBatchFailed(0);
+    setBatchStatus('idle');
   };
 
   const getSelectedHospitalName = () => {
@@ -388,8 +932,8 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
-                       user?.role === 'osm' ? '️ อสม.' : '👩💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨⚕️ แพทย์' :
+                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -457,7 +1001,7 @@ function PatientRecordContent() {
           </div>
         </div>
 
-        {/* Export Buttons - อยู่ด้านบน เห็นชัดเจน */}
+        {/* Export Buttons */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 mb-6 text-white">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
@@ -473,20 +1017,12 @@ function PatientRecordContent() {
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => handleExport('individual')}
+                onClick={handleExport}
                 disabled={selectedPatients.size === 0}
                 className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
               >
                 <FileText className="w-5 h-5" />
-                แยกไฟล์ ({selectedPatients.size})
-              </button>
-              <button
-                onClick={() => handleExport('zip')}
-                disabled={selectedPatients.size === 0}
-                className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-              >
-                <FileArchive className="w-5 h-5" />
-                รวม ZIP ({selectedPatients.size})
+                บันทึกรวม ({selectedPatients.size})
               </button>
             </div>
           </div>
@@ -657,67 +1193,35 @@ function PatientRecordContent() {
             </table>
           </div>
 
-          {/* Pagination Controls */}
+          {/* Pagination */}
           {totalPages > 1 && (
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
               <div className="text-sm text-gray-600">
                 แสดง {startIndex + 1} - {Math.min(endIndex, filteredPatients.length)} จาก {filteredPatients.length} คน
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setCurrentPage(1)}
-                  disabled={currentPage === 1}
-                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50">
                   <ChevronsLeft className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   let pageNum;
-                  if (totalPages <= 5) {
-                    pageNum = i + 1;
-                  } else if (currentPage <= 3) {
-                    pageNum = i + 1;
-                  } else if (currentPage >= totalPages - 2) {
-                    pageNum = totalPages - 4 + i;
-                  } else {
-                    pageNum = currentPage - 2 + i;
-                  }
-                  
+                  if (totalPages <= 5) pageNum = i + 1;
+                  else if (currentPage <= 3) pageNum = i + 1;
+                  else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
+                  else pageNum = currentPage - 2 + i;
                   return (
-                    <button
-                      key={pageNum}
-                      onClick={() => setCurrentPage(pageNum)}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                        currentPage === pageNum
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white border border-gray-300 hover:bg-gray-100'
-                      }`}
-                    >
+                    <button key={pageNum} onClick={() => setCurrentPage(pageNum)} className={`px-3 py-2 rounded-lg text-sm font-medium ${currentPage === pageNum ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 hover:bg-gray-100'}`}>
                       {pageNum}
                     </button>
                   );
                 })}
-                
-                <button
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50">
                   <ChevronRight className="w-4 h-4" />
                 </button>
-                <button
-                  onClick={() => setCurrentPage(totalPages)}
-                  disabled={currentPage === totalPages}
-                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50">
                   <ChevronsRight className="w-4 h-4" />
                 </button>
               </div>
@@ -732,108 +1236,145 @@ function PatientRecordContent() {
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between">
               <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                <Printer className="w-6 h-6 text-blue-600" />
-                รายการบันทึกรวม ({exportQueue.length} คน)
+                <FolderOpen className="w-6 h-6 text-blue-600" />
+                บันทึกรายการรวม ({exportQueue.length} คน)
               </h3>
-              <button onClick={closeExportList} className="text-gray-400 hover:text-gray-600">
+              <button onClick={closeExportList} className="text-gray-400 hover:text-gray-600" disabled={isBatchRecording}>
                 <X className="w-6 h-6" />
               </button>
             </div>
 
             <div className="p-6">
-              {/* ✅ ปุ่มเริ่มบันทึกรวม */}
-              <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h4 className="font-bold text-lg mb-1"> บันทึกรวมทั้งหมด (Auto-Save)</h4>
-                    <p className="text-sm text-blue-100">
-                      ระบบจะเปิดและบันทึกรายการลงเครื่องอัตโนมัติทีละคน (ไม่ต้องกด Save เอง)
-                    </p>
+              {/* ✅ ปุ่มบันทึกรวม */}
+              {batchStatus === 'idle' && (
+                <>
+                  <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h4 className="font-bold text-lg mb-1">💾 บันทึกรวมทั้งหมด</h4>
+                        <p className="text-sm text-blue-100">
+                          เลือกโฟลเดอร์ → ระบบจะบันทึก PDF {exportQueue.length} ไฟล์ลงโฟลเดอร์นั้นทันที
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleBatchRecord}
+                        className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all font-bold flex items-center gap-2 shadow-lg"
+                      >
+                        <HardDrive className="w-5 h-5" />
+                        เลือกโฟลเดอร์และบันทึก
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    onClick={handleSequentialRecord}
-                    disabled={isSequentialRecording}
-                    className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                  >
-                    {isSequentialRecording ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        กำลังบันทึก...
-                      </>
-                    ) : (
-                      <>
-                        <ExternalLink className="w-5 h-5" />
-                        เริ่มบันทึกรวม ({exportQueue.length})
-                      </>
-                    )}
-                  </button>
+
+                  <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <div className="flex items-start gap-3">
+                      <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-bold text-blue-800 mb-2">📋 วิธีใช้งาน:</p>
+                        <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                          <li>กดปุ่ม "เลือกโฟลเดอร์และบันทึก" ด้านบน</li>
+                          <li>เลือกโฟลเดอร์ปลายทางที่ต้องการบันทึก</li>
+                          <li>ระบบจะสร้าง PDF และบันทึกลงโฟลเดอร์ทันที (แยกไฟล์ตามชื่อ)</li>
+                          <li>รอจนกว่าระบบจะบันทึกครบทุกคน</li>
+                        </ol>
+                        <p className="text-xs text-blue-600 mt-3 italic">
+                          💡 ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf
+                        </p>
+                        <p className="text-xs text-blue-600 mt-1 italic">
+                          💻 รองรับ Chrome/Edge บน Desktop (Firefox/Safari จะบันทึกเป็น ZIP แทน)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* ✅ Progress Bar */}
+              {batchStatus === 'recording' && (
+                <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
+                  <div className="flex items-center gap-3 mb-4">
+                    <Loader2 className="w-8 h-8 animate-spin" />
+                    <div>
+                      <h4 className="font-bold text-lg">กำลังบันทึกรายการ...</h4>
+                      <p className="text-sm text-blue-100">
+                        {batchCurrentName && `กำลังบันทึก: ${batchCurrentName}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mb-2">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span>ความคืบหน้า:</span>
+                      <span className="font-bold">{batchProgress} / {batchTotal} คน</span>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="h-3 bg-white rounded-full transition-all duration-300"
+                        style={{ width: `${batchTotal > 0 ? (batchProgress / batchTotal) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-xs mt-3 text-blue-100">
+                    <span>✅ สำเร็จ: {batchSuccess}</span>
+                    {batchFailed > 0 && <span>❌ ล้มเหลว: {batchFailed}</span>}
+                  </div>
                 </div>
+              )}
 
-                {isSequentialRecording && (
-                  <div className="mt-3 p-3 bg-white bg-opacity-20 rounded-lg">
-                    <p className="text-sm">
-                      ⏳ กำลังบันทึกรายการคนที่ {sequentialProgress + 1} จาก {exportQueue.length}...
-                    </p>
+              {/* ✅ Success */}
+              {batchStatus === 'done' && (
+                <div className="mb-6 p-6 bg-green-50 rounded-lg border border-green-200">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle className="w-8 h-8 text-green-600 flex-shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-lg text-green-800 mb-2">✅ บันทึกรายการเสร็จสิ้น!</h4>
+                      <p className="text-sm text-green-700 mb-2">
+                        ✓ สำเร็จ: <strong>{batchSuccess}</strong> ไฟล์
+                      </p>
+                      {batchFailed > 0 && (
+                        <p className="text-sm text-yellow-700 mb-2">
+                          ✗ ล้มเหลว: <strong>{batchFailed}</strong> ไฟล์
+                        </p>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
-              <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-sm text-blue-800 mb-2">
-                  <strong>📋 วิธีใช้งาน:</strong>
-                </p>
-                <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
-                  <li>กดปุ่ม "เริ่มบันทึกรวม" ด้านบน</li>
-                  <li>ระบบจะเปิดหน้าระเบียนและบันทึก PDF ลงเครื่องทันที</li>
-                  <li>เมื่อบันทึกเสร็จ กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไปและบันทึกอัตโนมัติ</li>
-                  <li>ทำเช่นนี้จนครบทุกคนที่เลือก</li>
-                </ol>
-              </div>
+              {/* ✅ Error */}
+              {batchStatus === 'error' && (
+                <div className="mb-6 p-6 bg-red-50 rounded-lg border border-red-200">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-8 h-8 text-red-600 flex-shrink-0" />
+                    <div>
+                      <h4 className="font-bold text-lg text-red-800 mb-2">❌ เกิดข้อผิดพลาด</h4>
+                      <p className="text-sm text-red-700">{batchErrorMessage}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* รายการผู้ป่วย */}
               <div className="space-y-3">
+                <h4 className="font-semibold text-gray-700">รายการที่จะบันทึก ({exportQueue.length} คน):</h4>
                 {exportQueue.map((patient, index) => (
                   <div
                     key={patient.id}
-                    className={`flex items-center justify-between p-4 rounded-lg border ${
-                      index < sequentialProgress
-                        ? 'bg-green-50 border-green-200'
-                        : index === sequentialProgress && isSequentialRecording
-                        ? 'bg-blue-50 border-blue-200'
-                        : 'bg-white border-gray-200'
-                    }`}
+                    className="flex items-center justify-between p-3 rounded-lg border bg-white border-gray-200"
                   >
                     <div className="flex items-center gap-3 flex-1">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${
-                        index < sequentialProgress ? 'bg-green-500' : 
-                        index === sequentialProgress && isSequentialRecording ? 'bg-blue-500' : 'bg-gray-400'
-                      }`}>
-                        {index < sequentialProgress ? (
-                          <CheckCircle className="w-5 h-5" />
-                        ) : (
-                          index + 1
-                        )}
+                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold bg-blue-500">
+                        {index + 1}
                       </div>
                       <div className="flex-1">
                         <p className="font-semibold text-gray-900">
                           {patient.first_name} {patient.last_name}
-                          {index === sequentialProgress && isSequentialRecording && (
-                            <span className="ml-2 text-xs text-blue-600 font-medium">← กำลังบันทึก</span>
-                          )}
                         </p>
                         <p className="text-xs text-gray-500">
                           HN: {patient.hospital_number || '-'} | {patient.hospitals?.name || '-'}
                         </p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => openPatientRecord(patient.id)}
-                      disabled={isSequentialRecording}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Printer className="w-4 h-4" />
-                      บันทึกรายการ
-                    </button>
+                    <CheckCircle className="w-5 h-5 text-green-500" />
                   </div>
                 ))}
               </div>
@@ -842,7 +1383,8 @@ function PatientRecordContent() {
             <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 flex justify-end">
               <button
                 onClick={closeExportList}
-                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
+                disabled={isBatchRecording}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:opacity-50"
               >
                 ปิด
               </button>
