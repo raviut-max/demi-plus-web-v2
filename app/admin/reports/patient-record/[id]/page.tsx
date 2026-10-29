@@ -1,6 +1,9 @@
 // app/admin/reports/patient-record/[id]/page.tsx
-// ✅ หน้าแสดงระเบียนคนไข้แบบ 5 หน้า A4
-// ✅ รองรับ Print/Export PDF
+// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
+// ✅ การแก้ไข:
+//    1. เพิ่ม useEffect ตั้งชื่อไฟล์ PDF อัตโนมัติ
+//    2. ใช้ทั้ง document.title และ <title> tag
+//    3. เพิ่ม console.log สำหรับ debug
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -92,7 +95,37 @@ export default function PatientRecordDetailPage() {
     }
     setUser(userData);
     loadPatientData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, router]);
+
+  // ✅ ตั้งชื่อไฟล์ PDF อัตโนมัติเมื่อโหลดข้อมูลผู้ป่วยเสร็จ
+  useEffect(() => {
+    if (patient) {
+      const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
+      const hn = patient.hospital_number || 'ไม่มีHN';
+      const firstName = patient.first_name || 'ไม่ระบุชื่อ';
+      const lastName = patient.last_name || '';
+
+      // สร้างสตริงชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล
+      const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
+
+      // วิธีที่ 1: เปลี่ยน document.title
+      document.title = fileName;
+      
+      // วิธีที่ 2: เปลี่ยน <title> tag ใน head
+      const titleElement = document.querySelector('title');
+      if (titleElement) {
+        titleElement.textContent = fileName;
+      } else {
+        const newTitle = document.createElement('title');
+        newTitle.textContent = fileName;
+        document.head.appendChild(newTitle);
+      }
+
+      // Debug: แสดงชื่อที่ตั้งใน Console
+      console.log('📄 [PDF FileName] ตั้งชื่อไฟล์เป็น:', fileName);
+    }
+  }, [patient]);
 
   const loadPatientData = async () => {
     try {
@@ -171,7 +204,7 @@ export default function PatientRecordDetailPage() {
     const statusMap: any = {
       'completed': { text: '✅ ตามแผน', class: 'text-green-600' },
       'not_completed': { text: '❌ ไม่ตามแผน', class: 'text-red-600' },
-      'not_in_plan': { text: ' ไม่มีในแผน', class: 'text-gray-500' }
+      'not_in_plan': { text: '⚪ ไม่มีในแผน', class: 'text-gray-500' }
     };
     return statusMap[status || ''] || { text: '-', class: 'text-gray-500' };
   };
@@ -194,7 +227,7 @@ export default function PatientRecordDetailPage() {
           <p className="text-gray-600">ไม่พบข้อมูลผู้ป่วย</p>
           <button
             onClick={() => router.push('/admin/reports/patient-record')}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg"
+            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
             กลับ
           </button>
@@ -217,7 +250,7 @@ export default function PatientRecordDetailPage() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
+                📄 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
               </h1>
               <p className="text-gray-600">HN: {patient.hospital_number || '-'}</p>
             </div>
@@ -518,7 +551,7 @@ export default function PatientRecordDetailPage() {
             <div className="space-y-6">
               {latestFollowup?.floating_chart_image_url && (
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Floating Chart - กราฟแนวโน้ม</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3"> Floating Chart - กราฟแนวโน้ม</h3>
                   <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
                     <img
                       src={latestFollowup.floating_chart_image_url}
@@ -565,7 +598,7 @@ export default function PatientRecordDetailPage() {
         {/* ===== PAGE 5: สรุปและลายเซ็น ===== */}
         <div className="bg-white p-8" style={{ minHeight: '297mm' }}>
           <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <h2 className="text-xl font-bold text-gray-900">📝 สรุปและคำแนะนำ</h2>
+            <h2 className="text-xl font-bold text-gray-900"> สรุปและคำแนะนำ</h2>
           </div>
 
           {latestFollowup && (
