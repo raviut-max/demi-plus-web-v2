@@ -1,18 +1,15 @@
 // app/admin/reports/patient-record/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ บันทึก PDF อัตโนมัติ (ไม่ต้องกดปุ่ม)
+// ✅ บันทึก PDF โดยตรงอัตโนมัติ (ไม่มี Print Dialog)
 'use client';
 import { useEffect, useState, Suspense, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { checkSession, logout } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
-import {
-  ArrowLeft, Download, LogOut, Loader2
-} from 'lucide-react';
+import { ArrowLeft, Download, LogOut, Loader2, CheckCircle } from 'lucide-react';
 
-// ✅ Dynamic import สำหรับไลบรารี PDF (แก้ปัญหา Next.js)
+// ✅ Dynamic import เพื่อป้องกันปัญหา SSR ใน Next.js
 import dynamic from 'next/dynamic';
-
 const jsPDF = dynamic(() => import('jspdf'), { ssr: false });
 const html2canvas = dynamic(() => import('html2canvas'), { ssr: false });
 
@@ -81,7 +78,6 @@ function PatientRecordContent() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
-  const isPrintMode = searchParams.get('print') === 'true';
   const isAutoDownload = searchParams.get('auto') === 'true';
   const patientId = params.id as string;
 
@@ -91,7 +87,7 @@ function PatientRecordContent() {
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
-  const [autoDownloaded, setAutoDownloaded] = useState(false);
+  const [isDownloaded, setIsDownloaded] = useState(false);
   
   const pdfContentRef = useRef<HTMLDivElement>(null);
 
@@ -126,17 +122,16 @@ function PatientRecordContent() {
     }
   }, [patient]);
 
-  // ✅ Auto-download เมื่อเปิดหน้า (ครั้งเดียว)
+  // ✅ Auto-download เมื่อเปิดหน้า (รอ 2.5 วินาทีให้รูปภาพโหลดเสร็จ)
   useEffect(() => {
-    if (isPrintMode && isAutoDownload && patient && !autoDownloaded && !isGeneratingPDF) {
+    if (isAutoDownload && patient && !isGeneratingPDF && !isDownloaded) {
       const timer = setTimeout(() => {
-        console.log('📥 [Auto-Download] เริ่มบันทึก PDF อัตโนมัติ');
+        console.log('📥 [Auto-Download] เริ่มบันทึกรายการอัตโนมัติ');
         handleDownloadPDF();
-      }, 2000);
-      
+      }, 2500);
       return () => clearTimeout(timer);
     }
-  }, [isPrintMode, isAutoDownload, patient, autoDownloaded, isGeneratingPDF]);
+  }, [isAutoDownload, patient, isGeneratingPDF, isDownloaded]);
 
   const loadPatientData = async () => {
     try {
@@ -155,26 +150,21 @@ function PatientRecordContent() {
       if (patientError) throw patientError;
       setPatient(patientData);
 
-      const { data: followupData, error: followupError } = await supabase
+      const { data: followupData } = await supabase
         .from('appointment_followups')
         .select('*')
         .eq('user_id', patientId)
         .order('followup_date', { ascending: false });
-
-      if (followupError) throw followupError;
       setFollowups(followupData || []);
 
-      const { data: screeningData, error: screeningError } = await supabase
+      const { data: screeningData } = await supabase
         .from('screenings')
         .select('*')
         .eq('user_id', patientId)
         .order('screening_date', { ascending: false });
-
-      if (screeningError) throw screeningError;
       setScreenings(screeningData || []);
 
       const latestFollowup = followupData?.[0];
-      
       setLatestHealthData({
         weight: latestFollowup?.weight ?? patientData?.current_weight ?? null,
         waist: latestFollowup?.waist_circumference ?? patientData?.waist_circumference ?? null,
@@ -184,7 +174,6 @@ function PatientRecordContent() {
         bpDia: latestFollowup?.blood_pressure_dia ?? null,
         healthDataDate: latestFollowup?.followup_date ?? patientData?.program_start_date ?? null,
       });
-
     } catch (error) {
       console.error('Error loading patient data:', error);
     } finally {
@@ -192,71 +181,61 @@ function PatientRecordContent() {
     }
   };
 
-  // ✅ ฟังก์ชันบันทึก PDF
   const handleDownloadPDF = async () => {
-    if (!pdfContentRef.current) {
-      console.error('❌ [PDF] ไม่พบเนื้อหาสำหรับสร้าง PDF');
-      return;
-    }
-
-    if (isGeneratingPDF) {
-      console.log('⚠️ [PDF] กำลังสร้าง PDF อยู่แล้ว');
-      return;
-    }
+    if (!pdfContentRef.current || isGeneratingPDF) return;
 
     setIsGeneratingPDF(true);
-
     try {
-      console.log('📥 [PDF] เริ่มสร้าง PDF...');
-      
-      // รอให้หน้าโหลดเสร็จ
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // รอให้ DOM และรูปภาพ Render สมบูรณ์
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Capture หน้าเว็บ
       const canvas = await html2canvas(pdfContentRef.current, {
-        scale: 2,
+        scale: 1.5, // ลด scale เพื่อป้องกัน Memory Crash แต่ยังคงความคมชัด
         useCORS: true,
+        allowTaint: true,
         logging: false,
         backgroundColor: '#ffffff',
-        allowTaint: true,
-      });
-
-      console.log('📥 [PDF] Capture สำเร็จ กำลังสร้างไฟล์ PDF...');
-
-      // สร้าง PDF
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
+        windowWidth: 1000, // บังคับความกว้างให้คงที่
       });
 
       const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       const imgWidth = canvas.width;
       const imgHeight = canvas.height;
-      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
-      const imgX = (pdfWidth - imgWidth * ratio) / 2;
-      const imgY = 0;
+      const ratio = pdfWidth / imgWidth;
+      const scaledHeight = imgHeight * ratio;
 
-      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+      let heightLeft = scaledHeight;
+      let position = 0;
 
-      // ตั้งชื่อไฟล์
+      // หน้าแรก
+      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+      heightLeft -= pdfHeight;
+
+      // หน้าที่เหลือ (ถ้ามี)
+      while (heightLeft > 0) {
+        position = heightLeft - scaledHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+        heightLeft -= pdfHeight;
+      }
+
       const hospitalName = patient?.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
       const hn = patient?.hospital_number || 'ไม่มีHN';
       const firstName = patient?.first_name || 'ไม่ระบุชื่อ';
       const lastName = patient?.last_name || '';
       const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
 
-      // ดาวน์โหลด PDF
       pdf.save(`${fileName}.pdf`);
-      
+      setIsDownloaded(true);
       console.log('✅ [PDF] บันทึกสำเร็จ:', fileName);
-      setAutoDownloaded(true);
 
     } catch (error) {
       console.error('❌ [PDF] เกิดข้อผิดพลาด:', error);
-      alert('เกิดข้อผิดพลาดในการบันทึก PDF');
+      alert('เกิดข้อผิดพลาดในการบันทึก PDF กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -266,34 +245,19 @@ function PatientRecordContent() {
     if (!dateString) return '-';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return '-';
-    const thaiMonths = [
-      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
-    ];
-    const day = date.getDate();
-    const month = thaiMonths[date.getMonth()];
-    const yearBE = date.getFullYear() + 543;
-    return `${day} ${month} ${yearBE}`;
+    const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    return `${date.getDate()} ${thaiMonths[date.getMonth()]} ${date.getFullYear() + 543}`;
   };
 
   const getStatusBadge = (status: string | null) => {
-    const statusMap: any = {
+    const map: any = {
       'excellent': { text: 'ดีเยี่ยม', class: 'bg-green-100 text-green-700' },
       'good': { text: 'ดี', class: 'bg-blue-100 text-blue-700' },
       'fair': { text: 'พอใช้', class: 'bg-yellow-100 text-yellow-700' },
       'needs_improvement': { text: 'ต้องปรับปรุง', class: 'bg-red-100 text-red-700' },
       'monitoring': { text: 'เฝ้าระวัง', class: 'bg-purple-100 text-purple-700' }
     };
-    return statusMap[status || ''] || { text: status || '-', class: 'bg-gray-100 text-gray-700' };
-  };
-
-  const getComplianceStatus = (status: string | null) => {
-    const statusMap: any = {
-      'completed': { text: '✅ ตามแผน', class: 'text-green-600' },
-      'not_completed': { text: '❌ ไม่ตามแผน', class: 'text-red-600' },
-      'not_in_plan': { text: ' ไม่มีในแผน', class: 'text-gray-500' }
-    };
-    return statusMap[status || ''] || { text: '-', class: 'text-gray-500' };
+    return map[status || ''] || { text: status || '-', class: 'bg-gray-100 text-gray-700' };
   };
 
   if (loading) {
@@ -312,12 +276,7 @@ function PatientRecordContent() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <p className="text-gray-600">ไม่พบข้อมูลผู้ป่วย</p>
-          <button
-            onClick={() => router.back()}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            กลับ
-          </button>
+          <button onClick={() => router.back()} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">กลับ</button>
         </div>
       </div>
     );
@@ -328,112 +287,64 @@ function PatientRecordContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200 print:hidden">
+      {/* Header - ซ่อนเมื่อกำลังสร้าง PDF */}
+      <div className={`bg-white shadow-sm border-b border-gray-200 ${isGeneratingPDF ? 'hidden' : ''}`}>
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
-            <ArrowLeft className="w-4 h-4" /> กลับไปหน้าเลือกรายงาน
+            <ArrowLeft className="w-4 h-4" /> กลับไปหน้าเลือกรายการ
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
-              </h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">📄 ระเบียนคนไข้: {patient.first_name} {patient.last_name}</h1>
               <p className="text-gray-600">HN: {patient.hospital_number || '-'}</p>
               {isAutoDownload && (
                 <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                  <Download className="w-3 h-3" />
-                  Auto-Download: PDF จะถูกบันทึกอัตโนมัติ
+                  {isDownloaded ? <CheckCircle className="w-3 h-3" /> : <Loader2 className="w-3 h-3 animate-spin" />}
+                  {isDownloaded ? 'บันทึกรายการเรียบร้อยแล้ว' : 'ระบบกำลังบันทึกรายการอัตโนมัติ...'}
                 </p>
               )}
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={handleDownloadPDF}
-                disabled={isGeneratingPDF}
+                disabled={isGeneratingPDF || isDownloaded}
                 className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isGeneratingPDF ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    กำลังบันทึก...
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-5 h-5" />
-                    บันทึก PDF
-                  </>
-                )}
+                {isGeneratingPDF ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
+                {isDownloaded ? 'บันทึกรายการแล้ว' : 'บันทึกรายการ PDF'}
               </button>
-              <button
-                onClick={() => { logout(); router.push('/admin/login'); }}
-                className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
-              >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
+              <button onClick={() => { logout(); router.push('/admin/login'); }} className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg">
+                <LogOut className="w-4 h-4" /> ออกจากระบบ
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* PDF Content */}
-      <div ref={pdfContentRef} className="max-w-4xl mx-auto px-4 py-8 print:px-0 print:py-0">
+      {/* ✅ พื้นที่ที่จะถูกแปลงเป็น PDF */}
+      <div ref={pdfContentRef} className="max-w-4xl mx-auto px-4 py-8">
         {/* ===== PAGE 1 ===== */}
-        <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
-          <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-blue-600">Community Bridge</h1>
-                <p className="text-sm text-gray-600">ระบบดูแลผู้ป่วยกลุ่มเสี่ยงเบาหวาน (PreDM)</p>
-              </div>
-              <div className="text-right">
-                <h2 className="text-xl font-bold text-gray-900">ระเบียนติดตามผล</h2>
-                <p className="text-sm text-gray-600">Follow-up Record</p>
-              </div>
+        <div className="bg-white p-8 mb-8" style={{ minHeight: '297mm' }}>
+          <div className="border-b-2 border-blue-600 pb-4 mb-6 flex justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-blue-600">Community Bridge</h1>
+              <p className="text-sm text-gray-600">ระบบดูแลผู้ป่วยกลุ่มเสี่ยงเบาหวาน (PreDM)</p>
+            </div>
+            <div className="text-right">
+              <h2 className="text-xl font-bold text-gray-900">ระเบียนติดตามผล</h2>
+              <p className="text-sm text-gray-600">Follow-up Record</p>
             </div>
           </div>
 
           <div className="bg-blue-50 rounded-lg p-4 mb-6 border-l-4 border-blue-500">
             <h3 className="text-lg font-bold text-gray-900 mb-3">👤 ข้อมูลผู้ป่วย</h3>
             <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs text-gray-600">ชื่อ-นามสกุล</p>
-                <p className="font-semibold">{patient.first_name} {patient.last_name}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">HN</p>
-                <p className="font-semibold">{patient.hospital_number || '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">อายุ / เพศ</p>
-                <p className="font-semibold">{patient.age || '-'} ปี / {patient.gender === 'female' ? 'หญิง' : 'ชาย'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">PAM Level</p>
-                <p className="font-semibold">
-                  <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm">
-                    {patient.pam_level || 'L0'}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">PROMS Zone</p>
-                <p className="font-semibold">
-                  <span className={`px-2 py-1 rounded text-sm ${
-                    patient.zone === 'Green Zone' ? 'bg-green-100 text-green-700' :
-                    patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
-                    patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {patient.zone || '-'}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">โรงพยาบาล</p>
-                <p className="font-semibold">{patient.hospitals?.name || '-'}</p>
-              </div>
+              <div><p className="text-xs text-gray-600">ชื่อ-นามสกุล</p><p className="font-semibold">{patient.first_name} {patient.last_name}</p></div>
+              <div><p className="text-xs text-gray-600">HN</p><p className="font-semibold">{patient.hospital_number || '-'}</p></div>
+              <div><p className="text-xs text-gray-600">อายุ / เพศ</p><p className="font-semibold">{patient.age || '-'} ปี / {patient.gender === 'female' ? 'หญิง' : 'ชาย'}</p></div>
+              <div><p className="text-xs text-gray-600">PAM Level</p><p className="font-semibold"><span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm">{patient.pam_level || 'L0'}</span></p></div>
+              <div><p className="text-xs text-gray-600">PROMS Zone</p><p className="font-semibold"><span className={`px-2 py-1 rounded text-sm ${patient.zone === 'Green Zone' ? 'bg-green-100 text-green-700' : patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' : patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>{patient.zone || '-'}</span></p></div>
+              <div><p className="text-xs text-gray-600">โรงพยาบาล</p><p className="font-semibold">{patient.hospitals?.name || '-'}</p></div>
             </div>
           </div>
 
@@ -443,267 +354,110 @@ function PatientRecordContent() {
               <div className="bg-blue-50 rounded-lg p-4 text-center border-2 border-blue-200">
                 <p className="text-sm text-gray-600 mb-2">PAM Score</p>
                 <p className="text-3xl font-bold text-blue-600">{latestScreening?.pam_total_score || '-'}</p>
-                <p className="text-sm text-gray-700 mt-2">{patient.pam_level || '-'}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}
-                </p>
+                <p className="text-xs text-gray-500 mt-1">{latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</p>
               </div>
               <div className="bg-purple-50 rounded-lg p-4 text-center border-2 border-purple-200">
                 <p className="text-sm text-gray-600 mb-2">PROMS Zone</p>
                 <p className="text-3xl font-bold text-purple-600">{latestScreening?.proms_zone || '-'}</p>
-                <p className="text-sm text-gray-700 mt-2">
-                  Q1:{latestScreening?.proms_q1_score || 0} Q2:{latestScreening?.proms_q2_score || 0}
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}
-                </p>
+                <p className="text-xs text-gray-500 mt-1">{latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</p>
               </div>
               <div className="bg-green-50 rounded-lg p-4 text-center border-2 border-green-200">
                 <p className="text-sm text-gray-600 mb-2">Confidence Score</p>
-                <p className="text-3xl font-bold text-green-600">
-                  {latestScreening?.confidence_score || latestFollowup?.confidence_score || '-'}/10
-                </p>
-                <p className="text-xs text-gray-500 mt-3">
-                  {latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}
-                </p>
+                <p className="text-3xl font-bold text-green-600">{latestScreening?.confidence_score || latestFollowup?.confidence_score || '-'}/10</p>
+                <p className="text-xs text-gray-500 mt-1">{latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</p>
               </div>
             </div>
           </div>
 
           <div className="mb-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
-              📊 ค่าสุขภาพปัจจุบัน
-              {latestHealthData.healthDataDate && (
-                <span className="text-sm font-normal text-gray-500 ml-2">
-                  (ข้อมูลเมื่อ {formatThaiDate(latestHealthData.healthDataDate)})
-                </span>
-              )}
-            </h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">📊 ค่าสุขภาพปัจจุบัน</h3>
             <div className="grid grid-cols-4 gap-4">
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">น้ำหนัก</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.weight || '-'} <span className="text-sm">กก.</span>
-                </p>
-              </div>
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">รอบเอว</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.waist || '-'} <span className="text-sm">ซม.</span>
-                </p>
-              </div>
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">FPG</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.fpg || '-'} <span className="text-sm">mg/dL</span>
-                </p>
-              </div>
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">HbA1c</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.hba1c || '-'} <span className="text-sm">%</span>
-                </p>
-              </div>
+              <div className="border rounded-lg p-3 text-center"><p className="text-xs text-gray-600">น้ำหนัก</p><p className="text-xl font-bold">{latestHealthData.weight || '-'} <span className="text-sm">กก.</span></p></div>
+              <div className="border rounded-lg p-3 text-center"><p className="text-xs text-gray-600">รอบเอว</p><p className="text-xl font-bold">{latestHealthData.waist || '-'} <span className="text-sm">ซม.</span></p></div>
+              <div className="border rounded-lg p-3 text-center"><p className="text-xs text-gray-600">FPG</p><p className="text-xl font-bold">{latestHealthData.fpg || '-'} <span className="text-sm">mg/dL</span></p></div>
+              <div className="border rounded-lg p-3 text-center"><p className="text-xs text-gray-600">HbA1c</p><p className="text-xl font-bold">{latestHealthData.hba1c || '-'} <span className="text-sm">%</span></p></div>
             </div>
           </div>
 
           {latestFollowup && (
             <div className="mb-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
-                 การติดตามล่าสุด (รอบที่ {latestFollowup.followup_round})
-              </h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">📅 การติดตามล่าสุด (รอบที่ {latestFollowup.followup_round})</h3>
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="grid grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <p className="text-xs text-gray-600">วันที่ติดตาม</p>
-                    <p className="font-semibold">{formatThaiDate(latestFollowup.followup_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">สถานะ</p>
-                    <span className={`px-2 py-1 rounded text-sm font-semibold ${getStatusBadge(latestFollowup.followup_status).class}`}>
-                      {getStatusBadge(latestFollowup.followup_status).text}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">ความมั่นใจ</p>
-                    <p className="font-semibold">{latestFollowup.confidence_score || '-'}/10</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-xs text-gray-600">ปริมาณอาหาร</p>
-                    <p className={`font-semibold ${getComplianceStatus(latestFollowup.food_amount_status).class}`}>
-                      {getComplianceStatus(latestFollowup.food_amount_status).text}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">ชนิดอาหาร</p>
-                    <p className={`font-semibold ${getComplianceStatus(latestFollowup.food_type_status).class}`}>
-                      {getComplianceStatus(latestFollowup.food_type_status).text}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">การเคลื่อนไหว</p>
-                    <p className={`font-semibold ${getComplianceStatus(latestFollowup.movement_status).class}`}>
-                      {getComplianceStatus(latestFollowup.movement_status).text}
-                    </p>
-                  </div>
+                  <div><p className="text-xs text-gray-600">วันที่ติดตาม</p><p className="font-semibold">{formatThaiDate(latestFollowup.followup_date)}</p></div>
+                  <div><p className="text-xs text-gray-600">สถานะ</p><span className={`px-2 py-1 rounded text-sm font-semibold ${getStatusBadge(latestFollowup.followup_status).class}`}>{getStatusBadge(latestFollowup.followup_status).text}</span></div>
+                  <div><p className="text-xs text-gray-600">ความมั่นใจ</p><p className="font-semibold">{latestFollowup.confidence_score || '-'}/10</p></div>
                 </div>
               </div>
             </div>
           )}
-
-          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-            <span>Community Bridge v1.0</span>
-            <span>หน้า 1 / 5</span>
-          </div>
+          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between"><span>Community Bridge v1.0</span><span>หน้า 1</span></div>
         </div>
 
         {/* ===== PAGE 2 ===== */}
-        <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
+        <div className="bg-white p-8 mb-8" style={{ minHeight: '297mm' }}>
           <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <h2 className="text-xl font-bold text-gray-900">📋 ประวัติการติดตาม (Follow-up History)</h2>
-            <p className="text-sm text-gray-600">แสดงข้อมูลย้อนหลังทุกครั้งที่มีการบันทึก</p>
+            <h2 className="text-xl font-bold text-gray-900">📋 ประวัติการติดตาม</h2>
           </div>
-
-          {followups.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <p>ยังไม่มีประวัติการติดตาม</p>
-            </div>
-          ) : (
+          {followups.length === 0 ? <p className="text-center text-gray-500 py-12">ยังไม่มีประวัติการติดตาม</p> : (
             <div className="space-y-4">
-              {followups.map((followup, index) => (
-                <div key={followup.id} className={`border rounded-lg p-4 ${index === 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <span className="text-lg font-bold">รอบที่ {followup.followup_round}</span>
-                      <span className={`ml-2 px-2 py-1 rounded text-xs font-semibold ${getStatusBadge(followup.followup_status).class}`}>
-                        {getStatusBadge(followup.followup_status).text}
-                      </span>
-                    </div>
-                    <span className="text-sm text-gray-600">{formatThaiDate(followup.followup_date)}</span>
+              {followups.map((f, i) => (
+                <div key={f.id} className={`border rounded-lg p-4 ${i === 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
+                  <div className="flex justify-between mb-3">
+                    <span className="font-bold">รอบที่ {f.followup_round}</span>
+                    <span className="text-sm text-gray-600">{formatThaiDate(f.followup_date)}</span>
                   </div>
-                  
-                  <div className="grid grid-cols-4 gap-3 mb-3">
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">น้ำหนัก</p>
-                      <p className="font-semibold">{followup.weight || '-'} กก.</p>
-                    </div>
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">ความดัน</p>
-                      <p className="font-semibold">
-                        {followup.blood_pressure_sys && followup.blood_pressure_dia 
-                          ? `${followup.blood_pressure_sys}/${followup.blood_pressure_dia}` 
-                          : '-'} mmHg
-                      </p>
-                    </div>
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">FPG</p>
-                      <p className="font-semibold">{followup.blood_sugar_dtx || '-'} mg/dL</p>
-                    </div>
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">ความมั่นใจ</p>
-                      <p className="font-semibold">{followup.confidence_score || '-'}/10</p>
-                    </div>
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="bg-white rounded p-2"><p className="text-xs text-gray-600">น้ำหนัก</p><p className="font-semibold">{f.weight || '-'} กก.</p></div>
+                    <div className="bg-white rounded p-2"><p className="text-xs text-gray-600">ความดัน</p><p className="font-semibold">{f.blood_pressure_sys && f.blood_pressure_dia ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : '-'} mmHg</p></div>
+                    <div className="bg-white rounded p-2"><p className="text-xs text-gray-600">FPG</p><p className="font-semibold">{f.blood_sugar_dtx || '-'} mg/dL</p></div>
+                    <div className="bg-white rounded p-2"><p className="text-xs text-gray-600">ความมั่นใจ</p><p className="font-semibold">{f.confidence_score || '-'}/10</p></div>
                   </div>
-
-                  {followup.summary && (
-                    <div className="bg-white rounded p-2 mb-2">
-                      <p className="text-xs text-gray-600 font-semibold mb-1">สรุป:</p>
-                      <p className="text-sm">{followup.summary}</p>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
           )}
-
-          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-            <span>Community Bridge v1.0</span>
-            <span>หน้า 2 / 5</span>
-          </div>
+          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between"><span>Community Bridge v1.0</span><span>หน้า 2</span></div>
         </div>
 
-        {/* ===== PAGE 3 ===== */}
+        {/* ===== PAGE 3 (Life Schedule) ===== */}
         {latestFollowup?.life_schedule_image_url && (
-          <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
+          <div className="bg-white p-8 mb-8" style={{ minHeight: '297mm' }}>
             <div className="border-b-2 border-blue-600 pb-4 mb-6">
               <h2 className="text-xl font-bold text-gray-900">📋 Life Schedule - ตารางชีวิตประจำวัน</h2>
-              <p className="text-sm text-gray-600">
-                {formatThaiDate(latestFollowup.followup_date)} • รอบที่ {latestFollowup.followup_round}
-              </p>
             </div>
-
             <div className="border-2 border-gray-300 rounded-lg overflow-hidden">
-              <img
-                src={latestFollowup.life_schedule_image_url}
-                alt="Life Schedule"
-                className="w-full h-auto"
-                style={{ maxHeight: '240mm' }}
-              />
+              <img src={latestFollowup.life_schedule_image_url} alt="Life Schedule" className="w-full h-auto" style={{ maxHeight: '240mm' }} />
             </div>
-
-            <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-              <span>Community Bridge v1.0</span>
-              <span>หน้า 3 / 5</span>
-            </div>
+            <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between"><span>Community Bridge v1.0</span><span>หน้า 3</span></div>
           </div>
         )}
 
-        {/* ===== PAGE 4 ===== */}
+        {/* ===== PAGE 4 (Charts) ===== */}
         {(latestFollowup?.floating_chart_image_url || latestFollowup?.dream_card_image_url) && (
-          <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
+          <div className="bg-white p-8 mb-8" style={{ minHeight: '297mm' }}>
             <div className="border-b-2 border-blue-600 pb-4 mb-6">
               <h2 className="text-xl font-bold text-gray-900">📈 รูปภาพประกอบ</h2>
-              <p className="text-sm text-gray-600">
-                {formatThaiDate(latestFollowup?.followup_date || '')} • รอบที่ {latestFollowup?.followup_round || '-'}
-              </p>
             </div>
-
             <div className="space-y-6">
               {latestFollowup?.floating_chart_image_url && (
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Floating Chart - กราฟแนวโน้ม</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Floating Chart</h3>
                   <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
-                    <img
-                      src={latestFollowup.floating_chart_image_url}
-                      alt="Floating Chart"
-                      className="w-full h-auto"
-                      style={{ maxHeight: '110mm' }}
-                    />
+                    <img src={latestFollowup.floating_chart_image_url} alt="Floating Chart" className="w-full h-auto" style={{ maxHeight: '110mm' }} />
                   </div>
-                  {latestFollowup.floating_chart_summary && (
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {latestFollowup.floating_chart_summary}
-                    </p>
-                  )}
                 </div>
               )}
-
               {latestFollowup?.dream_card_image_url && (
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">💭 Dream Card - บัตรความฝัน</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">💭 Dream Card</h3>
                   <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
-                    <img
-                      src={latestFollowup.dream_card_image_url}
-                      alt="Dream Card"
-                      className="w-full h-auto"
-                      style={{ maxHeight: '110mm' }}
-                    />
+                    <img src={latestFollowup.dream_card_image_url} alt="Dream Card" className="w-full h-auto" style={{ maxHeight: '110mm' }} />
                   </div>
-                  {latestFollowup.dream_card_description && (
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {latestFollowup.dream_card_description}
-                    </p>
-                  )}
                 </div>
               )}
             </div>
-
-            <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-              <span>Community Bridge v1.0</span>
-              <span>หน้า 4 / 5</span>
-            </div>
+            <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between"><span>Community Bridge v1.0</span><span>หน้า 4</span></div>
           </div>
         )}
 
@@ -712,113 +466,26 @@ function PatientRecordContent() {
           <div className="border-b-2 border-blue-600 pb-4 mb-6">
             <h2 className="text-xl font-bold text-gray-900">📝 สรุปและคำแนะนำ</h2>
           </div>
-
           {latestFollowup && (
             <>
-              <div className="mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-3">🔄 การปรับตัว</h3>
-                {latestFollowup.adaptation_summary && (
-                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
-                    <p className="text-xs text-gray-600 font-semibold mb-1">สรุปการปรับตัว:</p>
-                    <p className="text-sm">{latestFollowup.adaptation_summary}</p>
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-4">
-                  {latestFollowup.adaptation_obstacles && (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-xs text-gray-600 font-semibold mb-1">อุปสรรค:</p>
-                      <p className="text-sm">{latestFollowup.adaptation_obstacles}</p>
-                    </div>
-                  )}
-                  {latestFollowup.adaptation_opportunities && (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-xs text-gray-600 font-semibold mb-1">โอกาส/จุดแข็ง:</p>
-                      <p className="text-sm">{latestFollowup.adaptation_opportunities}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mb-6">
-                {latestFollowup.summary && (
-                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
-                    <p className="text-xs text-gray-600 font-semibold mb-1">สรุปผลการติดตาม:</p>
-                    <p className="text-sm">{latestFollowup.summary}</p>
-                  </div>
-                )}
-                {latestFollowup.recommendations && (
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <p className="text-xs text-gray-600 font-semibold mb-1">คำแนะนำ:</p>
-                    <p className="text-sm whitespace-pre-line">{latestFollowup.recommendations}</p>
-                  </div>
-                )}
-              </div>
+              {latestFollowup.summary && <div className="bg-gray-50 rounded-lg p-4 mb-3"><p className="text-xs text-gray-600 font-semibold mb-1">สรุปผลการติดตาม:</p><p className="text-sm">{latestFollowup.summary}</p></div>}
+              {latestFollowup.recommendations && <div className="bg-gray-50 rounded-lg p-4 mb-6"><p className="text-xs text-gray-600 font-semibold mb-1">คำแนะนำ:</p><p className="text-sm whitespace-pre-line">{latestFollowup.recommendations}</p></div>}
             </>
           )}
-
           <div className="mt-12 grid grid-cols-2 gap-8">
-            <div className="text-center">
-              <div className="border-b border-gray-400 h-16 mb-2"></div>
-              <p className="text-sm font-semibold">ผู้บันทึก (อสม./เจ้าหน้าที่)</p>
-              <p className="text-xs text-gray-600 mt-1">วันที่: {formatThaiDate(new Date().toISOString())}</p>
-            </div>
-            <div className="text-center">
-              <div className="border-b border-gray-400 h-16 mb-2"></div>
-              <p className="text-sm font-semibold">ผู้ป่วย/ญาติ</p>
-              <p className="text-xs text-gray-600 mt-1">วันที่: _______________</p>
-            </div>
+            <div className="text-center"><div className="border-b border-gray-400 h-16 mb-2"></div><p className="text-sm font-semibold">ผู้บันทึก (อสม./เจ้าหน้าที่)</p></div>
+            <div className="text-center"><div className="border-b border-gray-400 h-16 mb-2"></div><p className="text-sm font-semibold">ผู้ป่วย/ญาติ</p></div>
           </div>
-
-          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-            <span>Community Bridge v1.0 • ระบบดูแลผู้ป่วย PreDM</span>
-            <span>หน้า 5 / 5</span>
-          </div>
+          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between"><span>Community Bridge v1.0</span><span>หน้า 5</span></div>
         </div>
       </div>
-
-      {/* Print Styles */}
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4;
-            margin: 10mm;
-          }
-          body {
-            background: white;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          .print\\:page-break-after {
-            page-break-after: always;
-          }
-          .print\\:mb-0 {
-            margin-bottom: 0 !important;
-          }
-          .print\\:px-0 {
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-          }
-          .print\\:py-0 {
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }
 
 export default function PatientRecordDetailPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-600">กำลังโหลดข้อมูล...</p>
-        </div>
-      </div>
-    }>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div></div>}>
       <PatientRecordContent />
     </Suspense>
   );
