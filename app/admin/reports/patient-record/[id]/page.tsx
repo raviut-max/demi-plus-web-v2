@@ -1,19 +1,16 @@
-// app/admin/reports/patient-record/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ การแก้ไข:
-//    1. ดึงค่าสุขภาพจาก Follow-up ล่าสุด (ถ้ามี)
-//    2. Fallback ไปใช้ค่าจาก profiles ถ้าไม่มีใน followups
-//    3. แสดงวันที่ของข้อมูลสุขภาพ
+// app/admin/reports/patient-record/page.tsx
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter, useParams, useSearchParams } from 'next/navigation';
-import { checkSession, logout } from '@/lib/supabase/queries';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { checkSession, logout, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
-  ArrowLeft, Printer, LogOut, UserCheck, Loader2
+  Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
+  Search, Filter, Download, FileSpreadsheet,
+  CheckSquare, Square, Loader2, Building2, Activity, AlertCircle
 } from 'lucide-react';
 
-interface PatientData {
+interface Patient {
   id: string;
   first_name: string | null;
   last_name: string | null;
@@ -21,82 +18,44 @@ interface PatientData {
   age: number | null;
   gender: string | null;
   pam_level: string | null;
-  pam_score: number | null;
   zone: string | null;
   current_weight: number | null;
-  waist_circumference: number | null;
   blood_sugar: number | null;
-  height: number | null;
-  bmi: number | null;
-  hba1c_level: number | null;
-  program_start_date: string | null;
   hospital_id: string | null;
-  coach_id: string | null;
   hospitals?: { name: string | null } | null;
+  // ✅ ฟิลด์ใหม่สำหรับข้อมูลติดตาม
+  followup_count?: number;
+  latest_weight?: number | null;
+  latest_fpg?: number | null;
+  latest_followup_date?: string | null;
 }
 
-interface FollowupRecord {
+interface HospitalData {
   id: string;
-  followup_date: string;
-  followup_round: number;
-  weight: number | null;
-  waist_circumference: number | null;
-  blood_pressure_sys: number | null;
-  blood_pressure_dia: number | null;
-  blood_sugar_dtx: number | null;
-  confidence_score: number | null;
-  followup_status: string | null;
-  food_amount_status: string | null;
-  food_type_status: string | null;
-  movement_status: string | null;
-  adaptation_summary: string | null;
-  adaptation_obstacles: string | null;
-  adaptation_opportunities: string | null;
-  summary: string | null;
-  recommendations: string | null;
-  life_schedule_image_url: string | null;
-  floating_chart_image_url: string | null;
-  dream_card_image_url: string | null;
-  floating_chart_summary: string | null;
-  dream_card_description: string | null;
+  name: string | null;
+  code: string | null;
+  type: 'main' | 'sub';
+  patientCount?: number;
 }
 
-interface ScreeningRecord {
-  id: string;
-  screening_date: string;
-  pam_total_score: number | null;
-  pam_level_result: string | null;
-  proms_zone: string | null;
-  proms_q1_score: number | null;
-  proms_q2_score: number | null;
-  proms_q3_score: number | null;
-  proms_q4_score: number | null;
-  confidence_score: number | null;
-}
-
-export default function PatientRecordDetailPage() {
+export default function PatientRecordPage() {
   const router = useRouter();
-  const params = useParams();
   const searchParams = useSearchParams();
-  const isPrintMode = searchParams.get('print') === 'true';
-  const patientId = params.id as string;
+  const initialMode = searchParams.get('mode') || 'hospital';
 
   const [user, setUser] = useState<any>(null);
-  const [patient, setPatient] = useState<PatientData | null>(null);
-  const [followups, setFollowups] = useState<FollowupRecord[]>([]);
-  const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
+  const [userHospital, setUserHospital] = useState<any>(null);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [hospitals, setHospitals] = useState<HospitalData[]>([]);
+  const [selectedHospital, setSelectedHospital] = useState<string>('all');
+  const [selectedPatients, setSelectedPatients] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-
-  // ✅ State สำหรับค่าสุขภาพล่าสุด (จาก Follow-up หรือ Profiles)
-  const [latestHealthData, setLatestHealthData] = useState({
-    weight: null as number | null,
-    waist: null as number | null,
-    fpg: null as number | null,
-    hba1c: null as number | null,
-    bpSys: null as number | null,
-    bpDia: null as number | null,
-    healthDataDate: null as string | null,
-  });
+  const [exporting, setExporting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [pamFilter, setPamFilter] = useState('all');
+  const [zoneFilter, setZoneFilter] = useState('all');
+  const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
+  const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
 
   useEffect(() => {
     const userData = checkSession();
@@ -105,117 +64,218 @@ export default function PatientRecordDetailPage() {
       return;
     }
     setUser(userData);
-    loadPatientData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientId, router]);
+    loadUserHospital(userData.id);
+    loadHospitals(userData.id);
+    loadPatients(userData.id);
+  }, [router]);
 
-  // ✅ ตั้งชื่อไฟล์ PDF อัตโนมัติเมื่อโหลดข้อมูลผู้ป่วยเสร็จ
-  useEffect(() => {
-    if (patient) {
-      const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
-      const hn = patient.hospital_number || 'ไม่มีHN';
-      const firstName = patient.first_name || 'ไม่ระบุชื่อ';
-      const lastName = patient.last_name || '';
-
-      const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
-      document.title = fileName;
-    }
-  }, [patient]);
-
-  const loadPatientData = async () => {
+  const loadUserHospital = async (userId: string) => {
     try {
-      // โหลดข้อมูลผู้ป่วย
-      const { data: patientData, error: patientError } = await supabase
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading hospital:', error);
+    }
+  };
+
+  const loadHospitals = async (userId: string) => {
+    try {
+      const accessibleIds = await getAccessibleHospitalIds(userId);
+      
+      let query = supabase
+        .from('hospitals')
+        .select('id, name, code, type')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+      if (accessibleIds.length > 0 && accessibleIds.length < 100) {
+        query = query.in('id', accessibleIds);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const hospitalsWithCount = await Promise.all(
+        (data || []).map(async (h: any) => {
+          const { count } = await supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .eq('hospital_id', h.id)
+            .eq('is_active', true);
+          
+          return { ...h, patientCount: count || 0 };
+        })
+      );
+
+      setHospitals(hospitalsWithCount);
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
+    }
+  };
+
+  const loadPatients = async (userId: string) => {
+    try {
+      const accessibleIds = await getAccessibleHospitalIds(userId);
+      
+      let query = supabase
         .from('profiles')
         .select(`
           id, first_name, last_name, hospital_number, age, gender,
-          pam_level, pam_score, zone, current_weight, waist_circumference,
-          blood_sugar, height, bmi, hba1c_level, program_start_date,
-          hospital_id, coach_id,
+          pam_level, zone, current_weight, blood_sugar, hospital_id,
           hospitals:hospital_id (name)
         `)
-        .eq('id', patientId)
-        .single();
+        .eq('is_active', true)
+        .order('first_name', { ascending: true });
 
-      if (patientError) throw patientError;
-      setPatient(patientData);
+      if (accessibleIds.length > 0 && accessibleIds.length < 100) {
+        query = query.in('hospital_id', accessibleIds);
+      }
 
-      // โหลดข้อมูล Follow-ups (เรียงจากล่าสุดไปเก่าสุด)
-      const { data: followupData, error: followupError } = await supabase
-        .from('appointment_followups')
-        .select('*')
-        .eq('user_id', patientId)
-        .order('followup_date', { ascending: false });
+      if (selectedHospital !== 'all') {
+        query = query.eq('hospital_id', selectedHospital);
+      }
 
-      if (followupError) throw followupError;
-      setFollowups(followupData || []);
-
-      // โหลดข้อมูล Screenings
-      const { data: screeningData, error: screeningError } = await supabase
-        .from('screenings')
-        .select('*')
-        .eq('user_id', patientId)
-        .order('screening_date', { ascending: false });
-
-      if (screeningError) throw screeningError;
-      setScreenings(screeningData || []);
-
-      // ✅ ดึงค่าสุขภาพล่าสุดจาก Follow-up หรือ Profiles
-      const latestFollowup = followupData?.[0];
+      const { data, error } = await query;
+      if (error) throw error;
       
-      setLatestHealthData({
-        weight: latestFollowup?.weight || patientData?.current_weight || null,
-        waist: latestFollowup?.waist_circumference || patientData?.waist_circumference || null,
-        fpg: latestFollowup?.blood_sugar_dtx || patientData?.blood_sugar || null,
-        hba1c: patientData?.hba1c_level || null,
-        bpSys: latestFollowup?.blood_pressure_sys || null,
-        bpDia: latestFollowup?.blood_pressure_dia || null,
-        healthDataDate: latestFollowup?.followup_date || patientData?.program_start_date || null,
+      // ✅ ดึงข้อมูล Follow-up สำหรับผู้ป่วยทั้งหมด
+      const patientIds = (data || []).map(p => p.id);
+      let followupData: any[] = [];
+      
+      if (patientIds.length > 0) {
+        // Query แบบ batch - ดึง follow-ups ทั้งหมดของผู้ป่วยในกลุ่มนี้
+        const { data: followups, error: followupError } = await supabase
+          .from('appointment_followups')
+          .select('user_id, followup_date, weight, blood_sugar_dtx')
+          .in('user_id', patientIds)
+          .order('followup_date', { ascending: false });
+        
+        if (followupError) {
+          console.error('Error loading followups:', followupError);
+        } else {
+          followupData = followups || [];
+        }
+      }
+
+      // ✅ รวมข้อมูล Follow-up เข้ากับข้อมูลผู้ป่วย
+      const patientsWithFollowup = (data || []).map(patient => {
+        const patientFollowups = followupData.filter(f => f.user_id === patient.id);
+        const latestFollowup = patientFollowups[0]; // ล่าสุดเพราะเรียง descending
+        
+        return {
+          ...patient,
+          followup_count: patientFollowups.length,
+          latest_weight: latestFollowup?.weight || patient.current_weight,
+          latest_fpg: latestFollowup?.blood_sugar_dtx || patient.blood_sugar,
+          latest_followup_date: latestFollowup?.followup_date || null,
+        };
       });
 
+      setPatients(patientsWithFollowup);
     } catch (error) {
-      console.error('Error loading patient data:', error);
+      console.error('Error loading patients:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  useEffect(() => {
+    setSelectedPatients(new Set());
+  }, [selectedHospital]);
+
+  useEffect(() => {
+    if (user) {
+      loadPatients(user.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHospital]);
+
+  const filteredPatients = patients.filter(p => {
+    const searchLower = searchTerm.toLowerCase();
+    const fullName = `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase();
+    const hn = (p.hospital_number || '').toLowerCase();
+    const matchSearch = fullName.includes(searchLower) || hn.includes(searchLower);
+    const matchPam = pamFilter === 'all' || p.pam_level === pamFilter;
+    const matchZone = zoneFilter === 'all' || p.zone === zoneFilter;
+    return matchSearch && matchPam && matchZone;
+  });
+
+  const toggleSelectAll = () => {
+    if (selectedPatients.size === filteredPatients.length) {
+      setSelectedPatients(new Set());
+    } else {
+      setSelectedPatients(new Set(filteredPatients.map(p => p.id)));
+    }
   };
 
-  const formatThaiDate = (dateString: string | null) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '-';
-    const thaiMonths = [
-      'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
-      'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
-    ];
-    const day = date.getDate();
-    const month = thaiMonths[date.getMonth()];
-    const yearBE = date.getFullYear() + 543;
-    return `${day} ${month} ${yearBE}`;
+  const toggleSelectPatient = (patientId: string) => {
+    const newSelected = new Set(selectedPatients);
+    if (newSelected.has(patientId)) {
+      newSelected.delete(patientId);
+    } else {
+      newSelected.add(patientId);
+    }
+    setSelectedPatients(newSelected);
   };
 
-  const getStatusBadge = (status: string | null) => {
-    const statusMap: any = {
-      'excellent': { text: 'ดีเยี่ยม', class: 'bg-green-100 text-green-700' },
-      'good': { text: 'ดี', class: 'bg-blue-100 text-blue-700' },
-      'fair': { text: 'พอใช้', class: 'bg-yellow-100 text-yellow-700' },
-      'needs_improvement': { text: 'ต้องปรับปรุง', class: 'bg-red-100 text-red-700' },
-      'monitoring': { text: 'เฝ้าระวัง', class: 'bg-purple-100 text-purple-700' }
-    };
-    return statusMap[status || ''] || { text: status || '-', class: 'bg-gray-100 text-gray-700' };
+  const handleExport = async () => {
+    if (selectedPatients.size === 0) {
+      alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
+      return;
+    }
+
+    setExporting(true);
+    
+    try {
+      const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
+      
+      for (const patient of selectedPatientData) {
+        window.open(
+          `/admin/reports/patient-record/${patient.id}?print=true`,
+          '_blank'
+        );
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      alert(`✅ เปิดระเบียน ${selectedPatientData.length} ไฟล์แล้ว`);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('❌ เกิดข้อผิดพลาดในการ Export');
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const getComplianceStatus = (status: string | null) => {
-    const statusMap: any = {
-      'completed': { text: '✅ ตามแผน', class: 'text-green-600' },
-      'not_completed': { text: '❌ ไม่ตามแผน', class: 'text-red-600' },
-      'not_in_plan': { text: '⚪ ไม่มีในแผน', class: 'text-gray-500' }
-    };
-    return statusMap[status || ''] || { text: '-', class: 'text-gray-500' };
+  const getSelectedHospitalName = () => {
+    if (selectedHospital === 'all') return 'ทั้งหมด';
+    const hospital = hospitals.find(h => h.id === selectedHospital);
+    return hospital?.name || 'ไม่ระบุ';
+  };
+
+  // ✅ ฟังก์ชันแสดง Badge สถานะข้อมูลติดตาม
+  const getFollowupBadge = (patient: Patient) => {
+    if (!patient.followup_count || patient.followup_count === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+          <AlertCircle className="w-3 h-3" />
+          ไม่มีข้อมูล
+        </span>
+      );
+    }
+    
+    const dateStr = patient.latest_followup_date 
+      ? new Date(patient.latest_followup_date).toLocaleDateString('th-TH', { 
+          day: '2-digit', 
+          month: 'short', 
+          year: '2-digit' 
+        })
+      : '';
+    
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+        <Activity className="w-3 h-3" />
+        {patient.followup_count} ครั้ง {dateStr && `(${dateStr})`}
+      </span>
+    );
   };
 
   if (loading) {
@@ -229,48 +289,35 @@ export default function PatientRecordDetailPage() {
     );
   }
 
-  if (!patient) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <p className="text-gray-600">ไม่พบข้อมูลผู้ป่วย</p>
-          <button
-            onClick={() => router.push('/admin/reports/patient-record')}
-            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            กลับ
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const latestFollowup = followups[0];
-  const latestScreening = screenings[0];
-
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - ซ่อนเมื่อ Print */}
-      <div className="bg-white shadow-sm border-b border-gray-200 print:hidden">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/reports/patient-record')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
-            <ArrowLeft className="w-4 h-4" /> กลับไปหน้าเลือกรายงาน
+          <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
+            <ArrowLeft className="w-4 h-4" /> กลับ Dashboard
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                📄 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
-              </h1>
-              <p className="text-gray-600">HN: {patient.hospital_number || '-'}</p>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2"> ระเบียนคนไข้ (PDF)</h1>
+              <p className="text-gray-600">เลือกรายงานและ Export เป็น PDF</p>
             </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handlePrint}
-                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg"
-              >
-                <Printer className="w-5 h-5" />
-                Print / Export PDF
-              </button>
+            <div className="flex items-center gap-4">
+              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
+                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+              </div>
               <button
                 onClick={() => { logout(); router.push('/admin/login'); }}
                 className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
@@ -283,443 +330,297 @@ export default function PatientRecordDetailPage() {
         </div>
       </div>
 
-      {/* PDF Content - 5 หน้า A4 */}
-      <div className="max-w-4xl mx-auto px-4 py-8 print:px-0 print:py-0">
-        {/* ===== PAGE 1: ข้อมูลพื้นฐาน + ผลประเมิน ===== */}
-        <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
-          {/* Header */}
-          <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-blue-600">Community Bridge</h1>
-                <p className="text-sm text-gray-600">ระบบดูแลผู้ป่วยกลุ่มเสี่ยงเบาหวาน (PreDM)</p>
-              </div>
-              <div className="text-right">
-                <h2 className="text-xl font-bold text-gray-900">ระเบียนติดตามผล</h2>
-                <p className="text-sm text-gray-600">Follow-up Record</p>
-              </div>
-            </div>
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Hospital Selection */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+          <div className="flex items-center gap-3 mb-4">
+            <Hospital className="w-6 h-6 text-blue-600" />
+            <h2 className="text-lg font-bold text-gray-800">เลือกโรงพยาบาล</h2>
           </div>
-
-          {/* Patient Info */}
-          <div className="bg-blue-50 rounded-lg p-4 mb-6 border-l-4 border-blue-500">
-            <h3 className="text-lg font-bold text-gray-900 mb-3">👤 ข้อมูลผู้ป่วย</h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-xs text-gray-600">ชื่อ-นามสกุล</p>
-                <p className="font-semibold">{patient.first_name} {patient.last_name}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">HN</p>
-                <p className="font-semibold">{patient.hospital_number || '-'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">อายุ / เพศ</p>
-                <p className="font-semibold">{patient.age || '-'} ปี / {patient.gender === 'female' ? 'หญิง' : 'ชาย'}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">PAM Level</p>
-                <p className="font-semibold">
-                  <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm">
-                    {patient.pam_level || 'L0'}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">PROMS Zone</p>
-                <p className="font-semibold">
-                  <span className={`px-2 py-1 rounded text-sm ${
-                    patient.zone === 'Green Zone' ? 'bg-green-100 text-green-700' :
-                    patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
-                    patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
-                    'bg-gray-100 text-gray-700'
-                  }`}>
-                    {patient.zone || '-'}
-                  </span>
-                </p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-600">โรงพยาบาล</p>
-                <p className="font-semibold">{patient.hospitals?.name || '-'}</p>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                โรงพยาบาลที่ต้องการดูระเบียน
+              </label>
+              <select
+                value={selectedHospital}
+                onChange={(e) => setSelectedHospital(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">ทั้งหมด ({hospitals.reduce((sum, h) => sum + (h.patientCount || 0), 0)} คน)</option>
+                {hospitals.map((hospital) => (
+                  <option key={hospital.id} value={hospital.id}>
+                    {hospital.name} ({hospital.patientCount || 0} คน)
+                    {hospital.type === 'main' ? ' - แม่ข่าย' : ' - ลูกข่าย'}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-
-          {/* Self-Assessment Results */}
-          <div className="mb-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">📊 ผลการประเมินตนเอง</h3>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-blue-50 rounded-lg p-4 text-center border-2 border-blue-200">
-                <p className="text-sm text-gray-600 mb-2">PAM Score</p>
-                <p className="text-3xl font-bold text-blue-600">{latestScreening?.pam_total_score || '-'}</p>
-                <p className="text-sm text-gray-700 mt-2">{patient.pam_level || '-'}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}
+            <div className="flex items-end">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
+                <p className="text-sm text-blue-800">
+                  <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
-              </div>
-              <div className="bg-purple-50 rounded-lg p-4 text-center border-2 border-purple-200">
-                <p className="text-sm text-gray-600 mb-2">PROMS Zone</p>
-                <p className="text-3xl font-bold text-purple-600">{latestScreening?.proms_zone || '-'}</p>
-                <p className="text-sm text-gray-700 mt-2">
-                  Q1:{latestScreening?.proms_q1_score || 0} Q2:{latestScreening?.proms_q2_score || 0}
+                <p className="text-sm text-blue-600 mt-1">
+                  <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
                 </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}
+                <p className="text-sm text-blue-600">
+                  <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
                 </p>
-              </div>
-              <div className="bg-green-50 rounded-lg p-4 text-center border-2 border-green-200">
-                <p className="text-sm text-gray-600 mb-2">Confidence Score</p>
-                <p className="text-3xl font-bold text-green-600">
-                  {latestScreening?.confidence_score || latestFollowup?.confidence_score || '-'}/10
-                </p>
-                <p className="text-xs text-gray-500 mt-3">
-                  {latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* ✅ Health Data - ดึงจาก Follow-up ล่าสุด หรือ Profiles */}
-          <div className="mb-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
-              📊 ค่าสุขภาพปัจจุบัน
-              {latestHealthData.healthDataDate && (
-                <span className="text-sm font-normal text-gray-500 ml-2">
-                  (ข้อมูลเมื่อ {formatThaiDate(latestHealthData.healthDataDate)})
-                </span>
-              )}
-            </h3>
-            <div className="grid grid-cols-4 gap-4">
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">น้ำหนัก</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.weight || '-'} <span className="text-sm">กก.</span>
-                </p>
-              </div>
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">รอบเอว</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.waist || '-'} <span className="text-sm">ซม.</span>
-                </p>
-              </div>
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">FPG</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.fpg || '-'} <span className="text-sm">mg/dL</span>
-                </p>
-              </div>
-              <div className="border rounded-lg p-3 text-center">
-                <p className="text-xs text-gray-600">HbA1c</p>
-                <p className="text-xl font-bold">
-                  {latestHealthData.hba1c || '-'} <span className="text-sm">%</span>
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Latest Follow-up Summary */}
-          {latestFollowup && (
-            <div className="mb-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
-                📅 การติดตามล่าสุด (รอบที่ {latestFollowup.followup_round})
-              </h3>
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="grid grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <p className="text-xs text-gray-600">วันที่ติดตาม</p>
-                    <p className="font-semibold">{formatThaiDate(latestFollowup.followup_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">สถานะ</p>
-                    <span className={`px-2 py-1 rounded text-sm font-semibold ${getStatusBadge(latestFollowup.followup_status).class}`}>
-                      {getStatusBadge(latestFollowup.followup_status).text}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">ความมั่นใจ</p>
-                    <p className="font-semibold">{latestFollowup.confidence_score || '-'}/10</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-xs text-gray-600">ปริมาณอาหาร</p>
-                    <p className={`font-semibold ${getComplianceStatus(latestFollowup.food_amount_status).class}`}>
-                      {getComplianceStatus(latestFollowup.food_amount_status).text}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">ชนิดอาหาร</p>
-                    <p className={`font-semibold ${getComplianceStatus(latestFollowup.food_type_status).class}`}>
-                      {getComplianceStatus(latestFollowup.food_type_status).text}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-600">การเคลื่อนไหว</p>
-                    <p className={`font-semibold ${getComplianceStatus(latestFollowup.movement_status).class}`}>
-                      {getComplianceStatus(latestFollowup.movement_status).text}
-                    </p>
-                  </div>
+                {/* ✅ สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม */}
+                <div className="mt-2 pt-2 border-t border-blue-200">
+                  <p className="text-xs text-green-700">
+                    ✓ มีข้อมูลติดตาม: {filteredPatients.filter(p => p.followup_count && p.followup_count > 0).length} คน
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    ✗ ไม่มีข้อมูลติดตาม: {filteredPatients.filter(p => !p.followup_count || p.followup_count === 0).length} คน
+                  </p>
                 </div>
               </div>
             </div>
-          )}
-
-          {/* Footer */}
-          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-            <span>Community Bridge v1.0</span>
-            <span>หน้า 1 / 5</span>
           </div>
         </div>
 
-        {/* ===== PAGE 2: ประวัติการติดตาม ===== */}
-        <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
-          <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <h2 className="text-xl font-bold text-gray-900">📋 ประวัติการติดตาม (Follow-up History)</h2>
-            <p className="text-sm text-gray-600">แสดงข้อมูลย้อนหลังทุกครั้งที่มีการบันทึก</p>
-          </div>
-
-          {followups.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
-              <p>ยังไม่มีประวัติการติดตาม</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {followups.map((followup, index) => (
-                <div key={followup.id} className={`border rounded-lg p-4 ${index === 0 ? 'border-blue-500 bg-blue-50' : 'border-gray-200'}`}>
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <span className="text-lg font-bold">รอบที่ {followup.followup_round}</span>
-                      <span className={`ml-2 px-2 py-1 rounded text-xs font-semibold ${getStatusBadge(followup.followup_status).class}`}>
-                        {getStatusBadge(followup.followup_status).text}
-                      </span>
-                    </div>
-                    <span className="text-sm text-gray-600">{formatThaiDate(followup.followup_date)}</span>
-                  </div>
-                  
-                  <div className="grid grid-cols-4 gap-3 mb-3">
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">น้ำหนัก</p>
-                      <p className="font-semibold">{followup.weight || '-'} กก.</p>
-                    </div>
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">ความดัน</p>
-                      <p className="font-semibold">
-                        {followup.blood_pressure_sys && followup.blood_pressure_dia 
-                          ? `${followup.blood_pressure_sys}/${followup.blood_pressure_dia}` 
-                          : '-'} mmHg
-                      </p>
-                    </div>
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">FPG</p>
-                      <p className="font-semibold">{followup.blood_sugar_dtx || '-'} mg/dL</p>
-                    </div>
-                    <div className="bg-white rounded p-2">
-                      <p className="text-xs text-gray-600">ความมั่นใจ</p>
-                      <p className="font-semibold">{followup.confidence_score || '-'}/10</p>
-                    </div>
-                  </div>
-
-                  {followup.summary && (
-                    <div className="bg-white rounded p-2 mb-2">
-                      <p className="text-xs text-gray-600 font-semibold mb-1">สรุป:</p>
-                      <p className="text-sm">{followup.summary}</p>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-            <span>Community Bridge v1.0</span>
-            <span>หน้า 2 / 5</span>
-          </div>
-        </div>
-
-        {/* ===== PAGE 3: รูปภาพ Life Schedule ===== */}
-        {latestFollowup?.life_schedule_image_url && (
-          <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
-            <div className="border-b-2 border-blue-600 pb-4 mb-6">
-              <h2 className="text-xl font-bold text-gray-900">📋 Life Schedule - ตารางชีวิตประจำวัน</h2>
-              <p className="text-sm text-gray-600">
-                {formatThaiDate(latestFollowup.followup_date)} • รอบที่ {latestFollowup.followup_round}
-              </p>
-            </div>
-
-            <div className="border-2 border-gray-300 rounded-lg overflow-hidden">
-              <img
-                src={latestFollowup.life_schedule_image_url}
-                alt="Life Schedule"
-                className="w-full h-auto"
-                style={{ maxHeight: '240mm' }}
+        {/* Filters */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Search className="w-4 h-4 inline mr-1" /> ค้นหาชื่อ / HN
+              </label>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="พิมพ์ชื่อ หรือ HN..."
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-
-            <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-              <span>Community Bridge v1.0</span>
-              <span>หน้า 3 / 5</span>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Filter className="w-4 h-4 inline mr-1" /> PAM Level
+              </label>
+              <select
+                value={pamFilter}
+                onChange={(e) => setPamFilter(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">ทั้งหมด</option>
+                <option value="L0">L0 - ไม่ทราบ</option>
+                <option value="L1">L1 - Deny</option>
+                <option value="L2">L2 - General</option>
+                <option value="L3">L3 - Intensive</option>
+                <option value="L4">L4 - Champion</option>
+              </select>
             </div>
-          </div>
-        )}
-
-        {/* ===== PAGE 4: รูปภาพ Floating Chart + Dream Card ===== */}
-        {(latestFollowup?.floating_chart_image_url || latestFollowup?.dream_card_image_url) && (
-          <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
-            <div className="border-b-2 border-blue-600 pb-4 mb-6">
-              <h2 className="text-xl font-bold text-gray-900">📈 รูปภาพประกอบ</h2>
-              <p className="text-sm text-gray-600">
-                {formatThaiDate(latestFollowup?.followup_date || '')} • รอบที่ {latestFollowup?.followup_round || '-'}
-              </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Filter className="w-4 h-4 inline mr-1" /> Zone
+              </label>
+              <select
+                value={zoneFilter}
+                onChange={(e) => setZoneFilter(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">ทั้งหมด</option>
+                <option value="Green Zone">Green Zone</option>
+                <option value="Yellow Zone">Yellow Zone</option>
+                <option value="Red Zone">Red Zone</option>
+              </select>
             </div>
-
-            <div className="space-y-6">
-              {latestFollowup?.floating_chart_image_url && (
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Floating Chart - กราฟแนวโน้ม</h3>
-                  <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
-                    <img
-                      src={latestFollowup.floating_chart_image_url}
-                      alt="Floating Chart"
-                      className="w-full h-auto"
-                      style={{ maxHeight: '110mm' }}
-                    />
-                  </div>
-                  {latestFollowup.floating_chart_summary && (
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {latestFollowup.floating_chart_summary}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {latestFollowup?.dream_card_image_url && (
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3">💭 Dream Card - บัตรความฝัน</h3>
-                  <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
-                    <img
-                      src={latestFollowup.dream_card_image_url}
-                      alt="Dream Card"
-                      className="w-full h-auto"
-                      style={{ maxHeight: '110mm' }}
-                    />
-                  </div>
-                  {latestFollowup.dream_card_description && (
-                    <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
-                      {latestFollowup.dream_card_description}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-              <span>Community Bridge v1.0</span>
-              <span>หน้า 4 / 5</span>
-            </div>
-          </div>
-        )}
-
-        {/* ===== PAGE 5: สรุปและลายเซ็น ===== */}
-        <div className="bg-white p-8" style={{ minHeight: '297mm' }}>
-          <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <h2 className="text-xl font-bold text-gray-900">📝 สรุปและคำแนะนำ</h2>
-          </div>
-
-          {latestFollowup && (
-            <>
-              {/* Adaptation */}
-              <div className="mb-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-3">🔄 การปรับตัว</h3>
-                {latestFollowup.adaptation_summary && (
-                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
-                    <p className="text-xs text-gray-600 font-semibold mb-1">สรุปการปรับตัว:</p>
-                    <p className="text-sm">{latestFollowup.adaptation_summary}</p>
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-4">
-                  {latestFollowup.adaptation_obstacles && (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-xs text-gray-600 font-semibold mb-1">อุปสรรค:</p>
-                      <p className="text-sm">{latestFollowup.adaptation_obstacles}</p>
-                    </div>
-                  )}
-                  {latestFollowup.adaptation_opportunities && (
-                    <div className="bg-gray-50 rounded-lg p-4">
-                      <p className="text-xs text-gray-600 font-semibold mb-1">โอกาส/จุดแข็ง:</p>
-                      <p className="text-sm">{latestFollowup.adaptation_opportunities}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Summary & Recommendations */}
-              <div className="mb-6">
-                {latestFollowup.summary && (
-                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
-                    <p className="text-xs text-gray-600 font-semibold mb-1">สรุปผลการติดตาม:</p>
-                    <p className="text-sm">{latestFollowup.summary}</p>
-                  </div>
-                )}
-                {latestFollowup.recommendations && (
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <p className="text-xs text-gray-600 font-semibold mb-1">คำแนะนำ:</p>
-                    <p className="text-sm whitespace-pre-line">{latestFollowup.recommendations}</p>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {/* Signature Section */}
-          <div className="mt-12 grid grid-cols-2 gap-8">
-            <div className="text-center">
-              <div className="border-b border-gray-400 h-16 mb-2"></div>
-              <p className="text-sm font-semibold">ผู้บันทึก (อสม./เจ้าหน้าที่)</p>
-              <p className="text-xs text-gray-600 mt-1">วันที่: {formatThaiDate(new Date().toISOString())}</p>
-            </div>
-            <div className="text-center">
-              <div className="border-b border-gray-400 h-16 mb-2"></div>
-              <p className="text-sm font-semibold">ผู้ป่วย/ญาติ</p>
-              <p className="text-xs text-gray-600 mt-1">วันที่: _______________</p>
-            </div>
-          </div>
-
-          <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
-            <span>Community Bridge v1.0 • ระบบดูแลผู้ป่วย PreDM</span>
-            <span>หน้า 5 / 5</span>
           </div>
         </div>
-      </div>
 
-      {/* Print Styles */}
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: A4;
-            margin: 10mm;
-          }
-          body {
-            background: white;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-          .print\\:page-break-after {
-            page-break-after: always;
-          }
-          .print\\:mb-0 {
-            margin-bottom: 0 !important;
-          }
-          .print\\:px-0 {
-            padding-left: 0 !important;
-            padding-right: 0 !important;
-          }
-          .print\\:py-0 {
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
-          }
-        }
-      `}</style>
+        {/* Export Options */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-gray-800">เลือกรูปแบบไฟล์</h3>
+              <p className="text-sm text-gray-600">
+                เลือกแล้ว <span className="font-bold text-blue-600">{selectedPatients.size}</span> คน
+                จากทั้งหมด <span className="font-bold">{filteredPatients.length}</span> คน
+                {selectedHospital !== 'all' && (
+                  <span className="ml-2 text-blue-600">
+                    (โรงพยาบาล: {getSelectedHospitalName()})
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setExportMode('individual')}
+                className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                  exportMode === 'individual'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 text-gray-600 hover:border-blue-300'
+                }`}
+              >
+                <FileText className="w-4 h-4 inline mr-2" />
+                แยกไฟล์ (Individual)
+              </button>
+              <button
+                onClick={() => setExportMode('zip')}
+                className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                  exportMode === 'zip'
+                    ? 'border-green-500 bg-green-50 text-green-700'
+                    : 'border-gray-200 text-gray-600 hover:border-green-300'
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4 inline mr-2" />
+                รวม ZIP
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Patient Table */}
+        <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="px-6 py-4 text-left">
+                    <button
+                      onClick={toggleSelectAll}
+                      className="flex items-center gap-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 px-2 py-1 rounded"
+                    >
+                      {selectedPatients.size === filteredPatients.length ? (
+                        <CheckSquare className="w-5 h-5 text-blue-600" />
+                      ) : (
+                        <Square className="w-5 h-5 text-gray-400" />
+                      )}
+                      เลือกทั้งหมด
+                    </button>
+                  </th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">HN</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">อายุ/เพศ</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
+                  {/* ✅ คอลัมน์ใหม่: ข้อมูลติดตาม */}
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ข้อมูลติดตาม</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">น้ำหนัก</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">FPG</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">การกระทำ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredPatients.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-6 py-12 text-center text-gray-500">
+                      <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>ไม่พบข้อมูลผู้ป่วย</p>
+                      {selectedHospital !== 'all' && (
+                        <button
+                          onClick={() => setSelectedHospital('all')}
+                          className="mt-4 px-4 py-2 text-blue-600 hover:underline"
+                        >
+                          แสดงผู้ป่วยทั้งหมด
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPatients.map((patient) => (
+                    <tr key={patient.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <button
+                          onClick={() => toggleSelectPatient(patient.id)}
+                          className="flex items-center gap-2"
+                        >
+                          {selectedPatients.has(patient.id) ? (
+                            <CheckSquare className="w-5 h-5 text-blue-600" />
+                          ) : (
+                            <Square className="w-5 h-5 text-gray-400" />
+                          )}
+                        </button>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                            <Users className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium">{patient.first_name} {patient.last_name}</p>
+                            <p className="text-xs text-gray-500">{patient.hospitals?.name || '-'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm">{patient.hospital_number || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        {patient.age || '-'} ปี / {patient.gender === 'female' ? 'หญิง' : 'ชาย'}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          patient.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
+                          patient.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
+                          patient.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
+                          patient.pam_level === 'L1' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {patient.pam_level || 'L0'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                          patient.zone === 'Green Zone' ? 'bg-green-100 text-green-700' :
+                          patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
+                          patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
+                          'bg-gray-100 text-gray-700'
+                        }`}>
+                          {patient.zone || '-'}
+                        </span>
+                      </td>
+                      {/* ✅ แสดง Badge สถานะข้อมูลติดตาม */}
+                      <td className="px-6 py-4">
+                        {getFollowupBadge(patient)}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        {patient.latest_weight ? `${patient.latest_weight} กก.` : '-'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        {patient.latest_fpg ? `${patient.latest_fpg} mg/dL` : '-'}
+                      </td>
+                      <td className="px-6 py-4">
+                        <button
+                          onClick={() => router.push(`/admin/reports/patient-record/${patient.id}`)}
+                          className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-xs font-medium hover:bg-indigo-200"
+                        >
+                          ดูระเบียน
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Export Button */}
+        <div className="mt-6 flex justify-end">
+          <button
+            onClick={handleExport}
+            disabled={selectedPatients.size === 0 || exporting}
+            className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                กำลัง Export...
+              </>
+            ) : (
+              <>
+                <Download className="w-5 h-5" />
+                Export PDF ({selectedPatients.size} คน)
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
