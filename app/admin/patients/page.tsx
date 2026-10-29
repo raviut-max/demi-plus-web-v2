@@ -23,7 +23,8 @@ import {
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
-  FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward, Download
+  FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward, Download,
+  FileText, Activity, TrendingUp
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -38,16 +39,13 @@ const formatThaiDate = (dateString: string | null) => {
   if (!dateString) return '';
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return '';
-  
   const thaiMonths = [
     'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
     'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
   ];
-  
   const day = date.getDate();
   const month = thaiMonths[date.getMonth()];
   const yearBE = date.getFullYear() + 543;
-  
   return `${day} ${month} ${yearBE}`;
 };
 
@@ -58,7 +56,7 @@ export default function PatientManagementPage() {
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ✅ Search States แยกกันชัดเจน เพื่อแก้ปัญหา Permission และ Search ผิดที่
+  // ✅ Search States แยกกันชัดเจน
   const [searchTermNameHN, setSearchTermNameHN] = useState('');
   const [searchTermIdCard, setSearchTermIdCard] = useState('');
   const [selectedPamLevel, setSelectedPamLevel] = useState<string>('all');
@@ -93,9 +91,7 @@ export default function PatientManagementPage() {
       .select('id, type, parent_id')
       .eq('id', hospitalIdFilter)
       .single();
-    
     if (error || !hospital) return [hospitalIdFilter];
-    
     if (hospital.type === 'main') {
       const { data: subHospitals } = await supabase
         .from('hospitals')
@@ -115,7 +111,6 @@ export default function PatientManagementPage() {
       setLoadingFilters(true);
       const targetHospitalIds = await getHospitalIdsForFilter(hospitalIdFilter);
       const allCoaches = await getCoachesWithHospitals(targetHospitalIds);
-      
       const coachesWithCount = await Promise.all(allCoaches.map(async (c: any) => {
         try {
           const { count } = await supabase
@@ -128,7 +123,6 @@ export default function PatientManagementPage() {
           return { ...c, patientCount: 0, hospitalName: c.users?.hospitals?.name || 'ไม่ระบุ' };
         }
       }));
-      
       const sortedCoaches = [...coachesWithCount].sort((a, b) => 
         (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
       );
@@ -204,7 +198,6 @@ export default function PatientManagementPage() {
     try {
       setLoadingFilters(true);
       const allHospitals = await getHospitalsWithHierarchy(isSuperAdmin(user) ? undefined : accessibleIds);
-      
       const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
         try {
           const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('hospital_id', h.id).eq('is_active', true);
@@ -213,7 +206,6 @@ export default function PatientManagementPage() {
           return { ...h, patientCount: 0, typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย' };
         }
       }));
-      
       const sortedHospitals = [...hospitalsWithCount].sort((a, b) => {
         if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
         return (a.name || '').localeCompare(b.name || '', 'th');
@@ -233,12 +225,11 @@ export default function PatientManagementPage() {
       const isAllHospitals = selectedHospitalFilter === 'all';
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
-      
       const pamParam = isAllPam ? undefined : selectedPamLevel;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
-
+      
       const total = await getPatientCount(
         searchTermNameHN,
         searchTermIdCard,
@@ -248,10 +239,10 @@ export default function PatientManagementPage() {
         coachIdParam
       );
       setTotalPatients(total);
-
+      
       const fetchPageSize = forceFetchAll ? total : pageSize;
       const fetchCurrentPage = forceFetchAll ? 0 : currentPage;
-
+      
       const { patients: data } = await getPatientListPaginated(
         fetchCurrentPage,
         fetchPageSize,
@@ -264,7 +255,6 @@ export default function PatientManagementPage() {
         sortColumn,
         sortDirection
       );
-
       setPatients(data);
       
       if (!forceFetchAll) {
@@ -332,17 +322,14 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก และรูปแบบวันที่ พ.ศ.
+  // ✅ ปรับปรุงฟังก์ชัน Export Excel
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
-    
-    // ถ้าเลือก Export ทั้งหมด ให้ดึงข้อมูลใหม่โดยไม่จำกัดจำนวนแถว (Force Fetch All)
     if (mode === 'all') {
       await loadPatients(accessibleHospitalIds, true);
       dataToExport = patients; 
     }
-
-    // เตรียมข้อมูลสำหรับสร้าง Excel
+    
     const exportData = await Promise.all(dataToExport.map(async (patient) => {
       const userId = patient.id;
       
@@ -357,15 +344,12 @@ export default function PatientManagementPage() {
           )
         `)
         .eq('user_id', userId)
-        .order('updated_at', { ascending: true }); // เรียงจากเก่าสุดไปล่าสุดตาม status update time
-
-      const totalScreenings = screenings?.length || 0;
+        .order('updated_at', { ascending: true });
       
-      // หาการประเมินครั้งแรกและครั้งล่าสุด
+      const totalScreenings = screenings?.length || 0;
       const firstScreening = screenings && screenings.length > 0 ? screenings[0] : null;
       const lastScreening = screenings && screenings.length > 0 ? screenings[screenings.length - 1] : null;
-
-      // ฟังก์ชันช่วยคำนวณคะแนน PROM จาก responses
+      
       const calculatePromsScore = (screening: any) => {
         if (!screening || !screening.screening_responses) return '';
         const promsResponses = screening.screening_responses.filter(
@@ -373,28 +357,24 @@ export default function PatientManagementPage() {
         );
         return promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
       };
-
+      
       const firstPromsScore = calculatePromsScore(firstScreening);
       const lastPromsScore = calculatePromsScore(lastScreening);
       const firstPamScore = firstScreening?.pam_total_score || '';
       const lastPamScore = lastScreening?.pam_total_score || '';
-
+      
       // 2. ดึงข้อมูลการติดตาม (Follow-ups) สูงสุด 6 ครั้งล่าสุด
-      // เรียงจากเก่าสุดไปล่าสุด (Ascending) เพื่อให้ F1 เป็นครั้งแรกสุดใน 6 ครั้งล่าสุด หรือเรียงตามความต้องการ
-      // ตามข้อกำหนด: "เรียงจากเก่าสุดไปล่าสุด" สำหรับส่วนการติดตามด้วย
       const { data: followups } = await supabase
         .from('appointment_followups')
         .select('*')
         .eq('user_id', userId)
-        .order('followup_date', { ascending: true }) // เก่าสุด -> ล่าสุด
+        .order('followup_date', { ascending: true })
         .limit(6);
-
-      // Helper สำหรับจัดรูปแบบความดัน
+      
       const formatBP = (sys: number | null, dia: number | null) => {
         return (sys && dia) ? `${sys}/${dia}` : '';
       };
-
-      // สร้าง Object ข้อมูลตามโครงสร้างที่กำหนด
+      
       const rowData: any = {
         // --- ส่วนที่ 1: ข้อมูลส่วนตัว (1-13) ---
         'ID Card': patient.users?.id_card || '',
@@ -410,7 +390,6 @@ export default function PatientManagementPage() {
         'กลุ่มเสี่ยง/เบาหวาน': patient.diabetes_type || '',
         'ค่าน้ำตาล': patient.blood_sugar || '',
         'ค่า HbA1C': patient.hba1c_level || '',
-
         // --- ส่วนที่ 2: การประเมิน (14-20) ---
         'จำนวนครั้งที่ประเมิน': totalScreenings,
         'วันที่ประเมินครั้งแรก': formatThaiDate(firstScreening?.screening_date),
@@ -420,55 +399,46 @@ export default function PatientManagementPage() {
         'คะแนน PROM (ล่าสุด)': lastPromsScore,
         'คะแนน PAM (ล่าสุด)': lastPamScore,
       };
-
+      
       // --- ส่วนที่ 3: รายละเอียดการติดตาม (สูงสุด 6 ครั้ง) ---
-      // สร้างคอลัมน์ F1 ถึง F6
       for (let i = 0; i < 6; i++) {
         const followup = followups?.[i];
         const prefix = `F${i + 1}`;
-        
         rowData[`${prefix} วันที่ติดตาม`] = formatThaiDate(followup?.followup_date);
         rowData[`${prefix} น้ำหนัก`] = followup?.weight || '';
         rowData[`${prefix} รอบเอว`] = followup?.waist_circumference || '';
         rowData[`${prefix} ความดัน`] = formatBP(followup?.blood_pressure_sys, followup?.blood_pressure_dia);
         rowData[`${prefix} น้ำตาล`] = followup?.blood_sugar_dtx || '';
         rowData[`${prefix} ความมั่นใจ`] = followup?.confidence_score || '';
-        rowData[`${prefix} แผนปฏิบัติอาหาร`] = followup?.food_amount_status || ''; // ใช้ status
-        rowData[`${prefix} แผนปฏิบัติชนิดอาหาร`] = followup?.food_type_status || ''; // ใช้ status
-        rowData[`${prefix} แผนปฏิบัติการเคลื่อนไหว`] = followup?.movement_status || ''; // ใช้ status
+        rowData[`${prefix} แผนปฏิบัติอาหาร`] = followup?.food_amount_status || '';
+        rowData[`${prefix} แผนปฏิบัติชนิดอาหาร`] = followup?.food_type_status || '';
+        rowData[`${prefix} แผนปฏิบัติการเคลื่อนไหว`] = followup?.movement_status || '';
       }
-
+      
       return rowData;
     }));
-
-    // สร้าง Worksheet และ Workbook
+    
     const ws = XLSX.utils.json_to_sheet(exportData);
-    
-    // ตั้งค่าความกว้างคอลัมน์ให้เหมาะสมกับข้อมูลภาษาไทยและตัวเลข
-    // คอลัมน์พื้นฐาน 20 คอลัมน์ + (9 คอลัมน์ต่อรอบ x 6 รอบ = 54 คอลัมน์) = รวม 74 คอลัมน์
     const baseCols = [
-      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 8 }, // 1-6
-      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, // 7-13
-      { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, // 14-20
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 8 },
+      { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 8 }, { wch: 15 }, { wch: 10 }, { wch: 10 },
+      { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 12 },
     ];
-    
-    const followupCols = Array(54).fill({ wch: 15 }); // 6 rounds * 9 cols
-    
+    const followupCols = Array(54).fill({ wch: 15 });
     ws['!cols'] = [...baseCols, ...followupCols];
-
+    
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
-    
     const fileName = `patients_export_${mode}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
     XLSX.writeFile(wb, fileName);
   };
 
   const handleDeletePatient = async (patientId: string, patientName: string) => {
     if (user?.role === 'osm') {
-      alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
+      alert(' อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
-    if (!confirm(`⚠️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
+    if (!confirm(`️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
@@ -535,7 +505,7 @@ export default function PatientManagementPage() {
       'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
       'admin': { text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100', textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700' },
       'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
-      'helper': { text: '👩‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
+      'helper': { text: '‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
     const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
     return <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>{config.text}</span>;
@@ -590,13 +560,11 @@ export default function PatientManagementPage() {
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
             <ArrowLeft className="w-4 h-4" /> กลับ Dashboard
           </button>
-          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการผู้ป่วย</h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2"> จัดการผู้ป่วย</h1>
               <p className="text-gray-600">จัดการข้อมูลผู้ป่วยและติดตามผลการรักษา</p>
             </div>
-            
             <div className="flex-1 max-w-md mx-4">
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200 shadow-sm">
                 <div className="flex items-start gap-3">
@@ -632,7 +600,6 @@ export default function PatientManagementPage() {
                 </div>
               </div>
             </div>
-            
             <div className="flex gap-2">
               {canDeleteData() && (
                 <button onClick={() => setShowDeletedModal(true)} className="flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
@@ -683,7 +650,6 @@ export default function PatientManagementPage() {
         {/* Filters */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
-            {/* ✅ ช่องค้นหาแยก: ชื่อ/HN */}
             <div className="lg:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Search className="w-4 h-4 inline mr-1" /> ค้นหา ชื่อ / HN
@@ -697,7 +663,6 @@ export default function PatientManagementPage() {
                 className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            {/* ✅ ช่องค้นหาแยก: ID Card */}
             <div className="lg:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <User className="w-4 h-4 inline mr-1" /> ค้นหา ID Card
@@ -762,38 +727,37 @@ export default function PatientManagementPage() {
             </div>
           </div>
           <div className="flex justify-end">
-             <button
+            <button
               onClick={handleSearch}
               disabled={loadingFilters}
               className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2 disabled:opacity-50"
-             >
+            >
               {loadingFilters ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />} ค้นหา
-             </button>
+            </button>
           </div>
         </div>
 
         {/* Export & Info Bar */}
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-           <div className="text-sm text-gray-600">
+          <div className="text-sm text-gray-600">
             📄 แสดงหน้าที่ {currentPage + 1} จาก {totalPages || 1} (หน้าละ {pageSize} รายการ)
-           </div>
-           {/* ✅ ปุ่ม Export แบบเลือกโหมด */}
-            <div className="flex items-center gap-2">
-               <button
-                onClick={() => exportToExcel('current')}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
-               >
-                 <FileSpreadsheet className="w-4 h-4" />
-                Export เฉพาะหน้านี้
-               </button>
-               <button
-                onClick={() => exportToExcel('all')}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
-               >
-                 <Download className="w-4 h-4" />
-                Export ทั้งหมด
-               </button>
-            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => exportToExcel('current')}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Export เฉพาะหน้านี้
+            </button>
+            <button
+              onClick={() => exportToExcel('all')}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-sm text-sm"
+            >
+              <Download className="w-4 h-4" />
+              Export ทั้งหมด
+            </button>
+          </div>
         </div>
 
         {/* Patient Table */}
@@ -825,48 +789,48 @@ export default function PatientManagementPage() {
               </thead>
               <tbody className="divide-y">
                 {patients.length === 0 ? (
-                   <tr>
-                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                       <p>ไม่พบข้อมูลผู้ป่วย</p>
+                  <tr>
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                      <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>ไม่พบข้อมูลผู้ป่วย</p>
                       {(searchTermNameHN || searchTermIdCard || selectedHospitalFilter !== 'all' || selectedCoachFilter !== 'all') && (
-                         <button
+                        <button
                           onClick={() => { setSearchTermNameHN(''); setSearchTermIdCard(''); setSelectedHospitalFilter('all'); setSelectedCoachFilter('all'); handleSearch(); }}
                           className="mt-4 px-4 py-2 text-blue-600 hover:underline"
-                         >
+                        >
                           ล้างฟิลเตอร์และค้นหาใหม่
-                         </button>
+                        </button>
                       )}
-                     </td>
-                   </tr>
+                    </td>
+                  </tr>
                 ) : (
                   patients.map((patient) => (
-                     <tr key={patient.id} className="hover:bg-gray-50">
-                       <td className="px-6 py-4">
-                         <div className="flex items-center gap-3">
-                           <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                             <Users className="w-5 h-5 text-blue-600" />
-                           </div>
-                           <div>
-                             <p className="font-medium">{patient.first_name} {patient.last_name}</p>
-                             <p className="text-sm text-gray-500">{patient.phone || '-'}</p>
-                           </div>
-                         </div>
-                       </td>
-                       <td className="px-6 py-4">
-                         <span className="font-mono text-sm">{patient.hospital_number || '-'}</span>
-                       </td>
-                       <td className="px-6 py-4">
-                         <span className="font-mono text-sm text-gray-600">{patient.users?.id_card || '-'}</span>
-                       </td>
-                       <td className="px-6 py-4">
-                         <span className="text-sm">{patient.hospitals?.name || '-'}</span>
-                       </td>
-                       <td className="px-6 py-4">
-                         <span className="text-sm">{patient.coach_name || '-'}</span>
-                       </td>
-                       <td className="px-6 py-4">
-                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                    <tr key={patient.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                            <Users className="w-5 h-5 text-blue-600" />
+                          </div>
+                          <div>
+                            <p className="font-medium">{patient.first_name} {patient.last_name}</p>
+                            <p className="text-sm text-gray-500">{patient.phone || '-'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm">{patient.hospital_number || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm text-gray-600">{patient.users?.id_card || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm">{patient.hospitals?.name || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="text-sm">{patient.coach_name || '-'}</span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                           patient.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
                           patient.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
                           patient.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
@@ -874,45 +838,64 @@ export default function PatientManagementPage() {
                           'bg-gray-100 text-gray-700'
                         }`}>
                           {patient.pam_level || 'L0'}
-                         </span>
-                       </td>
-                       <td className="px-6 py-4">
-                         <div className="flex items-center gap-2">
-                           <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด">
-                             <Eye className="w-4 h-4" />
-                           </button>
-                           <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข">
-                             <Edit className="w-4 h-4" />
-                           </button>
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          {/* ✅ ปุ่มดูระเบียนคนไข้ (ใหม่) */}
+                          <button 
+                            onClick={() => router.push(`/admin/patients/${patient.id}/record`)} 
+                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" 
+                            title="ดูระเบียนคนไข้"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => router.push(`/admin/patients/${patient.id}`)} 
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" 
+                            title="ดูรายละเอียด"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button 
+                            onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} 
+                            className="p-2 text-green-600 hover:bg-green-50 rounded-lg" 
+                            title="แก้ไข"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
                           {canDeleteData() ? (
-                             <button onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="ลบ">
-                               <Trash2 className="w-4 h-4" />
-                             </button>
+                            <button 
+                              onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} 
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg" 
+                              title="ลบ"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           ) : (
-                             <span className="text-xs text-gray-400" title="อสม. ไม่มีสิทธิ์ลบ">
-                               <Lock className="w-3 h-3" />
-                             </span>
+                            <span className="text-xs text-gray-400" title="อสม. ไม่มีสิทธิ์ลบ">
+                              <Lock className="w-3 h-3" />
+                            </span>
                           )}
-                         </div>
-                       </td>
-                     </tr>
+                        </div>
+                      </td>
+                    </tr>
                   ))
                 )}
               </tbody>
             </table>
           </div>
-          
-          {/* ✅ Pagination Controls with Jump to Page */}
+
+          {/* Pagination Controls */}
           {totalPages > 1 && (
-             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
-               <div className="text-sm text-gray-600">
+            <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
+              <div className="text-sm text-gray-600">
                 แสดง {currentPage * pageSize + 1} - {Math.min((currentPage + 1) * pageSize, totalPatients)} จาก {totalPatients.toLocaleString()} รายการ
-               </div>
-               <div className="flex items-center gap-3 flex-wrap">
-                {/* Jump to Page Input */}
-                 <div className="flex items-center gap-2">
-                   <span className="text-sm text-gray-600">ไปยังหน้า:</span>
-                   <input
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">ไปยังหน้า:</span>
+                  <input
                     type="number"
                     min="1"
                     max={totalPages}
@@ -922,125 +905,123 @@ export default function PatientManagementPage() {
                     className="w-16 px-2 py-1 border rounded text-center text-sm"
                     placeholder="หน้า"
                   />
-                   <button
+                  <button
                     onClick={handleJumpToPage}
                     className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600"
-                   >
+                  >
                     ไป
-                   </button>
-                 </div>
-                {/* Navigation Buttons */}
-                 <div className="flex items-center gap-2">
-                   <button
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
                     onClick={() => setCurrentPage(0)}
                     disabled={currentPage === 0}
                     className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 text-sm flex items-center gap-1"
                     title="หน้าแรก"
-                   >
-                     <SkipBack className="w-4 h-4" />
-                   </button>
-                   <button
+                  >
+                    <SkipBack className="w-4 h-4" />
+                  </button>
+                  <button
                     onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
                     disabled={currentPage === 0}
                     className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 flex items-center gap-1 text-sm"
-                   >
-                     <ChevronLeft className="w-4 h-4" /> ก่อนหน้า
-                   </button>
-                   <div className="flex gap-1">
+                  >
+                    <ChevronLeft className="w-4 h-4" /> ก่อนหน้า
+                  </button>
+                  <div className="flex gap-1">
                     {getPageNumbers().map((pageNum, idx) => {
                       if (pageNum === '...') {
                         return <span key={`ellipsis-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
                       }
                       const p = pageNum as number;
                       return (
-                         <button
+                        <button
                           key={p}
                           onClick={() => setCurrentPage(p)}
                           className={`px-3 py-2 rounded-lg text-sm font-medium ${
                             currentPage === p ? 'bg-blue-500 text-white' : 'bg-white border hover:bg-gray-50'
                           }`}
-                         >
+                        >
                           {p + 1}
-                         </button>
+                        </button>
                       );
                     })}
-                   </div>
-                   <button
+                  </div>
+                  <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
                     disabled={currentPage >= totalPages - 1}
                     className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 flex items-center gap-1 text-sm"
-                   >
+                  >
                     ถัดไป <ChevronRight className="w-4 h-4" />
-                   </button>
-                   <button
+                  </button>
+                  <button
                     onClick={() => setCurrentPage(totalPages - 1)}
                     disabled={currentPage >= totalPages - 1}
                     className="px-3 py-2 bg-white border rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 text-sm flex items-center gap-1"
                     title="หน้าสุดท้าย"
-                   >
-                     <SkipForward className="w-4 h-4" />
-                   </button>
-                 </div>
-               </div>
-             </div>
+                  >
+                    <SkipForward className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
 
       {/* Deleted Modal */}
       {showDeletedModal && canDeleteData() && (
-         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-             <div className="p-6 border-b flex justify-between items-center">
-               <h2 className="text-2xl font-bold flex gap-2">
-                 <Archive className="w-6 h-6" />
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b flex justify-between items-center">
+              <h2 className="text-2xl font-bold flex gap-2">
+                <Archive className="w-6 h-6" />
                 ผู้ป่วยที่ลบแล้ว ({deletedPatients.length})
-               </h2>
-               <button onClick={() => setShowDeletedModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
-             </div>
-             <div className="p-6">
+              </h2>
+              <button onClick={() => setShowDeletedModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl">×</button>
+            </div>
+            <div className="p-6">
               {deletedPatients.length === 0 ? (
-                 <div className="text-center py-12">
-                   <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                   <p>ไม่มีผู้ป่วยที่ถูกลบ</p>
-                 </div>
+                <div className="text-center py-12">
+                  <Archive className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p>ไม่มีผู้ป่วยที่ถูกลบ</p>
+                </div>
               ) : (
-                 <div className="space-y-4">
+                <div className="space-y-4">
                   {deletedPatients.map((patient) => (
-                     <div key={patient.id} className="border rounded-lg p-4">
-                       <div className="flex justify-between">
-                         <div>
-                           <div className="flex gap-2 mb-2">
-                             <h3 className="font-semibold">{patient.first_name} {patient.last_name}</h3>
-                             <span className="px-2 py-1 bg-gray-100 rounded-full text-xs">{patient.hospital_number}</span>
-                           </div>
-                           <div className="text-sm space-y-1">
-                             <p>HN: {patient.hospital_number || '-'}</p>
-                             <p>โรงพยาบาล: {patient.hospitals?.name || '-'}</p>
-                             <p>ลบเมื่อ: {new Date(patient.updated_at).toLocaleDateString('th-TH')}</p>
-                           </div>
-                         </div>
-                         <div className="flex gap-2">
-                           <button onClick={() => handleRestorePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="flex gap-2 px-4 py-2 bg-green-500 text-white rounded-lg">
-                             <RotateCcw className="w-4 h-4" /> กู้คืน
-                           </button>
-                           <button onClick={() => handlePermanentlyDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="flex gap-2 px-4 py-2 bg-red-600 text-white rounded-lg">
-                             <Trash2 className="w-4 h-4" /> ลบถาวร
-                           </button>
-                         </div>
-                       </div>
-                     </div>
+                    <div key={patient.id} className="border rounded-lg p-4">
+                      <div className="flex justify-between">
+                        <div>
+                          <div className="flex gap-2 mb-2">
+                            <h3 className="font-semibold">{patient.first_name} {patient.last_name}</h3>
+                            <span className="px-2 py-1 bg-gray-100 rounded-full text-xs">{patient.hospital_number}</span>
+                          </div>
+                          <div className="text-sm space-y-1">
+                            <p>HN: {patient.hospital_number || '-'}</p>
+                            <p>โรงพยาบาล: {patient.hospitals?.name || '-'}</p>
+                            <p>ลบเมื่อ: {new Date(patient.updated_at).toLocaleDateString('th-TH')}</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleRestorePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="flex gap-2 px-4 py-2 bg-green-500 text-white rounded-lg">
+                            <RotateCcw className="w-4 h-4" /> กู้คืน
+                          </button>
+                          <button onClick={() => handlePermanentlyDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="flex gap-2 px-4 py-2 bg-red-600 text-white rounded-lg">
+                            <Trash2 className="w-4 h-4" /> ลบถาวร
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                 </div>
+                </div>
               )}
-             </div>
-             <div className="p-6 border-t bg-gray-50">
-               <button onClick={() => setShowDeletedModal(false)} className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg">ปิด</button>
-             </div>
-           </div>
-         </div>
+            </div>
+            <div className="p-6 border-t bg-gray-50">
+              <button onClick={() => setShowDeletedModal(false)} className="w-full px-4 py-2 bg-gray-500 text-white rounded-lg">ปิด</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
-  
 }
