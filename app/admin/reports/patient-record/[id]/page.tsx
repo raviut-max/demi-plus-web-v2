@@ -11,7 +11,7 @@ import { ArrowLeft, Download, LogOut, Loader2, CheckCircle } from 'lucide-react'
 // ✅ Dynamic import เพื่อป้องกันปัญหา SSR ใน Next.js
 import dynamic from 'next/dynamic';
 const jsPDF = dynamic(() => import('jspdf'), { ssr: false });
-const html2canvas = dynamic(() => import('html2canvas'), { ssr: false });
+const html2canvas = dynamic(() => import('html2canvas-pro'), { ssr: false });
 
 interface PatientData {
   id: string;

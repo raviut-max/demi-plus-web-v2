@@ -15,7 +15,7 @@ import {
   Loader2, Info, HardDrive
 } from 'lucide-react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 import JSZip from 'jszip';
 
 interface Patient {
