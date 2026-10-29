@@ -1,9 +1,9 @@
 // app/admin/reports/patient-record/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
 // ✅ การแก้ไข:
-//    1. เพิ่ม useEffect ตั้งชื่อไฟล์ PDF อัตโนมัติ
-//    2. ใช้ทั้ง document.title และ <title> tag
-//    3. เพิ่ม console.log สำหรับ debug
+//    1. ดึงค่าสุขภาพจาก Follow-up ล่าสุด (ถ้ามี)
+//    2. Fallback ไปใช้ค่าจาก profiles ถ้าไม่มีใน followups
+//    3. แสดงวันที่ของข้อมูลสุขภาพ
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -87,6 +87,17 @@ export default function PatientRecordDetailPage() {
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ✅ State สำหรับค่าสุขภาพล่าสุด (จาก Follow-up หรือ Profiles)
+  const [latestHealthData, setLatestHealthData] = useState({
+    weight: null as number | null,
+    waist: null as number | null,
+    fpg: null as number | null,
+    hba1c: null as number | null,
+    bpSys: null as number | null,
+    bpDia: null as number | null,
+    healthDataDate: null as string | null,
+  });
+
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -106,24 +117,8 @@ export default function PatientRecordDetailPage() {
       const firstName = patient.first_name || 'ไม่ระบุชื่อ';
       const lastName = patient.last_name || '';
 
-      // สร้างสตริงชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล
       const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
-
-      // วิธีที่ 1: เปลี่ยน document.title
       document.title = fileName;
-      
-      // วิธีที่ 2: เปลี่ยน <title> tag ใน head
-      const titleElement = document.querySelector('title');
-      if (titleElement) {
-        titleElement.textContent = fileName;
-      } else {
-        const newTitle = document.createElement('title');
-        newTitle.textContent = fileName;
-        document.head.appendChild(newTitle);
-      }
-
-      // Debug: แสดงชื่อที่ตั้งใน Console
-      console.log('📄 [PDF FileName] ตั้งชื่อไฟล์เป็น:', fileName);
     }
   }, [patient]);
 
@@ -145,7 +140,7 @@ export default function PatientRecordDetailPage() {
       if (patientError) throw patientError;
       setPatient(patientData);
 
-      // โหลดข้อมูล Follow-ups
+      // โหลดข้อมูล Follow-ups (เรียงจากล่าสุดไปเก่าสุด)
       const { data: followupData, error: followupError } = await supabase
         .from('appointment_followups')
         .select('*')
@@ -164,6 +159,20 @@ export default function PatientRecordDetailPage() {
 
       if (screeningError) throw screeningError;
       setScreenings(screeningData || []);
+
+      // ✅ ดึงค่าสุขภาพล่าสุดจาก Follow-up หรือ Profiles
+      const latestFollowup = followupData?.[0];
+      
+      setLatestHealthData({
+        weight: latestFollowup?.weight || patientData?.current_weight || null,
+        waist: latestFollowup?.waist_circumference || patientData?.waist_circumference || null,
+        fpg: latestFollowup?.blood_sugar_dtx || patientData?.blood_sugar || null,
+        hba1c: patientData?.hba1c_level || null,
+        bpSys: latestFollowup?.blood_pressure_sys || null,
+        bpDia: latestFollowup?.blood_pressure_dia || null,
+        healthDataDate: latestFollowup?.followup_date || patientData?.program_start_date || null,
+      });
+
     } catch (error) {
       console.error('Error loading patient data:', error);
     } finally {
@@ -370,25 +379,40 @@ export default function PatientRecordDetailPage() {
             </div>
           </div>
 
-          {/* Health Data */}
+          {/* ✅ Health Data - ดึงจาก Follow-up ล่าสุด หรือ Profiles */}
           <div className="mb-6">
-            <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">📊 ค่าสุขภาพปัจจุบัน</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
+              📊 ค่าสุขภาพปัจจุบัน
+              {latestHealthData.healthDataDate && (
+                <span className="text-sm font-normal text-gray-500 ml-2">
+                  (ข้อมูลเมื่อ {formatThaiDate(latestHealthData.healthDataDate)})
+                </span>
+              )}
+            </h3>
             <div className="grid grid-cols-4 gap-4">
               <div className="border rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-600">น้ำหนัก</p>
-                <p className="text-xl font-bold">{patient.current_weight || '-'} <span className="text-sm">กก.</span></p>
+                <p className="text-xl font-bold">
+                  {latestHealthData.weight || '-'} <span className="text-sm">กก.</span>
+                </p>
               </div>
               <div className="border rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-600">รอบเอว</p>
-                <p className="text-xl font-bold">{patient.waist_circumference || '-'} <span className="text-sm">ซม.</span></p>
+                <p className="text-xl font-bold">
+                  {latestHealthData.waist || '-'} <span className="text-sm">ซม.</span>
+                </p>
               </div>
               <div className="border rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-600">FPG</p>
-                <p className="text-xl font-bold">{patient.blood_sugar || '-'} <span className="text-sm">mg/dL</span></p>
+                <p className="text-xl font-bold">
+                  {latestHealthData.fpg || '-'} <span className="text-sm">mg/dL</span>
+                </p>
               </div>
               <div className="border rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-600">HbA1c</p>
-                <p className="text-xl font-bold">{patient.hba1c_level || '-'} <span className="text-sm">%</span></p>
+                <p className="text-xl font-bold">
+                  {latestHealthData.hba1c || '-'} <span className="text-sm">%</span>
+                </p>
               </div>
             </div>
           </div>
@@ -551,7 +575,7 @@ export default function PatientRecordDetailPage() {
             <div className="space-y-6">
               {latestFollowup?.floating_chart_image_url && (
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3"> Floating Chart - กราฟแนวโน้ม</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Floating Chart - กราฟแนวโน้ม</h3>
                   <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
                     <img
                       src={latestFollowup.floating_chart_image_url}
@@ -598,7 +622,7 @@ export default function PatientRecordDetailPage() {
         {/* ===== PAGE 5: สรุปและลายเซ็น ===== */}
         <div className="bg-white p-8" style={{ minHeight: '297mm' }}>
           <div className="border-b-2 border-blue-600 pb-4 mb-6">
-            <h2 className="text-xl font-bold text-gray-900"> สรุปและคำแนะนำ</h2>
+            <h2 className="text-xl font-bold text-gray-900">📝 สรุปและคำแนะนำ</h2>
           </div>
 
           {latestFollowup && (
