@@ -1,6 +1,14 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ ฉบับสมบูรณ์: 29 ตุลาคม 2569
-// ✅ บันทึกรวม PDF: เลือกโฟลเดอร์ + บันทึกทีเดียว + แบ่งหน้าถูกต้อง + ลายเซ็น
+// ✅ ฟีเจอร์ทั้งหมด:
+//    1. เลือกโรงพยาบาล + สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม
+//    2. ปุ่ม "บันทึกรวม" อยู่ด้านบนเห็นชัดเจน
+//    3. Pagination แสดงทีละ 10 คน
+//    4. คอลัมน์ "ข้อมูลติดตาม" พร้อม Badge
+//    5. บันทึกรวม: เลือกโฟลเดอร์ + บันทึกทีเดียว + แยกชื่อไฟล์
+//    6. แบ่งหน้า PDF อัตโนมัติตามพื้นที่จริง (ไม่ตัดกลาง, ไม่เหลือที่ว่างเยอะ)
+//    7. หัวตารางประวัติใช้หมายเลขรอบจริง (รอบที่ 4-6 จากทั้งหมด 6 รอบ)
+//    8. Fallback เป็น ZIP สำหรับ browser ที่ไม่รองรับเลือกโฟลเดอร์
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -310,7 +318,7 @@ function PatientRecordContent() {
     return { patient: patientData, followups: followupData || [], screenings: screeningData || [] };
   };
 
-  // ✅ สร้าง HTML แยกเป็นหน้าๆ (แต่ละหน้า = A4 1 หน้าพอดี ไม่มีการตัดกลาง)
+  // ✅ สร้าง HTML แยกเป็นหน้าๆ (A4 พอดีต่อหน้า + แบ่งประวัติการติดตามอัตโนมัติตามพื้นที่จริง)
   const renderPatientPages = (patient: any, followups: FollowupRecord[], screenings: ScreeningRecord[]): string[] => {
     const formatThaiDate = (dateString: string | null) => {
       if (!dateString) return '-';
@@ -332,7 +340,24 @@ function PatientRecordContent() {
     const latestScreening = screenings[0];
     const inners: string[] = [];
 
-    /* ---------- PAGE 1 ---------- */
+    // ---------- ตัวสร้างการ์ดประวัติการติดตาม ----------
+    const buildFollowupCard = (f: FollowupRecord, highlight: boolean) => `
+      <div style="border:1px solid ${highlight ? '#3b82f6' : '#e5e7eb'};background:${highlight ? '#eff6ff' : '#ffffff'};border-radius:8px;padding:12px 14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:16px;font-weight:800;">รอบที่ ${f.followup_round}</span>
+          <span style="font-size:13px;color:#6b7280;">${formatThaiDate(f.followup_date)}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;font-size:13px;">
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">น้ำหนัก</div><div style="font-weight:600;">${f.weight || '-'} กก.</div></div>
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">ความดัน</div><div style="font-weight:600;">${f.blood_pressure_sys && f.blood_pressure_dia ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : '-'} mmHg</div></div>
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">FPG</div><div style="font-weight:600;">${f.blood_sugar_dtx || '-'} mg/dL</div></div>
+          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">ความมั่นใจ</div><div style="font-weight:600;">${f.confidence_score || '-'}/10</div></div>
+        </div>
+        ${f.summary ? `<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;margin-top:8px;font-size:13px;"><span style="color:#6b7280;font-size:11px;font-weight:700;">สรุป: </span>${f.summary}</div>` : ''}
+      </div>
+    `;
+
+    /* ---------- PAGE 1: ข้อมูลผู้ป่วย + ผลประเมิน + ค่าสุขภาพ ---------- */
     inners.push(`
       <div style="border-bottom:2px solid #2563eb;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
@@ -414,38 +439,60 @@ function PatientRecordContent() {
       </div>` : ''}
     `);
 
-    /* ---------- PAGE 2+: ประวัติการติดตาม (3 รอบ/หน้า) ---------- */
+    /* ---------- PAGE 2+: ประวัติการติดตาม (วัดความสูงจริง → แบ่งอัตโนมัติ) ---------- */
     if (followups.length === 0) {
       inners.push(`
         <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:16px;">📋 ประวัติการติดตาม</div>
         <div style="text-align:center;color:#9ca3af;padding:60px 0;font-size:14px;">ยังไม่มีประวัติการติดตาม</div>
       `);
     } else {
-      for (let c = 0; c < followups.length; c += 3) {
-        const chunk = followups.slice(c, c + 3);
-        inners.push(`
-          <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">
-            📋 ประวัติการติดตาม (ครั้งที่ ${c + 1}-${Math.min(c + 3, followups.length)} จาก ${followups.length} ครั้ง)
-          </div>
-          <div style="display:flex;flex-direction:column;gap:12px;">
-            ${chunk.map((f, idx) => `
-              <div style="border:1px solid ${idx === 0 && c === 0 ? '#3b82f6' : '#e5e7eb'};background:${idx === 0 && c === 0 ? '#eff6ff' : '#ffffff'};border-radius:8px;padding:12px 14px;">
-                <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-                  <span style="font-size:16px;font-weight:800;">รอบที่ ${f.followup_round}</span>
-                  <span style="font-size:13px;color:#6b7280;">${formatThaiDate(f.followup_date)}</span>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;font-size:13px;">
-                  <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">น้ำหนัก</div><div style="font-weight:600;">${f.weight || '-'} กก.</div></div>
-                  <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">ความดัน</div><div style="font-weight:600;">${f.blood_pressure_sys && f.blood_pressure_dia ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : '-'} mmHg</div></div>
-                  <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">FPG</div><div style="font-weight:600;">${f.blood_sugar_dtx || '-'} mg/dL</div></div>
-                  <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">ความมั่นใจ</div><div style="font-weight:600;">${f.confidence_score || '-'}/10</div></div>
-                </div>
-                ${f.summary ? `<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;margin-top:8px;font-size:13px;"><span style="color:#6b7280;font-size:11px;font-weight:700;">สรุป: </span>${f.summary}</div>` : ''}
-              </div>
-            `).join('')}
-          </div>
-        `);
+      const MAX_CONTENT_HEIGHT = 980; // px พื้นที่เนื้อหาที่ใส่ได้ภายใน 1 หน้า A4
+      const headerHtml = (label: string) => `
+        <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">
+          📋 ประวัติการติดตาม (${label})
+        </div>
+      `;
+
+      // ตัววัดความสูง (ซ่อนนอกจอ)
+      const measure = document.createElement('div');
+      measure.style.width = '698px';
+      measure.style.position = 'fixed';
+      measure.style.left = '-10000px';
+      measure.style.top = '0';
+      measure.style.visibility = 'hidden';
+      measure.style.fontFamily = "'Sarabun','Noto Sans Thai','Helvetica Neue',Arial,sans-serif";
+      document.body.appendChild(measure);
+
+      // ✅ แบ่งการ์ดเป็นชุดๆ ตามความสูงจริงของเนื้อหา
+      const chunks: FollowupRecord[][] = [];
+      let current: FollowupRecord[] = [];
+
+      for (let i = 0; i < followups.length; i++) {
+        const trial = [...current, followups[i]];
+        measure.innerHTML = headerHtml('วัด') + trial.map((f, idx) => buildFollowupCard(f, idx === 0)).join('');
+        if (measure.scrollHeight > MAX_CONTENT_HEIGHT && current.length > 0) {
+          chunks.push(current);
+          current = [followups[i]];
+        } else {
+          current = trial;
+        }
       }
+      if (current.length > 0) chunks.push(current);
+      document.body.removeChild(measure);
+
+      // ✅ สร้างแต่ละหน้า โดยใช้หมายเลขรอบจริงในหัวตาราง
+      chunks.forEach((chunk, chunkIndex) => {
+        const rounds = chunk.map(f => f.followup_round || 0);
+        const maxR = Math.max(...rounds);
+        const minR = Math.min(...rounds);
+        const label = minR === maxR
+          ? `รอบที่ ${maxR} จากทั้งหมด ${followups.length} รอบ`
+          : `รอบที่ ${minR}-${maxR} จากทั้งหมด ${followups.length} รอบ`;
+        inners.push(
+          headerHtml(label) +
+          chunk.map((f, idx) => buildFollowupCard(f, chunkIndex === 0 && idx === 0)).join('')
+        );
+      });
     }
 
     /* ---------- PAGE: Life Schedule ---------- */
@@ -788,7 +835,7 @@ function PatientRecordContent() {
                   <div>
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩💼 เจ้าหน้าที่'}
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
