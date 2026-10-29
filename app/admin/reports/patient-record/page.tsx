@@ -1,15 +1,13 @@
 // app/admin/reports/patient-record/page.tsx
-// ✅ หน้าเลือกระเบียนคนไข้สำหรับ Export PDF
-// ✅ รองรับ 2 โหมด: ทั้งโรงพยาบาล / เฉพาะราย
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { checkSession, logout, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { useRouter } from 'next/navigation';
+import { checkSession, logout, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
-  CheckSquare, Square, Loader2, Printer, X
+  CheckSquare, Square, Loader2
 } from 'lucide-react';
 
 interface Patient {
@@ -29,9 +27,6 @@ interface Patient {
 
 export default function PatientRecordPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const initialMode = searchParams.get('mode') || 'hospital';
-
   const [user, setUser] = useState<any>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatients, setSelectedPatients] = useState<Set<string>>(new Set());
@@ -39,9 +34,6 @@ export default function PatientRecordPage() {
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [pamFilter, setPamFilter] = useState('all');
-  const [zoneFilter, setZoneFilter] = useState('all');
-  const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
-  const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
 
   useEffect(() => {
     const userData = checkSession();
@@ -87,8 +79,7 @@ export default function PatientRecordPage() {
     const hn = (p.hospital_number || '').toLowerCase();
     const matchSearch = fullName.includes(searchLower) || hn.includes(searchLower);
     const matchPam = pamFilter === 'all' || p.pam_level === pamFilter;
-    const matchZone = zoneFilter === 'all' || p.zone === zoneFilter;
-    return matchSearch && matchPam && matchZone;
+    return matchSearch && matchPam;
   });
 
   const toggleSelectAll = () => {
@@ -120,26 +111,15 @@ export default function PatientRecordPage() {
     try {
       const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
       
-      if (exportMode === 'individual') {
-        // Export แยกไฟล์ - เปิดหน้าต่างใหม่ทีละคน
-        for (const patient of selectedPatientData) {
-          window.open(
-            `/admin/reports/patient-record/${patient.id}?print=true`,
-            '_blank'
-          );
-          // หน่วงเวลาเล็กน้อยเพื่อไม่ให้ browser block popup
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        alert(`✅ เปิดระเบียน ${selectedPatientData.length} ไฟล์แล้ว กรุณาอนุญาต Popup หากถูกบล็อค`);
-      } else {
-        // Export รวม ZIP - เปิดหน้ารวม
-        const ids = selectedPatientData.map(p => p.id).join(',');
+      // Export แยกไฟล์ - เปิดหน้าต่างใหม่ทีละคน
+      for (const patient of selectedPatientData) {
         window.open(
-          `/admin/reports/patient-record/batch?ids=${ids}`,
+          `/admin/reports/patient-record/${patient.id}?print=true`,
           '_blank'
         );
-        alert(`✅ เปิดหน้า Export ZIP แล้ว`);
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
+      alert(`✅ เปิดระเบียน ${selectedPatientData.length} ไฟล์แล้ว`);
     } catch (error) {
       console.error('Export error:', error);
       alert('❌ เกิดข้อผิดพลาดในการ Export');
@@ -169,7 +149,7 @@ export default function PatientRecordPage() {
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">📄 ระเบียนคนไข้ (PDF)</h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2"> ระเบียนคนไข้ (PDF)</h1>
               <p className="text-gray-600">เลือกรายงานและ Export เป็น PDF</p>
             </div>
             <div className="flex items-center gap-4">
@@ -182,7 +162,7 @@ export default function PatientRecordPage() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
                        user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
@@ -202,52 +182,9 @@ export default function PatientRecordPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Mode Selection */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">เลือกรูปแบบการ Export</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button
-              onClick={() => setMode('hospital')}
-              className={`p-6 rounded-xl border-2 transition-all text-left ${
-                mode === 'hospital' 
-                  ? 'border-blue-500 bg-blue-50' 
-                  : 'border-gray-200 hover:border-blue-300'
-              }`}
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Hospital className="w-8 h-8 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">🏥 ทั้งโรงพยาบาล</h3>
-                  <p className="text-sm text-gray-600">Export ระเบียนผู้ป่วยทั้งหมดในโรงพยาบาล</p>
-                </div>
-              </div>
-            </button>
-            <button
-              onClick={() => setMode('select')}
-              className={`p-6 rounded-xl border-2 transition-all text-left ${
-                mode === 'select' 
-                  ? 'border-green-500 bg-green-50' 
-                  : 'border-gray-200 hover:border-green-300'
-              }`}
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
-                  <Users className="w-8 h-8 text-green-600" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-gray-800">👤 เฉพาะราย</h3>
-                  <p className="text-sm text-gray-600">เลือกผู้ป่วยเฉพาะคนที่ต้องการ</p>
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-
         {/* Filters */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Search className="w-4 h-4 inline mr-1" /> ค้นหาชื่อ / HN
@@ -277,21 +214,6 @@ export default function PatientRecordPage() {
                 <option value="L4">L4 - Champion</option>
               </select>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                <Filter className="w-4 h-4 inline mr-1" /> Zone
-              </label>
-              <select
-                value={zoneFilter}
-                onChange={(e) => setZoneFilter(e.target.value)}
-                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="all">ทั้งหมด</option>
-                <option value="Green Zone">Green Zone</option>
-                <option value="Yellow Zone">Yellow Zone</option>
-                <option value="Red Zone">Red Zone</option>
-              </select>
-            </div>
           </div>
         </div>
 
@@ -304,30 +226,6 @@ export default function PatientRecordPage() {
                 เลือกแล้ว <span className="font-bold text-blue-600">{selectedPatients.size}</span> คน
                 จากทั้งหมด <span className="font-bold">{filteredPatients.length}</span> คน
               </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setExportMode('individual')}
-                className={`px-4 py-2 rounded-lg border-2 transition-all ${
-                  exportMode === 'individual'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 text-gray-600 hover:border-blue-300'
-                }`}
-              >
-                <FileText className="w-4 h-4 inline mr-2" />
-                แยกไฟล์ (Individual)
-              </button>
-              <button
-                onClick={() => setExportMode('zip')}
-                className={`px-4 py-2 rounded-lg border-2 transition-all ${
-                  exportMode === 'zip'
-                    ? 'border-green-500 bg-green-50 text-green-700'
-                    : 'border-gray-200 text-gray-600 hover:border-green-300'
-                }`}
-              >
-                <FileSpreadsheet className="w-4 h-4 inline mr-2" />
-                รวม ZIP
-              </button>
             </div>
           </div>
         </div>
