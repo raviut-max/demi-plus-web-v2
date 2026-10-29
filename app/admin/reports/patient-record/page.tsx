@@ -1,6 +1,5 @@
 // app/admin/reports/patient-record/page.tsx
-// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ เปลี่ยนจาก popup เป็นเปิดในแท็บเดิม (ไม่ถูกบล็อก)
+// ✅ DEBUG VERSION - มี alert ทุกจุดสำคัญ
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -63,8 +62,6 @@ function PatientRecordContent() {
   const [zoneFilter, setZoneFilter] = useState(urlZone);
   const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
   const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
-  
-  // ✅ State สำหรับรายการ Export
   const [exportQueue, setExportQueue] = useState<Patient[]>([]);
   const [currentExportIndex, setCurrentExportIndex] = useState(0);
   const [showExportList, setShowExportList] = useState(false);
@@ -82,11 +79,14 @@ function PatientRecordContent() {
   }, [pathname, router, selectedHospital, pamFilter, zoneFilter, searchTerm, mode]);
 
   useEffect(() => {
+    alert('🔵 [DEBUG] useEffect ทำงาน - กำลังเช็ค session');
     const userData = checkSession();
     if (!userData) {
+      alert('🔴 [DEBUG] ไม่มี session - redirect ไป login');
       router.push('/admin/login');
       return;
     }
+    alert('🟢 [DEBUG] มี session แล้ว - role: ' + userData.role);
     setUser(userData);
     loadUserHospital(userData.id);
     loadHospitals(userData.id);
@@ -197,8 +197,10 @@ function PatientRecordContent() {
       });
 
       setPatients(patientsWithFollowup);
+      alert('🟢 [DEBUG] โหลดผู้ป่วยสำเร็จ: ' + patientsWithFollowup.length + ' คน');
     } catch (error) {
       console.error('Error loading patients:', error);
+      alert('🔴 [DEBUG] Error โหลดผู้ป่วย: ' + error);
     } finally {
       setLoading(false);
     }
@@ -225,10 +227,13 @@ function PatientRecordContent() {
   });
 
   const toggleSelectAll = () => {
+    alert(' [DEBUG] toggleSelectAll - ก่อน: ' + selectedPatients.size);
     if (selectedPatients.size === filteredPatients.length) {
       setSelectedPatients(new Set());
+      alert('🟢 [DEBUG] deselect all');
     } else {
       setSelectedPatients(new Set(filteredPatients.map(p => p.id)));
+      alert('🟢 [DEBUG] select all: ' + filteredPatients.length + ' คน');
     }
   };
 
@@ -236,27 +241,36 @@ function PatientRecordContent() {
     const newSelected = new Set(selectedPatients);
     if (newSelected.has(patientId)) {
       newSelected.delete(patientId);
+      alert(' [DEBUG] deselect: ' + patientId);
     } else {
       newSelected.add(patientId);
+      alert('🟢 [DEBUG] select: ' + patientId);
     }
     setSelectedPatients(newSelected);
   };
 
-  // ✅ ฟังก์ชัน Export แบบไม่ใช้ Popup - แสดงรายการให้ผู้ใช้เลือกพิมพ์ทีละคน
+  // ✅ ฟังก์ชัน Export แบบ DEBUG
   const handleExport = () => {
+    alert(' [DEBUG] handleExport ถูกเรียก!');
+    alert('🔵 [DEBUG] selectedPatients.size: ' + selectedPatients.size);
+    
     if (selectedPatients.size === 0) {
-      alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
+      alert('🔴 [DEBUG] ไม่มีผู้ป่วยที่เลือก!');
       return;
     }
 
     const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
+    alert('🟢 [DEBUG] จำนวนผู้ป่วยที่เลือก: ' + selectedPatientData.length);
+    alert('🟢 [DEBUG] รายชื่อ: ' + selectedPatientData.map(p => p.first_name + ' ' + p.last_name).join(', '));
+    
     setExportQueue(selectedPatientData);
     setCurrentExportIndex(0);
     setShowExportList(true);
+    alert('🟢 [DEBUG] แสดง Modal แล้ว!');
   };
 
-  // ✅ เปิดระเบียนผู้ป่วยในแท็บเดิม
   const openPatientRecord = (patientId: string) => {
+    alert('🔵 [DEBUG] กำลังเปิดระเบียน: ' + patientId);
     router.push(`/admin/reports/patient-record/${patientId}?print=true`);
   };
 
@@ -335,7 +349,7 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
                        user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
@@ -383,7 +397,7 @@ function PatientRecordContent() {
             <div className="flex items-end">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
                 <p className="text-sm text-blue-800">
-                  <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
+                  <span className="font-semibold"> โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
                   <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
@@ -633,7 +647,7 @@ function PatientRecordContent() {
         </div>
       </div>
 
-      {/* ✅ Export List Modal - แสดงรายการให้ผู้ใช้เลือกพิมพ์ทีละคน */}
+      {/* Export List Modal */}
       {showExportList && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -650,7 +664,7 @@ function PatientRecordContent() {
             <div className="p-6">
               <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-sm text-blue-800 mb-2">
-                  <strong>📋 วิธีใช้งาน:</strong>
+                  <strong> วิธีใช้งาน:</strong>
                 </p>
                 <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
                   <li>กดปุ่ม "พิมพ์ระเบียน" สำหรับผู้ป่วยแต่ละคน</li>
