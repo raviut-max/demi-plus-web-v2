@@ -1,9 +1,6 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ ปรับปรุง:
-//    1. ย้ายปุ่ม Export มาไว้ด้านบน (เห็นชัดเจน)
-//    2. เพิ่ม Pagination แสดงทีละ 10 คน
-//    3. Modal Export แสดงเฉพาะคนที่เลือก
+// ✅ เพิ่มปุ่ม "พิมพ์ทั้งหมด" ใน Modal - กดทีเดียวเปิดทุกคน
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -14,7 +11,8 @@ import {
   Search, Filter, Download, FileSpreadsheet,
   CheckSquare, Square, Activity, AlertCircle,
   X, FileArchive, CheckCircle, Printer,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Loader2
 } from 'lucide-react';
 
 interface Patient {
@@ -64,15 +62,20 @@ function PatientRecordContent() {
   const [pamFilter, setPamFilter] = useState(urlPam);
   const [zoneFilter, setZoneFilter] = useState(urlZone);
   
-  // ✅ Pagination state
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(10); // แสดงทีละ 10 คน
+  const [pageSize] = useState(10);
   
-  // ✅ Export Modal state
   const [exportQueue, setExportQueue] = useState<Patient[]>([]);
   const [currentExportIndex, setCurrentExportIndex] = useState(0);
   const [showExportList, setShowExportList] = useState(false);
   const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
+  
+  // ✅ State สำหรับ Batch Print
+  const [isBatchPrinting, setIsBatchPrinting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(0);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [batchSuccess, setBatchSuccess] = useState(0);
+  const [batchBlocked, setBatchBlocked] = useState(0);
 
   const updateUrlParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -101,14 +104,13 @@ function PatientRecordContent() {
     updateUrlParams();
   }, [updateUrlParams]);
 
-  // ✅ รีเซ็ตหน้าเมื่อ filter เปลี่ยน
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedHospital, searchTerm, pamFilter, zoneFilter]);
 
   const loadUserHospital = async (userId: string) => {
     try {
-      const hospitalInfo = await getUserHospitalInfo(userId);
+      await getUserHospitalInfo(userId);
     } catch (error) {
       console.error('Error loading hospital:', error);
     }
@@ -232,14 +234,12 @@ function PatientRecordContent() {
     return matchSearch && matchPam && matchZone;
   });
 
-  // ✅ Pagination calculation
   const totalPages = Math.ceil(filteredPatients.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
   const paginatedPatients = filteredPatients.slice(startIndex, endIndex);
 
   const toggleSelectAll = () => {
-    // เลือกทั้งหมดเฉพาะหน้าปัจจุบัน
     const currentPageIds = paginatedPatients.map(p => p.id);
     const allSelected = currentPageIds.every(id => selectedPatients.has(id));
     
@@ -262,7 +262,6 @@ function PatientRecordContent() {
     setSelectedPatients(newSelected);
   };
 
-  // ✅ ฟังก์ชัน Export
   const handleExport = (mode: 'individual' | 'zip') => {
     if (selectedPatients.size === 0) {
       alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
@@ -276,6 +275,78 @@ function PatientRecordContent() {
     setShowExportList(true);
   };
 
+  // ✅ ฟังก์ชัน Batch Print - เปิดทั้งหมดพร้อมกัน
+  const handleBatchPrint = async () => {
+    if (exportQueue.length === 0) {
+      alert('ไม่มีรายการที่จะพิมพ์');
+      return;
+    }
+
+    // ✅ แสดง confirmation ก่อน
+    const confirmed = window.confirm(
+      `จะเปิดระเบียน ${exportQueue.length} ไฟล์พร้อมกัน\n\n` +
+      `⚠️ อนุญาต popup ในเบราว์เซอร์ก่อนดำเนินการ\n\n` +
+      `ต้องการดำเนินการต่อหรือไม่?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsBatchPrinting(true);
+    setBatchProgress(0);
+    setBatchTotal(exportQueue.length);
+    setBatchSuccess(0);
+    setBatchBlocked(0);
+
+    try {
+      let successCount = 0;
+      let blockedCount = 0;
+
+      for (let i = 0; i < exportQueue.length; i++) {
+        const patient = exportQueue[i];
+        
+        // ✅ เปิดหน้าต่างใหม่
+        const newWindow = window.open(
+          `/admin/reports/patient-record/${patient.id}?print=true`,
+          '_blank'
+        );
+
+        if (newWindow) {
+          successCount++;
+          setBatchSuccess(successCount);
+        } else {
+          blockedCount++;
+          setBatchBlocked(blockedCount);
+        }
+
+        setBatchProgress(i + 1);
+
+        // หน่วงเวลา 300ms เพื่อลดการ block popup
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // ✅ แสดงผลลัพธ์
+      if (blockedCount > 0) {
+        alert(
+          `⚠️ เปิดระเบียนสำเร็จ ${successCount} ไฟล์\n\n` +
+          `❌ ถูกบล็อก ${blockedCount} ไฟล์\n\n` +
+          `กรุณาอนุญาต popup ในเบราว์เซอร์แล้วลองใหม่`
+        );
+      } else {
+        alert(
+          `✅ เปิดระเบียนสำเร็จ ${successCount} ไฟล์\n\n` +
+          `กรุณาพิมพ์/บันทึก PDF ในแต่ละหน้าต่างที่เปิดขึ้น`
+        );
+      }
+    } catch (error) {
+      console.error('Batch print error:', error);
+      alert('❌ เกิดข้อผิดพลาดในการพิมพ์');
+    } finally {
+      setIsBatchPrinting(false);
+    }
+  };
+
   const openPatientRecord = (patientId: string) => {
     router.push(`/admin/reports/patient-record/${patientId}?print=true`);
   };
@@ -284,6 +355,11 @@ function PatientRecordContent() {
     setShowExportList(false);
     setExportQueue([]);
     setCurrentExportIndex(0);
+    setIsBatchPrinting(false);
+    setBatchProgress(0);
+    setBatchTotal(0);
+    setBatchSuccess(0);
+    setBatchBlocked(0);
   };
 
   const getSelectedHospitalName = () => {
@@ -406,7 +482,7 @@ function PatientRecordContent() {
                   <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
-                  <span className="font-semibold"> ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
+                  <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
                 </p>
                 <p className="text-sm text-blue-600">
                   <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
@@ -416,7 +492,7 @@ function PatientRecordContent() {
                     ✓ มีข้อมูลติดตาม: <span className="font-bold">{patientsWithFollowup}</span> คน
                   </p>
                   <p className="text-xs text-gray-600">
-                    ✗ ไม่มีข้อมูลติดตาม: <span className="font-bold">{patientsWithoutFollowup}</span> คน
+                     ไม่มีข้อมูลติดตาม: <span className="font-bold">{patientsWithoutFollowup}</span> คน
                   </p>
                 </div>
               </div>
@@ -424,11 +500,11 @@ function PatientRecordContent() {
           </div>
         </div>
 
-        {/* ✅ Export Buttons - ย้ายมาด้านบน (เห็นชัดเจน) */}
+        {/* Export Buttons */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 mb-6 text-white">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h3 className="text-xl font-bold mb-1">📤 Export PDF</h3>
+              <h3 className="text-xl font-bold mb-1"> Export PDF</h3>
               <p className="text-blue-100 text-sm">
                 เลือกแล้ว <span className="font-bold text-white">{selectedPatients.size}</span> คน
                 {selectedHospital !== 'all' && (
@@ -624,7 +700,7 @@ function PatientRecordContent() {
             </table>
           </div>
 
-          {/* ✅ Pagination Controls */}
+          {/* Pagination Controls */}
           {totalPages > 1 && (
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
               <div className="text-sm text-gray-600">
@@ -646,7 +722,6 @@ function PatientRecordContent() {
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 
-                {/* Page numbers */}
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   let pageNum;
                   if (totalPages <= 5) {
@@ -703,40 +778,96 @@ function PatientRecordContent() {
                 <Printer className="w-6 h-6 text-blue-600" />
                 รายการ Export PDF ({exportQueue.length} คน)
               </h3>
-              <button onClick={closeExportList} className="text-gray-400 hover:text-gray-600">
+              <button onClick={closeExportList} className="text-gray-400 hover:text-gray-600" disabled={isBatchPrinting}>
                 <X className="w-6 h-6" />
               </button>
             </div>
 
             <div className="p-6">
-              <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-sm text-blue-800 mb-2">
-                  <strong>📋 วิธีใช้งาน:</strong>
-                </p>
-                <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
-                  <li>กดปุ่ม "พิมพ์ระเบียน" สำหรับผู้ป่วยแต่ละคน</li>
-                  <li>ในหน้าระเบียน กดปุ่ม "Print / Export PDF"</li>
-                  <li>เลือก "Save as PDF" แล้วบันทึก</li>
-                  <li>กดปุ่ม "กลับ" เพื่อกลับมาหน้านี้</li>
-                  <li>ทำซ้ำจนครบทุกคน</li>
-                </ol>
+              {/* ✅ ปุ่มพิมพ์ทั้งหมด - อยู่ด้านบน เห็นชัดเจน */}
+              <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h4 className="font-bold text-lg mb-1">🖨️ พิมพ์ทั้งหมดพร้อมกัน</h4>
+                    <p className="text-sm text-blue-100">
+                      กดปุ่มนี้จะเปิดระเบียน {exportQueue.length} ไฟล์พร้อมกัน
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleBatchPrint}
+                    disabled={isBatchPrinting}
+                    className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                  >
+                    {isBatchPrinting ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        กำลังพิมพ์...
+                      </>
+                    ) : (
+                      <>
+                        <Printer className="w-5 h-5" />
+                        พิมพ์ทั้งหมด ({exportQueue.length})
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* ✅ Progress Bar แบบ Real-time */}
+                {isBatchPrinting && (
+                  <div className="mt-3">
+                    <div className="flex justify-between text-sm mb-2">
+                      <span>ความคืบหน้า:</span>
+                      <span className="font-bold">
+                        {batchProgress} / {batchTotal} คน
+                      </span>
+                    </div>
+                    <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="h-3 bg-white rounded-full transition-all duration-300"
+                        style={{ width: `${(batchProgress / batchTotal) * 100}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs mt-2 text-blue-100">
+                      <span>✅ สำเร็จ: {batchSuccess}</span>
+                      {batchBlocked > 0 && <span>️ ถูกบล็อก: {batchBlocked}</span>}
+                    </div>
+                  </div>
+                )}
               </div>
 
+              <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-sm text-blue-800 mb-2">
+                  <strong> วิธีใช้งาน:</strong>
+                </p>
+                <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                  <li>กดปุ่ม "พิมพ์ทั้งหมด" ด้านบนเพื่อเปิดระเบียนทุกคนพร้อมกัน</li>
+                  <li>ในแต่ละหน้าต่างที่เปิดขึ้น กดปุ่ม "Print / Export PDF"</li>
+                  <li>เลือก "Save as PDF" แล้วบันทึก (ชื่อไฟล์จะตั้งอัตโนมัติ)</li>
+                  <li>ทำซ้ำจนครบทุกหน้าต่าง</li>
+                </ol>
+                {batchBlocked > 0 && (
+                  <div className="mt-3 p-2 bg-yellow-100 border border-yellow-300 rounded text-xs text-yellow-800">
+                    ⚠️ <strong>ถูกบล็อก {batchBlocked} ไฟล์</strong> - กรุณาอนุญาต popup ในเบราว์เซอร์แล้วลองใหม่
+                  </div>
+                )}
+              </div>
+
+              {/* รายการผู้ป่วย */}
               <div className="space-y-3">
                 {exportQueue.map((patient, index) => (
                   <div
                     key={patient.id}
                     className={`flex items-center justify-between p-4 rounded-lg border ${
-                      index < currentExportIndex
+                      index < batchProgress
                         ? 'bg-green-50 border-green-200'
                         : 'bg-white border-gray-200'
                     }`}
                   >
                     <div className="flex items-center gap-3 flex-1">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${
-                        index < currentExportIndex ? 'bg-green-500' : 'bg-blue-500'
+                        index < batchProgress ? 'bg-green-500' : 'bg-blue-500'
                       }`}>
-                        {index < currentExportIndex ? (
+                        {index < batchProgress ? (
                           <CheckCircle className="w-5 h-5" />
                         ) : (
                           index + 1
@@ -753,35 +884,40 @@ function PatientRecordContent() {
                     </div>
                     <button
                       onClick={() => openPatientRecord(patient.id)}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2"
+                      disabled={isBatchPrinting}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Printer className="w-4 h-4" />
-                      พิมพ์ระเบียน
+                      พิมพ์
                     </button>
                   </div>
                 ))}
               </div>
 
-              <div className="mt-6 pt-4 border-t border-gray-200">
-                <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
-                  <span>ความคืบหน้า:</span>
-                  <span className="font-bold text-blue-600">
-                    {currentExportIndex} / {exportQueue.length} คน
-                  </span>
+              {/* Progress Bar ด้านล่าง */}
+              {isBatchPrinting && (
+                <div className="mt-6 pt-4 border-t border-gray-200">
+                  <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                    <span>ความคืบหน้ารวม:</span>
+                    <span className="font-bold text-blue-600">
+                      {batchProgress} / {batchTotal} คน ({Math.round((batchProgress / batchTotal) * 100)}%)
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-2 bg-blue-600 rounded-full transition-all duration-300"
+                      style={{ width: `${(batchProgress / batchTotal) * 100}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="h-2 bg-blue-600 rounded-full transition-all duration-300"
-                    style={{ width: `${(currentExportIndex / exportQueue.length) * 100}%` }}
-                  />
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 flex justify-end">
               <button
                 onClick={closeExportList}
-                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium"
+                disabled={isBatchPrinting}
+                className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ปิด
               </button>
