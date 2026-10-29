@@ -1,9 +1,10 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 16 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มสิทธิ์ 'osm' ให้เข้าถึงหน้าแดชบอร์ดได้
-//    2. กำหนดเมนูที่ อสม. เข้าถึงได้ (ยกเว้น จัดการเจ้าหน้าที่ และ ตั้งค่า)
-//    3. ปรับ Badge แสดงบทบาทให้แสดง "🏘️ อสม." เมื่อเป็น role osm
+//    1. เพิ่มเมนู "ระเบียนคนไข้ (PDF)" ในเมนูหลัก (ตำแหน่งที่ 2)
+//    2. เพิ่ม Quick Actions 2 ปุ่ม: Export PDF ทั้งโรงพยาบาล + เฉพาะราย
+//    3. เพิ่ม import FileSpreadsheet, Download, Printer จาก lucide-react
+//    4. แสดง badge จำนวนผู้ป่วยทั้งหมดบนเมนูระเบียนคนไข้
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,7 +23,10 @@ import {
   BarChart3,
   Settings,
   Hospital,
-  Building2
+  Building2,
+  FileSpreadsheet,
+  Download,
+  Printer
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -74,7 +78,6 @@ export default function AdminDashboard() {
       router.push('/admin/login');
       return;
     }
-    // ✅ แก้ไข: เพิ่ม 'osm' ในการตรวจสอบสิทธิ์
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
@@ -85,10 +88,9 @@ export default function AdminDashboard() {
     loadAccessibleHospitals(userData.id);
   }, [router]);
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🏥 [loadUserHospital] Loading for user:', userId);
+      console.log(' [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
       console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
@@ -97,7 +99,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
@@ -105,14 +106,12 @@ export default function AdminDashboard() {
       setAccessibleHospitalIds(ids);
       console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
       console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
-      // ✅ โหลดสถิติหลังจากได้สิทธิ์แล้ว (ส่ง hospitalIds ไปด้วย)
       loadDashboardStats(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
     }
   };
 
-  // ✅ โหลดสถิติ Dashboard (กรองตามโรงพยาบาลที่เข้าถึงได้)
   const loadDashboardStats = async (hospitalIds?: string[]) => {
     try {
       console.log('📊 [loadDashboardStats] Loading stats with hospitalIds:', hospitalIds);
@@ -132,7 +131,7 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - แสดงตามสิทธิ์ (อัปเดตเพิ่ม 'osm' ในเมนูที่เข้าถึงได้)
+  // ✅ เมนูจัดการระบบ - เพิ่มปุ่มระเบียนคนไข้ PDF
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -140,7 +139,16 @@ export default function AdminDashboard() {
       icon: <Users className="w-6 h-6" />,
       color: 'from-blue-500 to-cyan-500',
       href: '/admin/patients',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
+    },
+    {
+      title: 'ระเบียนคนไข้ (PDF)',
+      description: 'ดึงระเบียนคนไข้แบบ PDF ทั้งโรงพยาบาลหรือเฉพาะราย',
+      icon: <FileSpreadsheet className="w-6 h-6" />,
+      color: 'from-indigo-500 to-purple-500',
+      href: '/admin/reports/patient-record',
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
+      badge: stats.totalPatients,
     },
     {
       title: 'แบบประเมิน',
@@ -148,7 +156,7 @@ export default function AdminDashboard() {
       icon: <ClipboardCheck className="w-6 h-6" />,
       color: 'from-purple-500 to-pink-500',
       href: '/admin/screening',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
       title: 'เป้าหมาย',
@@ -156,7 +164,7 @@ export default function AdminDashboard() {
       icon: <Target className="w-6 h-6" />,
       color: 'from-green-500 to-emerald-500',
       href: '/admin/goals',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
       title: 'นัดหมาย',
@@ -164,7 +172,7 @@ export default function AdminDashboard() {
       icon: <Calendar className="w-6 h-6" />,
       color: 'from-orange-500 to-red-500',
       href: '/admin/appointments',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
       title: 'จัดการเจ้าหน้าที่',
@@ -172,7 +180,7 @@ export default function AdminDashboard() {
       icon: <UserCheck className="w-6 h-6" />,
       color: 'from-indigo-500 to-purple-500',
       href: '/admin/staff',
-      allowedRoles: ['admin'], // ❌ เฉพาะ Admin เท่านั้น
+      allowedRoles: ['admin'],
     },
     {
       title: 'รายงาน',
@@ -180,7 +188,7 @@ export default function AdminDashboard() {
       icon: <BarChart3 className="w-6 h-6" />,
       color: 'from-red-500 to-pink-500',
       href: '/admin/reports',
-      allowedRoles: ['admin', 'doctor', 'helper', 'osm'], // ✅ เพิ่ม osm
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
       title: 'ตั้งค่า',
@@ -188,11 +196,10 @@ export default function AdminDashboard() {
       icon: <Settings className="w-6 h-6" />,
       color: 'from-gray-500 to-slate-500',
       href: '/admin/settings',
-      allowedRoles: ['admin'], // ❌ เฉพาะ Admin เท่านั้น
+      allowedRoles: ['admin'],
     },
   ];
 
-  // ✅ Filter เมนูตามสิทธิ์ของผู้ใช้
   const visibleMenuItems = menuItems.filter(item =>
     item.allowedRoles?.includes(user?.role || '')
   );
@@ -217,9 +224,7 @@ export default function AdminDashboard() {
               </h1>
               <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
             </div>
-
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -230,15 +235,12 @@ export default function AdminDashboard() {
                       {user?.full_name_th || 'ผู้ดูแลระบบ'}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {/* ✅ แก้ไข: เพิ่มการแสดงผลสำหรับ role 'osm' */}
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                        user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
-
-                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
@@ -247,8 +249,6 @@ export default function AdminDashboard() {
                         {userHospital.name}
                       </span>
                     </div>
-
-                    {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
@@ -259,8 +259,6 @@ export default function AdminDashboard() {
                           🏥 ลูกข่าย
                         </span>
                       )}
-
-                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -275,7 +273,6 @@ export default function AdminDashboard() {
                   </p>
                 )}
               </div>
-
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
@@ -290,10 +287,8 @@ export default function AdminDashboard() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* Total Patients */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
             <div className="flex items-center justify-between">
               <div>
@@ -310,8 +305,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-
-          {/* Today's Records */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
             <div className="flex items-center justify-between">
               <div>
@@ -323,8 +316,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-
-          {/* Today's Appointments */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
             <div className="flex items-center justify-between">
               <div>
@@ -336,8 +327,6 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-
-          {/* Pending Assessments */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl transition-all">
             <div className="flex items-center justify-between">
               <div>
@@ -351,7 +340,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Quick Actions */}
+        {/* Quick Actions - เพิ่มปุ่ม Export PDF */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4">ดำเนินการด่วน</h2>
           <div className="flex flex-wrap gap-3">
@@ -368,6 +357,22 @@ export default function AdminDashboard() {
             >
               <FileText className="w-4 h-4" />
               ทำแบบประเมิน
+            </button>
+            {/* ✅ ปุ่มใหม่: Export PDF ทั้งโรงพยาบาล */}
+            <button
+              onClick={() => router.push('/admin/reports/patient-record?mode=hospital')}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
+            >
+              <Download className="w-4 h-4" />
+              Export PDF ทั้งโรงพยาบาล
+            </button>
+            {/* ✅ ปุ่มใหม่: Export PDF เฉพาะราย */}
+            <button
+              onClick={() => router.push('/admin/reports/patient-record?mode=select')}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all"
+            >
+              <Printer className="w-4 h-4" />
+              Export PDF เฉพาะราย
             </button>
             {user?.role === 'admin' && (
               <button
@@ -388,13 +393,13 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Menu Grid - แสดงเมนูตามสิทธิ์ */}
+        {/* Menu Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {visibleMenuItems.map((item, index) => (
             <button
               key={index}
               onClick={() => router.push(item.href)}
-              className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl hover:scale-105 transition-all text-left group"
+              className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl hover:scale-105 transition-all text-left group relative"
             >
               <div className={`w-14 h-14 bg-gradient-to-br ${item.color} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
                 <div className="text-white">
@@ -404,7 +409,7 @@ export default function AdminDashboard() {
               <h3 className="text-lg font-bold text-gray-800 mb-1">{item.title}</h3>
               <p className="text-sm text-gray-600">{item.description}</p>
               {item.badge !== undefined && item.badge > 0 && (
-                <span className="inline-block mt-2 px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded-full">
+                <span className="absolute top-4 right-4 px-2 py-1 bg-red-500 text-white text-xs font-semibold rounded-full">
                   {item.badge}
                 </span>
               )}

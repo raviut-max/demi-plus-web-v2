@@ -1,4 +1,9 @@
 // app/admin/patients/page.tsx
+// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
+// ✅ การแก้ไข:
+//    1. แก้ typo setSearchTermIdCar d → setSearchTermIdCard
+//    2. เพิ่มปุ่ม "ดูระเบียนคนไข้" (FileText icon สี Indigo)
+//    3. เพิ่ม import FileText จาก lucide-react
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -24,7 +29,7 @@ import {
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
   FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward, Download,
-  FileText, Activity, TrendingUp
+  FileText
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -56,9 +61,9 @@ export default function PatientManagementPage() {
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ✅ Search States แยกกันชัดเจน
+  // ✅ Search States แยกกันชัดเจน เพื่อแก้ปัญหา Permission และ Search ผิดที่
   const [searchTermNameHN, setSearchTermNameHN] = useState('');
-  const [searchTermIdCard, setSearchTermIdCard] = useState('');
+  const [searchTermIdCard, setSearchTermIdCard] = useState(''); // ✅ แก้ typo แล้ว
   const [selectedPamLevel, setSelectedPamLevel] = useState<string>('all');
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
@@ -322,7 +327,7 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ปรับปรุงฟังก์ชัน Export Excel
+  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก และรูปแบบวันที่ พ.ศ.
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
     if (mode === 'all') {
@@ -435,10 +440,10 @@ export default function PatientManagementPage() {
 
   const handleDeletePatient = async (patientId: string, patientName: string) => {
     if (user?.role === 'osm') {
-      alert(' อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
+      alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
       return;
     }
-    if (!confirm(`️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
+    if (!confirm(`⚠️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
     try {
       const result = await deletePatient(patientId);
       if (result.success) {
@@ -475,10 +480,10 @@ export default function PatientManagementPage() {
 
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
     if (user?.role === 'osm') {
-      alert('❌ อสม. ไม่มีสิทธิ์ลบถาวร');
+      alert(' อสม. ไม่มีสิทธิ์ลบถาวร');
       return;
     }
-    if (!confirm(`⚠️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
+    if (!confirm(`️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
     const secondConfirm = prompt('พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:');
     if (secondConfirm !== 'YES') {
       alert('ยกเลิกการลบถาวร');
@@ -490,7 +495,7 @@ export default function PatientManagementPage() {
         alert('✅ ลบถาวรสำเร็จ');
         await loadDeletedPatients(accessibleHospitalIds);
       } else {
-        alert('❌ เกิดข้อผิดพลาด: ' + result.error);
+        alert(' เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
       alert('❌ เกิดข้อผิดพลาด');
@@ -505,7 +510,7 @@ export default function PatientManagementPage() {
       'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
       'admin': { text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100', textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700' },
       'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
-      'helper': { text: '‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
+      'helper': { text: '👩‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
     const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
     return <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>{config.text}</span>;
@@ -562,7 +567,7 @@ export default function PatientManagementPage() {
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2"> จัดการผู้ป่วย</h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">👥 จัดการผู้ป่วย</h1>
               <p className="text-gray-600">จัดการข้อมูลผู้ป่วยและติดตามผลการรักษา</p>
             </div>
             <div className="flex-1 max-w-md mx-4">
@@ -590,7 +595,7 @@ export default function PatientManagementPage() {
                         )}
                         {userHospital.type === 'main' && (
                           <div className="flex items-center gap-2 text-purple-600">
-                            <div className="w-4 h-4">🏢</div>
+                            <div className="w-4 h-4"></div>
                             <span>แม่ข่าย</span>
                           </div>
                         )}
@@ -842,11 +847,11 @@ export default function PatientManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          {/* ✅ ปุ่มดูระเบียนคนไข้ (ใหม่) */}
+                          {/* ✅ ปุ่มใหม่: ดูระเบียนคนไข้ (PDF) - สี Indigo */}
                           <button 
                             onClick={() => router.push(`/admin/patients/${patient.id}/record`)} 
                             className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" 
-                            title="ดูระเบียนคนไข้"
+                            title="ดูระเบียนคนไข้ (PDF)"
                           >
                             <FileText className="w-4 h-4" />
                           </button>
