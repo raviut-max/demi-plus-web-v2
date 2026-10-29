@@ -1,10 +1,11 @@
 // app/admin/reports/patient-record/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ การแก้ไข:
-//    1. แก้ปัญหา Suspense boundary สำหรับ useSearchParams
-//    2. ดึงค่าสุขภาพจาก Follow-up ล่าสุด
-//    3. ตั้งชื่อไฟล์ PDF อัตโนมัติ
-//    4. แสดงข้อมูลครบ 5 หน้า A4
+// ✅ การแก้ไขทั้งหมด:
+//    1. ใช้ Suspense boundary ครอบ useSearchParams (แก้ Vercel build error)
+//    2. ดึงค่าสุขภาพจาก Follow-up ล่าสุด (fallback → Profiles)
+//    3. ตั้งชื่อไฟล์ PDF อัตโนมัติ (โรงพยาบาล_HN_ชื่อ_นามสกุล)
+//    4. ใช้ router.back() เมื่อย้อนกลับ (คง state หน้าก่อนหน้า)
+//    5. แสดงข้อมูล 5 หน้า A4 (ซ่อนส่วนรูปภาพถ้าไม่มีข้อมูล)
 'use client';
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -75,7 +76,7 @@ interface ScreeningRecord {
   confidence_score: number | null;
 }
 
-// ✅ Component หลักที่แสดงเนื้อหา (ใช้ useSearchParams)
+// ✅ Component หลักที่ใช้ useSearchParams (ต้องอยู่ใน Suspense)
 function PatientRecordContent() {
   const router = useRouter();
   const params = useParams();
@@ -89,7 +90,7 @@ function PatientRecordContent() {
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ✅ State สำหรับค่าสุขภาพล่าสุด
+  // ✅ State สำหรับค่าสุขภาพล่าสุด (จาก Follow-up หรือ Profiles)
   const [latestHealthData, setLatestHealthData] = useState({
     weight: null as number | null,
     waist: null as number | null,
@@ -111,7 +112,7 @@ function PatientRecordContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, router]);
 
-  // ✅ ตั้งชื่อไฟล์ PDF อัตโนมัติ
+  // ✅ ตั้งชื่อไฟล์ PDF อัตโนมัติเมื่อโหลดข้อมูลผู้ป่วยเสร็จ
   useEffect(() => {
     if (patient) {
       const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
@@ -119,18 +120,29 @@ function PatientRecordContent() {
       const firstName = patient.first_name || 'ไม่ระบุชื่อ';
       const lastName = patient.last_name || '';
 
+      // สร้างสตริงชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล
       const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
+
+      // เปลี่ยน Title ของหน้าเว็บ (จะเป็นชื่อไฟล์เริ่มต้นเมื่อกด Save as PDF)
       document.title = fileName;
       
+      // เปลี่ยน <title> tag ใน head ด้วย
       const titleElement = document.querySelector('title');
       if (titleElement) {
         titleElement.textContent = fileName;
+      } else {
+        const newTitle = document.createElement('title');
+        newTitle.textContent = fileName;
+        document.head.appendChild(newTitle);
       }
+
+      console.log('📄 [PDF FileName] ตั้งชื่อไฟล์เป็น:', fileName);
     }
   }, [patient]);
 
   const loadPatientData = async () => {
     try {
+      // โหลดข้อมูลผู้ป่วย
       const { data: patientData, error: patientError } = await supabase
         .from('profiles')
         .select(`
@@ -146,6 +158,7 @@ function PatientRecordContent() {
       if (patientError) throw patientError;
       setPatient(patientData);
 
+      // โหลดข้อมูล Follow-ups (เรียงจากล่าสุดไปเก่าสุด)
       const { data: followupData, error: followupError } = await supabase
         .from('appointment_followups')
         .select('*')
@@ -155,6 +168,7 @@ function PatientRecordContent() {
       if (followupError) throw followupError;
       setFollowups(followupData || []);
 
+      // โหลดข้อมูล Screenings
       const { data: screeningData, error: screeningError } = await supabase
         .from('screenings')
         .select('*')
@@ -216,7 +230,7 @@ function PatientRecordContent() {
   const getComplianceStatus = (status: string | null) => {
     const statusMap: any = {
       'completed': { text: '✅ ตามแผน', class: 'text-green-600' },
-      'not_completed': { text: '❌ ไม่ตามแผน', class: 'text-red-600' },
+      'not_completed': { text: ' ไม่ตามแผน', class: 'text-red-600' },
       'not_in_plan': { text: '⚪ ไม่มีในแผน', class: 'text-gray-500' }
     };
     return statusMap[status || ''] || { text: '-', class: 'text-gray-500' };
@@ -239,7 +253,7 @@ function PatientRecordContent() {
         <div className="text-center">
           <p className="text-gray-600">ไม่พบข้อมูลผู้ป่วย</p>
           <button
-            onClick={() => router.push('/admin/reports/patient-record')}
+            onClick={() => router.back()}
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
             กลับ
@@ -257,7 +271,8 @@ function PatientRecordContent() {
       {/* Header - ซ่อนเมื่อ Print */}
       <div className="bg-white shadow-sm border-b border-gray-200 print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/reports/patient-record')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
+          {/* ✅ ใช้ router.back() แทน router.push() เพื่อย้อนกลับไปหน้าก่อนหน้าพร้อม state เดิม */}
+          <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
             <ArrowLeft className="w-4 h-4" /> กลับไปหน้าเลือกรายงาน
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -291,6 +306,7 @@ function PatientRecordContent() {
       <div className="max-w-4xl mx-auto px-4 py-8 print:px-0 print:py-0">
         {/* ===== PAGE 1: ข้อมูลพื้นฐาน + ผลประเมิน ===== */}
         <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
+          {/* Header */}
           <div className="border-b-2 border-blue-600 pb-4 mb-6">
             <div className="flex items-center justify-between">
               <div>
@@ -304,6 +320,7 @@ function PatientRecordContent() {
             </div>
           </div>
 
+          {/* Patient Info */}
           <div className="bg-blue-50 rounded-lg p-4 mb-6 border-l-4 border-blue-500">
             <h3 className="text-lg font-bold text-gray-900 mb-3">👤 ข้อมูลผู้ป่วย</h3>
             <div className="grid grid-cols-3 gap-4">
@@ -347,6 +364,7 @@ function PatientRecordContent() {
             </div>
           </div>
 
+          {/* Self-Assessment Results */}
           <div className="mb-6">
             <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">📊 ผลการประเมินตนเอง</h3>
             <div className="grid grid-cols-3 gap-4">
@@ -380,6 +398,7 @@ function PatientRecordContent() {
             </div>
           </div>
 
+          {/* ✅ Health Data - ดึงจาก Follow-up ล่าสุด หรือ Profiles */}
           <div className="mb-6">
             <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
               📊 ค่าสุขภาพปัจจุบัน
@@ -417,6 +436,7 @@ function PatientRecordContent() {
             </div>
           </div>
 
+          {/* Latest Follow-up Summary */}
           {latestFollowup && (
             <div className="mb-6">
               <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
@@ -463,6 +483,7 @@ function PatientRecordContent() {
             </div>
           )}
 
+          {/* Footer */}
           <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
             <span>Community Bridge v1.0</span>
             <span>หน้า 1 / 5</span>
@@ -573,7 +594,7 @@ function PatientRecordContent() {
             <div className="space-y-6">
               {latestFollowup?.floating_chart_image_url && (
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3"> Floating Chart - กราฟแนวโน้ม</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">📈 Floating Chart - กราฟแนวโน้ม</h3>
                   <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
                     <img
                       src={latestFollowup.floating_chart_image_url}
@@ -592,7 +613,7 @@ function PatientRecordContent() {
 
               {latestFollowup?.dream_card_image_url && (
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900 mb-3"> Dream Card - บัตรความฝัน</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">💭 Dream Card - บัตรความฝัน</h3>
                   <div className="border-2 border-gray-300 rounded-lg overflow-hidden mb-2">
                     <img
                       src={latestFollowup.dream_card_image_url}
@@ -625,6 +646,7 @@ function PatientRecordContent() {
 
           {latestFollowup && (
             <>
+              {/* Adaptation */}
               <div className="mb-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-3">🔄 การปรับตัว</h3>
                 {latestFollowup.adaptation_summary && (
@@ -649,6 +671,7 @@ function PatientRecordContent() {
                 </div>
               </div>
 
+              {/* Summary & Recommendations */}
               <div className="mb-6">
                 {latestFollowup.summary && (
                   <div className="bg-gray-50 rounded-lg p-4 mb-3">
@@ -666,6 +689,7 @@ function PatientRecordContent() {
             </>
           )}
 
+          {/* Signature Section */}
           <div className="mt-12 grid grid-cols-2 gap-8">
             <div className="text-center">
               <div className="border-b border-gray-400 h-16 mb-2"></div>
@@ -719,7 +743,7 @@ function PatientRecordContent() {
   );
 }
 
-// ✅ Export default ที่ครอบด้วย Suspense
+// ✅ Export default ที่ครอบด้วย Suspense (แก้ Vercel build error)
 export default function PatientRecordDetailPage() {
   return (
     <Suspense fallback={
