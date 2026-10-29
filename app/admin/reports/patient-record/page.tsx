@@ -1,13 +1,13 @@
 // app/admin/reports/patient-record/page.tsx
 'use client';
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { checkSession, logout, getAccessibleHospitalIds } from '@/lib/supabase/queries';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { checkSession, logout, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
-  CheckSquare, Square, Loader2
+  CheckSquare, Square, Loader2, Building2
 } from 'lucide-react';
 
 interface Patient {
@@ -25,15 +25,32 @@ interface Patient {
   hospitals?: { name: string | null } | null;
 }
 
+interface HospitalData {
+  id: string;
+  name: string | null;
+  code: string | null;
+  type: 'main' | 'sub';
+  patientCount?: number;
+}
+
 export default function PatientRecordPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialMode = searchParams.get('mode') || 'hospital';
+
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [hospitals, setHospitals] = useState<HospitalData[]>([]);
+  const [selectedHospital, setSelectedHospital] = useState<string>('all');
   const [selectedPatients, setSelectedPatients] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [pamFilter, setPamFilter] = useState('all');
+  const [zoneFilter, setZoneFilter] = useState('all');
+  const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
+  const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
 
   useEffect(() => {
     const userData = checkSession();
@@ -42,8 +59,63 @@ export default function PatientRecordPage() {
       return;
     }
     setUser(userData);
+    loadUserHospital(userData.id);
+    loadHospitals(userData.id);
     loadPatients(userData.id);
   }, [router]);
+
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('Error loading hospital:', error);
+    }
+  };
+
+  const loadHospitals = async (userId: string) => {
+    try {
+      const accessibleIds = await getAccessibleHospitalIds(userId);
+      
+      let query = supabase
+        .from('hospitals')
+        .select('id, name, code, type')
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+      if (accessibleIds.length > 0 && accessibleIds.length < 100) {
+        query = query.in('id', accessibleIds);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // นับจำนวนผู้ป่วยในแต่ละโรงพยาบาล
+      const hospitalsWithCount = await Promise.all(
+        (data || []).map(async (h: any) => {
+          const { count } = await supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .eq('hospital_id', h.id)
+            .eq('is_active', true);
+          
+          return {
+            ...h,
+            patientCount: count || 0
+          };
+        })
+      );
+
+      setHospitals(hospitalsWithCount);
+      
+      // เลือกโรงพยาบาลเริ่มต้นเป็นโรงพยาบาลของผู้ใช้
+      if (hospitalInfo?.id && !hospitalsWithCount.find((h: any) => h.id === hospitalInfo.id)) {
+        setSelectedHospital(hospitalInfo.id);
+      }
+    } catch (error) {
+      console.error('Error loading hospitals:', error);
+    }
+  };
 
   const loadPatients = async (userId: string) => {
     try {
@@ -63,6 +135,11 @@ export default function PatientRecordPage() {
         query = query.in('hospital_id', accessibleIds);
       }
 
+      // กรองตามโรงพยาบาลที่เลือก
+      if (selectedHospital !== 'all') {
+        query = query.eq('hospital_id', selectedHospital);
+      }
+
       const { data, error } = await query;
       if (error) throw error;
       setPatients(data || []);
@@ -73,13 +150,27 @@ export default function PatientRecordPage() {
     }
   };
 
+  // รีเซ็ตการเลือกผู้ป่วยเมื่อเปลี่ยนโรงพยาบาล
+  useEffect(() => {
+    setSelectedPatients(new Set());
+  }, [selectedHospital]);
+
+  // โหลดผู้ป่วยใหม่เมื่อเปลี่ยนโรงพยาบาล
+  useEffect(() => {
+    if (user) {
+      loadPatients(user.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHospital]);
+
   const filteredPatients = patients.filter(p => {
     const searchLower = searchTerm.toLowerCase();
     const fullName = `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase();
     const hn = (p.hospital_number || '').toLowerCase();
     const matchSearch = fullName.includes(searchLower) || hn.includes(searchLower);
     const matchPam = pamFilter === 'all' || p.pam_level === pamFilter;
-    return matchSearch && matchPam;
+    const matchZone = zoneFilter === 'all' || p.zone === zoneFilter;
+    return matchSearch && matchPam && matchZone;
   });
 
   const toggleSelectAll = () => {
@@ -128,6 +219,12 @@ export default function PatientRecordPage() {
     }
   };
 
+  const getSelectedHospitalName = () => {
+    if (selectedHospital === 'all') return 'ทั้งหมด';
+    const hospital = hospitals.find(h => h.id === selectedHospital);
+    return hospital?.name || 'ไม่ระบุ';
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -149,7 +246,7 @@ export default function PatientRecordPage() {
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2"> ระเบียนคนไข้ (PDF)</h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">📄 ระเบียนคนไข้ (PDF)</h1>
               <p className="text-gray-600">เลือกรายงานและ Export เป็น PDF</p>
             </div>
             <div className="flex items-center gap-4">
@@ -162,7 +259,7 @@ export default function PatientRecordPage() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
+                       user?.role === 'doctor' ? '👨‍️ แพทย์' :
                        user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
@@ -182,9 +279,50 @@ export default function PatientRecordPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Hospital Selection */}
+        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+          <div className="flex items-center gap-3 mb-4">
+            <Hospital className="w-6 h-6 text-blue-600" />
+            <h2 className="text-lg font-bold text-gray-800">เลือกโรงพยาบาล</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                โรงพยาบาลที่ต้องการดูระเบียน
+              </label>
+              <select
+                value={selectedHospital}
+                onChange={(e) => setSelectedHospital(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">ทั้งหมด ({hospitals.reduce((sum, h) => sum + (h.patientCount || 0), 0)} คน)</option>
+                {hospitals.map((hospital) => (
+                  <option key={hospital.id} value={hospital.id}>
+                    {hospital.name} ({hospital.patientCount || 0} คน)
+                    {hospital.type === 'main' ? ' - แม่ข่าย' : ' - ลูกข่าย'}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-end">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
+                <p className="text-sm text-blue-800">
+                  <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
+                </p>
+                <p className="text-sm text-blue-600 mt-1">
+                  <span className="font-semibold"> ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
+                </p>
+                <p className="text-sm text-blue-600">
+                  <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Filters */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="md:col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 <Search className="w-4 h-4 inline mr-1" /> ค้นหาชื่อ / HN
@@ -214,6 +352,21 @@ export default function PatientRecordPage() {
                 <option value="L4">L4 - Champion</option>
               </select>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Filter className="w-4 h-4 inline mr-1" /> Zone
+              </label>
+              <select
+                value={zoneFilter}
+                onChange={(e) => setZoneFilter(e.target.value)}
+                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="all">ทั้งหมด</option>
+                <option value="Green Zone">Green Zone</option>
+                <option value="Yellow Zone">Yellow Zone</option>
+                <option value="Red Zone">Red Zone</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -225,7 +378,36 @@ export default function PatientRecordPage() {
               <p className="text-sm text-gray-600">
                 เลือกแล้ว <span className="font-bold text-blue-600">{selectedPatients.size}</span> คน
                 จากทั้งหมด <span className="font-bold">{filteredPatients.length}</span> คน
+                {selectedHospital !== 'all' && (
+                  <span className="ml-2 text-blue-600">
+                    (โรงพยาบาล: {getSelectedHospitalName()})
+                  </span>
+                )}
               </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setExportMode('individual')}
+                className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                  exportMode === 'individual'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-200 text-gray-600 hover:border-blue-300'
+                }`}
+              >
+                <FileText className="w-4 h-4 inline mr-2" />
+                แยกไฟล์ (Individual)
+              </button>
+              <button
+                onClick={() => setExportMode('zip')}
+                className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                  exportMode === 'zip'
+                    ? 'border-green-500 bg-green-50 text-green-700'
+                    : 'border-gray-200 text-gray-600 hover:border-green-300'
+                }`}
+              >
+                <FileSpreadsheet className="w-4 h-4 inline mr-2" />
+                รวม ZIP
+              </button>
             </div>
           </div>
         </div>
@@ -265,6 +447,14 @@ export default function PatientRecordPage() {
                     <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
+                      {selectedHospital !== 'all' && (
+                        <button
+                          onClick={() => setSelectedHospital('all')}
+                          className="mt-4 px-4 py-2 text-blue-600 hover:underline"
+                        >
+                          แสดงผู้ป่วยทั้งหมด
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ) : (
