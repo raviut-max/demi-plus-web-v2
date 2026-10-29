@@ -1,13 +1,13 @@
 // app/admin/reports/patient-record/page.tsx
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
-  CheckSquare, Square, Loader2, Building2
+  CheckSquare, Square, Loader2
 } from 'lucide-react';
 
 interface Patient {
@@ -33,7 +33,8 @@ interface HospitalData {
   patientCount?: number;
 }
 
-export default function PatientRecordPage() {
+// ✅ แยกเนื้อหาหลักออกมาเป็น Component ย่อย
+function PatientRecordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialMode = searchParams.get('mode') || 'hospital';
@@ -90,7 +91,6 @@ export default function PatientRecordPage() {
       const { data, error } = await query;
       if (error) throw error;
 
-      // นับจำนวนผู้ป่วยในแต่ละโรงพยาบาล
       const hospitalsWithCount = await Promise.all(
         (data || []).map(async (h: any) => {
           const { count } = await supabase
@@ -99,16 +99,12 @@ export default function PatientRecordPage() {
             .eq('hospital_id', h.id)
             .eq('is_active', true);
           
-          return {
-            ...h,
-            patientCount: count || 0
-          };
+          return { ...h, patientCount: count || 0 };
         })
       );
 
       setHospitals(hospitalsWithCount);
       
-      // เลือกโรงพยาบาลเริ่มต้นเป็นโรงพยาบาลของผู้ใช้
       if (hospitalInfo?.id && !hospitalsWithCount.find((h: any) => h.id === hospitalInfo.id)) {
         setSelectedHospital(hospitalInfo.id);
       }
@@ -135,7 +131,6 @@ export default function PatientRecordPage() {
         query = query.in('hospital_id', accessibleIds);
       }
 
-      // กรองตามโรงพยาบาลที่เลือก
       if (selectedHospital !== 'all') {
         query = query.eq('hospital_id', selectedHospital);
       }
@@ -150,17 +145,15 @@ export default function PatientRecordPage() {
     }
   };
 
-  // รีเซ็ตการเลือกผู้ป่วยเมื่อเปลี่ยนโรงพยาบาล
   useEffect(() => {
     setSelectedPatients(new Set());
   }, [selectedHospital]);
 
-  // โหลดผู้ป่วยใหม่เมื่อเปลี่ยนโรงพยาบาล
   useEffect(() => {
     if (user) {
       loadPatients(user.id);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedHospital]);
 
   const filteredPatients = patients.filter(p => {
@@ -202,7 +195,6 @@ export default function PatientRecordPage() {
     try {
       const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
       
-      // Export แยกไฟล์ - เปิดหน้าต่างใหม่ทีละคน
       for (const patient of selectedPatientData) {
         window.open(
           `/admin/reports/patient-record/${patient.id}?print=true`,
@@ -259,7 +251,7 @@ export default function PatientRecordPage() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍️ แพทย์' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                        user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
@@ -554,5 +546,21 @@ export default function PatientRecordPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ✅ Component หลักที่ครอบด้วย Suspense
+export default function PatientRecordPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <p className="text-gray-600">กำลังโหลดข้อมูล...</p>
+        </div>
+      </div>
+    }>
+      <PatientRecordContent />
+    </Suspense>
   );
 }
