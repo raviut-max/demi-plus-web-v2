@@ -1,5 +1,9 @@
 // app/admin/reports/patient-record/page.tsx
-// ✅ DEBUG VERSION - มี alert ทุกจุดสำคัญ
+// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
+// ✅ ปรับปรุง:
+//    1. ย้ายปุ่ม Export มาไว้ด้านบน (เห็นชัดเจน)
+//    2. เพิ่ม Pagination แสดงทีละ 10 คน
+//    3. Modal Export แสดงเฉพาะคนที่เลือก
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -8,8 +12,9 @@ import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
-  CheckSquare, Square, Loader2, Activity, AlertCircle,
-  X, FileArchive, CheckCircle, AlertTriangle, Printer
+  CheckSquare, Square, Activity, AlertCircle,
+  X, FileArchive, CheckCircle, Printer,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 
 interface Patient {
@@ -44,14 +49,12 @@ function PatientRecordContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
-  const initialMode = searchParams.get('mode') || 'hospital';
   const urlHospital = searchParams.get('hospital') || 'all';
   const urlPam = searchParams.get('pam') || 'all';
   const urlZone = searchParams.get('zone') || 'all';
   const urlSearch = searchParams.get('search') || '';
 
   const [user, setUser] = useState<any>(null);
-  const [userHospital, setUserHospital] = useState<any>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [hospitals, setHospitals] = useState<HospitalData[]>([]);
   const [selectedHospital, setSelectedHospital] = useState<string>(urlHospital);
@@ -60,11 +63,16 @@ function PatientRecordContent() {
   const [searchTerm, setSearchTerm] = useState(urlSearch);
   const [pamFilter, setPamFilter] = useState(urlPam);
   const [zoneFilter, setZoneFilter] = useState(urlZone);
-  const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
-  const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
+  
+  // ✅ Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(10); // แสดงทีละ 10 คน
+  
+  // ✅ Export Modal state
   const [exportQueue, setExportQueue] = useState<Patient[]>([]);
   const [currentExportIndex, setCurrentExportIndex] = useState(0);
   const [showExportList, setShowExportList] = useState(false);
+  const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
 
   const updateUrlParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -72,21 +80,17 @@ function PatientRecordContent() {
     if (pamFilter !== 'all') params.set('pam', pamFilter);
     if (zoneFilter !== 'all') params.set('zone', zoneFilter);
     if (searchTerm) params.set('search', searchTerm);
-    if (mode !== 'hospital') params.set('mode', mode);
     
     const newUrl = `${pathname}?${params.toString()}`;
     router.replace(newUrl, { scroll: false });
-  }, [pathname, router, selectedHospital, pamFilter, zoneFilter, searchTerm, mode]);
+  }, [pathname, router, selectedHospital, pamFilter, zoneFilter, searchTerm]);
 
   useEffect(() => {
-    alert('🔵 [DEBUG] useEffect ทำงาน - กำลังเช็ค session');
     const userData = checkSession();
     if (!userData) {
-      alert('🔴 [DEBUG] ไม่มี session - redirect ไป login');
       router.push('/admin/login');
       return;
     }
-    alert('🟢 [DEBUG] มี session แล้ว - role: ' + userData.role);
     setUser(userData);
     loadUserHospital(userData.id);
     loadHospitals(userData.id);
@@ -97,10 +101,14 @@ function PatientRecordContent() {
     updateUrlParams();
   }, [updateUrlParams]);
 
+  // ✅ รีเซ็ตหน้าเมื่อ filter เปลี่ยน
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedHospital, searchTerm, pamFilter, zoneFilter]);
+
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
-      setUserHospital(hospitalInfo);
     } catch (error) {
       console.error('Error loading hospital:', error);
     }
@@ -197,10 +205,8 @@ function PatientRecordContent() {
       });
 
       setPatients(patientsWithFollowup);
-      alert('🟢 [DEBUG] โหลดผู้ป่วยสำเร็จ: ' + patientsWithFollowup.length + ' คน');
     } catch (error) {
       console.error('Error loading patients:', error);
-      alert('🔴 [DEBUG] Error โหลดผู้ป่วย: ' + error);
     } finally {
       setLoading(false);
     }
@@ -226,51 +232,51 @@ function PatientRecordContent() {
     return matchSearch && matchPam && matchZone;
   });
 
+  // ✅ Pagination calculation
+  const totalPages = Math.ceil(filteredPatients.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedPatients = filteredPatients.slice(startIndex, endIndex);
+
   const toggleSelectAll = () => {
-    alert(' [DEBUG] toggleSelectAll - ก่อน: ' + selectedPatients.size);
-    if (selectedPatients.size === filteredPatients.length) {
-      setSelectedPatients(new Set());
-      alert('🟢 [DEBUG] deselect all');
+    // เลือกทั้งหมดเฉพาะหน้าปัจจุบัน
+    const currentPageIds = paginatedPatients.map(p => p.id);
+    const allSelected = currentPageIds.every(id => selectedPatients.has(id));
+    
+    const newSelected = new Set(selectedPatients);
+    if (allSelected) {
+      currentPageIds.forEach(id => newSelected.delete(id));
     } else {
-      setSelectedPatients(new Set(filteredPatients.map(p => p.id)));
-      alert('🟢 [DEBUG] select all: ' + filteredPatients.length + ' คน');
+      currentPageIds.forEach(id => newSelected.add(id));
     }
+    setSelectedPatients(newSelected);
   };
 
   const toggleSelectPatient = (patientId: string) => {
     const newSelected = new Set(selectedPatients);
     if (newSelected.has(patientId)) {
       newSelected.delete(patientId);
-      alert(' [DEBUG] deselect: ' + patientId);
     } else {
       newSelected.add(patientId);
-      alert('🟢 [DEBUG] select: ' + patientId);
     }
     setSelectedPatients(newSelected);
   };
 
-  // ✅ ฟังก์ชัน Export แบบ DEBUG
-  const handleExport = () => {
-    alert(' [DEBUG] handleExport ถูกเรียก!');
-    alert('🔵 [DEBUG] selectedPatients.size: ' + selectedPatients.size);
-    
+  // ✅ ฟังก์ชัน Export
+  const handleExport = (mode: 'individual' | 'zip') => {
     if (selectedPatients.size === 0) {
-      alert('🔴 [DEBUG] ไม่มีผู้ป่วยที่เลือก!');
+      alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
       return;
     }
 
     const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
-    alert('🟢 [DEBUG] จำนวนผู้ป่วยที่เลือก: ' + selectedPatientData.length);
-    alert('🟢 [DEBUG] รายชื่อ: ' + selectedPatientData.map(p => p.first_name + ' ' + p.last_name).join(', '));
-    
+    setExportMode(mode);
     setExportQueue(selectedPatientData);
     setCurrentExportIndex(0);
     setShowExportList(true);
-    alert('🟢 [DEBUG] แสดง Modal แล้ว!');
   };
 
   const openPatientRecord = (patientId: string) => {
-    alert('🔵 [DEBUG] กำลังเปิดระเบียน: ' + patientId);
     router.push(`/admin/reports/patient-record/${patientId}?print=true`);
   };
 
@@ -349,7 +355,7 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
                        user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
@@ -397,10 +403,10 @@ function PatientRecordContent() {
             <div className="flex items-end">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
                 <p className="text-sm text-blue-800">
-                  <span className="font-semibold"> โรงพยาบาล:</span> {getSelectedHospitalName()}
+                  <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
-                  <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
+                  <span className="font-semibold"> ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
                 </p>
                 <p className="text-sm text-blue-600">
                   <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
@@ -414,6 +420,41 @@ function PatientRecordContent() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ✅ Export Buttons - ย้ายมาด้านบน (เห็นชัดเจน) */}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 mb-6 text-white">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h3 className="text-xl font-bold mb-1">📤 Export PDF</h3>
+              <p className="text-blue-100 text-sm">
+                เลือกแล้ว <span className="font-bold text-white">{selectedPatients.size}</span> คน
+                {selectedHospital !== 'all' && (
+                  <span className="ml-2">
+                    (โรงพยาบาล: {getSelectedHospitalName()})
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => handleExport('individual')}
+                disabled={selectedPatients.size === 0}
+                className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              >
+                <FileText className="w-5 h-5" />
+                แยกไฟล์ ({selectedPatients.size})
+              </button>
+              <button
+                onClick={() => handleExport('zip')}
+                disabled={selectedPatients.size === 0}
+                className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all font-semibold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              >
+                <FileArchive className="w-5 h-5" />
+                รวม ZIP ({selectedPatients.size})
+              </button>
             </div>
           </div>
         </div>
@@ -468,48 +509,6 @@ function PatientRecordContent() {
           </div>
         </div>
 
-        {/* Export Options */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h3 className="text-lg font-bold text-gray-800">เลือกรูปแบบไฟล์</h3>
-              <p className="text-sm text-gray-600">
-                เลือกแล้ว <span className="font-bold text-blue-600">{selectedPatients.size}</span> คน
-                จากทั้งหมด <span className="font-bold">{filteredPatients.length}</span> คน
-                {selectedHospital !== 'all' && (
-                  <span className="ml-2 text-blue-600">
-                    (โรงพยาบาล: {getSelectedHospitalName()})
-                  </span>
-                )}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setExportMode('individual')}
-                className={`px-4 py-2 rounded-lg border-2 transition-all flex items-center gap-2 ${
-                  exportMode === 'individual'
-                    ? 'border-blue-500 bg-blue-50 text-blue-700'
-                    : 'border-gray-200 text-gray-600 hover:border-blue-300'
-                }`}
-              >
-                <FileText className="w-4 h-4" />
-                แยกไฟล์ (Individual)
-              </button>
-              <button
-                onClick={() => setExportMode('zip')}
-                className={`px-4 py-2 rounded-lg border-2 transition-all flex items-center gap-2 ${
-                  exportMode === 'zip'
-                    ? 'border-green-500 bg-green-50 text-green-700'
-                    : 'border-gray-200 text-gray-600 hover:border-green-300'
-                }`}
-              >
-                <FileArchive className="w-4 h-4" />
-                รวม ZIP
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Patient Table */}
         <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
           <div className="overflow-x-auto">
@@ -521,43 +520,35 @@ function PatientRecordContent() {
                       onClick={toggleSelectAll}
                       className="flex items-center gap-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 px-2 py-1 rounded"
                     >
-                      {selectedPatients.size === filteredPatients.length ? (
+                      {paginatedPatients.length > 0 && paginatedPatients.every(p => selectedPatients.has(p.id)) ? (
                         <CheckSquare className="w-5 h-5 text-blue-600" />
                       ) : (
                         <Square className="w-5 h-5 text-gray-400" />
                       )}
-                      เลือกทั้งหมด
+                      เลือกหน้านี้
                     </button>
                   </th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ชื่อ-นามสกุล</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">HN</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">อายุ/เพศ</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ข้อมูลติดตาม</th>
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ติดตาม</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">น้ำหนัก</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">FPG</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">การกระทำ</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredPatients.length === 0 ? (
+                {paginatedPatients.length === 0 ? (
                   <tr>
                     <td colSpan={10} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
-                      {selectedHospital !== 'all' && (
-                        <button
-                          onClick={() => setSelectedHospital('all')}
-                          className="mt-4 px-4 py-2 text-blue-600 hover:underline"
-                        >
-                          แสดงผู้ป่วยทั้งหมด
-                        </button>
-                      )}
                     </td>
                   </tr>
                 ) : (
-                  filteredPatients.map((patient) => (
+                  paginatedPatients.map((patient) => (
                     <tr key={patient.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
                         <button
@@ -632,18 +623,74 @@ function PatientRecordContent() {
               </tbody>
             </table>
           </div>
-        </div>
 
-        {/* Export Button */}
-        <div className="mt-6 flex justify-end">
-          <button
-            onClick={handleExport}
-            disabled={selectedPatients.size === 0}
-            className="flex items-center gap-2 px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Download className="w-5 h-5" />
-            Export PDF ({selectedPatients.size} คน)
-          </button>
+          {/* ✅ Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                แสดง {startIndex + 1} - {Math.min(endIndex, filteredPatients.length)} จาก {filteredPatients.length} คน
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                
+                {/* Page numbers */}
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium ${
+                        currentPage === pageNum
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white border border-gray-300 hover:bg-gray-100'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+                
+                <button
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronsRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -664,7 +711,7 @@ function PatientRecordContent() {
             <div className="p-6">
               <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-sm text-blue-800 mb-2">
-                  <strong> วิธีใช้งาน:</strong>
+                  <strong>📋 วิธีใช้งาน:</strong>
                 </p>
                 <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
                   <li>กดปุ่ม "พิมพ์ระเบียน" สำหรับผู้ป่วยแต่ละคน</li>
