@@ -1,10 +1,10 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ ฉบับสมบูรณ์: 29 ตุลาคม 2569
-// ✅ แก้ไขล่าสุด: หัวตารางประวัติการติดตามนับถอยหลัง (มาก→น้อย) ตรงกับการ์ด
+// ✅ ใช้เทมเพลตกลาง (patientRecordTemplate) สร้าง PDF ฉบับสมบูรณ์
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import { checkSession, logout, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
+import { checkSession, logout, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
@@ -13,9 +13,8 @@ import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Loader2, Info, HardDrive
 } from 'lucide-react';
-import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas-pro';
 import JSZip from 'jszip';
+import { fetchPatientRecordData, generatePatientPDFBlob, buildRecordMeta } from '@/lib/pdf/patientRecordTemplate';
 
 interface Patient {
   id: string;
@@ -42,45 +41,6 @@ interface HospitalData {
   code: string | null;
   type: 'main' | 'sub';
   patientCount?: number;
-}
-
-interface FollowupRecord {
-  id: string;
-  followup_date: string;
-  followup_round: number;
-  weight: number | null;
-  waist_circumference: number | null;
-  blood_pressure_sys: number | null;
-  blood_pressure_dia: number | null;
-  blood_sugar_dtx: number | null;
-  confidence_score: number | null;
-  followup_status: string | null;
-  food_amount_status: string | null;
-  food_type_status: string | null;
-  movement_status: string | null;
-  adaptation_summary: string | null;
-  adaptation_obstacles: string | null;
-  adaptation_opportunities: string | null;
-  summary: string | null;
-  recommendations: string | null;
-  life_schedule_image_url: string | null;
-  floating_chart_image_url: string | null;
-  dream_card_image_url: string | null;
-  floating_chart_summary: string | null;
-  dream_card_description: string | null;
-}
-
-interface ScreeningRecord {
-  id: string;
-  screening_date: string;
-  pam_total_score: number | null;
-  pam_level_result: string | null;
-  proms_zone: string | null;
-  proms_q1_score: number | null;
-  proms_q2_score: number | null;
-  proms_q3_score: number | null;
-  proms_q4_score: number | null;
-  confidence_score: number | null;
 }
 
 function PatientRecordContent() {
@@ -281,341 +241,11 @@ function PatientRecordContent() {
     setShowExportList(true);
   };
 
-  const fetchPatientFullData = async (patientId: string) => {
-    const { data: patientData, error: patientError } = await supabase
-      .from('profiles')
-      .select(`
-        id, first_name, last_name, hospital_number, age, gender,
-        pam_level, pam_score, zone, current_weight, waist_circumference,
-        blood_sugar, height, bmi, hba1c_level, program_start_date,
-        hospital_id, coach_id,
-        hospitals:hospital_id (name)
-      `)
-      .eq('id', patientId)
-      .single();
-    if (patientError) throw patientError;
-
-    const { data: followupData } = await supabase
-      .from('appointment_followups')
-      .select('*')
-      .eq('user_id', patientId)
-      .order('followup_date', { ascending: false });
-
-    const { data: screeningData } = await supabase
-      .from('screenings')
-      .select('*')
-      .eq('user_id', patientId)
-      .order('screening_date', { ascending: false });
-
-    return { patient: patientData, followups: followupData || [], screenings: screeningData || [] };
-  };
-
-  // ✅ สร้าง HTML แยกเป็นหน้าๆ (A4 พอดีต่อหน้า + แบ่งอัตโนมัติตามพื้นที่จริง)
-  const renderPatientPages = (patient: any, followups: FollowupRecord[], screenings: ScreeningRecord[]): string[] => {
-    const formatThaiDate = (dateString: string | null) => {
-      if (!dateString) return '-';
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return '-';
-      const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-      return `${date.getDate()} ${thaiMonths[date.getMonth()]} ${date.getFullYear() + 543}`;
-    };
-    const statusText = (s: string | null) => {
-      const map: any = { excellent: 'ดีเยี่ยม', good: 'ดี', fair: 'พอใช้', needs_improvement: 'ต้องปรับปรุง', monitoring: 'เฝ้าระวัง' };
-      return map[s || ''] || (s || '-');
-    };
-    const complianceText = (s: string | null) => {
-      const map: any = { completed: '✅ ตามแผน', not_completed: '❌ ไม่ตามแผน', not_in_plan: '⚪ ไม่มีในแผน' };
-      return map[s || ''] || '-';
-    };
-
-    const latestFollowup = followups[0];
-    const latestScreening = screenings[0];
-    const inners: string[] = [];
-
-    // ---------- ตัวสร้างการ์ดประวัติการติดตาม ----------
-    const buildFollowupCard = (f: FollowupRecord, highlight: boolean) => `
-      <div style="border:1px solid ${highlight ? '#3b82f6' : '#e5e7eb'};background:${highlight ? '#eff6ff' : '#ffffff'};border-radius:8px;padding:12px 14px;margin-bottom:12px;">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:16px;font-weight:800;">รอบที่ ${f.followup_round}</span>
-          <span style="font-size:13px;color:#6b7280;">${formatThaiDate(f.followup_date)}</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;font-size:13px;">
-          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">น้ำหนัก</div><div style="font-weight:600;">${f.weight || '-'} กก.</div></div>
-          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">ความดัน</div><div style="font-weight:600;">${f.blood_pressure_sys && f.blood_pressure_dia ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : '-'} mmHg</div></div>
-          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">FPG</div><div style="font-weight:600;">${f.blood_sugar_dtx || '-'} mg/dL</div></div>
-          <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;"><div style="color:#6b7280;font-size:11px;">ความมั่นใจ</div><div style="font-weight:600;">${f.confidence_score || '-'}/10</div></div>
-        </div>
-        ${f.summary ? `<div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;margin-top:8px;font-size:13px;"><span style="color:#6b7280;font-size:11px;font-weight:700;">สรุป: </span>${f.summary}</div>` : ''}
-      </div>
-    `;
-
-    /* ---------- PAGE 1 ---------- */
-    inners.push(`
-      <div style="border-bottom:2px solid #2563eb;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;">
-        <div>
-          <div style="font-size:22px;font-weight:800;color:#2563eb;">Community Bridge</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:2px;">ระบบดูแลผู้ป่วยกลุ่มเสี่ยงเบาหวาน (PreDM)</div>
-        </div>
-        <div style="text-align:right;">
-          <div style="font-size:18px;font-weight:800;color:#111827;">ระเบียนติดตามผล</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:2px;">Follow-up Record</div>
-        </div>
-      </div>
-
-      <div style="background:#eff6ff;border-left:4px solid #3b82f6;border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-        <div style="font-size:15px;font-weight:700;margin-bottom:8px;">👤 ข้อมูลผู้ป่วย</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px 16px;font-size:13px;">
-          <div><div style="color:#6b7280;font-size:11px;">ชื่อ-นามสกุล</div><div style="font-weight:600;">${patient.first_name || ''} ${patient.last_name || ''}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">HN</div><div style="font-weight:600;">${patient.hospital_number || '-'}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">อายุ / เพศ</div><div style="font-weight:600;">${patient.age || '-'} ปี / ${patient.gender === 'female' ? 'หญิง' : 'ชาย'}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">PAM Level</div><div style="font-weight:600;">${patient.pam_level || 'L0'}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">PROMS Zone</div><div style="font-weight:600;">${patient.zone || '-'}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">โรงพยาบาล</div><div style="font-weight:600;">${patient.hospitals?.name || '-'}</div></div>
-        </div>
-      </div>
-
-      <div style="font-size:15px;font-weight:700;border-bottom:1px solid #e5e7eb;padding-bottom:6px;margin-bottom:10px;">📊 ผลการประเมินตนเอง</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
-        <div style="background:#eff6ff;border:2px solid #bfdbfe;border-radius:8px;padding:12px;text-align:center;">
-          <div style="font-size:12px;color:#6b7280;">PAM Score</div>
-          <div style="font-size:30px;font-weight:800;color:#2563eb;">${latestScreening?.pam_total_score || '-'}</div>
-          <div style="font-size:12px;color:#374151;">${patient.pam_level || '-'}</div>
-          <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</div>
-        </div>
-        <div style="background:#faf5ff;border:2px solid #e9d5ff;border-radius:8px;padding:12px;text-align:center;">
-          <div style="font-size:12px;color:#6b7280;">PROMS Zone</div>
-          <div style="font-size:30px;font-weight:800;color:#9333ea;">${latestScreening?.proms_zone || '-'}</div>
-          <div style="font-size:12px;color:#374151;">Q1:${latestScreening?.proms_q1_score || 0} Q2:${latestScreening?.proms_q2_score || 0}</div>
-          <div style="font-size:11px;color:#9ca3af;margin-top:2px;">${latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</div>
-        </div>
-        <div style="background:#f0fdf4;border:2px solid #bbf7d0;border-radius:8px;padding:12px;text-align:center;">
-          <div style="font-size:12px;color:#6b7280;">Confidence</div>
-          <div style="font-size:30px;font-weight:800;color:#16a34a;">${latestScreening?.confidence_score || latestFollowup?.confidence_score || '-'}/10</div>
-          <div style="font-size:11px;color:#9ca3af;margin-top:14px;">${latestScreening ? formatThaiDate(latestScreening.screening_date) : '-'}</div>
-        </div>
-      </div>
-
-      <div style="font-size:15px;font-weight:700;border-bottom:1px solid #e5e7eb;padding-bottom:6px;margin-bottom:10px;">📊 ค่าสุขภาพปัจจุบัน</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px;">
-        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;">
-          <div style="font-size:11px;color:#6b7280;">น้ำหนัก</div>
-          <div style="font-size:20px;font-weight:800;">${latestFollowup?.weight ?? patient?.current_weight ?? '-'} <span style="font-size:12px;">กก.</span></div>
-        </div>
-        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;">
-          <div style="font-size:11px;color:#6b7280;">รอบเอว</div>
-          <div style="font-size:20px;font-weight:800;">${latestFollowup?.waist_circumference ?? patient?.waist_circumference ?? '-'} <span style="font-size:12px;">ซม.</span></div>
-        </div>
-        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;">
-          <div style="font-size:11px;color:#6b7280;">FPG</div>
-          <div style="font-size:20px;font-weight:800;">${latestFollowup?.blood_sugar_dtx ?? patient?.blood_sugar ?? '-'} <span style="font-size:12px;">mg/dL</span></div>
-        </div>
-        <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;text-align:center;">
-          <div style="font-size:11px;color:#6b7280;">HbA1c</div>
-          <div style="font-size:20px;font-weight:800;">${patient?.hba1c_level ?? '-'} <span style="font-size:12px;">%</span></div>
-        </div>
-      </div>
-
-      ${latestFollowup ? `
-      <div style="font-size:15px;font-weight:700;border-bottom:1px solid #e5e7eb;padding-bottom:6px;margin-bottom:10px;">📅 การติดตามล่าสุด (รอบที่ ${latestFollowup.followup_round})</div>
-      <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:13px;margin-bottom:10px;">
-          <div><div style="color:#6b7280;font-size:11px;">วันที่ติดตาม</div><div style="font-weight:600;">${formatThaiDate(latestFollowup.followup_date)}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">สถานะ</div><div style="font-weight:600;">${statusText(latestFollowup.followup_status)}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">ความมั่นใจ</div><div style="font-weight:600;">${latestFollowup.confidence_score || '-'}/10</div></div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:13px;">
-          <div><div style="color:#6b7280;font-size:11px;">ปริมาณอาหาร</div><div style="font-weight:600;">${complianceText(latestFollowup.food_amount_status)}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">ชนิดอาหาร</div><div style="font-weight:600;">${complianceText(latestFollowup.food_type_status)}</div></div>
-          <div><div style="color:#6b7280;font-size:11px;">การเคลื่อนไหว</div><div style="font-weight:600;">${complianceText(latestFollowup.movement_status)}</div></div>
-        </div>
-      </div>` : ''}
-    `);
-
-    /* ---------- PAGE 2+: ประวัติการติดตาม ---------- */
-    if (followups.length === 0) {
-      inners.push(`
-        <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:16px;">📋 ประวัติการติดตาม</div>
-        <div style="text-align:center;color:#9ca3af;padding:60px 0;font-size:14px;">ยังไม่มีประวัติการติดตาม</div>
-      `);
-    } else {
-      const MAX_CONTENT_HEIGHT = 980;
-      const headerHtml = (label: string) => `
-        <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">
-          📋 ประวัติการติดตาม (${label})
-        </div>
-      `;
-
-      // ตัววัดความสูง (ซ่อนนอกจอ)
-      const measure = document.createElement('div');
-      measure.style.width = '698px';
-      measure.style.position = 'fixed';
-      measure.style.left = '-10000px';
-      measure.style.top = '0';
-      measure.style.visibility = 'hidden';
-      measure.style.fontFamily = "'Sarabun','Noto Sans Thai','Helvetica Neue',Arial,sans-serif";
-      document.body.appendChild(measure);
-
-      // แบ่งการ์ดเป็นชุดๆ ตามความสูงจริง
-      const chunks: FollowupRecord[][] = [];
-      let current: FollowupRecord[] = [];
-
-      for (let i = 0; i < followups.length; i++) {
-        const trial = [...current, followups[i]];
-        measure.innerHTML = headerHtml('วัด') + trial.map((f, idx) => buildFollowupCard(f, idx === 0)).join('');
-        if (measure.scrollHeight > MAX_CONTENT_HEIGHT && current.length > 0) {
-          chunks.push(current);
-          current = [followups[i]];
-        } else {
-          current = trial;
-        }
-      }
-      if (current.length > 0) chunks.push(current);
-      document.body.removeChild(measure);
-
-      // ✅ หัวตารางนับถอยหลัง (มาก→น้อย) ตามทิศทางการ์ดที่แสดง
-      chunks.forEach((chunk, chunkIndex) => {
-        const firstRound = chunk[0]?.followup_round ?? 0;          // รอบสูงสุดบนหน้า (ล่าสุด)
-        const lastRound = chunk[chunk.length - 1]?.followup_round ?? 0; // รอบต่ำสุดบนหน้า
-        const label = firstRound === lastRound
-          ? `รอบที่ ${firstRound} จากทั้งหมด ${followups.length} รอบ • เรียงจากล่าสุด`
-          : `รอบที่ ${firstRound}-${lastRound} จากทั้งหมด ${followups.length} รอบ • เรียงจากล่าสุด`;
-        inners.push(
-          headerHtml(label) +
-          chunk.map((f, idx) => buildFollowupCard(f, chunkIndex === 0 && idx === 0)).join('')
-        );
-      });
-    }
-
-    /* ---------- PAGE: Life Schedule ---------- */
-    if (latestFollowup?.life_schedule_image_url) {
-      inners.push(`
-        <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">📋 Life Schedule - ตารางชีวิตประจำวัน</div>
-        <div style="font-size:13px;color:#6b7280;margin-bottom:10px;">${formatThaiDate(latestFollowup.followup_date)} • รอบที่ ${latestFollowup.followup_round}</div>
-        <div style="border:2px solid #d1d5db;border-radius:8px;overflow:hidden;text-align:center;background:#ffffff;">
-          <img src="${latestFollowup.life_schedule_image_url}" style="width:100%;max-height:840px;object-fit:contain;" />
-        </div>
-      `);
-    }
-
-    /* ---------- PAGE: Floating Chart + Dream Card ---------- */
-    if (latestFollowup?.floating_chart_image_url || latestFollowup?.dream_card_image_url) {
-      inners.push(`
-        <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">📈 รูปภาพประกอบ</div>
-        ${latestFollowup?.floating_chart_image_url ? `
-          <div style="margin-bottom:14px;">
-            <div style="font-size:15px;font-weight:700;margin-bottom:6px;">📈 Floating Chart - กราฟแนวโน้ม</div>
-            <div style="border:2px solid #d1d5db;border-radius:8px;overflow:hidden;text-align:center;background:#ffffff;">
-              <img src="${latestFollowup.floating_chart_image_url}" style="width:100%;max-height:360px;object-fit:contain;" />
-            </div>
-            ${latestFollowup.floating_chart_summary ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;font-size:13px;margin-top:6px;">${latestFollowup.floating_chart_summary}</div>` : ''}
-          </div>
-        ` : ''}
-        ${latestFollowup?.dream_card_image_url ? `
-          <div>
-            <div style="font-size:15px;font-weight:700;margin-bottom:6px;">💭 Dream Card - บัตรความฝัน</div>
-            <div style="border:2px solid #d1d5db;border-radius:8px;overflow:hidden;text-align:center;background:#ffffff;">
-              <img src="${latestFollowup.dream_card_image_url}" style="width:100%;max-height:360px;object-fit:contain;" />
-            </div>
-            ${latestFollowup.dream_card_description ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:8px 10px;font-size:13px;margin-top:6px;">${latestFollowup.dream_card_description}</div>` : ''}
-          </div>
-        ` : ''}
-      `);
-    }
-
-    /* ---------- PAGE สุดท้าย: สรุป + ลายเซ็น ---------- */
-    const today = formatThaiDate(new Date().toISOString());
-    inners.push(`
-      <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">📝 สรุปและคำแนะนำ</div>
-      ${latestFollowup?.adaptation_summary ? `
-        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;">
-          <div style="color:#6b7280;font-size:11px;font-weight:700;margin-bottom:4px;">สรุปการปรับตัว</div>
-          ${latestFollowup.adaptation_summary}
-        </div>` : ''}
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
-        ${latestFollowup?.adaptation_obstacles ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;font-size:13px;"><div style="color:#6b7280;font-size:11px;font-weight:700;margin-bottom:4px;">อุปสรรค</div>${latestFollowup.adaptation_obstacles}</div>` : ''}
-        ${latestFollowup?.adaptation_opportunities ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;font-size:13px;"><div style="color:#6b7280;font-size:11px;font-weight:700;margin-bottom:4px;">โอกาส/จุดแข็ง</div>${latestFollowup.adaptation_opportunities}</div>` : ''}
-      </div>
-      ${latestFollowup?.summary ? `
-        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;">
-          <div style="color:#6b7280;font-size:11px;font-weight:700;margin-bottom:4px;">สรุปผลการติดตาม</div>
-          ${latestFollowup.summary}
-        </div>` : ''}
-      ${latestFollowup?.recommendations ? `
-        <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;">
-          <div style="color:#6b7280;font-size:11px;font-weight:700;margin-bottom:4px;">คำแนะนำ</div>
-          <div style="white-space:pre-line;">${latestFollowup.recommendations}</div>
-        </div>` : ''}
-
-      <div style="margin-top:48px;display:flex;gap:40px;">
-        <div style="flex:1;text-align:center;">
-          <div style="height:70px;border-bottom:1px solid #9ca3af;"></div>
-          <div style="font-size:13px;font-weight:700;margin-top:6px;">ผู้บันทึก (อสม./เจ้าหน้าที่)</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:2px;">วันที่: ${today}</div>
-        </div>
-        <div style="flex:1;text-align:center;">
-          <div style="height:70px;border-bottom:1px solid #9ca3af;"></div>
-          <div style="font-size:13px;font-weight:700;margin-top:6px;">ผู้ป่วย/ญาติ</div>
-          <div style="font-size:12px;color:#6b7280;margin-top:2px;">วันที่: ______________</div>
-        </div>
-      </div>
-    `);
-
-    // ห่อแต่ละหน้าด้วยกรอบ A4 พอดี + เลขหน้า
-    return inners.map((inner, i) => `
-      <div style="width:794px;height:1123px;box-sizing:border-box;padding:44px 48px 56px 48px;background:#ffffff;position:relative;overflow:hidden;font-family:'Sarabun','Noto Sans Thai','Helvetica Neue',Arial,sans-serif;color:#111827;">
-        ${inner}
-        <div style="position:absolute;bottom:20px;left:48px;right:48px;border-top:1px solid #e5e7eb;padding-top:6px;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
-          <span>Community Bridge v1.0 • ระเบียนติดตามผล</span>
-          <span>หน้า ${i + 1} / ${inners.length}</span>
-        </div>
-      </div>
-    `);
-  };
-
-  // ✅ สร้าง PDF โดยถ่ายภาพทีละหน้า
+  // ✅ สร้าง PDF ฉบับสมบูรณ์ผ่านเทมเพลตกลาง
   const generatePatientPDF = async (patientId: string): Promise<Blob> => {
-    const { patient, followups, screenings } = await fetchPatientFullData(patientId);
-    const pagesHtml = renderPatientPages(patient, followups, screenings);
-
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-
-    for (let i = 0; i < pagesHtml.length; i++) {
-      const container = document.createElement('div');
-      container.style.position = 'fixed';
-      container.style.left = '-10000px';
-      container.style.top = '0';
-      container.style.width = '794px';
-      container.style.zIndex = '-1';
-      container.innerHTML = pagesHtml[i];
-      document.body.appendChild(container);
-
-      const imgs = Array.from(container.querySelectorAll('img'));
-      await Promise.all(imgs.map(img =>
-        img.complete ? Promise.resolve() : new Promise<void>(res => { img.onload = () => res(); img.onerror = () => res(); })
-      ));
-      await new Promise(r => setTimeout(r, 200));
-
-      const pageEl = container.firstElementChild as HTMLElement;
-      const canvas = await html2canvas(pageEl, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        width: 794,
-        height: 1123,
-        windowWidth: 794,
-      });
-      document.body.removeChild(container);
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.95);
-      if (i > 0) pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-    }
-
-    return pdf.output('blob');
+    const { patient, followups, screenings, coachName } = await fetchPatientRecordData(patientId);
+    const meta = buildRecordMeta(user?.full_name_th || 'เจ้าหน้าที่ระบบ', coachName, patient);
+    return generatePatientPDFBlob(patient, followups, screenings, meta);
   };
 
   // ✅ บันทึกรวม: เลือกโฟลเดอร์แล้วบันทึกทั้งหมด
@@ -637,7 +267,7 @@ function PatientRecordContent() {
     }
 
     const confirmed = window.confirm(
-      `จะบันทึกรายการ ${exportQueue.length} คน ลงในโฟลเดอร์ที่คุณเลือก\n\n• ระบบจะเปิดหน้าต่างเลือกโฟลเดอร์\n• PDF จะถูกบันทึกลงโฟลเดอร์นั้นโดยตรง\n• ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf\n\nต้องการดำเนินการต่อหรือไม่?`
+      `จะบันทึกรายการ ${exportQueue.length} คน ลงในโฟลเดอร์ที่คุณเลือก\n\n• ระบบจะเปิดหน้าต่างเลือกโฟลเดอร์\n• PDF ฉบับสมบูรณ์จะถูกลงโฟลเดอร์นั้นโดยตรง\n• ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf\n\nต้องการดำเนินการต่อหรือไม่?`
     );
     if (!confirmed) return;
 
@@ -815,7 +445,7 @@ function PatientRecordContent() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">📄 ระเบียนคนไข้ (PDF)</h1>
-              <p className="text-gray-600">เลือกรายงานและบันทึกรายการเป็น PDF</p>
+              <p className="text-gray-600">เลือกรายงานและบันทึกรายการเป็น PDF ฉบับสมบูรณ์</p>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
@@ -826,7 +456,7 @@ function PatientRecordContent() {
                   <div>
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍ เจ้าหน้าที่'}
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -1098,7 +728,7 @@ function PatientRecordContent() {
                         <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
                           <li>กดปุ่ม "เลือกโฟลเดอร์และบันทึก" ด้านบน</li>
                           <li>เลือกโฟลเดอร์ปลายทางที่ต้องการบันทึก</li>
-                          <li>ระบบจะสร้าง PDF และบันทึกลงโฟลเดอร์ทันที (แยกไฟล์ตามชื่อ)</li>
+                          <li>ระบบจะสร้าง PDF ฉบับสมบูรณ์และบันทึกลงโฟลเดอร์ทันที</li>
                           <li>รอจนกว่าระบบจะบันทึกครบทุกคน</li>
                         </ol>
                         <p className="text-xs text-blue-600 mt-3 italic">💡 ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf</p>
