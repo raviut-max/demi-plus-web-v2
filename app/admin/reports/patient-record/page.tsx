@@ -1,14 +1,6 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ ฉบับสมบูรณ์: 29 ตุลาคม 2569
-// ✅ ฟีเจอร์ทั้งหมด:
-//    1. เลือกโรงพยาบาล + สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม
-//    2. ปุ่ม "บันทึกรวม" อยู่ด้านบนเห็นชัดเจน
-//    3. Pagination แสดงทีละ 10 คน
-//    4. คอลัมน์ "ข้อมูลติดตาม" พร้อม Badge
-//    5. บันทึกรวม: เลือกโฟลเดอร์ + บันทึกทีเดียว + แยกชื่อไฟล์
-//    6. แบ่งหน้า PDF อัตโนมัติตามพื้นที่จริง (ไม่ตัดกลาง, ไม่เหลือที่ว่างเยอะ)
-//    7. หัวตารางประวัติใช้หมายเลขรอบจริง (รอบที่ 4-6 จากทั้งหมด 6 รอบ)
-//    8. Fallback เป็น ZIP สำหรับ browser ที่ไม่รองรับเลือกโฟลเดอร์
+// ✅ แก้ไขล่าสุด: หัวตารางประวัติการติดตามนับถอยหลัง (มาก→น้อย) ตรงกับการ์ด
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -318,7 +310,7 @@ function PatientRecordContent() {
     return { patient: patientData, followups: followupData || [], screenings: screeningData || [] };
   };
 
-  // ✅ สร้าง HTML แยกเป็นหน้าๆ (A4 พอดีต่อหน้า + แบ่งประวัติการติดตามอัตโนมัติตามพื้นที่จริง)
+  // ✅ สร้าง HTML แยกเป็นหน้าๆ (A4 พอดีต่อหน้า + แบ่งอัตโนมัติตามพื้นที่จริง)
   const renderPatientPages = (patient: any, followups: FollowupRecord[], screenings: ScreeningRecord[]): string[] => {
     const formatThaiDate = (dateString: string | null) => {
       if (!dateString) return '-';
@@ -357,7 +349,7 @@ function PatientRecordContent() {
       </div>
     `;
 
-    /* ---------- PAGE 1: ข้อมูลผู้ป่วย + ผลประเมิน + ค่าสุขภาพ ---------- */
+    /* ---------- PAGE 1 ---------- */
     inners.push(`
       <div style="border-bottom:2px solid #2563eb;padding-bottom:12px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
@@ -439,14 +431,14 @@ function PatientRecordContent() {
       </div>` : ''}
     `);
 
-    /* ---------- PAGE 2+: ประวัติการติดตาม (วัดความสูงจริง → แบ่งอัตโนมัติ) ---------- */
+    /* ---------- PAGE 2+: ประวัติการติดตาม ---------- */
     if (followups.length === 0) {
       inners.push(`
         <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:16px;">📋 ประวัติการติดตาม</div>
         <div style="text-align:center;color:#9ca3af;padding:60px 0;font-size:14px;">ยังไม่มีประวัติการติดตาม</div>
       `);
     } else {
-      const MAX_CONTENT_HEIGHT = 980; // px พื้นที่เนื้อหาที่ใส่ได้ภายใน 1 หน้า A4
+      const MAX_CONTENT_HEIGHT = 980;
       const headerHtml = (label: string) => `
         <div style="font-size:18px;font-weight:800;border-bottom:2px solid #2563eb;padding-bottom:10px;margin-bottom:14px;">
           📋 ประวัติการติดตาม (${label})
@@ -463,7 +455,7 @@ function PatientRecordContent() {
       measure.style.fontFamily = "'Sarabun','Noto Sans Thai','Helvetica Neue',Arial,sans-serif";
       document.body.appendChild(measure);
 
-      // ✅ แบ่งการ์ดเป็นชุดๆ ตามความสูงจริงของเนื้อหา
+      // แบ่งการ์ดเป็นชุดๆ ตามความสูงจริง
       const chunks: FollowupRecord[][] = [];
       let current: FollowupRecord[] = [];
 
@@ -480,14 +472,13 @@ function PatientRecordContent() {
       if (current.length > 0) chunks.push(current);
       document.body.removeChild(measure);
 
-      // ✅ สร้างแต่ละหน้า โดยใช้หมายเลขรอบจริงในหัวตาราง
+      // ✅ หัวตารางนับถอยหลัง (มาก→น้อย) ตามทิศทางการ์ดที่แสดง
       chunks.forEach((chunk, chunkIndex) => {
-        const rounds = chunk.map(f => f.followup_round || 0);
-        const maxR = Math.max(...rounds);
-        const minR = Math.min(...rounds);
-        const label = minR === maxR
-          ? `รอบที่ ${maxR} จากทั้งหมด ${followups.length} รอบ`
-          : `รอบที่ ${minR}-${maxR} จากทั้งหมด ${followups.length} รอบ`;
+        const firstRound = chunk[0]?.followup_round ?? 0;          // รอบสูงสุดบนหน้า (ล่าสุด)
+        const lastRound = chunk[chunk.length - 1]?.followup_round ?? 0; // รอบต่ำสุดบนหน้า
+        const label = firstRound === lastRound
+          ? `รอบที่ ${firstRound} จากทั้งหมด ${followups.length} รอบ • เรียงจากล่าสุด`
+          : `รอบที่ ${firstRound}-${lastRound} จากทั้งหมด ${followups.length} รอบ • เรียงจากล่าสุด`;
         inners.push(
           headerHtml(label) +
           chunk.map((f, idx) => buildFollowupCard(f, chunkIndex === 0 && idx === 0)).join('')
@@ -581,7 +572,7 @@ function PatientRecordContent() {
     `);
   };
 
-  // ✅ สร้าง PDF โดยถ่ายภาพทีละหน้า (ไม่ตัดกลางหน้า)
+  // ✅ สร้าง PDF โดยถ่ายภาพทีละหน้า
   const generatePatientPDF = async (patientId: string): Promise<Blob> => {
     const { patient, followups, screenings } = await fetchPatientFullData(patientId);
     const pagesHtml = renderPatientPages(patient, followups, screenings);
@@ -835,7 +826,7 @@ function PatientRecordContent() {
                   <div>
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩 เจ้าหน้าที่'}
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
