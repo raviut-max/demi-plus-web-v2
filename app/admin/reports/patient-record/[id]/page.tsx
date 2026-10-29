@@ -1,20 +1,16 @@
 // app/admin/reports/patient-record/[id]/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ การแก้ไขทั้งหมด:
-//    1. ใช้ Suspense boundary ครอบ useSearchParams (แก้ Vercel build error)
-//    2. ดึงค่าสุขภาพจาก Follow-up ล่าสุด (fallback → Profiles)
-//    3. ตั้งชื่อไฟล์ PDF อัตโนมัติ (โรงพยาบาล_HN_ชื่อ_นามสกุล)
-//    4. ใช้ router.back() เมื่อย้อนกลับ (คง state หน้าก่อนหน้า)
-//    5. แสดงข้อมูล 5 หน้า A4 (ซ่อนส่วนรูปภาพถ้าไม่มีข้อมูล)
-//    6. ✅ Auto-print เมื่อมี parameter ?auto=true (กด Save ครั้งเดียว)
+// ✅ บันทึก PDF โดยตรง (ไม่ต้องผ่าน Print Dialog)
 'use client';
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, useRef } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { checkSession, logout } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
-  ArrowLeft, Printer, LogOut, UserCheck, Loader2
+  ArrowLeft, Printer, LogOut, UserCheck, Loader2, Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 interface PatientData {
   id: string;
@@ -77,7 +73,6 @@ interface ScreeningRecord {
   confidence_score: number | null;
 }
 
-// ✅ Component หลักที่ใช้ useSearchParams (ต้องอยู่ใน Suspense)
 function PatientRecordContent() {
   const router = useRouter();
   const params = useParams();
@@ -91,9 +86,11 @@ function PatientRecordContent() {
   const [followups, setFollowups] = useState<FollowupRecord[]>([]);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [autoPrintTriggered, setAutoPrintTriggered] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  
+  // ✅ Ref สำหรับอ้างอิงส่วนที่ต้องการแปลงเป็น PDF
+  const pdfContentRef = useRef<HTMLDivElement>(null);
 
-  // ✅ State สำหรับค่าสุขภาพล่าสุด (จาก Follow-up หรือ Profiles)
   const [latestHealthData, setLatestHealthData] = useState({
     weight: null as number | null,
     waist: null as number | null,
@@ -112,54 +109,26 @@ function PatientRecordContent() {
     }
     setUser(userData);
     loadPatientData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientId, router]);
 
-  // ✅ ตั้งชื่อไฟล์ PDF อัตโนมัติเมื่อโหลดข้อมูลผู้ป่วยเสร็จ
   useEffect(() => {
     if (patient) {
       const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
       const hn = patient.hospital_number || 'ไม่มีHN';
       const firstName = patient.first_name || 'ไม่ระบุชื่อ';
       const lastName = patient.last_name || '';
-
-      // สร้างสตริงชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล
       const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
-
-      // เปลี่ยน Title ของหน้าเว็บ (จะเป็นชื่อไฟล์เริ่มต้นเมื่อกด Save as PDF)
       document.title = fileName;
       
-      // เปลี่ยน <title> tag ใน head ด้วย
       const titleElement = document.querySelector('title');
       if (titleElement) {
         titleElement.textContent = fileName;
-      } else {
-        const newTitle = document.createElement('title');
-        newTitle.textContent = fileName;
-        document.head.appendChild(newTitle);
       }
-
-      console.log('📄 [PDF FileName] ตั้งชื่อไฟล์เป็น:', fileName);
     }
   }, [patient]);
 
-  // ✅ Auto-print เมื่อมี parameter ?auto=true
-  useEffect(() => {
-    if (isPrintMode && isAutoPrint && patient && !autoPrintTriggered) {
-      // รอ 1.5 วินาทีให้หน้าโหลดเสร็จสมบูรณ์ แล้วเรียก print()
-      const timer = setTimeout(() => {
-        console.log('🖨️ [Auto-Print] เรียก window.print() อัตโนมัติ');
-        window.print();
-        setAutoPrintTriggered(true);
-      }, 1500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [isPrintMode, isAutoPrint, patient, autoPrintTriggered]);
-
   const loadPatientData = async () => {
     try {
-      // โหลดข้อมูลผู้ป่วย
       const { data: patientData, error: patientError } = await supabase
         .from('profiles')
         .select(`
@@ -175,7 +144,6 @@ function PatientRecordContent() {
       if (patientError) throw patientError;
       setPatient(patientData);
 
-      // โหลดข้อมูล Follow-ups (เรียงจากล่าสุดไปเก่าสุด)
       const { data: followupData, error: followupError } = await supabase
         .from('appointment_followups')
         .select('*')
@@ -185,7 +153,6 @@ function PatientRecordContent() {
       if (followupError) throw followupError;
       setFollowups(followupData || []);
 
-      // โหลดข้อมูล Screenings
       const { data: screeningData, error: screeningError } = await supabase
         .from('screenings')
         .select('*')
@@ -195,7 +162,6 @@ function PatientRecordContent() {
       if (screeningError) throw screeningError;
       setScreenings(screeningData || []);
 
-      // ✅ ดึงค่าสุขภาพล่าสุดจาก Follow-up หรือ Profiles
       const latestFollowup = followupData?.[0];
       
       setLatestHealthData({
@@ -215,9 +181,75 @@ function PatientRecordContent() {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  // ✅ ฟังก์ชันสร้าง PDF โดยตรงและดาวน์โหลด
+  const handleDownloadPDF = async () => {
+    if (!pdfContentRef.current) {
+      alert('ไม่พบเนื้อหาสำหรับสร้าง PDF');
+      return;
+    }
+
+    setIsGeneratingPDF(true);
+
+    try {
+      // รอให้หน้าโหลดเสร็จสมบูรณ์
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Capture หน้าเว็บเป็น canvas
+      const canvas = await html2canvas(pdfContentRef.current, {
+        scale: 2, // ความละเอียดสูง
+        useCORS: true, // อนุญาตให้โหลดรูปภาพจาก domain อื่น
+        logging: false,
+        backgroundColor: '#ffffff',
+      });
+
+      // สร้าง PDF
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+      const imgX = (pdfWidth - imgWidth * ratio) / 2;
+      const imgY = 0;
+
+      pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+
+      // ตั้งชื่อไฟล์
+      const hospitalName = patient?.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
+      const hn = patient?.hospital_number || 'ไม่มีHN';
+      const firstName = patient?.first_name || 'ไม่ระบุชื่อ';
+      const lastName = patient?.last_name || '';
+      const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_');
+
+      // ดาวน์โหลด PDF
+      pdf.save(`${fileName}.pdf`);
+
+      console.log('✅ [PDF] สร้างและดาวน์โหลดสำเร็จ:', fileName);
+    } catch (error) {
+      console.error(' [PDF] เกิดข้อผิดพลาด:', error);
+      alert('เกิดข้อผิดพลาดในการสร้าง PDF');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
+
+  // ✅ Auto-download เมื่อมี parameter ?auto=true
+  useEffect(() => {
+    if (isPrintMode && isAutoPrint && patient && !isGeneratingPDF) {
+      const timer = setTimeout(() => {
+        console.log('🖨️ [Auto-Download] เริ่มสร้าง PDF อัตโนมัติ');
+        handleDownloadPDF();
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isPrintMode, isAutoPrint, patient]);
 
   const formatThaiDate = (dateString: string | null) => {
     if (!dateString) return '-';
@@ -247,7 +279,7 @@ function PatientRecordContent() {
   const getComplianceStatus = (status: string | null) => {
     const statusMap: any = {
       'completed': { text: '✅ ตามแผน', class: 'text-green-600' },
-      'not_completed': { text: ' ไม่ตามแผน', class: 'text-red-600' },
+      'not_completed': { text: '❌ ไม่ตามแผน', class: 'text-red-600' },
       'not_in_plan': { text: '⚪ ไม่มีในแผน', class: 'text-gray-500' }
     };
     return statusMap[status || ''] || { text: '-', class: 'text-gray-500' };
@@ -285,7 +317,7 @@ function PatientRecordContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - ซ่อนเมื่อ Print */}
+      {/* Header - ซ่อนเมื่อ Print/Download */}
       <div className="bg-white shadow-sm border-b border-gray-200 print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -294,22 +326,32 @@ function PatientRecordContent() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                📄 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
+                 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
               </h1>
               <p className="text-gray-600">HN: {patient.hospital_number || '-'}</p>
               {isAutoPrint && (
                 <p className="text-xs text-blue-600 mt-1">
-                  💡 Auto-Print Mode: Print dialog จะเปิดอัตโนมัติ
+                  💡 Auto-Download Mode: PDF จะถูกสร้างและดาวน์โหลดอัตโนมัติ
                 </p>
               )}
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={handlePrint}
-                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg"
+                onClick={handleDownloadPDF}
+                disabled={isGeneratingPDF}
+                className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Printer className="w-5 h-5" />
-                Print / Export PDF
+                {isGeneratingPDF ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    กำลังสร้าง PDF...
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-5 h-5" />
+                    ดาวน์โหลด PDF
+                  </>
+                )}
               </button>
               <button
                 onClick={() => { logout(); router.push('/admin/login'); }}
@@ -323,11 +365,10 @@ function PatientRecordContent() {
         </div>
       </div>
 
-      {/* PDF Content - 5 หน้า A4 */}
-      <div className="max-w-4xl mx-auto px-4 py-8 print:px-0 print:py-0">
+      {/* ✅ PDF Content - ส่วนที่จะถูกแปลงเป็น PDF */}
+      <div ref={pdfContentRef} className="max-w-4xl mx-auto px-4 py-8 print:px-0 print:py-0">
         {/* ===== PAGE 1: ข้อมูลพื้นฐาน + ผลประเมิน ===== */}
         <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
-          {/* Header */}
           <div className="border-b-2 border-blue-600 pb-4 mb-6">
             <div className="flex items-center justify-between">
               <div>
@@ -341,7 +382,6 @@ function PatientRecordContent() {
             </div>
           </div>
 
-          {/* Patient Info */}
           <div className="bg-blue-50 rounded-lg p-4 mb-6 border-l-4 border-blue-500">
             <h3 className="text-lg font-bold text-gray-900 mb-3">👤 ข้อมูลผู้ป่วย</h3>
             <div className="grid grid-cols-3 gap-4">
@@ -385,7 +425,6 @@ function PatientRecordContent() {
             </div>
           </div>
 
-          {/* Self-Assessment Results */}
           <div className="mb-6">
             <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">📊 ผลการประเมินตนเอง</h3>
             <div className="grid grid-cols-3 gap-4">
@@ -419,7 +458,6 @@ function PatientRecordContent() {
             </div>
           </div>
 
-          {/* ✅ Health Data - ดึงจาก Follow-up ล่าสุด หรือ Profiles */}
           <div className="mb-6">
             <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
               📊 ค่าสุขภาพปัจจุบัน
@@ -457,7 +495,6 @@ function PatientRecordContent() {
             </div>
           </div>
 
-          {/* Latest Follow-up Summary */}
           {latestFollowup && (
             <div className="mb-6">
               <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
@@ -504,7 +541,6 @@ function PatientRecordContent() {
             </div>
           )}
 
-          {/* Footer */}
           <div className="mt-8 pt-4 border-t text-sm text-gray-500 flex justify-between">
             <span>Community Bridge v1.0</span>
             <span>หน้า 1 / 5</span>
@@ -580,7 +616,7 @@ function PatientRecordContent() {
         {latestFollowup?.life_schedule_image_url && (
           <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
             <div className="border-b-2 border-blue-600 pb-4 mb-6">
-              <h2 className="text-xl font-bold text-gray-900"> Life Schedule - ตารางชีวิตประจำวัน</h2>
+              <h2 className="text-xl font-bold text-gray-900">📋 Life Schedule - ตารางชีวิตประจำวัน</h2>
               <p className="text-sm text-gray-600">
                 {formatThaiDate(latestFollowup.followup_date)} • รอบที่ {latestFollowup.followup_round}
               </p>
@@ -667,7 +703,6 @@ function PatientRecordContent() {
 
           {latestFollowup && (
             <>
-              {/* Adaptation */}
               <div className="mb-6">
                 <h3 className="text-lg font-bold text-gray-900 mb-3">🔄 การปรับตัว</h3>
                 {latestFollowup.adaptation_summary && (
@@ -692,7 +727,6 @@ function PatientRecordContent() {
                 </div>
               </div>
 
-              {/* Summary & Recommendations */}
               <div className="mb-6">
                 {latestFollowup.summary && (
                   <div className="bg-gray-50 rounded-lg p-4 mb-3">
@@ -710,7 +744,6 @@ function PatientRecordContent() {
             </>
           )}
 
-          {/* Signature Section */}
           <div className="mt-12 grid grid-cols-2 gap-8">
             <div className="text-center">
               <div className="border-b border-gray-400 h-16 mb-2"></div>
@@ -764,7 +797,6 @@ function PatientRecordContent() {
   );
 }
 
-// ✅ Export default ที่ครอบด้วย Suspense (แก้ Vercel build error)
 export default function PatientRecordDetailPage() {
   return (
     <Suspense fallback={
