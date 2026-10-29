@@ -1,7 +1,6 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ เปลี่ยนจาก popup เป็นเปิดในแท็บเดิม (ไม่ถูกบล็อก)
-// ✅ เพิ่มระบบ Auto-advance อัจฉริยะ
+// ✅ Auto-print เมื่อเปิดหน้าระเบียน (กด Save ครั้งเดียว)
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -71,7 +70,6 @@ function PatientRecordContent() {
   const [showExportList, setShowExportList] = useState(false);
   const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
   
-  // ✅ State สำหรับ Sequential Print (เปิดทีละคนในแท็บเดิม)
   const [isSequentialPrinting, setIsSequentialPrinting] = useState(false);
   const [sequentialProgress, setSequentialProgress] = useState(0);
 
@@ -273,7 +271,7 @@ function PatientRecordContent() {
     setShowExportList(true);
   };
 
-  // ✅ ฟังก์ชัน Sequential Print - เปิดทีละคนในแท็บเดิม
+  // ✅ Sequential Print - เปิดทีละคน + auto-print
   const handleSequentialPrint = async () => {
     if (exportQueue.length === 0) {
       alert('ไม่มีรายการที่จะพิมพ์');
@@ -283,10 +281,10 @@ function PatientRecordContent() {
     const confirmed = window.confirm(
       `จะเปิดระเบียน ${exportQueue.length} คน ทีละคนในแท็บนี้\n\n` +
       `วิธีใช้งาน:\n` +
-      `1. กด "Print / Export PDF" ในหน้าระเบียน\n` +
-      `2. เลือก "Save as PDF" แล้วบันทึก\n` +
-      `3. กดปุ่ม "กลับ" เพื่อกลับมาหน้านี้\n` +
-      `4. ระบบจะเปิดคนถัดไปอัตโนมัติ\n\n` +
+      `1. ระบบจะเปิดหน้าระเบียนและแสดง Print dialog อัตโนมัติ\n` +
+      `2. เลือก "Save as PDF" แล้วกด Save (ชื่อไฟล์ตั้งอัตโนมัติ)\n` +
+      `3. กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไป + Print dialog อัตโนมัติ\n` +
+      `4. ทำซ้ำจนครบทุกคน\n\n` +
       `ต้องการเริ่มต้นหรือไม่?`
     );
 
@@ -297,15 +295,15 @@ function PatientRecordContent() {
     setIsSequentialPrinting(true);
     setSequentialProgress(0);
 
-    // ✅ เปิดคนแรกทันที
     if (exportQueue.length > 0) {
       const firstPatient = exportQueue[0];
-      router.push(`/admin/reports/patient-record/${firstPatient.id}?print=true&batch=true&batchIndex=0&batchTotal=${exportQueue.length}`);
+      // ✅ เพิ่ม parameter &auto=true เพื่อให้หน้าระเบียนเรียก print() อัตโนมัติ
+      router.push(`/admin/reports/patient-record/${firstPatient.id}?print=true&auto=true&batch=true&batchIndex=0&batchTotal=${exportQueue.length}`);
     }
   };
 
   const openPatientRecord = (patientId: string) => {
-    router.push(`/admin/reports/patient-record/${patientId}?print=true`);
+    router.push(`/admin/reports/patient-record/${patientId}?print=true&auto=true`);
   };
 
   const closeExportList = () => {
@@ -738,13 +736,13 @@ function PatientRecordContent() {
             </div>
 
             <div className="p-6">
-              {/* ✅ ปุ่มพิมพ์ทั้งหมด - ใช้ Sequential Print (ไม่ใช้ popup) */}
+              {/* ✅ ปุ่มพิมพ์ทั้งหมด - Auto-print */}
               <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h4 className="font-bold text-lg mb-1">🖨️ พิมพ์ทั้งหมด (ไม่ใช้ Popup)</h4>
+                    <h4 className="font-bold text-lg mb-1">🖨️ พิมพ์ทั้งหมด (Auto-Print)</h4>
                     <p className="text-sm text-blue-100">
-                      เปิดทีละคนในแท็บนี้ - ไม่ถูกบล็อก!
+                      เปิดทีละคน + Print dialog อัตโนมัติ - กด Save ครั้งเดียว!
                     </p>
                   </div>
                   <button
@@ -781,9 +779,9 @@ function PatientRecordContent() {
                 </p>
                 <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
                   <li>กดปุ่ม "เริ่มพิมพ์" ด้านบน</li>
-                  <li>ระบบจะเปิดหน้าระเบียนคนแรกในแท็บนี้</li>
-                  <li>กดปุ่ม "Print / Export PDF" → เลือก "Save as PDF" → บันทึก</li>
-                  <li>กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไปอัตโนมัติ</li>
+                  <li>ระบบจะเปิดหน้าระเบียน + Print dialog อัตโนมัติ</li>
+                  <li>เลือก "Save as PDF" แล้วกด Save (ชื่อไฟล์ตั้งอัตโนมัติ)</li>
+                  <li>กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไป + Print dialog อัตโนมัติ</li>
                   <li>ทำซ้ำจนครบทุกคน</li>
                 </ol>
               </div>

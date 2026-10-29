@@ -6,6 +6,7 @@
 //    3. ตั้งชื่อไฟล์ PDF อัตโนมัติ (โรงพยาบาล_HN_ชื่อ_นามสกุล)
 //    4. ใช้ router.back() เมื่อย้อนกลับ (คง state หน้าก่อนหน้า)
 //    5. แสดงข้อมูล 5 หน้า A4 (ซ่อนส่วนรูปภาพถ้าไม่มีข้อมูล)
+//    6. ✅ Auto-print เมื่อมี parameter ?auto=true (กด Save ครั้งเดียว)
 'use client';
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -82,6 +83,7 @@ function PatientRecordContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const isPrintMode = searchParams.get('print') === 'true';
+  const isAutoPrint = searchParams.get('auto') === 'true';
   const patientId = params.id as string;
 
   const [user, setUser] = useState<any>(null);
@@ -89,6 +91,7 @@ function PatientRecordContent() {
   const [followups, setFollowups] = useState<FollowupRecord[]>([]);
   const [screenings, setScreenings] = useState<ScreeningRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [autoPrintTriggered, setAutoPrintTriggered] = useState(false);
 
   // ✅ State สำหรับค่าสุขภาพล่าสุด (จาก Follow-up หรือ Profiles)
   const [latestHealthData, setLatestHealthData] = useState({
@@ -140,6 +143,20 @@ function PatientRecordContent() {
     }
   }, [patient]);
 
+  // ✅ Auto-print เมื่อมี parameter ?auto=true
+  useEffect(() => {
+    if (isPrintMode && isAutoPrint && patient && !autoPrintTriggered) {
+      // รอ 1.5 วินาทีให้หน้าโหลดเสร็จสมบูรณ์ แล้วเรียก print()
+      const timer = setTimeout(() => {
+        console.log('🖨️ [Auto-Print] เรียก window.print() อัตโนมัติ');
+        window.print();
+        setAutoPrintTriggered(true);
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isPrintMode, isAutoPrint, patient, autoPrintTriggered]);
+
   const loadPatientData = async () => {
     try {
       // โหลดข้อมูลผู้ป่วย
@@ -182,13 +199,13 @@ function PatientRecordContent() {
       const latestFollowup = followupData?.[0];
       
       setLatestHealthData({
-        weight: latestFollowup?.weight || patientData?.current_weight || null,
-        waist: latestFollowup?.waist_circumference || patientData?.waist_circumference || null,
-        fpg: latestFollowup?.blood_sugar_dtx || patientData?.blood_sugar || null,
-        hba1c: patientData?.hba1c_level || null,
-        bpSys: latestFollowup?.blood_pressure_sys || null,
-        bpDia: latestFollowup?.blood_pressure_dia || null,
-        healthDataDate: latestFollowup?.followup_date || patientData?.program_start_date || null,
+        weight: latestFollowup?.weight ?? patientData?.current_weight ?? null,
+        waist: latestFollowup?.waist_circumference ?? patientData?.waist_circumference ?? null,
+        fpg: latestFollowup?.blood_sugar_dtx ?? patientData?.blood_sugar ?? null,
+        hba1c: patientData?.hba1c_level ?? null,
+        bpSys: latestFollowup?.blood_pressure_sys ?? null,
+        bpDia: latestFollowup?.blood_pressure_dia ?? null,
+        healthDataDate: latestFollowup?.followup_date ?? patientData?.program_start_date ?? null,
       });
 
     } catch (error) {
@@ -271,7 +288,6 @@ function PatientRecordContent() {
       {/* Header - ซ่อนเมื่อ Print */}
       <div className="bg-white shadow-sm border-b border-gray-200 print:hidden">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ✅ ใช้ router.back() แทน router.push() เพื่อย้อนกลับไปหน้าก่อนหน้าพร้อม state เดิม */}
           <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
             <ArrowLeft className="w-4 h-4" /> กลับไปหน้าเลือกรายงาน
           </button>
@@ -281,6 +297,11 @@ function PatientRecordContent() {
                 📄 ระเบียนคนไข้: {patient.first_name} {patient.last_name}
               </h1>
               <p className="text-gray-600">HN: {patient.hospital_number || '-'}</p>
+              {isAutoPrint && (
+                <p className="text-xs text-blue-600 mt-1">
+                  💡 Auto-Print Mode: Print dialog จะเปิดอัตโนมัติ
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -440,7 +461,7 @@ function PatientRecordContent() {
           {latestFollowup && (
             <div className="mb-6">
               <h3 className="text-lg font-bold text-gray-900 mb-3 border-b pb-2">
-                 การติดตามล่าสุด (รอบที่ {latestFollowup.followup_round})
+                📅 การติดตามล่าสุด (รอบที่ {latestFollowup.followup_round})
               </h3>
               <div className="bg-gray-50 rounded-lg p-4">
                 <div className="grid grid-cols-3 gap-4 mb-4">
@@ -559,7 +580,7 @@ function PatientRecordContent() {
         {latestFollowup?.life_schedule_image_url && (
           <div className="bg-white p-8 mb-8 print:mb-0 print:page-break-after" style={{ minHeight: '297mm' }}>
             <div className="border-b-2 border-blue-600 pb-4 mb-6">
-              <h2 className="text-xl font-bold text-gray-900">📋 Life Schedule - ตารางชีวิตประจำวัน</h2>
+              <h2 className="text-xl font-bold text-gray-900"> Life Schedule - ตารางชีวิตประจำวัน</h2>
               <p className="text-sm text-gray-600">
                 {formatThaiDate(latestFollowup.followup_date)} • รอบที่ {latestFollowup.followup_round}
               </p>
