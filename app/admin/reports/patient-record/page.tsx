@@ -6,6 +6,7 @@
 //    3. ดึงค่าน้ำหนัก/FPG จาก Follow-up ล่าสุด (fallback → Profiles)
 //    4. Query แบบ Batch (ดึง followups ทั้งหมดในกลุ่มเดียว)
 //    5. คง state เมื่อกลับจากหน้าระเบียน (เก็บ hospital/pam/zone ใน URL)
+//    6. ✅ แก้ไขปุ่ม Export ให้ทำงานได้จริง พร้อม Progress Bar
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -14,7 +15,8 @@ import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
-  CheckSquare, Square, Loader2, Activity, AlertCircle
+  CheckSquare, Square, Loader2, Activity, AlertCircle,
+  X, Printer, FileArchive
 } from 'lucide-react';
 
 interface Patient {
@@ -30,7 +32,6 @@ interface Patient {
   blood_sugar: number | null;
   hospital_id: string | null;
   hospitals?: { name: string | null } | null;
-  // ✅ ฟิลด์สำหรับข้อมูลติดตาม
   followup_count?: number;
   latest_weight?: number | null;
   latest_fpg?: number | null;
@@ -51,7 +52,6 @@ function PatientRecordContent() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   
-  // ✅ อ่านค่าจาก URL เพื่อคง state เมื่อกลับจากหน้าระเบียน
   const initialMode = searchParams.get('mode') || 'hospital';
   const urlHospital = searchParams.get('hospital') || 'all';
   const urlPam = searchParams.get('pam') || 'all';
@@ -71,8 +71,16 @@ function PatientRecordContent() {
   const [zoneFilter, setZoneFilter] = useState(urlZone);
   const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
   const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
+  
+  // ✅ State สำหรับ Progress Modal
+  const [showProgress, setShowProgress] = useState(false);
+  const [progressCurrent, setProgressCurrent] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [progressPatientName, setProgressPatientName] = useState('');
+  const [progressDone, setProgressDone] = useState(false);
+  const [progressBlocked, setProgressBlocked] = useState(0);
 
-  // ✅ ฟังก์ชันอัปเดต URL เมื่อ filter เปลี่ยน (เพื่อคง state)
+  // ✅ ฟังก์ชันอัปเดต URL เมื่อ filter เปลี่ยน
   const updateUrlParams = useCallback(() => {
     const params = new URLSearchParams();
     if (selectedHospital !== 'all') params.set('hospital', selectedHospital);
@@ -97,7 +105,6 @@ function PatientRecordContent() {
     loadPatients(userData.id);
   }, [router]);
 
-  // ✅ อัปเดต URL ทุกครั้งที่ filter เปลี่ยน
   useEffect(() => {
     updateUrlParams();
   }, [updateUrlParams]);
@@ -171,7 +178,6 @@ function PatientRecordContent() {
       const { data, error } = await query;
       if (error) throw error;
       
-      // ✅ Query แบบ Batch - ดึง followups ทั้งหมดของผู้ป่วยในกลุ่มเดียว
       const patientIds = (data || []).map(p => p.id);
       let followupData: any[] = [];
       
@@ -189,15 +195,13 @@ function PatientRecordContent() {
         }
       }
 
-      // ✅ รวมข้อมูล Follow-up เข้ากับข้อมูลผู้ป่วย
       const patientsWithFollowup = (data || []).map(patient => {
         const patientFollowups = followupData.filter(f => f.user_id === patient.id);
-        const latestFollowup = patientFollowups[0]; // ล่าสุดเพราะเรียง descending
+        const latestFollowup = patientFollowups[0];
         
         return {
           ...patient,
           followup_count: patientFollowups.length,
-          // ✅ ดึงค่าจาก Follow-up ล่าสุด หรือ fallback ไป Profiles
           latest_weight: latestFollowup?.weight ?? patient.current_weight ?? null,
           latest_fpg: latestFollowup?.blood_sugar_dtx ?? patient.blood_sugar ?? null,
           latest_followup_date: latestFollowup?.followup_date || null,
@@ -212,12 +216,10 @@ function PatientRecordContent() {
     }
   };
 
-  // ✅ รีเซ็ตการเลือกเมื่อเปลี่ยนโรงพยาบาล
   useEffect(() => {
     setSelectedPatients(new Set());
   }, [selectedHospital]);
 
-  // ✅ โหลดผู้ป่วยใหม่เมื่อเปลี่ยนโรงพยาบาล
   useEffect(() => {
     if (user) {
       loadPatients(user.id);
@@ -253,25 +255,64 @@ function PatientRecordContent() {
     setSelectedPatients(newSelected);
   };
 
+  // ✅ ฟังก์ชัน Export ที่ทำงานได้จริง พร้อม Progress
   const handleExport = async () => {
     if (selectedPatients.size === 0) {
       alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
       return;
     }
 
+    const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
+    
+    // ✅ แสดง confirmation ก่อน export
+    const confirmMessage = exportMode === 'individual'
+      ? `จะเปิดระเบียน ${selectedPatientData.length} ไฟล์ในหน้าต่างใหม่\n\n⚠️ อนุญาต popup ในเบราว์เซอร์ก่อนดำเนินการ\n\nต้องการดำเนินการต่อหรือไม่?`
+      : `จะรวบรวมข้อมูล ${selectedPatientData.length} คนเพื่อ Export เป็น PDF\n\n️ อนุญาต popup ในเบราว์เซอร์ก่อนดำเนินการ\n\nต้องการดำเนินการต่อหรือไม่?`;
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
     setExporting(true);
+    setShowProgress(true);
+    setProgressDone(false);
+    setProgressBlocked(0);
+    setProgressTotal(selectedPatientData.length);
+    setProgressCurrent(0);
     
     try {
-      const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
+      let blockedCount = 0;
       
-      for (const patient of selectedPatientData) {
-        window.open(
+      for (let i = 0; i < selectedPatientData.length; i++) {
+        const patient = selectedPatientData[i];
+        const patientName = `${patient.first_name} ${patient.last_name}`;
+        
+        setProgressPatientName(patientName);
+        setProgressCurrent(i + 1);
+        
+        // ✅ เปิดหน้าต่างใหม่สำหรับผู้ป่วยแต่ละคน
+        const newWindow = window.open(
           `/admin/reports/patient-record/${patient.id}?print=true`,
           '_blank'
         );
-        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        if (!newWindow) {
+          blockedCount++;
+          setProgressBlocked(blockedCount);
+        }
+        
+        // หน่วงเวลา 400ms ระหว่างเปิดแต่ละหน้าต่าง (ลดการ block)
+        await new Promise(resolve => setTimeout(resolve, 400));
       }
-      alert(`✅ เปิดระเบียน ${selectedPatientData.length} ไฟล์แล้ว`);
+      
+      setProgressDone(true);
+      
+      // แสดงผลลัพธ์สุดท้าย
+      if (blockedCount > 0) {
+        alert(`⚠️ เปิดระเบียนสำเร็จ ${selectedPatientData.length - blockedCount} ไฟล์\n\n❌ ถูกบล็อก ${blockedCount} ไฟล์\n\nกรุณาอนุญาต popup ในเบราว์เซอร์แล้วลองใหม่`);
+      } else {
+        alert(`✅ เปิดระเบียนสำเร็จ ${selectedPatientData.length} ไฟล์\n\nกรุณาพิมพ์/บันทึก PDF ในแต่ละหน้าต่าง`);
+      }
     } catch (error) {
       console.error('Export error:', error);
       alert('❌ เกิดข้อผิดพลาดในการ Export');
@@ -280,13 +321,20 @@ function PatientRecordContent() {
     }
   };
 
+  const closeProgress = () => {
+    setShowProgress(false);
+    setProgressDone(false);
+    setProgressCurrent(0);
+    setProgressTotal(0);
+    setProgressPatientName('');
+  };
+
   const getSelectedHospitalName = () => {
     if (selectedHospital === 'all') return 'ทั้งหมด';
     const hospital = hospitals.find(h => h.id === selectedHospital);
     return hospital?.name || 'ไม่ระบุ';
   };
 
-  // ✅ ฟังก์ชันแสดง Badge สถานะข้อมูลติดตาม
   const getFollowupBadge = (patient: Patient) => {
     if (!patient.followup_count || patient.followup_count === 0) {
       return (
@@ -313,7 +361,6 @@ function PatientRecordContent() {
     );
   };
 
-  // ✅ คำนวณจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม
   const patientsWithFollowup = filteredPatients.filter(p => p.followup_count && p.followup_count > 0).length;
   const patientsWithoutFollowup = filteredPatients.filter(p => !p.followup_count || p.followup_count === 0).length;
 
@@ -351,8 +398,8 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨⚕️ แพทย์' :
-                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'osm' ? '🏘️ อสม.' : '‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -399,7 +446,7 @@ function PatientRecordContent() {
             <div className="flex items-end">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
                 <p className="text-sm text-blue-800">
-                  <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
+                  <span className="font-semibold"> โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
                   <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
@@ -407,7 +454,6 @@ function PatientRecordContent() {
                 <p className="text-sm text-blue-600">
                   <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
                 </p>
-                {/* ✅ สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม */}
                 <div className="mt-2 pt-2 border-t border-blue-200 space-y-1">
                   <p className="text-xs text-green-700 font-medium">
                     ✓ มีข้อมูลติดตาม: <span className="font-bold">{patientsWithFollowup}</span> คน
@@ -489,24 +535,24 @@ function PatientRecordContent() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setExportMode('individual')}
-                className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                className={`px-4 py-2 rounded-lg border-2 transition-all flex items-center gap-2 ${
                   exportMode === 'individual'
                     ? 'border-blue-500 bg-blue-50 text-blue-700'
                     : 'border-gray-200 text-gray-600 hover:border-blue-300'
                 }`}
               >
-                <FileText className="w-4 h-4 inline mr-2" />
+                <FileText className="w-4 h-4" />
                 แยกไฟล์ (Individual)
               </button>
               <button
                 onClick={() => setExportMode('zip')}
-                className={`px-4 py-2 rounded-lg border-2 transition-all ${
+                className={`px-4 py-2 rounded-lg border-2 transition-all flex items-center gap-2 ${
                   exportMode === 'zip'
                     ? 'border-green-500 bg-green-50 text-green-700'
                     : 'border-gray-200 text-gray-600 hover:border-green-300'
                 }`}
               >
-                <FileSpreadsheet className="w-4 h-4 inline mr-2" />
+                <FileArchive className="w-4 h-4" />
                 รวม ZIP
               </button>
             </div>
@@ -537,7 +583,6 @@ function PatientRecordContent() {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">อายุ/เพศ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
-                  {/* ✅ คอลัมน์ข้อมูลติดตาม */}
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ข้อมูลติดตาม</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">น้ำหนัก</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">FPG</th>
@@ -613,7 +658,6 @@ function PatientRecordContent() {
                           {patient.zone || '-'}
                         </span>
                       </td>
-                      {/* ✅ แสดง Badge สถานะข้อมูลติดตาม */}
                       <td className="px-6 py-4">
                         {getFollowupBadge(patient)}
                       </td>
@@ -660,11 +704,99 @@ function PatientRecordContent() {
           </button>
         </div>
       </div>
+
+      {/* ✅ Progress Modal */}
+      {showProgress && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                {progressDone ? (
+                  <>
+                    <span className="text-2xl">✅</span>
+                    Export เสร็จสิ้น
+                  </>
+                ) : (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin text-blue-600" />
+                    กำลัง Export PDF...
+                  </>
+                )}
+              </h3>
+              {progressDone && (
+                <button onClick={closeProgress} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {/* Progress Bar */}
+            <div className="mb-4">
+              <div className="flex justify-between text-sm text-gray-600 mb-2">
+                <span>{progressCurrent} / {progressTotal} คน</span>
+                <span>{Math.round((progressCurrent / progressTotal) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                <div 
+                  className={`h-3 rounded-full transition-all duration-300 ${
+                    progressDone ? 'bg-green-500' : 'bg-blue-600'
+                  }`}
+                  style={{ width: `${(progressCurrent / progressTotal) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Current Patient */}
+            {!progressDone && progressPatientName && (
+              <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-xs text-blue-600 font-medium mb-1">กำลังเปิดระเบียน:</p>
+                <p className="text-sm font-semibold text-gray-900">{progressPatientName}</p>
+              </div>
+            )}
+
+            {/* Blocked Warning */}
+            {progressBlocked > 0 && (
+              <div className="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                <p className="text-sm text-yellow-800">
+                  ⚠️ ถูกบล็อก {progressBlocked} ไฟล์ - กรุณาอนุญาต popup
+                </p>
+              </div>
+            )}
+
+            {/* Success Message */}
+            {progressDone && (
+              <div className="mb-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                <p className="text-sm text-green-800 mb-2">
+                  ✅ เปิดระเบียนสำเร็จ <strong>{progressTotal - progressBlocked}</strong> ไฟล์
+                </p>
+                {progressBlocked > 0 && (
+                  <p className="text-sm text-yellow-700">
+                    ⚠️ ถูกบล็อก {progressBlocked} ไฟล์
+                  </p>
+                )}
+                <p className="text-xs text-gray-600 mt-2">
+                  💡 กรุณาพิมพ์/บันทึก PDF ในแต่ละหน้าต่างที่เปิดขึ้น
+                </p>
+              </div>
+            )}
+
+            {/* Close Button */}
+            {progressDone && (
+              <button
+                onClick={closeProgress}
+                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+              >
+                ปิด
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ✅ Export default ที่ครอบด้วย Suspense (แก้ Vercel build error)
+// ✅ Export default ที่ครอบด้วย Suspense
 export default function PatientRecordPage() {
   return (
     <Suspense fallback={
