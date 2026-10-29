@@ -1,6 +1,14 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ Auto-print เมื่อเปิดหน้าระเบียน (กด Save ครั้งเดียว)
+// ✅ ฟีเจอร์ทั้งหมด:
+//    1. เลือกโรงพยาบาล + สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม
+//    2. ปุ่ม Export PDF อยู่ด้านบน (เห็นชัดเจน)
+//    3. Pagination แสดงทีละ 10 คน
+//    4. คอลัมน์ "ข้อมูลติดตาม" พร้อม Badge
+//    5. ดึงค่าน้ำหนัก/FPG จาก Follow-up ล่าสุด
+//    6. Modal "บันทึกรวม" พร้อมปุ่ม "เริ่มบันทึกรวม"
+//    7. Sequential print (เปิดทีละคนในแท็บเดิม + auto-download)
+//    8. คง state เมื่อเปลี่ยน filter (URL params)
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -66,11 +74,10 @@ function PatientRecordContent() {
   const [pageSize] = useState(10);
   
   const [exportQueue, setExportQueue] = useState<Patient[]>([]);
-  const [currentExportIndex, setCurrentExportIndex] = useState(0);
   const [showExportList, setShowExportList] = useState(false);
   const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
   
-  const [isSequentialPrinting, setIsSequentialPrinting] = useState(false);
+  const [isSequentialRecording, setIsSequentialRecording] = useState(false);
   const [sequentialProgress, setSequentialProgress] = useState(0);
 
   const updateUrlParams = useCallback(() => {
@@ -258,6 +265,7 @@ function PatientRecordContent() {
     setSelectedPatients(newSelected);
   };
 
+  // ✅ เปิด Modal แสดงรายการที่จะบันทึก
   const handleExport = (mode: 'individual' | 'zip') => {
     if (selectedPatients.size === 0) {
       alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
@@ -267,37 +275,35 @@ function PatientRecordContent() {
     const selectedPatientData = patients.filter(p => selectedPatients.has(p.id));
     setExportMode(mode);
     setExportQueue(selectedPatientData);
-    setCurrentExportIndex(0);
+    setSequentialProgress(0);
     setShowExportList(true);
   };
 
-  // ✅ Sequential Print - เปิดทีละคน + auto-print
-  const handleSequentialPrint = async () => {
+  // ✅ Sequential Recording - เปิดทีละคนในแท็บเดิม + auto-download
+  const handleSequentialRecord = async () => {
     if (exportQueue.length === 0) {
-      alert('ไม่มีรายการที่จะพิมพ์');
+      alert('ไม่มีรายการที่จะบันทึก');
       return;
     }
 
     const confirmed = window.confirm(
-      `จะเปิดระเบียน ${exportQueue.length} คน ทีละคนในแท็บนี้\n\n` +
-      `วิธีใช้งาน:\n` +
-      `1. ระบบจะเปิดหน้าระเบียนและแสดง Print dialog อัตโนมัติ\n` +
-      `2. เลือก "Save as PDF" แล้วกด Save (ชื่อไฟล์ตั้งอัตโนมัติ)\n` +
-      `3. กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไป + Print dialog อัตโนมัติ\n` +
-      `4. ทำซ้ำจนครบทุกคน\n\n` +
-      `ต้องการเริ่มต้นหรือไม่?`
+      `จะบันทึกรายการ ${exportQueue.length} คน ลงเครื่องอัตโนมัติ\n\n` +
+      `วิธีทำงาน:\n` +
+      `1. ระบบจะเปิดหน้าระเบียนและบันทึก PDF ลงเครื่องทันที\n` +
+      `2. เมื่อบันทึกเสร็จ กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไปและบันทึกอัตโนมัติ\n` +
+      `3. ทำเช่นนี้จนครบทุกคนที่เลือก\n\n` +
+      `ต้องการเริ่มต้นการบันทึกรวมหรือไม่?`
     );
 
     if (!confirmed) {
       return;
     }
 
-    setIsSequentialPrinting(true);
+    setIsSequentialRecording(true);
     setSequentialProgress(0);
 
     if (exportQueue.length > 0) {
       const firstPatient = exportQueue[0];
-      // ✅ เพิ่ม parameter &auto=true เพื่อให้หน้าระเบียนเรียก print() อัตโนมัติ
       router.push(`/admin/reports/patient-record/${firstPatient.id}?print=true&auto=true&batch=true&batchIndex=0&batchTotal=${exportQueue.length}`);
     }
   };
@@ -309,9 +315,8 @@ function PatientRecordContent() {
   const closeExportList = () => {
     setShowExportList(false);
     setExportQueue([]);
-    setCurrentExportIndex(0);
-    setIsSequentialPrinting(false);
     setSequentialProgress(0);
+    setIsSequentialRecording(false);
   };
 
   const getSelectedHospitalName = () => {
@@ -371,7 +376,7 @@ function PatientRecordContent() {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">📄 ระเบียนคนไข้ (PDF)</h1>
-              <p className="text-gray-600">เลือกรายงานและ Export เป็น PDF</p>
+              <p className="text-gray-600">เลือกรายงานและบันทึกรายการเป็น PDF</p>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
@@ -383,8 +388,8 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '‍⚕️ แพทย์' :
+                       user?.role === 'osm' ? '️ อสม.' : '👩💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -434,7 +439,7 @@ function PatientRecordContent() {
                   <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
-                  <span className="font-semibold"> ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
+                  <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
                 </p>
                 <p className="text-sm text-blue-600">
                   <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
@@ -444,7 +449,7 @@ function PatientRecordContent() {
                     ✓ มีข้อมูลติดตาม: <span className="font-bold">{patientsWithFollowup}</span> คน
                   </p>
                   <p className="text-xs text-gray-600">
-                     ไม่มีข้อมูลติดตาม: <span className="font-bold">{patientsWithoutFollowup}</span> คน
+                    ✗ ไม่มีข้อมูลติดตาม: <span className="font-bold">{patientsWithoutFollowup}</span> คน
                   </p>
                 </div>
               </div>
@@ -452,11 +457,11 @@ function PatientRecordContent() {
           </div>
         </div>
 
-        {/* Export Buttons */}
+        {/* Export Buttons - อยู่ด้านบน เห็นชัดเจน */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 mb-6 text-white">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h3 className="text-xl font-bold mb-1">📤 Export PDF</h3>
+              <h3 className="text-xl font-bold mb-1">💾 บันทึกรายการ PDF</h3>
               <p className="text-blue-100 text-sm">
                 เลือกแล้ว <span className="font-bold text-white">{selectedPatients.size}</span> คน
                 {selectedHospital !== 'all' && (
@@ -721,14 +726,14 @@ function PatientRecordContent() {
         </div>
       </div>
 
-      {/* Export List Modal */}
+      {/* ✅ Modal บันทึกรวม */}
       {showExportList && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between">
               <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                 <Printer className="w-6 h-6 text-blue-600" />
-                รายการ Export PDF ({exportQueue.length} คน)
+                รายการบันทึกรวม ({exportQueue.length} คน)
               </h3>
               <button onClick={closeExportList} className="text-gray-400 hover:text-gray-600">
                 <X className="w-6 h-6" />
@@ -736,38 +741,38 @@ function PatientRecordContent() {
             </div>
 
             <div className="p-6">
-              {/* ✅ ปุ่มพิมพ์ทั้งหมด - Auto-print */}
+              {/* ✅ ปุ่มเริ่มบันทึกรวม */}
               <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h4 className="font-bold text-lg mb-1">🖨️ พิมพ์ทั้งหมด (Auto-Print)</h4>
+                    <h4 className="font-bold text-lg mb-1"> บันทึกรวมทั้งหมด (Auto-Save)</h4>
                     <p className="text-sm text-blue-100">
-                      เปิดทีละคน + Print dialog อัตโนมัติ - กด Save ครั้งเดียว!
+                      ระบบจะเปิดและบันทึกรายการลงเครื่องอัตโนมัติทีละคน (ไม่ต้องกด Save เอง)
                     </p>
                   </div>
                   <button
-                    onClick={handleSequentialPrint}
-                    disabled={isSequentialPrinting}
+                    onClick={handleSequentialRecord}
+                    disabled={isSequentialRecording}
                     className="px-6 py-3 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
                   >
-                    {isSequentialPrinting ? (
+                    {isSequentialRecording ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin" />
-                        กำลังพิมพ์...
+                        กำลังบันทึก...
                       </>
                     ) : (
                       <>
                         <ExternalLink className="w-5 h-5" />
-                        เริ่มพิมพ์ ({exportQueue.length})
+                        เริ่มบันทึกรวม ({exportQueue.length})
                       </>
                     )}
                   </button>
                 </div>
 
-                {isSequentialPrinting && (
+                {isSequentialRecording && (
                   <div className="mt-3 p-3 bg-white bg-opacity-20 rounded-lg">
                     <p className="text-sm">
-                      ⏳ กำลังเปิดระเบียนคนที่ {sequentialProgress + 1} จาก {exportQueue.length}...
+                      ⏳ กำลังบันทึกรายการคนที่ {sequentialProgress + 1} จาก {exportQueue.length}...
                     </p>
                   </div>
                 )}
@@ -778,11 +783,10 @@ function PatientRecordContent() {
                   <strong>📋 วิธีใช้งาน:</strong>
                 </p>
                 <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
-                  <li>กดปุ่ม "เริ่มพิมพ์" ด้านบน</li>
-                  <li>ระบบจะเปิดหน้าระเบียน + Print dialog อัตโนมัติ</li>
-                  <li>เลือก "Save as PDF" แล้วกด Save (ชื่อไฟล์ตั้งอัตโนมัติ)</li>
-                  <li>กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไป + Print dialog อัตโนมัติ</li>
-                  <li>ทำซ้ำจนครบทุกคน</li>
+                  <li>กดปุ่ม "เริ่มบันทึกรวม" ด้านบน</li>
+                  <li>ระบบจะเปิดหน้าระเบียนและบันทึก PDF ลงเครื่องทันที</li>
+                  <li>เมื่อบันทึกเสร็จ กดปุ่ม "กลับ" → ระบบจะเปิดคนถัดไปและบันทึกอัตโนมัติ</li>
+                  <li>ทำเช่นนี้จนครบทุกคนที่เลือก</li>
                 </ol>
               </div>
 
@@ -794,7 +798,7 @@ function PatientRecordContent() {
                     className={`flex items-center justify-between p-4 rounded-lg border ${
                       index < sequentialProgress
                         ? 'bg-green-50 border-green-200'
-                        : index === sequentialProgress && isSequentialPrinting
+                        : index === sequentialProgress && isSequentialRecording
                         ? 'bg-blue-50 border-blue-200'
                         : 'bg-white border-gray-200'
                     }`}
@@ -802,7 +806,7 @@ function PatientRecordContent() {
                     <div className="flex items-center gap-3 flex-1">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-bold ${
                         index < sequentialProgress ? 'bg-green-500' : 
-                        index === sequentialProgress && isSequentialPrinting ? 'bg-blue-500' : 'bg-gray-400'
+                        index === sequentialProgress && isSequentialRecording ? 'bg-blue-500' : 'bg-gray-400'
                       }`}>
                         {index < sequentialProgress ? (
                           <CheckCircle className="w-5 h-5" />
@@ -813,8 +817,8 @@ function PatientRecordContent() {
                       <div className="flex-1">
                         <p className="font-semibold text-gray-900">
                           {patient.first_name} {patient.last_name}
-                          {index === sequentialProgress && isSequentialPrinting && (
-                            <span className="ml-2 text-xs text-blue-600 font-medium">← กำลังพิมพ์</span>
+                          {index === sequentialProgress && isSequentialRecording && (
+                            <span className="ml-2 text-xs text-blue-600 font-medium">← กำลังบันทึก</span>
                           )}
                         </p>
                         <p className="text-xs text-gray-500">
@@ -824,11 +828,11 @@ function PatientRecordContent() {
                     </div>
                     <button
                       onClick={() => openPatientRecord(patient.id)}
-                      disabled={isSequentialPrinting}
+                      disabled={isSequentialRecording}
                       className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Printer className="w-4 h-4" />
-                      พิมพ์
+                      บันทึกรายการ
                     </button>
                   </div>
                 ))}
