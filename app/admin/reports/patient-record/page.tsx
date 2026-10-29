@@ -1,6 +1,6 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ บันทึกรวม PDF - เลือกโฟลเดอร์ + บันทึกทีเดียว + แยกชื่อไฟล์
+// ✅ แก้ไขปัญหาล้มเหลวในการบันทึก PDF
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -110,7 +110,6 @@ function PatientRecordContent() {
   const [showExportList, setShowExportList] = useState(false);
   const [exportQueue, setExportQueue] = useState<Patient[]>([]);
   
-  // ✅ State สำหรับ Batch Recording
   const [isBatchRecording, setIsBatchRecording] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
@@ -305,7 +304,6 @@ function PatientRecordContent() {
     setSelectedPatients(newSelected);
   };
 
-  // ✅ เปิด Modal แสดงรายการที่จะบันทึก
   const handleExport = () => {
     if (selectedPatients.size === 0) {
       alert('กรุณาเลือกผู้ป่วยอย่างน้อย 1 คน');
@@ -322,7 +320,6 @@ function PatientRecordContent() {
     setShowExportList(true);
   };
 
-  // ✅ ฟังก์ชันดึงข้อมูลผู้ป่วยแบบเต็ม (สำหรับสร้าง PDF)
   const fetchPatientFullData = async (patientId: string) => {
     const { data: patientData, error: patientError } = await supabase
       .from('profiles')
@@ -357,7 +354,7 @@ function PatientRecordContent() {
     };
   };
 
-  // ✅ ฟังก์ชันสร้าง HTML สำหรับ PDF (off-screen)
+  // ✅ ฟังก์ชันสร้าง HTML สำหรับ PDF (ปรับปรุงให้เสถียรขึ้น)
   const renderPatientHTML = (patient: any, followups: FollowupRecord[], screenings: ScreeningRecord[]) => {
     const latestFollowup = followups[0];
     const latestScreening = screenings[0];
@@ -387,7 +384,7 @@ function PatientRecordContent() {
     const latestHba1c = patient?.hba1c_level ?? '-';
 
     return `
-      <div style="font-family: 'Sarabun', 'TH Sarabun New', sans-serif; padding: 20px; background: white; width: 800px;">
+      <div style="font-family: Arial, sans-serif; padding: 20px; background: white; width: 800px;">
         <!-- Page 1 -->
         <div style="min-height: 1100px; margin-bottom: 20px;">
           <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between;">
@@ -402,7 +399,7 @@ function PatientRecordContent() {
           </div>
 
           <div style="background: #eff6ff; padding: 16px; margin-bottom: 24px; border-left: 4px solid #3b82f6; border-radius: 8px;">
-            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;">👤 ข้อมูลผู้ป่วย</h3>
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;">ข้อมูลผู้ป่วย</h3>
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
               <div><p style="font-size: 12px; color: #666; margin: 0;">ชื่อ-นามสกุล</p><p style="font-weight: 600; margin: 4px 0 0 0;">${patient.first_name || ''} ${patient.last_name || ''}</p></div>
               <div><p style="font-size: 12px; color: #666; margin: 0;">HN</p><p style="font-weight: 600; margin: 4px 0 0 0;">${patient.hospital_number || '-'}</p></div>
@@ -414,7 +411,7 @@ function PatientRecordContent() {
           </div>
 
           <div style="margin-bottom: 24px;">
-            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">📊 ผลการประเมินตนเอง</h3>
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">ผลการประเมินตนเอง</h3>
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
               <div style="background: #eff6ff; padding: 16px; text-align: center; border: 2px solid #bfdbfe; border-radius: 8px;">
                 <p style="font-size: 14px; color: #666; margin: 0 0 8px 0;">PAM Score</p>
@@ -437,7 +434,7 @@ function PatientRecordContent() {
           </div>
 
           <div style="margin-bottom: 24px;">
-            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">📊 ค่าสุขภาพปัจจุบัน</h3>
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">ค่าสุขภาพปัจจุบัน</h3>
             <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
               <div style="border: 1px solid #e5e7eb; padding: 12px; text-align: center; border-radius: 8px;">
                 <p style="font-size: 12px; color: #666; margin: 0;">น้ำหนัก</p>
@@ -460,7 +457,7 @@ function PatientRecordContent() {
 
           ${latestFollowup ? `
           <div style="margin-bottom: 24px;">
-            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">📅 การติดตามล่าสุด (รอบที่ ${latestFollowup.followup_round})</h3>
+            <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0; border-bottom: 1px solid #e5e7eb; padding-bottom: 8px;">การติดตามล่าสุด (รอบที่ ${latestFollowup.followup_round})</h3>
             <div style="background: #f9fafb; padding: 16px; border-radius: 8px;">
               <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px;">
                 <div><p style="font-size: 12px; color: #666; margin: 0;">วันที่ติดตาม</p><p style="font-weight: 600; margin: 4px 0 0 0;">${formatThaiDate(latestFollowup.followup_date)}</p></div>
@@ -480,7 +477,7 @@ function PatientRecordContent() {
         <!-- Page 2 -->
         <div style="min-height: 1100px; margin-bottom: 20px;">
           <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
-            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">📋 ประวัติการติดตาม</h2>
+            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">ประวัติการติดตาม</h2>
             <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">แสดงข้อมูลย้อนหลังทุกครั้งที่มีการบันทึก</p>
           </div>
 
@@ -521,156 +518,83 @@ function PatientRecordContent() {
             <span>หน้า 2</span>
           </div>
         </div>
-
-        <!-- Page 3: Life Schedule -->
-        ${latestFollowup?.life_schedule_image_url ? `
-        <div style="min-height: 1100px; margin-bottom: 20px;">
-          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
-            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">📋 Life Schedule - ตารางชีวิตประจำวัน</h2>
-            <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">${formatThaiDate(latestFollowup.followup_date)} • รอบที่ ${latestFollowup.followup_round}</p>
-          </div>
-          <div style="border: 2px solid #d1d5db; border-radius: 8px; overflow: hidden;">
-            <img src="${latestFollowup.life_schedule_image_url}" style="width: 100%; height: auto; max-height: 900px;" crossorigin="anonymous" />
-          </div>
-          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
-            <span>Community Bridge v1.0</span>
-            <span>หน้า 3</span>
-          </div>
-        </div>
-        ` : ''}
-
-        <!-- Page 4: Charts -->
-        ${(latestFollowup?.floating_chart_image_url || latestFollowup?.dream_card_image_url) ? `
-        <div style="min-height: 1100px; margin-bottom: 20px;">
-          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
-            <h2 style="font-size: 20px; font-weight: bold; margin: 0;">📈 รูปภาพประกอบ</h2>
-            <p style="font-size: 14px; color: #666; margin: 4px 0 0 0;">${formatThaiDate(latestFollowup?.followup_date || '')} • รอบที่ ${latestFollowup?.followup_round || '-'}</p>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 24px;">
-            ${latestFollowup?.floating_chart_image_url ? `
-              <div>
-                <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;">📈 Floating Chart - กราฟแนวโน้ม</h3>
-                <div style="border: 2px solid #d1d5db; border-radius: 8px; overflow: hidden; margin-bottom: 8px;">
-                  <img src="${latestFollowup.floating_chart_image_url}" style="width: 100%; height: auto; max-height: 420px;" crossorigin="anonymous" />
-                </div>
-                ${latestFollowup.floating_chart_summary ? `<p style="font-size: 14px; color: #374151; background: #f9fafb; padding: 12px; border-radius: 4px;">${latestFollowup.floating_chart_summary}</p>` : ''}
-              </div>
-            ` : ''}
-            ${latestFollowup?.dream_card_image_url ? `
-              <div>
-                <h3 style="font-size: 18px; font-weight: bold; margin: 0 0 12px 0;"> Dream Card - บัตรความฝัน</h3>
-                <div style="border: 2px solid #d1d5db; border-radius: 8px; overflow: hidden; margin-bottom: 8px;">
-                  <img src="${latestFollowup.dream_card_image_url}" style="width: 100%; height: auto; max-height: 420px;" crossorigin="anonymous" />
-                </div>
-                ${latestFollowup.dream_card_description ? `<p style="font-size: 14px; color: #374151; background: #f9fafb; padding: 12px; border-radius: 4px;">${latestFollowup.dream_card_description}</p>` : ''}
-              </div>
-            ` : ''}
-          </div>
-          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
-            <span>Community Bridge v1.0</span>
-            <span>หน้า 4</span>
-          </div>
-        </div>
-        ` : ''}
-
-        <!-- Page 5: Summary -->
-        <div style="min-height: 1100px;">
-          <div style="border-bottom: 2px solid #2563eb; padding-bottom: 16px; margin-bottom: 24px;">
-            <h2 style="font-size: 20px; font-weight: bold; margin: 0;"> สรุปและคำแนะนำ</h2>
-          </div>
-
-          ${latestFollowup ? `
-            ${latestFollowup.summary ? `<div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 16px;"><p style="font-size: 12px; color: #666; font-weight: 600; margin: 0 0 8px 0;">สรุปผลการติดตาม:</p><p style="font-size: 14px; margin: 0;">${latestFollowup.summary}</p></div>` : ''}
-            ${latestFollowup.recommendations ? `<div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 24px;"><p style="font-size: 12px; color: #666; font-weight: 600; margin: 0 0 8px 0;">คำแนะนำ:</p><p style="font-size: 14px; margin: 0; white-space: pre-line;">${latestFollowup.recommendations}</p></div>` : ''}
-          ` : ''}
-
-          <div style="margin-top: 48px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 32px;">
-            <div style="text-align: center;">
-              <div style="border-bottom: 1px solid #9ca3af; height: 64px; margin-bottom: 8px;"></div>
-              <p style="font-size: 14px; font-weight: 600; margin: 0;">ผู้บันทึก (อสม./เจ้าหน้าที่)</p>
-            </div>
-            <div style="text-align: center;">
-              <div style="border-bottom: 1px solid #9ca3af; height: 64px; margin-bottom: 8px;"></div>
-              <p style="font-size: 14px; font-weight: 600; margin: 0;">ผู้ป่วย/ญาติ</p>
-            </div>
-          </div>
-
-          <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 14px; color: #9ca3af; display: flex; justify-content: space-between;">
-            <span>Community Bridge v1.0 • ระบบดูแลผู้ป่วย PreDM</span>
-            <span>หน้า 5</span>
-          </div>
-        </div>
       </div>
     `;
   };
 
-  // ✅ ฟังก์ชันสร้าง PDF จากข้อมูลผู้ป่วย
+  // ✅ ฟังก์ชันสร้าง PDF จากข้อมูลผู้ป่วย (ปรับปรุงให้เสถียรขึ้น)
   const generatePatientPDF = async (patientId: string): Promise<Blob> => {
-    const { patient, followups, screenings } = await fetchPatientFullData(patientId);
-    
-    // สร้าง container ชั่วคราวสำหรับ render HTML
-    const container = document.createElement('div');
-    container.style.position = 'absolute';
-    container.style.left = '-10000px';
-    container.style.top = '0';
-    container.style.width = '800px';
-    container.innerHTML = renderPatientHTML(patient, followups, screenings);
-    document.body.appendChild(container);
-
-    // รอให้รูปภาพโหลดเสร็จ
-    const images = container.querySelectorAll('img');
-    await Promise.all(
-      Array.from(images).map(img => {
-        return new Promise<void>((resolve) => {
-          if (img.complete) {
-            resolve();
-          } else {
-            img.onload = () => resolve();
-            img.onerror = () => resolve();
-          }
-        });
-      })
-    );
-
-    // รอเพิ่มเล็กน้อยให้ render เสร็จ
-    await new Promise(resolve => setTimeout(resolve, 500));
-
     try {
-      const canvas = await html2canvas(container, {
-        scale: 1.5,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 800,
-      });
-
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
+      console.log(`📄 [generatePatientPDF] เริ่มสร้าง PDF สำหรับผู้ป่วย: ${patientId}`);
       
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
-      const ratio = pdfWidth / imgWidth;
-      const scaledHeight = imgHeight * ratio;
+      const { patient, followups, screenings } = await fetchPatientFullData(patientId);
+      
+      // สร้าง container ชั่วคราวสำหรับ render HTML
+      const container = document.createElement('div');
+      container.style.position = 'absolute';
+      container.style.left = '-10000px';
+      container.style.top = '0';
+      container.style.width = '800px';
+      container.style.zIndex = '-1';
+      container.innerHTML = renderPatientHTML(patient, followups, screenings);
+      document.body.appendChild(container);
 
-      let heightLeft = scaledHeight;
-      let position = 0;
+      console.log(`📄 [generatePatientPDF] HTML ถูก append เข้า DOM`);
 
-      pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
-      heightLeft -= pdfHeight;
+      // รอให้ DOM render เสร็จ
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-      while (heightLeft > 0) {
-        position = heightLeft - scaledHeight;
-        pdf.addPage();
+      try {
+        const canvas = await html2canvas(container, {
+          scale: 1.5,
+          useCORS: true,
+          allowTaint: true,
+          logging: true, // ✅ เปิด logging เพื่อดู debug
+          backgroundColor: '#ffffff',
+          windowWidth: 800,
+          windowHeight: container.scrollHeight,
+          foreignObjectRendering: false, // ✅ ปิดเพื่อป้องกันปัญหา
+        });
+
+        console.log(`📄 [generatePatientPDF] html2canvas สำเร็จ, ขนาด: ${canvas.width}x${canvas.height}`);
+
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const ratio = pdfWidth / imgWidth;
+        const scaledHeight = imgHeight * ratio;
+
+        let heightLeft = scaledHeight;
+        let position = 0;
+
         pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
         heightLeft -= pdfHeight;
-      }
 
-      return pdf.output('blob');
-    } finally {
-      document.body.removeChild(container);
+        while (heightLeft > 0) {
+          position = heightLeft - scaledHeight;
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, scaledHeight);
+          heightLeft -= pdfHeight;
+        }
+
+        console.log(`📄 [generatePatientPDF] สร้าง PDF สำเร็จ`);
+
+        // ลบ container ออกจาก DOM
+        document.body.removeChild(container);
+
+        return pdf.output('blob');
+      } catch (html2canvasError) {
+        console.error(`❌ [generatePatientPDF] html2canvas ล้มเหลว:`, html2canvasError);
+        document.body.removeChild(container);
+        throw new Error(`html2canvas failed: ${html2canvasError}`);
+      }
+    } catch (error) {
+      console.error(`❌ [generatePatientPDF] เกิดข้อผิดพลาด:`, error);
+      throw error;
     }
   };
 
@@ -681,11 +605,9 @@ function PatientRecordContent() {
       return;
     }
 
-    // ตรวจสอบว่า browser รองรับ File System Access API หรือไม่
     const supportsFileSystemAccess = 'showDirectoryPicker' in window;
 
     if (!supportsFileSystemAccess) {
-      // Fallback: ใช้ ZIP
       const confirmed = window.confirm(
         `เบราว์เซอร์ของคุณไม่รองรับการเลือกโฟลเดอร์โดยตรง\n\n` +
         `ระบบจะบันทึกรวมเป็นไฟล์ ZIP (${exportQueue.length} ไฟล์) แทน\n\n` +
@@ -696,7 +618,6 @@ function PatientRecordContent() {
       return;
     }
 
-    // ✅ ใช้ File System Access API
     const confirmed = window.confirm(
       `จะบันทึกรายการ ${exportQueue.length} คน ลงในโฟลเดอร์ที่คุณเลือก\n\n` +
       `• ระบบจะเปิดหน้าต่างเลือกโฟลเดอร์\n` +
@@ -708,7 +629,6 @@ function PatientRecordContent() {
     if (!confirmed) return;
 
     try {
-      // เปิด Directory Picker
       const dirHandle = await (window as any).showDirectoryPicker({
         mode: 'readwrite',
         startIn: 'downloads',
@@ -723,6 +643,7 @@ function PatientRecordContent() {
 
       let successCount = 0;
       let failedCount = 0;
+      const errors: string[] = [];
 
       for (let i = 0; i < exportQueue.length; i++) {
         const patient = exportQueue[i];
@@ -732,17 +653,18 @@ function PatientRecordContent() {
         setBatchProgress(i + 1);
 
         try {
-          // สร้าง PDF
+          console.log(`\n🔄 [Batch] กำลังบันทึกคนที่ ${i + 1}/${exportQueue.length}: ${patientName}`);
+          
           const pdfBlob = await generatePatientPDF(patient.id);
 
-          // สร้างชื่อไฟล์
           const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
           const hn = patient.hospital_number || 'ไม่มีHN';
           const firstName = patient.first_name || 'ไม่ระบุชื่อ';
           const lastName = patient.last_name || '';
           const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_') + '.pdf';
 
-          // บันทึกไฟล์ลงในโฟลเดอร์
+          console.log(` [Batch] กำลังเขียนไฟล์: ${fileName}`);
+
           const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
           const writable = await fileHandle.createWritable();
           await writable.write(pdfBlob);
@@ -751,35 +673,40 @@ function PatientRecordContent() {
           successCount++;
           setBatchSuccess(successCount);
           console.log(`✅ [Batch] บันทึกสำเร็จ: ${fileName}`);
-        } catch (error) {
-          console.error(`❌ [Batch] บันทึก失敗: ${patientName}`, error);
+        } catch (error: any) {
+          console.error(`❌ [Batch] บันทึกล้มเหลว: ${patientName}`, error);
           failedCount++;
           setBatchFailed(failedCount);
+          errors.push(`${patientName}: ${error.message || error}`);
         }
       }
 
       setBatchStatus('done');
-      alert(
-        `✅ บันทึกรายการเสร็จสิ้น!\n\n` +
+      
+      const resultMessage = `✅ บันทึกรายการเสร็จสิ้น!\n\n` +
         `✓ สำเร็จ: ${successCount} ไฟล์\n` +
         `✗ ล้มเหลว: ${failedCount} ไฟล์\n\n` +
-        `ไฟล์ถูกบันทึกในโฟลเดอร์: ${dirHandle.name}`
-      );
+        `ไฟล์ถูกบันทึกในโฟลเดอร์: ${dirHandle.name}`;
+      
+      if (errors.length > 0) {
+        alert(resultMessage + `\n\n❌ ข้อผิดพลาด:\n${errors.join('\n')}`);
+      } else {
+        alert(resultMessage);
+      }
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        alert('❌ ยกเลิกการเลือกโฟลเดอร์');
+        alert(' ยกเลิกการเลือกโฟลเดอร์');
       } else {
-        console.error(' [Batch] Error:', error);
+        console.error('❌ [Batch] Error:', error);
         setBatchStatus('error');
         setBatchErrorMessage(error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
-        alert('❌ เกิดข้อผิดพลาด: ' + (error.message || 'กรุณาลองใหม่อีกครั้ง'));
+        alert(' เกิดข้อผิดพลาด: ' + (error.message || 'กรุณาลองใหม่อีกครั้ง'));
       }
     } finally {
       setIsBatchRecording(false);
     }
   };
 
-  // ✅ Fallback: บันทึกรวมเป็น ZIP
   const handleBatchRecordAsZip = async () => {
     setIsBatchRecording(true);
     setBatchStatus('recording');
@@ -791,6 +718,7 @@ function PatientRecordContent() {
     const zip = new JSZip();
     let successCount = 0;
     let failedCount = 0;
+    const errors: string[] = [];
 
     try {
       for (let i = 0; i < exportQueue.length; i++) {
@@ -812,17 +740,17 @@ function PatientRecordContent() {
           zip.file(fileName, pdfBlob);
           successCount++;
           setBatchSuccess(successCount);
-        } catch (error) {
+        } catch (error: any) {
           console.error(`❌ [ZIP] Error: ${patientName}`, error);
           failedCount++;
           setBatchFailed(failedCount);
+          errors.push(`${patientName}: ${error.message || error}`);
         }
       }
 
       setBatchCurrentName('กำลังสร้างไฟล์ ZIP...');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       
-      // ดาวน์โหลด ZIP
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
       a.href = url;
@@ -833,12 +761,17 @@ function PatientRecordContent() {
       URL.revokeObjectURL(url);
 
       setBatchStatus('done');
-      alert(
-        `✅ บันทึกรายการเสร็จสิ้น!\n\n` +
+      
+      const resultMessage = `✅ บันทึกรายการเสร็จสิ้น!\n\n` +
         `✓ สำเร็จ: ${successCount} ไฟล์\n` +
         `✗ ล้มเหลว: ${failedCount} ไฟล์\n\n` +
-        `ไฟล์ ZIP ถูกดาวน์โหลดแล้ว`
-      );
+        `ไฟล์ ZIP ถูกดาวน์โหลดแล้ว`;
+      
+      if (errors.length > 0) {
+        alert(resultMessage + `\n\n❌ ข้อผิดพลาด:\n${errors.join('\n')}`);
+      } else {
+        alert(resultMessage);
+      }
     } catch (error: any) {
       console.error('❌ [ZIP] Error:', error);
       setBatchStatus('error');
@@ -932,8 +865,8 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨⚕️ แพทย์' :
-                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍ เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -983,7 +916,7 @@ function PatientRecordContent() {
                   <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
-                  <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
+                  <span className="font-semibold"> ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
                 </p>
                 <p className="text-sm text-blue-600">
                   <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
@@ -1193,7 +1126,6 @@ function PatientRecordContent() {
             </table>
           </div>
 
-          {/* Pagination */}
           {totalPages > 1 && (
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
               <div className="text-sm text-gray-600">
@@ -1230,7 +1162,7 @@ function PatientRecordContent() {
         </div>
       </div>
 
-      {/* ✅ Modal บันทึกรวม */}
+      {/* Modal บันทึกรวม */}
       {showExportList && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -1245,13 +1177,12 @@ function PatientRecordContent() {
             </div>
 
             <div className="p-6">
-              {/* ✅ ปุ่มบันทึกรวม */}
               {batchStatus === 'idle' && (
                 <>
                   <div className="mb-6 p-4 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <h4 className="font-bold text-lg mb-1">💾 บันทึกรวมทั้งหมด</h4>
+                        <h4 className="font-bold text-lg mb-1"> บันทึกรวมทั้งหมด</h4>
                         <p className="text-sm text-blue-100">
                           เลือกโฟลเดอร์ → ระบบจะบันทึก PDF {exportQueue.length} ไฟล์ลงโฟลเดอร์นั้นทันที
                         </p>
@@ -1270,7 +1201,7 @@ function PatientRecordContent() {
                     <div className="flex items-start gap-3">
                       <Info className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                       <div>
-                        <p className="text-sm font-bold text-blue-800 mb-2">📋 วิธีใช้งาน:</p>
+                        <p className="text-sm font-bold text-blue-800 mb-2"> วิธีใช้งาน:</p>
                         <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
                           <li>กดปุ่ม "เลือกโฟลเดอร์และบันทึก" ด้านบน</li>
                           <li>เลือกโฟลเดอร์ปลายทางที่ต้องการบันทึก</li>
@@ -1289,7 +1220,6 @@ function PatientRecordContent() {
                 </>
               )}
 
-              {/* ✅ Progress Bar */}
               {batchStatus === 'recording' && (
                 <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
                   <div className="flex items-center gap-3 mb-4">
@@ -1320,7 +1250,6 @@ function PatientRecordContent() {
                 </div>
               )}
 
-              {/* ✅ Success */}
               {batchStatus === 'done' && (
                 <div className="mb-6 p-6 bg-green-50 rounded-lg border border-green-200">
                   <div className="flex items-start gap-3">
@@ -1340,7 +1269,6 @@ function PatientRecordContent() {
                 </div>
               )}
 
-              {/* ✅ Error */}
               {batchStatus === 'error' && (
                 <div className="mb-6 p-6 bg-red-50 rounded-lg border border-red-200">
                   <div className="flex items-start gap-3">
@@ -1353,7 +1281,6 @@ function PatientRecordContent() {
                 </div>
               )}
 
-              {/* รายการผู้ป่วย */}
               <div className="space-y-3">
                 <h4 className="font-semibold text-gray-700">รายการที่จะบันทึก ({exportQueue.length} คน):</h4>
                 {exportQueue.map((patient, index) => (
