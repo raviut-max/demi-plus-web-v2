@@ -1,13 +1,20 @@
 // app/admin/reports/patient-record/page.tsx
+// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
+// ✅ ฟีเจอร์ทั้งหมด:
+//    1. เพิ่มคอลัมน์ "ข้อมูลติดตาม" พร้อม Badge (จำนวนครั้ง + วันที่ล่าสุด)
+//    2. สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตามในกล่องโรงพยาบาล
+//    3. ดึงค่าน้ำหนัก/FPG จาก Follow-up ล่าสุด (fallback → Profiles)
+//    4. Query แบบ Batch (ดึง followups ทั้งหมดในกลุ่มเดียว)
+//    5. คง state เมื่อกลับจากหน้าระเบียน (เก็บ hospital/pam/zone ใน URL)
 'use client';
-import { useEffect, useState, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, Suspense, useCallback } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { checkSession, logout, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, ArrowLeft, LogOut, UserCheck, Hospital,
   Search, Filter, Download, FileSpreadsheet,
-  CheckSquare, Square, Loader2
+  CheckSquare, Square, Loader2, Activity, AlertCircle
 } from 'lucide-react';
 
 interface Patient {
@@ -23,6 +30,11 @@ interface Patient {
   blood_sugar: number | null;
   hospital_id: string | null;
   hospitals?: { name: string | null } | null;
+  // ✅ ฟิลด์สำหรับข้อมูลติดตาม
+  followup_count?: number;
+  latest_weight?: number | null;
+  latest_fpg?: number | null;
+  latest_followup_date?: string | null;
 }
 
 interface HospitalData {
@@ -33,25 +45,45 @@ interface HospitalData {
   patientCount?: number;
 }
 
-// ✅ แยกเนื้อหาหลักออกมาเป็น Component ย่อย
+// ✅ Component หลัก (ใช้ useSearchParams - ต้องอยู่ใน Suspense)
 function PatientRecordContent() {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  
+  // ✅ อ่านค่าจาก URL เพื่อคง state เมื่อกลับจากหน้าระเบียน
   const initialMode = searchParams.get('mode') || 'hospital';
+  const urlHospital = searchParams.get('hospital') || 'all';
+  const urlPam = searchParams.get('pam') || 'all';
+  const urlZone = searchParams.get('zone') || 'all';
+  const urlSearch = searchParams.get('search') || '';
 
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [hospitals, setHospitals] = useState<HospitalData[]>([]);
-  const [selectedHospital, setSelectedHospital] = useState<string>('all');
+  const [selectedHospital, setSelectedHospital] = useState<string>(urlHospital);
   const [selectedPatients, setSelectedPatients] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [pamFilter, setPamFilter] = useState('all');
-  const [zoneFilter, setZoneFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState(urlSearch);
+  const [pamFilter, setPamFilter] = useState(urlPam);
+  const [zoneFilter, setZoneFilter] = useState(urlZone);
   const [exportMode, setExportMode] = useState<'individual' | 'zip'>('individual');
   const [mode, setMode] = useState<'hospital' | 'select'>(initialMode as any);
+
+  // ✅ ฟังก์ชันอัปเดต URL เมื่อ filter เปลี่ยน (เพื่อคง state)
+  const updateUrlParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (selectedHospital !== 'all') params.set('hospital', selectedHospital);
+    if (pamFilter !== 'all') params.set('pam', pamFilter);
+    if (zoneFilter !== 'all') params.set('zone', zoneFilter);
+    if (searchTerm) params.set('search', searchTerm);
+    if (mode !== 'hospital') params.set('mode', mode);
+    
+    const newUrl = `${pathname}?${params.toString()}`;
+    router.replace(newUrl, { scroll: false });
+  }, [pathname, router, selectedHospital, pamFilter, zoneFilter, searchTerm, mode]);
 
   useEffect(() => {
     const userData = checkSession();
@@ -64,6 +96,11 @@ function PatientRecordContent() {
     loadHospitals(userData.id);
     loadPatients(userData.id);
   }, [router]);
+
+  // ✅ อัปเดต URL ทุกครั้งที่ filter เปลี่ยน
+  useEffect(() => {
+    updateUrlParams();
+  }, [updateUrlParams]);
 
   const loadUserHospital = async (userId: string) => {
     try {
@@ -104,10 +141,6 @@ function PatientRecordContent() {
       );
 
       setHospitals(hospitalsWithCount);
-      
-      if (hospitalInfo?.id && !hospitalsWithCount.find((h: any) => h.id === hospitalInfo.id)) {
-        setSelectedHospital(hospitalInfo.id);
-      }
     } catch (error) {
       console.error('Error loading hospitals:', error);
     }
@@ -137,7 +170,41 @@ function PatientRecordContent() {
 
       const { data, error } = await query;
       if (error) throw error;
-      setPatients(data || []);
+      
+      // ✅ Query แบบ Batch - ดึง followups ทั้งหมดของผู้ป่วยในกลุ่มเดียว
+      const patientIds = (data || []).map(p => p.id);
+      let followupData: any[] = [];
+      
+      if (patientIds.length > 0) {
+        const { data: followups, error: followupError } = await supabase
+          .from('appointment_followups')
+          .select('user_id, followup_date, weight, blood_sugar_dtx')
+          .in('user_id', patientIds)
+          .order('followup_date', { ascending: false });
+        
+        if (followupError) {
+          console.error('Error loading followups:', followupError);
+        } else {
+          followupData = followups || [];
+        }
+      }
+
+      // ✅ รวมข้อมูล Follow-up เข้ากับข้อมูลผู้ป่วย
+      const patientsWithFollowup = (data || []).map(patient => {
+        const patientFollowups = followupData.filter(f => f.user_id === patient.id);
+        const latestFollowup = patientFollowups[0]; // ล่าสุดเพราะเรียง descending
+        
+        return {
+          ...patient,
+          followup_count: patientFollowups.length,
+          // ✅ ดึงค่าจาก Follow-up ล่าสุด หรือ fallback ไป Profiles
+          latest_weight: latestFollowup?.weight ?? patient.current_weight ?? null,
+          latest_fpg: latestFollowup?.blood_sugar_dtx ?? patient.blood_sugar ?? null,
+          latest_followup_date: latestFollowup?.followup_date || null,
+        };
+      });
+
+      setPatients(patientsWithFollowup);
     } catch (error) {
       console.error('Error loading patients:', error);
     } finally {
@@ -145,10 +212,12 @@ function PatientRecordContent() {
     }
   };
 
+  // ✅ รีเซ็ตการเลือกเมื่อเปลี่ยนโรงพยาบาล
   useEffect(() => {
     setSelectedPatients(new Set());
   }, [selectedHospital]);
 
+  // ✅ โหลดผู้ป่วยใหม่เมื่อเปลี่ยนโรงพยาบาล
   useEffect(() => {
     if (user) {
       loadPatients(user.id);
@@ -217,6 +286,37 @@ function PatientRecordContent() {
     return hospital?.name || 'ไม่ระบุ';
   };
 
+  // ✅ ฟังก์ชันแสดง Badge สถานะข้อมูลติดตาม
+  const getFollowupBadge = (patient: Patient) => {
+    if (!patient.followup_count || patient.followup_count === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-medium">
+          <AlertCircle className="w-3 h-3" />
+          ไม่มีข้อมูล
+        </span>
+      );
+    }
+    
+    const dateStr = patient.latest_followup_date 
+      ? new Date(patient.latest_followup_date).toLocaleDateString('th-TH', { 
+          day: '2-digit', 
+          month: 'short', 
+          year: '2-digit' 
+        })
+      : '';
+    
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+        <Activity className="w-3 h-3" />
+        {patient.followup_count} ครั้ง {dateStr && `(${dateStr})`}
+      </span>
+    );
+  };
+
+  // ✅ คำนวณจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม
+  const patientsWithFollowup = filteredPatients.filter(p => p.followup_count && p.followup_count > 0).length;
+  const patientsWithoutFollowup = filteredPatients.filter(p => !p.followup_count || p.followup_count === 0).length;
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -251,8 +351,8 @@ function PatientRecordContent() {
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨⚕️ แพทย์' :
+                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍ เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -302,11 +402,20 @@ function PatientRecordContent() {
                   <span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}
                 </p>
                 <p className="text-sm text-blue-600 mt-1">
-                  <span className="font-semibold"> ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
+                  <span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน
                 </p>
                 <p className="text-sm text-blue-600">
                   <span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน
                 </p>
+                {/* ✅ สรุปจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม */}
+                <div className="mt-2 pt-2 border-t border-blue-200 space-y-1">
+                  <p className="text-xs text-green-700 font-medium">
+                    ✓ มีข้อมูลติดตาม: <span className="font-bold">{patientsWithFollowup}</span> คน
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    ✗ ไม่มีข้อมูลติดตาม: <span className="font-bold">{patientsWithoutFollowup}</span> คน
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -428,6 +537,8 @@ function PatientRecordContent() {
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">อายุ/เพศ</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">PAM Level</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">Zone</th>
+                  {/* ✅ คอลัมน์ข้อมูลติดตาม */}
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">ข้อมูลติดตาม</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">น้ำหนัก</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">FPG</th>
                   <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700">การกระทำ</th>
@@ -436,7 +547,7 @@ function PatientRecordContent() {
               <tbody className="divide-y">
                 {filteredPatients.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={10} className="px-6 py-12 text-center text-gray-500">
                       <Users className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                       <p>ไม่พบข้อมูลผู้ป่วย</p>
                       {selectedHospital !== 'all' && (
@@ -502,11 +613,15 @@ function PatientRecordContent() {
                           {patient.zone || '-'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-700">
-                        {patient.current_weight ? `${patient.current_weight} กก.` : '-'}
+                      {/* ✅ แสดง Badge สถานะข้อมูลติดตาม */}
+                      <td className="px-6 py-4">
+                        {getFollowupBadge(patient)}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-700">
-                        {patient.blood_sugar ? `${patient.blood_sugar} mg/dL` : '-'}
+                        {patient.latest_weight ? `${patient.latest_weight} กก.` : '-'}
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-700">
+                        {patient.latest_fpg ? `${patient.latest_fpg} mg/dL` : '-'}
                       </td>
                       <td className="px-6 py-4">
                         <button
@@ -549,7 +664,7 @@ function PatientRecordContent() {
   );
 }
 
-// ✅ Component หลักที่ครอบด้วย Suspense
+// ✅ Export default ที่ครอบด้วย Suspense (แก้ Vercel build error)
 export default function PatientRecordPage() {
   return (
     <Suspense fallback={
