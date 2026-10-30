@@ -1,6 +1,6 @@
 // app/admin/reports/patient-record/page.tsx
-// ✅ ฉบับสมบูรณ์: 29 ตุลาคม 2569
-// ✅ ใช้เทมเพลตกลาง (patientRecordTemplate) สร้าง PDF ฉบับสมบูรณ์
+// ✅ ฉบับสมบูรณ์: 30 ตุลาคม 2569
+// ✅ แก้ไข: showDirectoryPicker ต้องเรียกทันทีใน click handler (ห้ามมี confirm คั่น)
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -77,6 +77,7 @@ function PatientRecordContent() {
   const [batchCurrentName, setBatchCurrentName] = useState('');
   const [batchStatus, setBatchStatus] = useState<'idle' | 'recording' | 'done' | 'error'>('idle');
   const [batchErrorMessage, setBatchErrorMessage] = useState('');
+  const [targetFolderName, setTargetFolderName] = useState('');
 
   const updateUrlParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -238,6 +239,7 @@ function PatientRecordContent() {
     setBatchFailed(0);
     setBatchStatus('idle');
     setBatchErrorMessage('');
+    setTargetFolderName('');
     setShowExportList(true);
   };
 
@@ -248,43 +250,21 @@ function PatientRecordContent() {
     return generatePatientPDFBlob(patient, followups, screenings, meta);
   };
 
-  // ✅ บันทึกรวม: เลือกโฟลเดอร์แล้วบันทึกทั้งหมด
-  const handleBatchRecord = async () => {
-    if (exportQueue.length === 0) {
-      alert('ไม่มีรายการที่จะบันทึก');
-      return;
-    }
+  // ✅ ลูปบันทึกลงโฟลเดอร์ที่เลือกไว้
+  const runBatchSaveToDirectory = async (dirHandle: any) => {
+    setIsBatchRecording(true);
+    setBatchStatus('recording');
+    setBatchProgress(0);
+    setBatchTotal(exportQueue.length);
+    setBatchSuccess(0);
+    setBatchFailed(0);
+    setTargetFolderName(dirHandle.name);
 
-    const supportsFileSystemAccess = 'showDirectoryPicker' in window;
-
-    if (!supportsFileSystemAccess) {
-      const confirmed = window.confirm(
-        `เบราว์เซอร์ของคุณไม่รองรับการเลือกโฟลเดอร์โดยตรง\n\nระบบจะบันทึกรวมเป็นไฟล์ ZIP (${exportQueue.length} ไฟล์) แทน\n\nต้องการดำเนินการต่อหรือไม่?`
-      );
-      if (!confirmed) return;
-      await handleBatchRecordAsZip();
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `จะบันทึกรายการ ${exportQueue.length} คน ลงในโฟลเดอร์ที่คุณเลือก\n\n• ระบบจะเปิดหน้าต่างเลือกโฟลเดอร์\n• PDF ฉบับสมบูรณ์จะถูกลงโฟลเดอร์นั้นโดยตรง\n• ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf\n\nต้องการดำเนินการต่อหรือไม่?`
-    );
-    if (!confirmed) return;
+    let successCount = 0;
+    let failedCount = 0;
+    const errors: string[] = [];
 
     try {
-      const dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
-
-      setIsBatchRecording(true);
-      setBatchStatus('recording');
-      setBatchProgress(0);
-      setBatchTotal(exportQueue.length);
-      setBatchSuccess(0);
-      setBatchFailed(0);
-
-      let successCount = 0;
-      let failedCount = 0;
-      const errors: string[] = [];
-
       for (let i = 0; i < exportQueue.length; i++) {
         const patient = exportQueue[i];
         const patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim();
@@ -316,18 +296,55 @@ function PatientRecordContent() {
 
       setBatchStatus('done');
       const msg = `✅ บันทึกรายการเสร็จสิ้น!\n\n✓ สำเร็จ: ${successCount} ไฟล์\n✗ ล้มเหลว: ${failedCount} ไฟล์\n\nโฟลเดอร์ปลายทาง: ${dirHandle.name}`;
-      alert(errors.length > 0 ? msg + `\n\n❌ ข้อผิดพลาด:\n${errors.join('\n')}` : msg);
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        alert('❌ ยกเลิกการเลือกโฟลเดอร์');
-      } else {
-        setBatchStatus('error');
-        setBatchErrorMessage(error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
-        alert('❌ เกิดข้อผิดพลาด: ' + (error.message || 'กรุณาลองใหม่อีกครั้ง'));
+      if (errors.length > 0) {
+        alert(msg + `\n\n❌ ข้อผิดพลาด:\n${errors.join('\n')}`);
       }
+    } catch (error: any) {
+      setBatchStatus('error');
+      setBatchErrorMessage(error.message || 'เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ');
+      alert('❌ เกิดข้อผิดพลาด: ' + (error.message || 'กรุณาลองใหม่อีกครั้ง'));
     } finally {
       setIsBatchRecording(false);
     }
+  };
+
+  // ✅ บันทึกรวม: เรียก showDirectoryPicker ทันทีที่คลิก (ห้ามมี confirm/alert คั่น)
+  const handleBatchRecord = async () => {
+    if (exportQueue.length === 0) {
+      alert('ไม่มีรายการที่จะบันทึก');
+      return;
+    }
+
+    // Browser ไม่รองรับ → ไป ZIP ทันที
+    if (!('showDirectoryPicker' in window)) {
+      const confirmed = window.confirm(
+        `เบราว์เซอร์ของคุณไม่รองรับการเลือกโฟลเดอร์โดยตรง\n\nระบบจะบันทึกรวมเป็นไฟล์ ZIP (${exportQueue.length} ไฟล์) แทน\n\nต้องการดำเนินการต่อหรือไม่?`
+      );
+      if (!confirmed) return;
+      await handleBatchRecordAsZip();
+      return;
+    }
+
+    // ✅ เรียก picker ทันทีภายใน user gesture (ไม่มี confirm คั่น)
+    let dirHandle: any;
+    try {
+      dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        // ผู้ใช้กดยกเลิกหน้าต่างเลือกโฟลเดอร์เอง → จบเงียบๆ
+        return;
+      }
+      // Error อื่น (เช่น permission) → เสนอโหมด ZIP แทน
+      console.error('❌ [DirectoryPicker] Error:', error);
+      const fallback = window.confirm(
+        `ไม่สามารถเปิดหน้าต่างเลือกโฟลเดอร์ได้ (${error?.message || 'ไม่ทราบสาเหตุ'})\n\nต้องการบันทึกรวมเป็นไฟล์ ZIP แทนหรือไม่?`
+      );
+      if (fallback) await handleBatchRecordAsZip();
+      return;
+    }
+
+    // เลือกโฟลเดอร์สำเร็จ → เริ่มบันทึกทันที
+    await runBatchSaveToDirectory(dirHandle);
   };
 
   // ✅ Fallback: บันทึกรวมเป็น ZIP
@@ -338,6 +355,7 @@ function PatientRecordContent() {
     setBatchTotal(exportQueue.length);
     setBatchSuccess(0);
     setBatchFailed(0);
+    setTargetFolderName('ไฟล์ ZIP');
 
     const zip = new JSZip();
     let successCount = 0;
@@ -392,6 +410,7 @@ function PatientRecordContent() {
     setBatchSuccess(0);
     setBatchFailed(0);
     setBatchStatus('idle');
+    setTargetFolderName('');
   };
 
   const getSelectedHospitalName = () => {
@@ -456,7 +475,7 @@ function PatientRecordContent() {
                   <div>
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -709,7 +728,7 @@ function PatientRecordContent() {
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <h4 className="font-bold text-lg mb-1">💾 บันทึกรวมทั้งหมด</h4>
-                        <p className="text-sm text-blue-100">เลือกโฟลเดอร์ → ระบบจะบันทึก PDF {exportQueue.length} ไฟล์ลงโฟลเดอร์นั้นทันที</p>
+                        <p className="text-sm text-blue-100">กดปุ่ม → เลือกโฟลเดอร์ → ระบบบันทึก PDF {exportQueue.length} ไฟล์ลงโฟลเดอร์นั้นทันที</p>
                       </div>
                       <button
                         onClick={handleBatchRecord}
@@ -727,8 +746,8 @@ function PatientRecordContent() {
                         <p className="text-sm font-bold text-blue-800 mb-2">📋 วิธีใช้งาน:</p>
                         <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
                           <li>กดปุ่ม "เลือกโฟลเดอร์และบันทึก" ด้านบน</li>
-                          <li>เลือกโฟลเดอร์ปลายทางที่ต้องการบันทึก</li>
-                          <li>ระบบจะสร้าง PDF ฉบับสมบูรณ์และบันทึกลงโฟลเดอร์ทันที</li>
+                          <li>หน้าต่างเลือกโฟลเดอร์จะเด้งขึ้นทันที → เลือกโฟลเดอร์ปลายทาง</li>
+                          <li>ระบบจะสร้าง PDF ฉบับสมบูรณ์และบันทึกลงโฟลเดอร์อัตโนมัติ</li>
                           <li>รอจนกว่าระบบจะบันทึกครบทุกคน</li>
                         </ol>
                         <p className="text-xs text-blue-600 mt-3 italic">💡 ชื่อไฟล์: โรงพยาบาล_HN_ชื่อ_นามสกุล.pdf</p>
@@ -744,7 +763,10 @@ function PatientRecordContent() {
                     <Loader2 className="w-8 h-8 animate-spin" />
                     <div>
                       <h4 className="font-bold text-lg">กำลังบันทึกรายการ...</h4>
-                      <p className="text-sm text-blue-100">{batchCurrentName && `กำลังบันทึก: ${batchCurrentName}`}</p>
+                      <p className="text-sm text-blue-100">
+                        {batchCurrentName && `กำลังบันทึก: ${batchCurrentName}`}
+                        {targetFolderName && ` → โฟลเดอร์ "${targetFolderName}"`}
+                      </p>
                     </div>
                   </div>
                   <div className="mb-2">
@@ -771,6 +793,7 @@ function PatientRecordContent() {
                       <h4 className="font-bold text-lg text-green-800 mb-2">✅ บันทึกรายการเสร็จสิ้น!</h4>
                       <p className="text-sm text-green-700">✓ สำเร็จ: <strong>{batchSuccess}</strong> ไฟล์</p>
                       {batchFailed > 0 && <p className="text-sm text-yellow-700">✗ ล้มเหลว: <strong>{batchFailed}</strong> ไฟล์</p>}
+                      {targetFolderName && <p className="text-sm text-gray-600 mt-1">📁 ปลายทาง: {targetFolderName}</p>}
                     </div>
                   </div>
                 </div>
