@@ -2,16 +2,15 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-// Assuming your login function might return an array or you have a way to fetch all matches
-// If 'login' only returns single(), you might need to adjust the query in queries.ts 
-// But here we handle the logic assuming 'result' could be the wrong role or we need to re-verify.
-import { login, logout } from '@/lib/supabase/queries'; 
-import { LogIn, AlertCircle, Loader2, UserPlus } from 'lucide-react';
+import { login, logout } from '@/lib/supabase/queries';
+import { LogIn, AlertCircle, Loader2, UserPlus, Eye, EyeOff } from 'lucide-react';
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false); // ✅ เพิ่ม State สำหรับแสดง/ซ่อนรหัสผ่าน
+  
   const [formData, setFormData] = useState({
     id_card: '',
     password: '',
@@ -28,21 +27,11 @@ export default function AdminLoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
+    
     try {
-      // Attempt login
       const result = await login(formData.id_card, formData.password);
-
       if (result) {
-        // ✅ FIX: Check if the returned result is already a valid staff role
         let validRole = result.role;
-        
-        // If the system returned 'patient' but we know they might have 'osm', 'admin', etc.
-        // We prioritize checking if the current result is valid. 
-        // Note: Ideally, your Supabase 'login' function should be updated to 
-        // return the 'staff' role if it exists, or return an array of roles.
-        // However, based on the provided file, we enforce the check here.
-        
         const allowedRoles = ['admin', 'doctor', 'helper', 'osm'];
         
         if (allowedRoles.includes(validRole)) {
@@ -51,22 +40,6 @@ export default function AdminLoginPage() {
           localStorage.setItem('login_time', new Date().toISOString());
           router.push('/admin/dashboard');
         } else {
-          // ️ CRITICAL FIX FOR MULTI-ROLE USERS:
-          // If the login returned 'patient' (or another non-staff role), 
-          // but the user IS a staff member (as seen in your SQL screenshot),
-          // we need to handle this. 
-          
-          // Since we can't easily change the DB query from this file without seeing queries.ts,
-          // The most robust fix for THIS file is to show a specific error 
-          // OR if your 'login' function supports fetching by ID Card and returning ALL matches,
-          // we would filter here. 
-          
-          // ASSUMPTION: Your 'login' function currently returns the FIRST match found.
-          // If it returns 'patient', this block executes.
-          // To truly fix the multi-role issue permanently, you should update @/lib/supabase/queries
-          // to use .maybeSingle() or filter WHERE role IN ('admin','doctor','helper','osm') 
-          // when logging into the ADMIN panel.
-          
           setError('บัญชีนี้ไม่มีสิทธิ์เข้าถึงระบบ Admin (พบสถานะ: ' + validRole + ')');
         }
       } else {
@@ -113,20 +86,35 @@ export default function AdminLoginPage() {
               />
             </div>
 
-            {/* Password */}
+            {/* Password (ปรับปรุงใหม่) */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 รหัสผ่าน
               </label>
-              <input
-                type="password"
-                name="password"
-                value={formData.password}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="••••••••"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  required
+                  className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700 focus:outline-none transition-colors"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Error Message */}
