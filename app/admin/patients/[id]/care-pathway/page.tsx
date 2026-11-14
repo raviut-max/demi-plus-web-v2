@@ -1,7 +1,5 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ v4: 6 ขั้นตอนตามไฟล์แนบ — แต่ละขั้น "ชี้ไปทำของตัวเอง" (ไม่ใช่นัดหมายทั้งหมด)
-//    1 รู้จักตัวเอง(PAM/PROMS)  2 ความฝันของฉัน  3 ชีวิต 1 วันของฉัน
-//    4 เป้าหมายและแผนสุขภาพ    5 ทดลองทำ        6 ติดตามต่อเนื่อง
+// ✅ v5: ปรับข้อ 1 "รู้จักตัวเอง" ให้ลิงก์ไปหน้า screening และ screening-history ตามที่ระบุ
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -9,9 +7,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
-  ArrowLeft, Route, UserCheck, Sparkles, Sun, Target, FlaskConical, Repeat,
-  CheckCircle2, Loader2, Eye, Edit, Plus, X, Users, Building2, AlertCircle,
-  FileText, Clock, Trash2, History
+  ArrowLeft, Route, UserCheck, Loader2, Eye, Edit, Plus, X, Users, Building2, AlertCircle,
+  FileText, Clock, History
 } from 'lucide-react';
 
 // ---------- Helpers ----------
@@ -24,75 +21,46 @@ const formatThaiDate = (dateString: string | null | undefined) => {
 };
 
 type StageStatus = 'done' | 'active' | 'pending';
-type EventStatus = 'done' | 'inprogress' | 'scheduled';
 
 interface PathEvent {
-  key: string; source: 'screening' | 'followup' | 'manual';
-  stageId: string; date: string | null; title: string; detail: string;
-  status: EventStatus; payload: Record<string, any>;
+  key: string;
+  date: string | null;
+  title: string;
+  detail: string;
+  raw: any;
 }
+
 interface CareStage {
-  id: string; no: number; title: string; description: string;
-  icon: any; actionLabel: string; status: StageStatus; events: PathEvent[];
+  id: string;
+  no: number;
+  title: string;
+  description: string;
+  icon: any;
+  status: StageStatus;
+  events: PathEvent[];
+  actionLabel?: string;
+  actionUrl?: (pid: string) => string;
+  historyUrl?: (pid: string) => string;
 }
 
-// ---------- 6 ขั้นตอนตามไฟล์แนบ ----------
+// ---------- กำหนด 6 ขั้นตอน (ปรับข้อ 1 ให้ตรง requirement) ----------
 const STAGE_META = [
-  { id: 'self',    no: 1, title: 'รู้จักตัวเอง',            description: 'ทำแบบประเมิน PAM / PROMS — แจ้งจำนวนครั้งที่ทำแล้ว และเพิ่มรอบทำใหม่ได้', icon: UserCheck,   actionLabel: '➕ เพิ่มรอบทำแบบประเมิน' },
-  { id: 'dream',   no: 2, title: 'ความฝันของฉัน',          description: 'ชี้ไปที่การทำความฝัน — บันทึกความฝันและสถานะการเดินตามฝัน',             icon: Sparkles,    actionLabel: '➕ บันทึกความฝัน' },
-  { id: 'oneday',  no: 3, title: 'ชีวิต 1 วันของฉัน',       description: 'บันทึกวิถีชีวิตจริง 1 วัน (กิน/หวาน/เคลื่อนไหว/นอน)',                    icon: Sun,         actionLabel: '➕ บันทึกชีวิต 1 วัน' },
-  { id: 'plan',    no: 4, title: 'เป้าหมายและแผนสุขภาพ',    description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ พร้อมกำหนดเวลา',                     icon: Target,      actionLabel: '➕ เพิ่มเป้าหมาย/แผน' },
-  { id: 'trial',   no: 5, title: 'ทดลองทำ',                description: 'ทดลองลงมือทำจริงตามแผน แล้วบันทึกผลที่ได้',                              icon: FlaskConical, actionLabel: '➕ บันทึกการทดลอง' },
-  { id: 'follow',  no: 6, title: 'ติดตามต่อเนื่อง',         description: 'ติดตามผลต่อเนื่อง (น้ำหนัก/น้ำตาล/ความมั่นใจ) ทำซ้ำได้ไม่จำกัด',           icon: Repeat,      actionLabel: '➕ บันทึกการติดตาม' },
+  { 
+    id: 'screening', 
+    no: 1, 
+    title: 'รู้จักตัวเอง (แบบประเมิน)', 
+    description: 'ทำแบบประเมิน PAM / PROMS เพื่อประเมินความพร้อมในการดูแลตนเอง', 
+    icon: UserCheck,
+    actionLabel: '➕ เพิ่มรอบทำแบบประเมิน',
+    actionUrl: (pid: string) => `/admin/screening?patient_id=${pid}`,
+    historyUrl: (pid: string) => `/admin/patients/${pid}/screening-history`
+  },
+  { id: 'dream', no: 2, title: 'ความฝันของฉัน', description: 'ชี้ไปที่การทำความฝัน (รอปรับในขั้นตอนถัดไป)', icon: History },
+  { id: 'oneday', no: 3, title: 'ชีวิต 1 วันของฉัน', description: 'บันทึกวิถีชีวิตจริง 1 วัน (รอปรับในขั้นตอนถัดไป)', icon: History },
+  { id: 'plan', no: 4, title: 'เป้าหมายและแผนสุขภาพ', description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ (รอปรับในขั้นตอนถัดไป)', icon: History },
+  { id: 'trial', no: 5, title: 'ทดลองทำ', description: 'ทดลองลงมือทำจริงตามแผน (รอปรับในขั้นตอนถัดไป)', icon: History },
+  { id: 'follow', no: 6, title: 'ติดตามต่อเนื่อง', description: 'ติดตามผลต่อเนื่อง (รอปรับในขั้นตอนถัดไป)', icon: History },
 ];
-
-// ฟิลด์ฟอร์มเฉพาะของแต่ละขั้น (ไม่ซ้ำกัน!)
-const FORM_FIELDS: Record<string, { name: string; label: string; type: string; options?: string[]; required?: boolean }[]> = {
-  self: [
-    { name: 'kind', label: 'แบบประเมิน', type: 'select', options: ['PAM', 'PROMS', 'PAM + PROMS'], required: true },
-    { name: 'score', label: 'คะแนนรวม', type: 'number' },
-    { name: 'note', label: 'สิ่งที่พบ/ข้อสังเกต', type: 'textarea' },
-  ],
-  dream: [
-    { name: 'dream', label: 'ความฝันของฉัน', type: 'text', required: true },
-    { name: 'why', label: 'ทำไมฝันนี้ถึงสำคัญ', type: 'textarea' },
-    { name: 'goal', label: 'เป้าหมายที่อยากไปถึง', type: 'text' },
-  ],
-  oneday: [
-    { name: 'summary', label: 'สรุปชีวิต 1 วันของฉัน', type: 'textarea', required: true },
-    { name: 'food', label: 'การกิน (เช่น ของหวาน/จุกจิก)', type: 'text' },
-    { name: 'move', label: 'การเคลื่อนไหว/ออกกำลังกาย', type: 'text' },
-    { name: 'sleep', label: 'การนอน', type: 'text' },
-  ],
-  plan: [
-    { name: 'goal', label: 'เป้าหมายสุขภาพ', type: 'text', required: true },
-    { name: 'plan', label: 'แผนการปฏิบัติ', type: 'textarea' },
-    { name: 'target_date', label: 'กำหนดถึงเป้าหมาย', type: 'date' },
-  ],
-  trial: [
-    { name: 'what', label: 'สิ่งที่ทดลองทำ', type: 'text', required: true },
-    { name: 'duration', label: 'ระยะเวลาทดลอง', type: 'text' },
-    { name: 'result', label: 'ผลที่ได้', type: 'textarea' },
-  ],
-  follow: [
-    { name: 'weight', label: 'น้ำหนัก (กก.)', type: 'number' },
-    { name: 'sugar', label: 'ค่าน้ำตาล', type: 'number' },
-    { name: 'confidence', label: 'ความมั่นใจ (%)', type: 'number' },
-    { name: 'note', label: 'สรุปการติดตาม', type: 'textarea' },
-  ],
-};
-
-const PRIMARY_FIELD: Record<string, string> = {
-  self: 'kind', dream: 'dream', oneday: 'summary', plan: 'goal', trial: 'what', follow: 'note',
-};
-
-const PAYLOAD_LABELS: Record<string, string> = {
-  kind: 'แบบประเมิน', score: 'คะแนนรวม', note: 'หมายเหตุ', dream: 'ความฝัน', why: 'เหตุผล',
-  goal: 'เป้าหมาย', summary: 'สรุปชีวิต 1 วัน', food: 'การกิน', move: 'การเคลื่อนไหว',
-  sleep: 'การนอน', plan: 'แผนการ', target_date: 'กำหนดถึงเป้า', what: 'สิ่งที่ทดลอง',
-  duration: 'ระยะเวลา', result: 'ผลที่ได้', weight: 'น้ำหนัก (กก.)', sugar: 'ค่าน้ำตาล',
-  confidence: 'ความมั่นใจ (%)',
-};
 
 const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: string; card: string }> = {
   done:    { label: 'เสร็จสิ้น',       badge: 'bg-green-100 text-green-700',   circle: 'bg-green-500 text-white',  card: 'bg-green-50/60 border-green-200' },
@@ -100,62 +68,31 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
   pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
 };
 
-const EVENT_STATUS_UI: Record<EventStatus, { label: string; chip: string }> = {
-  done:       { label: '✔ เสร็จแล้ว',      chip: 'bg-green-100 text-green-700' },
-  inprogress: { label: '🔄 กำลังดำเนินการ', chip: 'bg-blue-100 text-blue-700' },
-  scheduled:  { label: '📅 ตั้งใจจะทำ',     chip: 'bg-amber-100 text-amber-700' },
-};
+// ---------- คำนวณสถานะและ Events ----------
+function buildStages(patient: any, screenings: any[]): CareStage[] {
+  return STAGE_META.map((m) => {
+    let events: PathEvent[] = [];
+    let status: StageStatus = 'pending';
 
-// ---------- สร้าง events ของแต่ละขั้นจากแหล่งข้อมูลของตัวเอง ----------
-function buildStages(patient: any, screenings: any[], followups: any[], activities: any[]): CareStage[] {
-  const derived: PathEvent[] = [
-    // ขั้น 1: นับจาก screenings จริง (PAM/PROMS)
-    ...screenings.map((s, i) => ({
-      key: `scr-${s.id ?? i}`, source: 'screening' as const, stageId: 'self',
-      date: s.screening_date, title: `แบบประเมินครั้งที่ ${i + 1}`,
-      detail: `คะแนน PAM: ${s.pam_total_score ?? '-'} | วันที่ ${formatThaiDate(s.screening_date)}`,
-      status: 'done' as EventStatus,
-      payload: { kind: 'PAM + PROMS', score: s.pam_total_score ?? '-', note: s.note || '', activity_date: s.screening_date },
-    })),
-    // ขั้น 6: นับจาก appointment_followups จริง
-    ...followups.map((f, i) => ({
-      key: `fu-${f.id ?? i}`, source: 'followup' as const, stageId: 'follow',
-      date: f.followup_date, title: `นัดติดตามครั้งที่ ${i + 1}`,
-      detail: `น้ำหนัก ${f.weight ?? '-'} | น้ำตาล ${f.blood_sugar_dtx ?? '-'} | ความมั่นใจ ${f.confidence_score ?? '-'}%`,
-      status: 'done' as EventStatus,
-      payload: { weight: f.weight, sugar: f.blood_sugar_dtx, confidence: f.confidence_score, note: f.note || '', activity_date: f.followup_date },
-    })),
-  ];
+    if (m.id === 'screening') {
+      // ✅ ข้อ 1: ดึงข้อมูลจาก screenings จริง
+      events = screenings.map((s, i) => ({
+        key: `scr-${s.id ?? i}`,
+        date: s.screening_date,
+        title: `แบบประเมินครั้งที่ ${i + 1}`,
+        detail: `PAM: ${s.pam_total_score ?? '-'} | PROMs: ${s.proms_q1_score + s.proms_q2_score + s.proms_q3_score + s.proms_q4_score ?? '-'} | Zone: ${s.proms_zone || '-'}`,
+        raw: s,
+      }));
+      
+      // สถานะ: ถ้ามี screening >= 1 ครั้ง = done, ถ้าไม่มี = active (เพราะเป็นขั้นแรก)
+      status = screenings.length > 0 ? 'done' : 'active';
+    }
 
-  // กิจกรรมที่บันทึกเองในแต่ละขั้น (payload เฉพาะขั้น)
-  const manual: PathEvent[] = (activities || []).map((a: any) => {
-    const p = a.payload || {};
-    const detail = Object.entries(p)
-      .filter(([k, v]) => v && k !== 'activity_date')
-      .map(([k, v]) => `${PAYLOAD_LABELS[k] || k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
-      .join(' | ') || a.note || '-';
     return {
-      key: `ma-${a.id}`, source: 'manual' as const, stageId: a.stage_id,
-      date: a.activity_date, title: a.title || 'กิจกรรม', detail,
-      status: (a.status as EventStatus) || 'done',
-      payload: { ...p, note: a.note, activity_date: a.activity_date },
+      ...m,
+      status,
+      events: events.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()),
     };
-  });
-
-  const all = [...derived, ...manual];
-  const stagesWithEvents = STAGE_META.map(m => ({
-    ...m,
-    events: all.filter(e => e.stageId === m.id)
-      .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()),
-  }));
-
-  const doneFlags = stagesWithEvents.map(s => s.events.some(e => e.status === 'done'));
-  const firstIncomplete = doneFlags.indexOf(false);
-
-  return stagesWithEvents.map((s, i) => {
-    const hasOther = s.events.some(e => e.status !== 'done');
-    const status: StageStatus = doneFlags[i] ? 'done' : (i === firstIncomplete || hasOther ? 'active' : 'pending');
-    return { id: s.id, no: s.no, title: s.title, description: s.description, icon: s.icon, actionLabel: s.actionLabel, status, events: s.events };
   });
 }
 
@@ -172,14 +109,6 @@ export default function CarePathwayPage() {
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
   const [errorDetail, setErrorDetail] = useState('');
   const [expanded, setExpanded] = useState<string[]>([]);
-
-  const [addStage, setAddStage] = useState<CareStage | null>(null);
-  const [detailEvent, setDetailEvent] = useState<PathEvent | null>(null);
-  const [showTrace, setShowTrace] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [formDate, setFormDate] = useState('');
-  const [formStatus, setFormStatus] = useState<EventStatus>('done');
 
   useEffect(() => {
     const userData = checkSession();
@@ -203,19 +132,17 @@ export default function CarePathwayPage() {
         if (prof.hospital_id && !ids.includes(prof.hospital_id)) { setErrorState('denied'); return; }
       }
 
-      const [hospRes, uRes, coachRes, scrRes, fuRes, actRes] = await Promise.all([
+      const [hospRes, uRes, coachRes, scrRes] = await Promise.all([
         prof.hospital_id ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
         supabase.from('users').select('id_card').eq('id', patientId).maybeSingle(),
         prof.coach_id ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
         supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
-        supabase.from('appointment_followups').select('*').eq('user_id', patientId).order('followup_date', { ascending: true }),
-        supabase.from('care_pathway_activities').select('*').eq('user_id', patientId).order('activity_date', { ascending: true }),
       ]);
-      if (actRes.error) console.warn('[CarePathway] care_pathway_activities:', actRes.error.message);
 
       const p = { ...prof, hospitals: hospRes.data || null, users: uRes.data || null, coach_name: coachRes.data?.full_name_th || '-' };
       setPatient(p);
-      const built = buildStages(p, scrRes.data || [], fuRes.data || [], actRes.data || []);
+      
+      const built = buildStages(p, scrRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
       setErrorState('none'); setErrorDetail('');
@@ -228,49 +155,6 @@ export default function CarePathwayPage() {
   }, [user, patientId]);
 
   useEffect(() => { load(); }, [load]);
-
-  const openAdd = (stage: CareStage) => {
-    const init: Record<string, string> = {};
-    (FORM_FIELDS[stage.id] || []).forEach(f => { init[f.name] = ''; });
-    setForm(init);
-    setFormDate(new Date().toISOString().slice(0, 10));
-    setFormStatus('done');
-    setAddStage(stage);
-  };
-
-  const handleSaveActivity = async () => {
-    if (!addStage) return;
-    const fields = FORM_FIELDS[addStage.id] || [];
-    const missing = fields.find(f => f.required && !form[f.name]);
-    if (missing) { alert(`กรุณากรอก "${missing.label}"`); return; }
-
-    const primary = PRIMARY_FIELD[addStage.id];
-    const title = form[primary] ? `${addStage.title}: ${form[primary]}` : `${addStage.title} ครั้งที่ ${addStage.events.length + 1}`;
-
-    setSaving(true);
-    try {
-      const { error } = await supabase.from('care_pathway_activities').insert({
-        user_id: patientId, stage_id: addStage.id,
-        activity_date: formDate, title, note: form.note || null,
-        status: formStatus, payload: form, created_by: user?.id,
-      });
-      if (error) throw error;
-      setAddStage(null);
-      await load();
-    } catch (e: any) {
-      alert('❌ บันทึกไม่สำเร็จ: ' + (e?.message || '') + '\n💡 รัน SQL เพิ่มคอลัมน์ payload แล้วหรือยัง?');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteActivity = async (ev: PathEvent) => {
-    if (!confirm('ลบรายการนี้?')) return;
-    const id = ev.key.replace('ma-', '');
-    const { error } = await supabase.from('care_pathway_activities').delete().eq('id', id);
-    if (error) { alert('❌ ลบไม่สำเร็จ: ' + error.message); return; }
-    await load();
-  };
 
   const toggle = (id: string) => setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
@@ -310,8 +194,6 @@ export default function CarePathwayPage() {
   }
 
   const doneCount = stages.filter(s => s.status === 'done').length;
-  const allEvents = stages.flatMap(s => s.events.map(e => ({ ...e, stageNo: s.no, stageTitle: s.title })))
-    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
 
   // ---------- Render ----------
   return (
@@ -334,9 +216,6 @@ export default function CarePathwayPage() {
             </div>
             <div className="flex items-center gap-2">
               <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">สำเร็จ {doneCount}/{stages.length} ขั้นตอน</span>
-              <button onClick={() => setShowTrace(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm">
-                <History className="w-4 h-4" /> ดู Trace
-              </button>
             </div>
           </div>
         </div>
@@ -381,25 +260,21 @@ export default function CarePathwayPage() {
               const ui = STATUS_UI[stage.status];
               const Icon = stage.icon;
               const isOpen = expanded.includes(stage.id);
-              const doneTimes = stage.events.filter(e => e.status === 'done').length;
+              const doneTimes = stage.events.filter(() => true).length; // นับจำนวน event ทั้งหมดในขั้นนี้
+
               return (
                 <div key={stage.id} className={`rounded-xl border shadow-sm ${ui.card}`}>
                   <button onClick={() => toggle(stage.id)} className="w-full flex items-center gap-4 p-4 text-left">
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold shrink-0 ${ui.circle}`}>
-                      {stage.status === 'done' ? <CheckCircle2 className="w-5 h-5" /> : stage.no}
+                      {stage.status === 'done' ? <UserCheck className="w-5 h-5" /> : stage.no}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Icon className="w-4 h-4 text-gray-600 shrink-0" />
                         <span className="font-semibold text-gray-800">{stage.no}. {stage.title}</span>
-                        {stage.id === 'self' && (
+                        {stage.id === 'screening' && doneTimes > 0 && (
                           <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
                             ทำแบบประเมินแล้ว {doneTimes} ครั้ง
-                          </span>
-                        )}
-                        {stage.id !== 'self' && stage.events.length > 0 && (
-                          <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
-                            {doneTimes} ครั้ง
                           </span>
                         )}
                       </div>
@@ -411,40 +286,49 @@ export default function CarePathwayPage() {
 
                   {isOpen && (
                     <div className="px-4 pb-4 pl-16">
+                      {/* ✅ รายการกิจกรรมของขั้นนี้ */}
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">— ยังไม่มีบันทึกในขั้นนี้ —</p>
                       ) : (
                         <div className="space-y-2 mb-3">
-                          {stage.events.map((ev) => {
-                            const evUi = EVENT_STATUS_UI[ev.status];
-                            return (
-                              <div key={ev.key} className="bg-white rounded-lg border p-3 flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <p className="text-sm font-medium text-gray-800">{ev.title}</p>
-                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${evUi.chip}`}>{evUi.label}</span>
-                                  </div>
-                                  <p className="text-xs text-gray-500">{ev.detail}</p>
-                                  <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1"><Clock className="w-3 h-3" /> {formatThaiDate(ev.date)}</p>
-                                </div>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button onClick={() => setDetailEvent(ev)} className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg">
-                                    <FileText className="w-3 h-3" /> ดูรายละเอียด
-                                  </button>
-                                  {ev.source === 'manual' && (
-                                    <button onClick={() => handleDeleteActivity(ev)} className="p-1 text-red-400 hover:text-red-600" title="ลบรายการ"><Trash2 className="w-3.5 h-3.5" /></button>
-                                  )}
-                                </div>
+                          {stage.events.map((ev) => (
+                            <div key={ev.key} className="bg-white rounded-lg border p-3 flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-800">{ev.title}</p>
+                                <p className="text-xs text-gray-500">{ev.detail}</p>
+                                <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1"><Clock className="w-3 h-3" /> {formatThaiDate(ev.date)}</p>
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
                         </div>
                       )}
 
-                      {/* ✅ ปุ่ม "ทำของตัวเอง" ของแต่ละขั้น (ไม่ซ้ำกัน) */}
-                      <button onClick={() => openAdd(stage)} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">
-                        <Plus className="w-4 h-4" /> {stage.actionLabel}
-                      </button>
+                      {/* ✅ ปุ่มทำงานเฉพาะของขั้นที่ 1: รู้จักตัวเอง */}
+                      {stage.id === 'screening' && (
+                        <div className="flex gap-2 flex-wrap">
+                          <button 
+                            onClick={() => router.push(stage.actionUrl!(patientId))} 
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"
+                          >
+                            <Plus className="w-4 h-4" /> {stage.actionLabel}
+                          </button>
+                          <button 
+                            onClick={() => router.push(stage.historyUrl!(patientId))} 
+                            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
+                          >
+                            <FileText className="w-4 h-4" /> ดูประวัติการประเมิน
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Placeholder สำหรับขั้นที่ 2-6 (รอปรับในลำดับถัดไป) */}
+                      {stage.id !== 'screening' && (
+                        <div className="flex gap-2 flex-wrap">
+                          <button className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-sm cursor-not-allowed">
+                            <Plus className="w-4 h-4" /> รอการปรับแต่งในขั้นตอนถัดไป
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -453,121 +337,6 @@ export default function CarePathwayPage() {
           </div>
         </div>
       </div>
-
-      {/* ===== Modal: ฟอร์มเฉพาะขั้น ===== */}
-      {addStage && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">{addStage.actionLabel.replace('➕ ', '')} — ขั้น {addStage.no}. {addStage.title}</h3>
-              <button onClick={() => setAddStage(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium mb-1">วันที่ *</label>
-                  <input type="date" value={formDate} onChange={e => setFormDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">สถานะ</label>
-                  <select value={formStatus} onChange={e => setFormStatus(e.target.value as EventStatus)} className="w-full px-3 py-2 border rounded-lg">
-                    <option value="done">✔ เสร็จแล้ว</option>
-                    <option value="inprogress">🔄 กำลังดำเนินการ</option>
-                    <option value="scheduled">📅 ตั้งใจจะทำ</option>
-                  </select>
-                </div>
-              </div>
-              {(FORM_FIELDS[addStage.id] || []).map(f => (
-                <div key={f.name}>
-                  <label className="block text-sm font-medium mb-1">{f.label}{f.required && ' *'}</label>
-                  {f.type === 'select' ? (
-                    <select value={form[f.name] || ''} onChange={e => setForm({ ...form, [f.name]: e.target.value })} className="w-full px-3 py-2 border rounded-lg">
-                      <option value="">— เลือก —</option>
-                      {f.options?.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  ) : f.type === 'textarea' ? (
-                    <textarea rows={2} value={form[f.name] || ''} onChange={e => setForm({ ...form, [f.name]: e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
-                  ) : (
-                    <input type={f.type} value={form[f.name] || ''} onChange={e => setForm({ ...form, [f.name]: e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
-                  )}
-                </div>
-              ))}
-              <div className="flex gap-2 pt-2">
-                <button onClick={handleSaveActivity} disabled={saving} className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50">
-                  {saving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : <Plus className="w-4 h-4 inline" />} บันทึก
-                </button>
-                <button onClick={() => setAddStage(null)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">ปิด</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ===== Modal: ดูรายละเอียด ===== */}
-      {detailEvent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">📋 {detailEvent.title}</h3>
-              <button onClick={() => setDetailEvent(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between gap-4 py-2 border-b">
-                <span className="text-sm text-gray-500">วันที่</span>
-                <span className="text-sm font-medium">{formatThaiDate(detailEvent.date)}</span>
-              </div>
-              <div className="flex justify-between gap-4 py-2 border-b">
-                <span className="text-sm text-gray-500">สถานะ</span>
-                <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${EVENT_STATUS_UI[detailEvent.status].chip}`}>{EVENT_STATUS_UI[detailEvent.status].label}</span>
-              </div>
-              {Object.entries(detailEvent.payload)
-                .filter(([k, v]) => v != null && v !== '' && k !== 'activity_date')
-                .map(([k, v]) => (
-                  <div key={k} className="flex justify-between gap-4 py-2 border-b last:border-0">
-                    <span className="text-sm text-gray-500 shrink-0">{PAYLOAD_LABELS[k] || k}</span>
-                    <span className="text-sm font-medium text-gray-800 text-right break-all">
-                      {k === 'target_date' ? formatThaiDate(v as string) : String(v)}
-                    </span>
-                  </div>
-                ))}
-            </div>
-            <p className="text-xs text-gray-400 mt-3">
-              {detailEvent.source === 'manual' ? 'บันทึกเอง — ลบได้' : detailEvent.source === 'screening' ? 'ข้อมูลจากแบบประเมิน PAM/PROMS (อ่านอย่างเดียว)' : 'ข้อมูลจากนัดติดตาม (อ่านอย่างเดียว)'}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* ===== Modal: ดู Trace ===== */}
-      {showTrace && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">🕘 Trace — กิจกรรมทั้งหมดของ {patient.first_name} {patient.last_name}</h3>
-              <button onClick={() => setShowTrace(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-            </div>
-            {allEvents.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">ยังไม่มีกิจกรรม</p>
-            ) : (
-              <div className="relative pl-6 border-l-2 border-gray-200 space-y-4">
-                {allEvents.map((ev) => (
-                  <div key={ev.key} className="relative">
-                    <div className="absolute -left-[31px] w-4 h-4 rounded-full bg-blue-500 border-2 border-white" />
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <p className="text-sm font-semibold text-gray-800">ขั้น {ev.stageNo} ({ev.stageTitle}): {ev.title}</p>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${EVENT_STATUS_UI[ev.status].chip}`}>{EVENT_STATUS_UI[ev.status].label}</span>
-                      </div>
-                      <p className="text-xs text-gray-500">{ev.detail}</p>
-                      <p className="text-xs text-blue-600 mt-1">📅 {formatThaiDate(ev.date)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
