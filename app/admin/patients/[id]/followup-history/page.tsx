@@ -1,13 +1,8 @@
 // app/admin/patients/[id]/followup-history/page.tsx
-// ✅ แก้ไขล่าสุด: 16 มิถุนายน 2569
-// ✅ การปรับปรุง:
-//    1. ปรับลิงก์ "บันทึกติดตามใหม่" ให้ส่งไปยัง /followup/new?patient_id=...&appointment_id=... (แก้ Error 406)
-//    2. เพิ่มคอลัมน์ "วันที่ติดตาม" ในตาราง เพื่อแสดงค่า followup_date ที่บันทึกไว้
-//    3. รักษาฟีเจอร์ปุ่ม "แก้ไข" และกรอง Soft Delete ไว้เหมือนเดิม
+// ✅ แก้ไขล่าสุด: เพิ่มการรองรับ from=care-pathway เพื่อให้ปุ่มกลับทำงานถูกต้อง
 'use client';
-
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getPatientDetail, getPatientFollowupHistory, getUserHospitalInfo, isSuperAdmin, isHospitalAdmin } from '@/lib/supabase/queries';
 import { ArrowLeft, Calendar, Activity, Heart, TrendingUp, FileText, Download, Printer, Plus, User, Hospital, Building2, Shield, Pencil } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
@@ -15,7 +10,9 @@ import { supabase } from '@/lib/supabase/client';
 export default function FollowupHistoryPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const patientId = params.id as string;
+  const from = searchParams.get('from');
 
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
@@ -23,8 +20,6 @@ export default function FollowupHistoryPage() {
   const [patient, setPatient] = useState<any>(null);
   const [followups, setFollowups] = useState<any[]>([]);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
-  
-  // ✅ State สำหรับตรวจสอบการนัดหมาย
   const [hasUnfollowedAppointment, setHasUnfollowedAppointment] = useState(false);
   const [latestAppointmentId, setLatestAppointmentId] = useState<string | null>(null);
 
@@ -55,18 +50,11 @@ export default function FollowupHistoryPage() {
 
   const loadData = async () => {
     try {
-      // โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
-
-      // โหลดประวัติการติดตาม (กรอง Soft Delete ถ้ามี column deleted_at)
       const followupData = await getPatientFollowupHistory(patientId);
       setFollowups(followupData);
-
-      // ✅ ตรวจสอบการนัดหมายที่ยังไม่ได้ติดตาม
       await checkUnfollowedAppointments(patientId);
-
-      console.log('📋 Followup History:', followupData.length);
     } catch (error) {
       console.error('Error loading ', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
@@ -75,11 +63,8 @@ export default function FollowupHistoryPage() {
     }
   };
 
-  // ✅ ฟังก์ชันตรวจสอบการนัดหมายที่ยังไม่ได้ติดตาม
   const checkUnfollowedAppointments = async (pid: string) => {
     try {
-      console.log('🔍 Checking unfollowed appointments for:', pid);
-      // ดึงนัดหมายที่เสร็จสิ้นแล้วทั้งหมด
       const { data: appointmentsData } = await supabase
         .from('appointments')
         .select('id, appointment_date, status')
@@ -90,19 +75,14 @@ export default function FollowupHistoryPage() {
 
       if (appointmentsData && appointmentsData.length > 0) {
         const latestApt = appointmentsData[0];
-        
-        // ตรวจสอบว่ามี followup แล้วหรือยัง
         const { data: existingFollowup } = await supabase
           .from('appointment_followups')
           .select('id')
           .eq('appointment_id', latestApt.id)
           .single();
-
         if (!existingFollowup) {
-          // ยังไม่มี followup
           setHasUnfollowedAppointment(true);
           setLatestAppointmentId(latestApt.id);
-          console.log('📅 Found unfollowed appointment:', latestApt.id);
         }
       }
     } catch (error) {
@@ -115,30 +95,27 @@ export default function FollowupHistoryPage() {
     router.push('/admin/login');
   };
 
-  // ✅ ฟังก์ชันจัดการปุ่มบันทึกติดตามใหม่ (แก้ไขแล้ว - ส่งลิงก์ที่ถูกต้อง)
   const handleNewFollowup = () => {
-    console.log(' New Followup button clicked');
-    console.log('hasUnfollowedAppointment:', hasUnfollowedAppointment);
-    console.log('latestAppointmentId:', latestAppointmentId);
-    
     if (hasUnfollowedAppointment && latestAppointmentId) {
-      // ✅ มีการนัดหมายที่ยังไม่ได้ติดตาม → ไปหน้าบันทึกผลการติดตาม (สร้างใหม่)
-      console.log('🔗 Has unfollowed appointment → Navigate to followup form (NEW)');
-      
-      // ✅ แก้ไขตรงนี้: ใช้ /new?patient_id=...&appointment_id=... แทนการส่ง ID ตรงๆ
       router.push(`/admin/appointments/followup/new?patient_id=${patientId}&appointment_id=${latestAppointmentId}`);
     } else {
-      // ✅ ยังไม่มีการนัดหมาย → แสดง confirm dialog (แบบง่าย)
-      console.log('🔗 No unfollowed appointment → Show confirm dialog');
       const confirmCreate = confirm(
         'คุณต้องการบันทึกข้อมูลการติดตาม (ก่อนนัดหมาย) ตอนนี้เลยหรือไม่?\n\n' +
         '• กด "ตกลง" → ไปหน้าบันทึกข้อมูลการติดตาม\n' +
         '• กด "ยกเลิก" → ยกเลิก'
       );
       if (confirmCreate) {
-        console.log(' Navigate to followup form (no appointment)');
         router.push(`/admin/appointments/followup/new?patient_id=${patientId}`);
       }
+    }
+  };
+
+  // ✅ ปุ่มกลับที่ถูกต้องตาม from parameter
+  const handleBack = () => {
+    if (from === 'care-pathway') {
+      router.push(`/admin/patients/${patientId}/care-pathway`);
+    } else {
+      router.push(`/admin/patients/${patientId}`);
     }
   };
 
@@ -182,11 +159,10 @@ export default function FollowupHistoryPage() {
     }
   };
 
-  // ✅ คำนวณความก้าวหน้า (เปรียบเทียบครั้งล่าสุดกับครั้งแรก)
   const calculateProgress = () => {
     if (followups.length < 2) return null;
-    const first = followups[followups.length - 1]; // ครั้งแรก
-    const latest = followups[0]; // ครั้งล่าสุด
+    const first = followups[followups.length - 1];
+    const latest = followups[0];
     const progress: any = {};
 
     if (first.weight && latest.weight) {
@@ -197,7 +173,6 @@ export default function FollowupHistoryPage() {
         improved: latest.weight < first.weight
       };
     }
-
     if (first.waist_circumference && latest.waist_circumference) {
       progress.waist = {
         first: first.waist_circumference,
@@ -206,7 +181,6 @@ export default function FollowupHistoryPage() {
         improved: latest.waist_circumference < first.waist_circumference
       };
     }
-
     if (first.blood_sugar_dtx && latest.blood_sugar_dtx) {
       progress.bloodSugar = {
         first: first.blood_sugar_dtx,
@@ -215,7 +189,6 @@ export default function FollowupHistoryPage() {
         improved: latest.blood_sugar_dtx < first.blood_sugar_dtx
       };
     }
-
     if (first.confidence_score && latest.confidence_score) {
       progress.confidence = {
         first: first.confidence_score,
@@ -224,7 +197,6 @@ export default function FollowupHistoryPage() {
         improved: latest.confidence_score > first.confidence_score
       };
     }
-
     return progress;
   };
 
@@ -240,22 +212,19 @@ export default function FollowupHistoryPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* ปุ่มกลับ */}
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}`)}
+            onClick={handleBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับหน้าผู้ป่วย
+            {from === 'care-pathway' ? 'กลับ Care Pathway' : 'กลับหน้าผู้ป่วย'}
           </button>
-
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                 ประวัติการติดตามนัดหมาย
+                ประวัติการติดตามนัดหมาย
               </h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
@@ -263,8 +232,6 @@ export default function FollowupHistoryPage() {
                 ทั้งหมด: {followups.length} ครั้ง
               </p>
             </div>
-
-            {/* ✅ User Info Card - การ์ดแสดงข้อมูลผู้ใช้งาน */}
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm min-w-[280px]">
               <div className="flex items-start gap-3">
                 <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
@@ -284,8 +251,8 @@ export default function FollowupHistoryPage() {
                     }`}>
                       {isSuperAdmin(user) ? '👑 Super Admin' :
                        isHospitalAdmin(user) ? '🏥 Hospital Admin' :
-                       user?.role === 'doctor' ? '👨‍️ แพทย์' :
-                       user?.role === 'helper' ? '👩‍ เจ้าหน้าที่' : 'ผู้ดูแล'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'helper' ? '👩‍💼 เจ้าหน้าที่' : 'ผู้ดูแล'}
                     </span>
                   </div>
                   {userHospital && (
@@ -302,9 +269,7 @@ export default function FollowupHistoryPage() {
                 </div>
               </div>
             </div>
-
             <div className="flex gap-2">
-              {/* ✅ ปุ่มบันทึกติดตามใหม่ */}
               <button
                 onClick={handleNewFollowup}
                 className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -312,7 +277,6 @@ export default function FollowupHistoryPage() {
                 <Plus className="w-4 h-4" />
                 บันทึกติดตามใหม่
               </button>
-            
               <button
                 onClick={() => setViewMode('table')}
                 className={`px-4 py-2 rounded-lg transition-all ${
@@ -345,10 +309,7 @@ export default function FollowupHistoryPage() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        
-        {/* สรุปความก้าวหน้า */}
         {progress && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -356,7 +317,6 @@ export default function FollowupHistoryPage() {
               สรุปความก้าวหน้า (ครั้งแรก → ล่าสุด)
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {/* น้ำหนัก */}
               {progress.weight && (
                 <div className={`p-4 rounded-lg border-2 ${
                   progress.weight.improved ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'
@@ -373,8 +333,6 @@ export default function FollowupHistoryPage() {
                   </p>
                 </div>
               )}
-
-              {/* รอบเอว */}
               {progress.waist && (
                 <div className={`p-4 rounded-lg border-2 ${
                   progress.waist.improved ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'
@@ -391,8 +349,6 @@ export default function FollowupHistoryPage() {
                   </p>
                 </div>
               )}
-
-              {/* น้ำตาล */}
               {progress.bloodSugar && (
                 <div className={`p-4 rounded-lg border-2 ${
                   progress.bloodSugar.improved ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'
@@ -409,8 +365,6 @@ export default function FollowupHistoryPage() {
                   </p>
                 </div>
               )}
-
-              {/* ความมั่นใจ */}
               {progress.confidence && (
                 <div className={`p-4 rounded-lg border-2 ${
                   progress.confidence.improved ? 'bg-green-50 border-green-300' : 'bg-orange-50 border-orange-300'
@@ -431,7 +385,6 @@ export default function FollowupHistoryPage() {
           </div>
         )}
 
-        {/* ตารางประวัติการติดตาม */}
         {viewMode === 'table' && (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
             <div className="p-6 border-b border-gray-200">
@@ -445,7 +398,6 @@ export default function FollowupHistoryPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">ครั้งที่</th>
-                    {/* ✅ เพิ่มคอลัมน์วันที่ติดตาม */}
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">วันที่ติดตาม</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">น้ำหนัก</th>
                     <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">รอบเอว</th>
@@ -471,7 +423,6 @@ export default function FollowupHistoryPage() {
                         <td className="px-4 py-3 text-sm">
                           <span className="font-bold text-blue-600">ครั้งที่ {followup.followup_round}</span>
                         </td>
-                        {/* ✅ แสดงวันที่ติดตามที่บันทึกไว้ */}
                         <td className="px-4 py-3 text-sm">
                           {new Date(followup.followup_date).toLocaleDateString('th-TH', {
                             year: 'numeric',
@@ -545,7 +496,6 @@ export default function FollowupHistoryPage() {
                             {getStatusText(followup.followup_status)}
                           </span>
                         </td>
-                        {/* ✅ คอลัมน์จัดการ: ดูรายละเอียด + แก้ไข */}
                         <td className="px-4 py-3 text-sm">
                           <div className="flex gap-2">
                             <button
@@ -555,7 +505,6 @@ export default function FollowupHistoryPage() {
                               <FileText className="w-3 h-3" />
                               ดูรายละเอียด
                             </button>
-                            {/* ✅ ปุ่มแก้ไข: ลิงก์ไปหน้าฟอร์มพร้อม edit=true */}
                             <button
                               onClick={() => router.push(`/admin/appointments/followup/${followup.id}?patient_id=${patientId}&edit=true`)}
                               className="px-3 py-1 bg-yellow-500 text-white text-xs rounded-lg hover:bg-yellow-600 transition-all flex items-center gap-1"
@@ -575,10 +524,8 @@ export default function FollowupHistoryPage() {
           </div>
         )}
 
-        {/* โหมดกราฟ (แสดงข้อมูลแนวโน้ม) */}
         {viewMode === 'chart' && followups.length > 0 && (
           <div className="space-y-6">
-            {/* กราฟน้ำหนัก */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
               <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <Activity className="w-5 h-5 text-blue-600" />
@@ -604,8 +551,6 @@ export default function FollowupHistoryPage() {
                 ))}
               </div>
             </div>
-
-            {/* กราฟความมั่นใจ */}
             <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
               <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <Heart className="w-5 h-5 text-pink-600" />
@@ -634,7 +579,6 @@ export default function FollowupHistoryPage() {
           </div>
         )}
 
-        {/* Legend */}
         <div className="mt-6 bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h3 className="text-lg font-bold text-gray-800 mb-4">คำอธิบายสัญลักษณ์</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -655,10 +599,8 @@ export default function FollowupHistoryPage() {
             <p><strong>ลำดับสัญลักษณ์:</strong> ปริมาณอาหาร | ชนิดอาหาร | การเคลื่อนไหว</p>
           </div>
         </div>
-
       </div>
 
-      {/* Print Styles */}
       <style jsx global>{`
         @media print {
           body {

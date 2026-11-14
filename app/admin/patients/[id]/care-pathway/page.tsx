@@ -1,8 +1,5 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ v12: ข้อ 1-6 ทำงานจริง (เหลือข้อ 3 placeholder)
-//    - ข้อ 4 → /admin/goals?patient_id=...&from=care-pathway
-//    - ข้อ 5 → ประวัติการทำตามเป้าหมาย (ตาราง records)
-//    - ข้อ 6 → ติดตามต่อเนื่อง (ตาราง appointment_followups) → /admin/patients/[id]/followup-history
+// ✅ v13: ข้อ 6 "ติดตามต่อเนื่อง" เชื่อมโยงไปยังหน้าบันทึกการติดตามผล และ ประวัติการติดตามผล พร้อมปุ่มกลับที่ถูกต้อง
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -11,8 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
   ArrowLeft, Route, UserCheck, Sparkles, Target, Loader2, Eye, Edit, Plus,
-  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History,
-  Activity, PhoneCall
+  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History
 } from 'lucide-react';
 
 const formatThaiDate = (d: string | null | undefined) => {
@@ -95,8 +91,8 @@ const STAGE_META = [
     id: 'trial',
     no: 5,
     title: 'ทดลองทำ',
-    description: 'ประวัติการทำตามเป้าหมาย — ตั้งแต่ตั้งเป้า ทำอะไรไปได้อย่างไรบ้าง (รายวัน)',
-    icon: Activity,
+    description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
+    icon: History,
     actionLabel: '➕ ดูบันทึกกิจกรรม',
     actionUrl: (p) => `/admin/patients/${p}/goals`,
     historyLabel: '📋 ดูประวัติการทำ',
@@ -106,12 +102,12 @@ const STAGE_META = [
     id: 'follow',
     no: 6,
     title: 'ติดตามต่อเนื่อง',
-    description: 'การตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติแต่ละครั้ง',
-    icon: PhoneCall,
+    description: 'ติดตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติแต่ละครั้ง',
+    icon: History,
     actionLabel: '➕ บันทึกการติดตามผล',
-    actionUrl: (p) => `/admin/patients/${p}/followup-history`,
-    historyLabel: '📋 ดูประวัติตามผล',
-    historyUrl: (p) => `/admin/patients/${p}/followup-history`,
+    actionUrl: (p) => `/admin/appointments/followup/new?patient_id=${p}`,
+    historyLabel: '📋 ดูประวัติการติดตามผล',
+    historyUrl: (p) => `/admin/patients/${p}/followup-history?from=care-pathway`,
   },
 ];
 
@@ -120,62 +116,6 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
   active:  { label: 'กำลังดำเนินการ',  badge: 'bg-blue-100 text-blue-700',     circle: 'bg-blue-500 text-white',    card: 'bg-blue-50/60 border-blue-300' },
   pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
 };
-
-// ✅ แปลง records → เหตุการณ์รายวัน (ข้อ 5)
-function buildRecordEvents(records: any[]): PathEvent[] {
-  const byDate = new Map<string, any[]>();
-  records.forEach(r => {
-    const d = (r.record_date || '').slice(0, 10);
-    if (!d) return;
-    if (!byDate.has(d)) byDate.set(d, []);
-    byDate.get(d)!.push(r);
-  });
-
-  return Array.from(byDate.entries())
-    .sort(([a], [b]) => b.localeCompare(a))
-    .slice(0, 14)
-    .map(([date, list]) => {
-      const done = list.filter(r => r.is_completed);
-      const notDone = list.filter(r => !r.is_completed);
-      const nameOf = (r: any) => r.activities?.activity_name_th || r.goal_name_th || r.goal_name || '-';
-      const notes = list.map(r => r.notes).filter(Boolean).join(' / ');
-      return {
-        key: `rec-${date}`,
-        date,
-        title: `ทำกิจกรรม ${done.length}/${list.length} รายการ`,
-        detail: [
-          done.length > 0 ? `✓ ${done.map(nameOf).join(', ')}` : '',
-          notDone.length > 0 ? `✗ ${notDone.map(nameOf).join(', ')}` : '',
-          notes ? `📝 ${notes}` : '',
-        ].filter(Boolean).join('  |  ') || '-',
-      };
-    });
-}
-
-// ✅ แปลง followups → เหตุการณ์ตามผล (ข้อ 6) เรียงใหม่→เก่า
-function buildFollowupEvents(followups: any[]): PathEvent[] {
-  return [...followups]
-    .sort((a, b) => new Date(b.followup_date || 0).getTime() - new Date(a.followup_date || 0).getTime())
-    .map((f, i, arr) => {
-      const no = arr.length - i; // ครั้งที่ 1,2,3... ตามลำดับเวลา
-      const bp = (f.blood_pressure_sys && f.blood_pressure_dia) ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : null;
-      return {
-        key: `fu-${f.id ?? i}`,
-        date: f.followup_date,
-        title: `ติดตามผลครั้งที่ ${no}`,
-        detail: [
-          f.weight != null ? `⚖️ ${f.weight} กก.` : '',
-          f.waist_circumference != null ? `รอบเอว ${f.waist_circumference} ซม.` : '',
-          bp ? `🩸 BP ${bp}` : '',
-          f.blood_sugar_dtx != null ? `🍬 น้ำตาล ${f.blood_sugar_dtx}` : '',
-          f.confidence_score != null ? `💪 มั่นใจ ${f.confidence_score}/10` : '',
-          f.food_type_status ? `🍚 อาหาร: ${f.food_type_status}` : '',
-          f.food_amount_status ? `ปริมาณ: ${f.food_amount_status}` : '',
-          f.movement_status ? `🚶 เคลื่อนไหว: ${f.movement_status}` : '',
-        ].filter(Boolean).join(' | ') || '-',
-      };
-    });
-}
 
 function buildStages(screenings: any[], dreams: any[], goals: any[], records: any[], followups: any[]): CareStage[] {
   const eventsByStage: Record<string, PathEvent[]> = {
@@ -216,8 +156,53 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
           ].filter(Boolean).join(' | ') || '-',
         }));
     })(),
-    trial: buildRecordEvents(records),
-    follow: buildFollowupEvents(followups),
+    trial: (() => {
+      const byDate = new Map<string, any[]>();
+      records.forEach(r => {
+        const d = (r.record_date || '').slice(0, 10);
+        if (!d) return;
+        if (!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d)!.push(r);
+      });
+      return Array.from(byDate.entries())
+        .sort(([a], [b]) => b.localeCompare(a))
+        .slice(0, 14)
+        .map(([date, list]) => {
+          const done = list.filter(r => r.is_completed);
+          const notDone = list.filter(r => !r.is_completed);
+          const nameOf = (r: any) => r.activities?.activity_name_th || r.goal_name_th || r.goal_name || '-';
+          const notes = list.map(r => r.notes).filter(Boolean).join(' / ');
+          return {
+            key: `rec-${date}`,
+            date,
+            title: `ทำกิจกรรม ${done.length}/${list.length} รายการ`,
+            detail: [
+              done.length > 0 ? `✓ ${done.map(nameOf).join(', ')}` : '',
+              notDone.length > 0 ? `✗ ${notDone.map(nameOf).join(', ')}` : '',
+              notes ? `📝 ${notes}` : '',
+            ].filter(Boolean).join('  |  ') || '-',
+          };
+        });
+    })(),
+    follow: followups.map((f, i, arr) => {
+      const no = arr.length - i;
+      const bp = (f.blood_pressure_sys && f.blood_pressure_dia) ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : null;
+      return {
+        key: `fu-${f.id ?? i}`,
+        date: f.followup_date,
+        title: `ติดตามผลครั้งที่ ${no}`,
+        detail: [
+          f.weight != null ? `⚖️ ${f.weight} กก.` : '',
+          f.waist_circumference != null ? `รอบเอว ${f.waist_circumference} ซม.` : '',
+          bp ? `🩸 BP ${bp}` : '',
+          f.blood_sugar_dtx != null ? `🍬 น้ำตาล ${f.blood_sugar_dtx}` : '',
+          f.confidence_score != null ? `💪 มั่นใจ ${f.confidence_score}/10` : '',
+          f.food_type_status ? `🍚 อาหาร: ${f.food_type_status}` : '',
+          f.food_amount_status ? `ปริมาณ: ${f.food_amount_status}` : '',
+          f.movement_status ? `🚶 เคลื่อนไหว: ${f.movement_status}` : '',
+        ].filter(Boolean).join(' | ') || '-',
+      };
+    }),
   };
 
   const doneFlags = [
@@ -246,7 +231,6 @@ export default function CarePathwayPage() {
   const [stages, setStages] = useState<CareStage[]>([]);
   const [records, setRecords] = useState<any[]>([]);
   const [followups, setFollowups] = useState<any[]>([]);
-  const [trialWarning, setTrialWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
   const [errorDetail, setErrorDetail] = useState('');
@@ -290,13 +274,11 @@ export default function CarePathwayPage() {
           .select('*').eq('user_id', patientId).eq('goal_type', 'weekly_activity')
           .in('status', ['active', 'archived'])
           .order('round_number', { ascending: false }).order('created_at', { ascending: false }),
-        // ✅ ข้อ 5: บันทึกกิจกรรมรายวัน
         supabase.from('records')
           .select(`*, activities ( activity_code, activity_name_th )`)
           .eq('user_id', patientId)
           .order('record_date', { ascending: false })
           .limit(120),
-        // ✅ ข้อ 6: การตามผล (appointment_followups)
         supabase.from('appointment_followups')
           .select('*')
           .eq('user_id', patientId)
@@ -306,20 +288,11 @@ export default function CarePathwayPage() {
 
       if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
       if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
+      if (recRes.error) console.warn('[CarePathway] records:', recRes.error.message);
       if (fuRes.error) console.warn('[CarePathway] appointment_followups:', fuRes.error.message);
 
-      if (recRes.error) {
-        console.error('[CarePathway] records error:', recRes.error);
-        setTrialWarning(`โหลดบันทึกกิจกรรมไม่ได้: ${recRes.error.message}`);
-        setRecords([]);
-      } else {
-        setTrialWarning('');
-        setRecords(recRes.data || []);
-      }
-
-      const fuList = fuRes.data || [];
-      setFollowups(fuList);
-      console.log(`✅ [CarePathway] records: ${recRes.data?.length || 0} | followups: ${fuList.length}`);
+      setRecords(recRes.data || []);
+      setFollowups(fuRes.data || []);
 
       const p = {
         ...prof,
@@ -329,7 +302,7 @@ export default function CarePathwayPage() {
       };
 
       setPatient(p);
-      const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || [], fuList);
+      const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || [], fuRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
       setErrorState('none');
@@ -348,7 +321,6 @@ export default function CarePathwayPage() {
   const toggle = (id: string) =>
     setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-  // ✅ สถิติข้อ 5
   const trialStats = (() => {
     const total = records.length;
     const done = records.filter(r => r.is_completed).length;
@@ -395,7 +367,6 @@ export default function CarePathwayPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-5xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/patients')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
@@ -419,7 +390,6 @@ export default function CarePathwayPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        {/* Patient Card */}
         <div className="bg-white rounded-xl shadow-lg p-6 border">
           <div className="flex items-start gap-4 flex-wrap">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-2xl font-bold text-blue-700">
@@ -462,7 +432,6 @@ export default function CarePathwayPage() {
           </div>
         </div>
 
-        {/* Stages */}
         <div>
           <h3 className="text-lg font-bold text-gray-800 mb-1">ขั้นตอนการดูแลสุขภาพ (Care Pathway)</h3>
           <p className="text-sm text-gray-500 mb-4">แต่ละขั้นมีปุ่มไปทำกิจกรรมของตัวเอง + ดูย้อนหลังได้</p>
@@ -471,7 +440,6 @@ export default function CarePathwayPage() {
               const ui = STATUS_UI[stage.status];
               const Icon = stage.icon;
               const isOpen = expanded.includes(stage.id);
-              // ✅ เหลือแค่ข้อ 3 ที่เป็น placeholder
               const isComingSoon = ['oneday'].includes(stage.id);
 
               return (
@@ -505,7 +473,6 @@ export default function CarePathwayPage() {
 
                   {isOpen && (
                     <div className="px-4 pb-4 pl-16">
-                      {/* ✅ สถิติข้อ 5 */}
                       {stage.id === 'trial' && trialStats.total > 0 && (
                         <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
                           <div className="bg-white border rounded-lg p-2 text-center">
@@ -529,46 +496,11 @@ export default function CarePathwayPage() {
                         </div>
                       )}
 
-                      {/* ✅ สถิติข้อ 6 */}
-                      {stage.id === 'follow' && followups.length > 0 && (() => {
-                        const latest = followups[0];
-                        const first = followups[followups.length - 1];
-                        const weightDiff = (latest?.weight != null && first?.weight != null)
-                          ? (Number(latest.weight) - Number(first.weight)).toFixed(1) : null;
-                        const sugarDiff = (latest?.blood_sugar_dtx != null && first?.blood_sugar_dtx != null)
-                          ? (Number(latest.blood_sugar_dtx) - Number(first.blood_sugar_dtx)).toFixed(0) : null;
-                        return (
-                          <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                            <div className="bg-white border rounded-lg p-2 text-center">
-                              <p className="text-[10px] text-gray-500">ตามผลทั้งหมด</p>
-                              <p className="text-lg font-bold text-gray-800">{followups.length} ครั้ง</p>
-                            </div>
-                            <div className="bg-white border rounded-lg p-2 text-center">
-                              <p className="text-[10px] text-gray-500">น้ำหนักล่าสุด</p>
-                              <p className="text-lg font-bold text-blue-600">{latest?.weight ?? '-'} กก.</p>
-                            </div>
-                            <div className="bg-white border rounded-lg p-2 text-center">
-                              <p className="text-[10px] text-gray-500">น้ำตาลล่าสุด</p>
-                              <p className="text-lg font-bold text-purple-600">{latest?.blood_sugar_dtx ?? '-'}</p>
-                            </div>
-                            <div className="bg-white border rounded-lg p-2 text-center">
-                              <p className="text-[10px] text-gray-500">เปลี่ยนแปลง</p>
-                              <p className={`text-lg font-bold ${weightDiff !== null && Number(weightDiff) < 0 ? 'text-green-600' : 'text-gray-700'}`}>
-                                {weightDiff !== null ? `${weightDiff > 0 ? '+' : ''}${weightDiff} กก.` :
-                                 sugarDiff !== null ? `${sugarDiff > 0 ? '+' : ''}${sugarDiff} mg` : '-'}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">
-                          {stage.id === 'trial'
-                            ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้บันทึกจากมือถือ) —'
-                            : stage.id === 'follow'
-                              ? '— ยังไม่มีประวัติการตามผล —'
-                              : '— ยังไม่มีบันทึกในขั้นนี้ —'}
+                          {stage.id === 'trial' ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —' : 
+                           stage.id === 'follow' ? '— ยังไม่มีประวัติการตามผล —' :
+                           '— ยังไม่มีบันทึกในขั้นนี้ —'}
                         </p>
                       ) : (
                         <div className="space-y-2 mb-3">
