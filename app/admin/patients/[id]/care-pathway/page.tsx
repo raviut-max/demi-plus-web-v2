@@ -12,7 +12,7 @@ import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supa
 import {
   ArrowLeft, Route, UserCheck, Sparkles, Target, Loader2, Eye, Edit, Plus,
   Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History,
-  Activity, TrendingUp
+  Activity
 } from 'lucide-react';
 
 const formatThaiDate = (d: string | null | undefined) => {
@@ -219,7 +219,7 @@ export default function CarePathwayPage() {
   const [user, setUser] = useState<any>(null);
   const [patient, setPatient] = useState<any>(null);
   const [stages, setStages] = useState<CareStage[]>([]);
-  const [records, setRecords] = useState<any[]>([]); // ✅ เก็บ records ไว้คำนวณสถิติ
+  const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
   const [errorDetail, setErrorDetail] = useState('');
@@ -428,6 +428,7 @@ export default function CarePathwayPage() {
               const ui = STATUS_UI[stage.status];
               const Icon = stage.icon;
               const isOpen = expanded.includes(stage.id);
+              // ✅ ข้อ 3, 6 เท่านั้นที่ยังรอปรับ — ข้อ 5 ทำงานแล้ว
               const isComingSoon = ['oneday', 'follow'].includes(stage.id);
 
               return (
