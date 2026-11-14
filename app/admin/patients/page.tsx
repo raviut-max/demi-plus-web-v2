@@ -1,10 +1,7 @@
 // app/admin/patients/page.tsx
-// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
-// ✅ การแก้ไข:
-//    1. แก้ typo setSearchTermIdCar d → setSearchTermIdCard
-//    2. เพิ่มปุ่ม "ดูระเบียนคนไข้" (FileText icon สี Indigo)
-//    3. เพิ่ม import FileText จาก lucide-react
+// ✅ แก้ไขล่าสุด: แก้ไขปุ่มให้ลิงก์ไปหน้า Care Pathway แทน /record (แก้ 404)
 'use client';
+
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
@@ -29,7 +26,7 @@ import {
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
   FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward, Download,
-  FileText
+  FileText, Route // ✅ เพิ่ม Route สำหรับปุ่ม Care Pathway
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -74,11 +71,11 @@ export default function PatientManagementPage() {
   const [filterHospitals, setFilterHospitals] = useState<any[]>([]);
   const [filterCoaches, setFilterCoaches] = useState<any[]>([]);
   const [loadingFilters, setLoadingFilters] = useState(false);
-  
+
   // Sort State
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  
+
   // Pagination State - แสดงหน้าละ 100 คน
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPatients, setTotalPatients] = useState(0);
@@ -96,7 +93,9 @@ export default function PatientManagementPage() {
       .select('id, type, parent_id')
       .eq('id', hospitalIdFilter)
       .single();
+    
     if (error || !hospital) return [hospitalIdFilter];
+    
     if (hospital.type === 'main') {
       const { data: subHospitals } = await supabase
         .from('hospitals')
@@ -116,6 +115,7 @@ export default function PatientManagementPage() {
       setLoadingFilters(true);
       const targetHospitalIds = await getHospitalIdsForFilter(hospitalIdFilter);
       const allCoaches = await getCoachesWithHospitals(targetHospitalIds);
+      
       const coachesWithCount = await Promise.all(allCoaches.map(async (c: any) => {
         try {
           const { count } = await supabase
@@ -128,7 +128,8 @@ export default function PatientManagementPage() {
           return { ...c, patientCount: 0, hospitalName: c.users?.hospitals?.name || 'ไม่ระบุ' };
         }
       }));
-      const sortedCoaches = [...coachesWithCount].sort((a, b) => 
+      
+      const sortedCoaches = [...coachesWithCount].sort((a, b) =>
         (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
       );
       setFilterCoaches(sortedCoaches);
@@ -203,6 +204,7 @@ export default function PatientManagementPage() {
     try {
       setLoadingFilters(true);
       const allHospitals = await getHospitalsWithHierarchy(isSuperAdmin(user) ? undefined : accessibleIds);
+      
       const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
         try {
           const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('hospital_id', h.id).eq('is_active', true);
@@ -211,6 +213,7 @@ export default function PatientManagementPage() {
           return { ...h, patientCount: 0, typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย' };
         }
       }));
+      
       const sortedHospitals = [...hospitalsWithCount].sort((a, b) => {
         if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
         return (a.name || '').localeCompare(b.name || '', 'th');
@@ -230,11 +233,12 @@ export default function PatientManagementPage() {
       const isAllHospitals = selectedHospitalFilter === 'all';
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
+      
       const pamParam = isAllPam ? undefined : selectedPamLevel;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
-      
+
       const total = await getPatientCount(
         searchTermNameHN,
         searchTermIdCard,
@@ -332,9 +336,9 @@ export default function PatientManagementPage() {
     let dataToExport = patients;
     if (mode === 'all') {
       await loadPatients(accessibleHospitalIds, true);
-      dataToExport = patients; 
+      dataToExport = patients;
     }
-    
+
     const exportData = await Promise.all(dataToExport.map(async (patient) => {
       const userId = patient.id;
       
@@ -379,7 +383,7 @@ export default function PatientManagementPage() {
       const formatBP = (sys: number | null, dia: number | null) => {
         return (sys && dia) ? `${sys}/${dia}` : '';
       };
-      
+
       const rowData: any = {
         // --- ส่วนที่ 1: ข้อมูลส่วนตัว (1-13) ---
         'ID Card': patient.users?.id_card || '',
@@ -404,7 +408,7 @@ export default function PatientManagementPage() {
         'คะแนน PROM (ล่าสุด)': lastPromsScore,
         'คะแนน PAM (ล่าสุด)': lastPamScore,
       };
-      
+
       // --- ส่วนที่ 3: รายละเอียดการติดตาม (สูงสุด 6 ครั้ง) ---
       for (let i = 0; i < 6; i++) {
         const followup = followups?.[i];
@@ -419,10 +423,9 @@ export default function PatientManagementPage() {
         rowData[`${prefix} แผนปฏิบัติชนิดอาหาร`] = followup?.food_type_status || '';
         rowData[`${prefix} แผนปฏิบัติการเคลื่อนไหว`] = followup?.movement_status || '';
       }
-      
       return rowData;
     }));
-    
+
     const ws = XLSX.utils.json_to_sheet(exportData);
     const baseCols = [
       { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 8 },
@@ -431,7 +434,7 @@ export default function PatientManagementPage() {
     ];
     const followupCols = Array(54).fill({ wch: 15 });
     ws['!cols'] = [...baseCols, ...followupCols];
-    
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
     const fileName = `patients_export_${mode}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
@@ -480,10 +483,10 @@ export default function PatientManagementPage() {
 
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
     if (user?.role === 'osm') {
-      alert(' อสม. ไม่มีสิทธิ์ลบถาวร');
+      alert('❌ อสม. ไม่มีสิทธิ์ลบถาวร');
       return;
     }
-    if (!confirm(`️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
+    if (!confirm(`⚠️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
     const secondConfirm = prompt('พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:');
     if (secondConfirm !== 'YES') {
       alert('ยกเลิกการลบถาวร');
@@ -495,7 +498,7 @@ export default function PatientManagementPage() {
         alert('✅ ลบถาวรสำเร็จ');
         await loadDeletedPatients(accessibleHospitalIds);
       } else {
-        alert(' เกิดข้อผิดพลาด: ' + result.error);
+        alert('❌ เกิดข้อผิดพลาด: ' + result.error);
       }
     } catch (error) {
       alert('❌ เกิดข้อผิดพลาด');
@@ -595,7 +598,7 @@ export default function PatientManagementPage() {
                         )}
                         {userHospital.type === 'main' && (
                           <div className="flex items-center gap-2 text-purple-600">
-                            <div className="w-4 h-4"></div>
+                            <div className="w-4 h-4">🏢</div>
                             <span>แม่ข่าย</span>
                           </div>
                         )}
@@ -847,13 +850,13 @@ export default function PatientManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          {/* ✅ ปุ่มใหม่: ดูระเบียนคนไข้ (PDF) - สี Indigo */}
+                          {/* ✅ ปุ่มใหม่: Care Pathway (แทนปุ่ม record เดิมที่ 404) */}
                           <button 
-                            onClick={() => router.push(`/admin/patients/${patient.id}/record`)} 
+                            onClick={() => router.push(`/admin/patients/${patient.id}/care-pathway`)} 
                             className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" 
-                            title="ดูระเบียนคนไข้ (PDF)"
+                            title="Care Pathway - เส้นทางดูแลสุขภาพ"
                           >
-                            <FileText className="w-4 h-4" />
+                            <Route className="w-4 h-4" />
                           </button>
                           <button 
                             onClick={() => router.push(`/admin/patients/${patient.id}`)} 
