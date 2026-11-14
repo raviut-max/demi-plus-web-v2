@@ -1,6 +1,10 @@
 // app/admin/goals-history/page.tsx
-// ✅ v2: ปรับ UI ให้เห็น "รอบ" ชัดเจน — Timeline bar + Section แยกแต่ละรอบ
-// ✅ รองรับ from parameter + patient_id auto-select
+// ✅ v3: รวมทุกฟีเจอร์ — Timeline bar + เป้าหมายหลัก + แสดงรอบ/วันที่ + from parameter
+//    1. Timeline bar อยู่ใต้ Patient Info Card (เหนือเป้าหมายหลัก)
+//    2. แสดงเป้าหมายหลัก 4 ประการ พร้อมรอบและวันที่ที่ตั้ง
+//    3. Header ของแต่ละรอบชัดเจน (กล่องสี 56×56)
+//    4. ขยายทุกรอบอัตโนมัติ + ปุ่มขยาย/ยุบทั้งหมด
+//    5. รองรับ from parameter สำหรับปุ่มกลับ
 'use client';
 
 import { useEffect, useState, Suspense, useCallback, useRef } from 'react';
@@ -10,7 +14,7 @@ import { supabase } from '@/lib/supabase/client';
 import {
   ArrowLeft, LogOut, Search, User, FileText, Calendar, History,
   CheckCircle, XCircle, Target, Loader2, ChevronDown, ChevronUp,
-  Trophy, CheckCircle2, Circle, Expand, Minimize, Clock, Layers
+  Trophy, CheckCircle2, Circle, Expand, Minimize, Layers
 } from 'lucide-react';
 
 // ---------- Types ----------
@@ -190,6 +194,7 @@ function GoalsHistoryContent() {
     }
   };
 
+  // ✅ Auto-select เมื่อมี patient_id จาก query
   useEffect(() => {
     if (patientIdFromQuery && patients.length > 0) {
       const patient = patients.find(p => p.id === patientIdFromQuery);
@@ -200,6 +205,7 @@ function GoalsHistoryContent() {
     }
   }, [patientIdFromQuery, patients]);
 
+  // ✅ โหลดประวัติเป้าหมาย + เป้าหมายหลัก
   const loadGoalHistory = useCallback(async (patientId: string) => {
     setHistoryLoading(true);
     try {
@@ -266,7 +272,7 @@ function GoalsHistoryContent() {
         setPrimaryGoalDate(null);
       }
 
-      // ✅ ขยายทุกรอบอัตโนมัติ (ให้เห็นข้อมูลชัดเจน)
+      // ✅ ขยายทุกรอบอัตโนมัติ
       if (history.length > 0) {
         setExpandedRounds(new Set(history.map(r => r.round_number)));
       }
@@ -317,7 +323,6 @@ function GoalsHistoryContent() {
     const el = roundRefs.current.get(roundNumber);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      // Highlight ชั่วคราว
       el.classList.add('ring-4', 'ring-blue-400', 'ring-opacity-50');
       setTimeout(() => el.classList.remove('ring-4', 'ring-blue-400', 'ring-opacity-50'), 1500);
     }
@@ -447,6 +452,42 @@ function GoalsHistoryContent() {
           </div>
         )}
 
+        {/* ✅ Timeline Bar — ย้ายขึ้นมาอยู่ใต้ Patient Info Card */}
+        {selectedPatient && goalHistory.length > 0 && (
+          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
+            <div className="flex items-center gap-2 mb-3">
+              <Layers className="w-4 h-4 text-blue-600" />
+              <p className="text-sm font-semibold text-blue-900">ทุกรอบ ({goalHistory.length} รอบ)</p>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto pb-2">
+              {goalHistory.map((round, idx) => (
+                <button
+                  key={round.round_number}
+                  onClick={() => scrollToRound(round.round_number)}
+                  className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                    round.is_current
+                      ? 'border-green-500 bg-green-50 text-green-800 shadow-sm'
+                      : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50'
+                  }`}
+                >
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                    round.is_current ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'
+                  }`}>
+                    {round.is_current ? <CheckCircle className="w-4 h-4" /> : round.round_number}
+                  </div>
+                  <div className="text-left">
+                    <p className="text-xs font-bold">รอบที่ {round.round_number}</p>
+                    <p className="text-[10px] text-gray-500">{round.goals_count} กิจกรรม</p>
+                  </div>
+                  {idx < goalHistory.length - 1 && (
+                    <span className="text-gray-300 ml-1">→</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ✅ เป้าหมายหลัก 4 ประการ */}
         {selectedPatient && (
           <div className="bg-white rounded-xl shadow-sm border">
@@ -528,7 +569,7 @@ function GoalsHistoryContent() {
           </div>
         )}
 
-        {/* ✅ ประวัติการบันทึกเป้าหมายรายสัปดาห์ — UI ใหม่ */}
+        {/* ✅ ประวัติการบันทึกเป้าหมายรายสัปดาห์ */}
         {selectedPatient && (
           <div className="bg-white rounded-xl shadow-sm border">
             <div className="p-6 border-b border-gray-200">
@@ -536,7 +577,7 @@ function GoalsHistoryContent() {
                 <div>
                   <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                     <History className="w-5 h-5 text-blue-600" />
-                    ประวัติการบันทึกเป้าหมายรายสัปดาห์
+                    ประวัติการบันทึกเป้าหมาย
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">
                     {goalHistory.length > 0
@@ -544,7 +585,6 @@ function GoalsHistoryContent() {
                       : 'ยังไม่มีประวัติ'}
                   </p>
                 </div>
-                {/* ✅ ปุ่มควบคุมการขยาย/ยุบ */}
                 {goalHistory.length > 1 && (
                   <div className="flex gap-2">
                     <button
@@ -576,190 +616,148 @@ function GoalsHistoryContent() {
                 <p className="text-sm mt-1">ผู้ป่วยยังไม่ได้ตั้งเป้าหมายในรอบใดๆ</p>
               </div>
             ) : (
-              <div className="p-6 space-y-6">
-                {/* ✅ Timeline Bar — แสดงทุกรอบแบบย่อ */}
-                <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-4 border border-blue-200">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Layers className="w-4 h-4 text-blue-600" />
-                    <p className="text-sm font-semibold text-blue-900">ไทม์ไลน์ทุกรอบ ({goalHistory.length} รอบ)</p>
-                  </div>
-                  <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                    {goalHistory.map((round, idx) => (
+              <div className="p-6 space-y-4">
+                {goalHistory.map((round) => {
+                  const isExpanded = expandedRounds.has(round.round_number);
+                  const roundRef = (el: HTMLDivElement | null) => {
+                    if (el) roundRefs.current.set(round.round_number, el);
+                  };
+
+                  return (
+                    <div
+                      key={round.round_number}
+                      ref={roundRef}
+                      className={`rounded-xl border-2 transition-all ${
+                        round.is_current
+                          ? 'border-green-400 bg-green-50/30 shadow-md'
+                          : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      {/* Header ของรอบ */}
                       <button
-                        key={round.round_number}
-                        onClick={() => scrollToRound(round.round_number)}
-                        className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
-                          round.is_current
-                            ? 'border-green-500 bg-green-50 text-green-800 shadow-sm'
-                            : 'border-gray-200 bg-white text-gray-700 hover:border-blue-300 hover:bg-blue-50'
-                        }`}
+                        onClick={() => toggleRound(round.round_number)}
+                        className="w-full p-5 text-left hover:bg-gray-50/50 transition-colors"
                       >
-                        <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                          round.is_current ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'
-                        }`}>
-                          {round.is_current ? <CheckCircle className="w-4 h-4" /> : round.round_number}
+                        <div className="flex items-center justify-between flex-wrap gap-3">
+                          <div className="flex items-center gap-4 flex-1 min-w-0">
+                            <div className={`shrink-0 w-14 h-14 rounded-xl flex flex-col items-center justify-center ${
+                              round.is_current
+                                ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg'
+                                : 'bg-gradient-to-br from-gray-400 to-gray-500 text-white'
+                            }`}>
+                              <span className="text-[10px] font-medium opacity-90">รอบที่</span>
+                              <span className="text-xl font-bold leading-none">{round.round_number}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="text-lg font-bold text-gray-800">
+                                  รอบที่ {round.round_number}
+                                </h3>
+                                {round.is_current && (
+                                  <span className="px-2.5 py-0.5 bg-green-500 text-white rounded-full text-xs font-bold flex items-center gap-1">
+                                    <CheckCircle className="w-3 h-3" /> ปัจจุบัน
+                                  </span>
+                                )}
+                                {!round.is_current && (
+                                  <span className="px-2.5 py-0.5 bg-gray-300 text-gray-700 rounded-full text-xs font-semibold">
+                                    Archived
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-4 mt-1.5 text-sm text-gray-600 flex-wrap">
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="w-3.5 h-3.5" />
+                                  {formatThaiDateTime(round.created_at)}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <FileText className="w-3.5 h-3.5" />
+                                  {round.goals_count} กิจกรรม
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                              round.is_current ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+                            }`}>
+                              {round.is_current ? 'Active' : 'Archived'}
+                            </span>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                              isExpanded ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-left">
-                          <p className="text-xs font-bold">รอบที่ {round.round_number}</p>
-                          <p className="text-[10px] text-gray-500">{round.goals_count} กิจกรรม</p>
-                        </div>
-                        {idx < goalHistory.length - 1 && (
-                          <span className="text-gray-300 ml-1">→</span>
-                        )}
                       </button>
-                    ))}
-                  </div>
-                </div>
 
-                {/* ✅ แต่ละรอบเป็น Section ชัดเจน */}
-                <div className="space-y-4">
-                  {goalHistory.map((round) => {
-                    const isExpanded = expandedRounds.has(round.round_number);
-                    const roundRef = (el: HTMLDivElement | null) => {
-                      if (el) roundRefs.current.set(round.round_number, el);
-                    };
-
-                    return (
-                      <div
-                        key={round.round_number}
-                        ref={roundRef}
-                        className={`rounded-xl border-2 transition-all ${
-                          round.is_current
-                            ? 'border-green-400 bg-green-50/30 shadow-md'
-                            : 'border-gray-200 bg-white'
-                        }`}
-                      >
-                        {/* ✅ Header ของรอบ — ใหญ่ ชัดเจน */}
-                        <button
-                          onClick={() => toggleRound(round.round_number)}
-                          className="w-full p-5 text-left hover:bg-gray-50/50 transition-colors"
-                        >
-                          <div className="flex items-center justify-between flex-wrap gap-3">
-                            <div className="flex items-center gap-4 flex-1 min-w-0">
-                              {/* หมายเลขรอบใหญ่ */}
-                              <div className={`shrink-0 w-14 h-14 rounded-xl flex flex-col items-center justify-center ${
-                                round.is_current
-                                  ? 'bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg'
-                                  : 'bg-gradient-to-br from-gray-400 to-gray-500 text-white'
-                              }`}>
-                                <span className="text-[10px] font-medium opacity-90">รอบที่</span>
-                                <span className="text-xl font-bold leading-none">{round.round_number}</span>
-                              </div>
-
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h3 className="text-lg font-bold text-gray-800">
-                                    รอบที่ {round.round_number}
-                                  </h3>
-                                  {round.is_current && (
-                                    <span className="px-2.5 py-0.5 bg-green-500 text-white rounded-full text-xs font-bold flex items-center gap-1">
-                                      <CheckCircle className="w-3 h-3" /> ปัจจุบัน
-                                    </span>
-                                  )}
-                                  {!round.is_current && (
-                                    <span className="px-2.5 py-0.5 bg-gray-300 text-gray-700 rounded-full text-xs font-semibold">
-                                      Archived
-                                    </span>
-                                  )}
+                      {/* เนื้อหาของรอบ */}
+                      {isExpanded && (
+                        <div className="px-5 pb-5 space-y-4 border-t border-gray-200 pt-4">
+                          {(round.primary_goal_note || round.weekly_goal_note) && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                              <h4 className="text-sm font-semibold text-blue-900 mb-2">📝 หมายเหตุ</h4>
+                              {round.primary_goal_note && (
+                                <div className="mb-2">
+                                  <p className="text-xs text-blue-700 font-medium">เป้าหมายหลัก:</p>
+                                  <p className="text-sm text-blue-800">{round.primary_goal_note}</p>
                                 </div>
-                                <div className="flex items-center gap-4 mt-1.5 text-sm text-gray-600 flex-wrap">
-                                  <span className="flex items-center gap-1">
-                                    <Calendar className="w-3.5 h-3.5" />
-                                    {formatThaiDateTime(round.created_at)}
-                                  </span>
-                                  <span className="flex items-center gap-1">
-                                    <FileText className="w-3.5 h-3.5" />
-                                    {round.goals_count} กิจกรรม
-                                  </span>
+                              )}
+                              {round.weekly_goal_note && (
+                                <div>
+                                  <p className="text-xs text-blue-700 font-medium">รายสัปดาห์:</p>
+                                  <p className="text-sm text-blue-800">{round.weekly_goal_note}</p>
                                 </div>
-                              </div>
+                              )}
                             </div>
+                          )}
 
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
-                                round.is_current ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
-                              }`}>
-                                {round.is_current ? 'Active' : 'Archived'}
-                              </span>
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                                isExpanded ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'
-                              }`}>
-                                {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                              </div>
-                            </div>
-                          </div>
-                        </button>
-
-                        {/* ✅ เนื้อหาของรอบ */}
-                        {isExpanded && (
-                          <div className="px-5 pb-5 space-y-4 border-t border-gray-200 pt-4">
-                            {/* หมายเหตุ */}
-                            {(round.primary_goal_note || round.weekly_goal_note) && (
-                              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                <h4 className="text-sm font-semibold text-blue-900 mb-2">📝 หมายเหตุ</h4>
-                                {round.primary_goal_note && (
-                                  <div className="mb-2">
-                                    <p className="text-xs text-blue-700 font-medium">เป้าหมายหลัก:</p>
-                                    <p className="text-sm text-blue-800">{round.primary_goal_note}</p>
-                                  </div>
-                                )}
-                                {round.weekly_goal_note && (
-                                  <div>
-                                    <p className="text-xs text-blue-700 font-medium">รายสัปดาห์:</p>
-                                    <p className="text-sm text-blue-800">{round.weekly_goal_note}</p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-
-                            {/* ตารางกิจกรรม */}
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-sm">
-                                <thead>
-                                  <tr className="bg-gray-100">
-                                    <th className="px-3 py-2 text-left font-semibold text-gray-700">กิจกรรม</th>
-                                    <th className="px-3 py-2 text-center font-semibold text-gray-700">วัน/สัปดาห์</th>
-                                    <th className="px-3 py-2 text-center font-semibold text-gray-700">ค่าเป้าหมาย</th>
-                                    <th className="px-3 py-2 text-center font-semibold text-gray-700">สถานะ</th>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-gray-100">
+                                  <th className="px-3 py-2 text-left font-semibold text-gray-700">กิจกรรม</th>
+                                  <th className="px-3 py-2 text-center font-semibold text-gray-700">วัน/สัปดาห์</th>
+                                  <th className="px-3 py-2 text-center font-semibold text-gray-700">ค่าเป้าหมาย</th>
+                                  <th className="px-3 py-2 text-center font-semibold text-gray-700">สถานะ</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-200">
+                                {round.goals.map((goal) => (
+                                  <tr key={goal.id} className="hover:bg-gray-50">
+                                    <td className="px-3 py-2">
+                                      <p className="font-medium text-gray-800">{goal.goal_name_th}</p>
+                                      <p className="text-xs text-gray-500">{goal.goal_name}</p>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span className="inline-block bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs font-semibold">
+                                        {goal.target_days} วัน
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      {goal.target_value ? (
+                                        <span className="text-gray-700">{goal.target_value} {goal.target_unit}</span>
+                                      ) : (
+                                        <span className="text-gray-400">-</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2 text-center">
+                                      <span className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${
+                                        goal.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'
+                                      }`}>
+                                        {goal.status}
+                                      </span>
+                                    </td>
                                   </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200">
-                                  {round.goals.map((goal) => (
-                                    <tr key={goal.id} className="hover:bg-gray-50">
-                                      <td className="px-3 py-2">
-                                        <p className="font-medium text-gray-800">{goal.goal_name_th}</p>
-                                        <p className="text-xs text-gray-500">{goal.goal_name}</p>
-                                      </td>
-                                      <td className="px-3 py-2 text-center">
-                                        <span className="inline-block bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs font-semibold">
-                                          {goal.target_days} วัน
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-2 text-center">
-                                        {goal.target_value ? (
-                                          <span className="text-gray-700">{goal.target_value} {goal.target_unit}</span>
-                                        ) : (
-                                          <span className="text-gray-400">-</span>
-                                        )}
-                                      </td>
-                                      <td className="px-3 py-2 text-center">
-                                        <span className={`inline-block px-2 py-1 rounded-full text-xs font-semibold ${
-                                          goal.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-700'
-                                        }`}>
-                                          {goal.status}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
