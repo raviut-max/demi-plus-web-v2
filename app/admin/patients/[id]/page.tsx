@@ -1,11 +1,5 @@
 // app/admin/patients/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 24 เมษายน 2569
-// ✅ การแก้ไข:
-//    1. ลบวันที่วินิจฉัยออก (ไม่ใช้แล้ว)
-//    2. เพิ่มแสดงค่าน้ำตาล (blood_sugar)
-//    3. ดึงข้อมูลนัดหมาย/ประเมิน/ติดตาม จากฐานข้อมูลจริง
-//    4. ✅ เพิ่มการ์ดแสดงข้อมูลผู้ใช้งานในส่วนหัว
-//    5. ✅ อนุญาตให้ อสม. เข้าถึงและใช้งานได้ (ยกเว้นลบข้อมูล)
+// ✅ แก้ไขล่าสุด: เพิ่มปุ่มนำทางไปยังหน้า Care Pathway
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
@@ -31,7 +25,8 @@ import {
   Heart,
   Hospital,
   Shield,
-  Building2
+  Building2,
+  Route // ✅ เพิ่ม Icon Route สำหรับปุ่ม Care Pathway
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -56,7 +51,7 @@ export default function PatientDetailPage() {
   
   // ✅ ตรวจสอบว่ามาจากไหน
   const fromPage = searchParams.get('from') || 'patients';
-  
+
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -73,14 +68,12 @@ export default function PatientDetailPage() {
       router.push('/admin/login');
       return;
     }
-    
     // ✅ อนุญาตให้ อสม. เข้าถึงได้
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-    
     setUser(userData);
     loadUserHospital(userData.id);
     loadData();
@@ -100,6 +93,7 @@ export default function PatientDetailPage() {
       console.log('📡 Loading patient detail:', patientId);
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
+      console.log('📋 [DEBUG] Patient data loaded:', patientData);
 
       // ✅ โหลดข้อมูลจริงจากฐานข้อมูล
       await Promise.all([
@@ -132,7 +126,6 @@ export default function PatientDetailPage() {
       if (error && error.code !== 'PGRST116') {
         console.error('Error fetching next appointment:', error);
       }
-
       console.log('📋 Next appointment:', data);
       setNextAppointment(data || null);
     } catch (err) {
@@ -258,7 +251,6 @@ export default function PatientDetailPage() {
   // ✅ ฟังก์ชันแสดง Badge บทบาท
   const getRoleBadge = () => {
     if (!user) return null;
-    
     const roleConfig: any = {
       'osm': { 
         text: '🏘️ อสม.', 
@@ -281,13 +273,11 @@ export default function PatientDetailPage() {
         textCol: 'text-yellow-700'
       }
     };
-
     const config = roleConfig[user.role] || { 
       text: user.role, 
       bg: 'bg-gray-100', 
       textCol: 'text-gray-700'
     };
-
     return (
       <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>
         {config.text}
@@ -316,7 +306,7 @@ export default function PatientDetailPage() {
             <ArrowLeft className="w-4 h-4" />
             กลับ{fromPage === 'appointments' ? 'หน้าดูนัดหมาย' : 'รายการผู้ป่วย'}
           </button>
-
+          
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-800 mb-2">
@@ -342,7 +332,6 @@ export default function PatientDetailPage() {
                     </h3>
                     {getRoleBadge()}
                   </div>
-                  
                   {/* ข้อมูลโรงพยาบาล */}
                   {userHospital && (
                     <div className="space-y-1.5 text-xs">
@@ -352,7 +341,6 @@ export default function PatientDetailPage() {
                           {userHospital.name}
                         </span>
                       </div>
-                      
                       {/* แสดงประเภทโรงพยาบาล */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1.5 text-green-600">
@@ -362,7 +350,6 @@ export default function PatientDetailPage() {
                           </span>
                         </div>
                       )}
-                      
                       {userHospital.type === 'main' && (
                         <div className="flex items-center gap-1.5 text-purple-600">
                           <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
@@ -374,7 +361,7 @@ export default function PatientDetailPage() {
                 </div>
               </div>
             </div>
-
+            
             <div className="flex gap-2">
               <button
                 onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
@@ -383,7 +370,6 @@ export default function PatientDetailPage() {
                 <Edit className="w-4 h-4" />
                 แก้ไขข้อมูล
               </button>
-              
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
@@ -398,14 +384,10 @@ export default function PatientDetailPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        
-        {/* 
-        ========================================
-        ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม
-        ========================================
-        */}
+        {/* ========================================
+            ✅ SUMMARY CARDS - ปุ่มนำทางหลัก 4 ปุ่ม
+            ======================================== */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          
           {/* ✅ 1. ปุ่มสีฟ้า - นัดหมายครั้งถัดไป */}
           <div 
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
@@ -488,12 +470,19 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* 
-        ========================================
-        ✅ ACTION BUTTONS - ปุ่มเพิ่มเติม
-        ========================================
-        */}
+        {/* ========================================
+            ✅ ACTION BUTTONS - ปุ่มเพิ่มเติม (เพิ่มปุ่ม Care Pathway ที่นี่)
+            ======================================== */}
         <div className="flex flex-wrap gap-2 mb-6">
+          {/* ✅ ปุ่มใหม่: เส้นทางสุขภาพ (Care Pathway) */}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/care-pathway`)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all shadow-sm"
+          >
+            <Route className="w-4 h-4" />
+            เส้นทางสุขภาพ (Care Pathway)
+          </button>
+
           <button
             onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
@@ -501,7 +490,6 @@ export default function PatientDetailPage() {
             <ClipboardCheck className="w-4 h-4" />
             ทำแบบประเมิน (PAM/PROMs)
           </button>
-          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/screening-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -509,7 +497,6 @@ export default function PatientDetailPage() {
             <FileText className="w-4 h-4" />
             ดูประวัติการประเมิน
           </button>
-          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/followup-history`)}
             className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
@@ -517,7 +504,6 @@ export default function PatientDetailPage() {
             <Activity className="w-4 h-4" />
             ดูประวัติการติดตาม
           </button>
-          
           <button
             onClick={() => router.push(`/admin/patients/${patientId}/appointments`)}
             className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
@@ -527,13 +513,10 @@ export default function PatientDetailPage() {
           </button>
         </div>
 
-        {/* 
-        ========================================
-        ✅ Patient Info Cards - ข้อมูลผู้ป่วย
-        ========================================
-        */}
+        {/* ========================================
+            ✅ Patient Info Cards - ข้อมูลผู้ป่วย
+            ======================================== */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
           {/* ข้อมูลส่วนตัว */}
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -703,7 +686,6 @@ export default function PatientDetailPage() {
                   <Hospital className="w-4 h-4 text-blue-600" />
                   <p className="font-bold text-gray-800">โรงพยาบาลสังกัด</p>
                 </div>
-                
                 {patient?.hospitals ? (
                   <div className="space-y-2">
                     {/* ชื่อโรงพยาบาล */}
@@ -716,7 +698,6 @@ export default function PatientDetailPage() {
                         ({patient.hospitals.code})
                       </p>
                     </div>
-                    
                     {/* ประเภทโรงพยาบาล */}
                     <div>
                       <p className="text-gray-500 text-xs">ประเภท</p>
@@ -746,17 +727,14 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        {/* 
-        ========================================
-        ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน (1 คน)
-        ========================================
-        */}
+        {/* ========================================
+            ✅ Emergency Contact - ผู้ติดต่อฉุกเฉิน (1 คน)
+            ======================================== */}
         <div className="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
             <Heart className="w-6 h-6 text-red-500" />
             ผู้ติดต่อฉุกเฉิน
           </h2>
-          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* ผู้ติดต่อฉุกเฉิน (1 คน) */}
             <div className="border border-gray-200 rounded-lg p-4">
@@ -787,7 +765,6 @@ export default function PatientDetailPage() {
             </div>
           </div>
         </div>
-
       </div>
     </div>
   );
