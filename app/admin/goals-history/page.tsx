@@ -1,5 +1,5 @@
 // app/admin/goals-history/page.tsx
-// ✅ เพิ่มแสดงเป้าหมายหลัก 4 ประการ (Core Performance Goals)
+// ✅ แก้ไข: แสดงรอบและวันที่ของเป้าหมายหลัก (Core Performance Goals)
 // ✅ รองรับ from parameter + patient_id auto-select
 'use client';
 
@@ -23,7 +23,7 @@ interface Patient {
   pam_level: string;
   phone?: string;
   hospital_id?: string;
-  primary_goal_code?: string; // ✅ เพิ่ม
+  primary_goal_code?: string;
   hospitals?: { name: string; type: string } | null;
 }
 
@@ -97,6 +97,10 @@ function GoalsHistoryContent() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [expandedRounds, setExpandedRounds] = useState<Set<number>>(new Set());
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+
+  // ✅ State ใหม่: ข้อมูลเป้าหมายหลัก
+  const [primaryGoalRound, setPrimaryGoalRound] = useState<number | null>(null);
+  const [primaryGoalDate, setPrimaryGoalDate] = useState<string | null>(null);
 
   // ✅ คำนวณปุ่มกลับตาม from
   const backTarget = (() => {
@@ -243,9 +247,29 @@ function GoalsHistoryContent() {
 
       setGoalHistory(history);
 
-      // ✅ อัปเดต selectedPatient ให้มี primary_goal_code (เพื่อแสดงการ์ดเป้าหมายหลัก)
+      // ✅ หาว่าเป้าหมายหลักถูกตั้งในรอบไหน
       if (profileData?.primary_goal_code) {
         setSelectedPatient(prev => prev ? { ...prev, primary_goal_code: profileData.primary_goal_code } : prev);
+
+        // ✅ หา round ที่มี primary_goal_note (แสดงว่ารอบนั้นมีการตั้งเป้าหมายหลัก)
+        const roundWithPrimaryNote = history.find(r => r.primary_goal_note);
+        if (roundWithPrimaryNote) {
+          setPrimaryGoalRound(roundWithPrimaryNote.round_number);
+          setPrimaryGoalDate(roundWithPrimaryNote.created_at);
+        } else {
+          // ถ้าไม่มี primary_goal_note → ใช้รอบแรกสุด (round_number น้อยที่สุด)
+          const firstRound = history.length > 0 ? history[history.length - 1] : null;
+          if (firstRound) {
+            setPrimaryGoalRound(firstRound.round_number);
+            setPrimaryGoalDate(firstRound.created_at);
+          } else {
+            setPrimaryGoalRound(null);
+            setPrimaryGoalDate(null);
+          }
+        }
+      } else {
+        setPrimaryGoalRound(null);
+        setPrimaryGoalDate(null);
       }
 
       // ขยายรอบแรกอัตโนมัติ
@@ -423,11 +447,28 @@ function GoalsHistoryContent() {
                 <Trophy className="w-5 h-5 text-purple-600" />
                 เป้าหมายหลัก 4 ประการ (Core Performance Goals)
               </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                {selectedPatient.primary_goal_code
-                  ? `เป้าหมายหลักที่เลือก: ${LONG_TERM_GOALS.find(g => g.code === selectedPatient.primary_goal_code)?.name_th || '-'}`
-                  : 'ยังไม่ได้เลือกเป้าหมายหลัก'}
-              </p>
+              <div className="mt-2 space-y-1">
+                {selectedPatient.primary_goal_code ? (
+                  <>
+                    <p className="text-sm text-gray-700">
+                      <span className="font-semibold">เป้าหมายหลักที่เลือก:</span>{' '}
+                      {LONG_TERM_GOALS.find(g => g.code === selectedPatient.primary_goal_code)?.name_th || '-'}
+                    </p>
+                    {/* ✅ แสดงรอบและวันที่ของเป้าหมายหลัก */}
+                    {primaryGoalRound && primaryGoalDate && (
+                      <p className="text-xs text-purple-600 flex items-center gap-2">
+                        <Calendar className="w-3 h-3" />
+                        <span>
+                          ตั้งตั้งแต่ <strong>รอบที่ {primaryGoalRound}</strong> ·{' '}
+                          <strong>{formatThaiDateTime(primaryGoalDate)}</strong>
+                        </span>
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-500">ยังไม่ได้เลือกเป้าหมายหลัก</p>
+                )}
+              </div>
             </div>
             <div className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -470,7 +511,6 @@ function GoalsHistoryContent() {
                   );
                 })}
               </div>
-
               {/* ✅ แสดงหมายเหตุเป้าหมายหลัก (ถ้ามี) */}
               {goalHistory[0]?.primary_goal_note && (
                 <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
