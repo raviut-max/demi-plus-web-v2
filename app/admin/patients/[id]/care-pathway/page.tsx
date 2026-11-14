@@ -1,8 +1,8 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ v10: ข้อ 5 "ทดลองทำ" ทำงานจริง — ดึงประวัติ records (บันทึกกิจกรรมรายวัน) มาแสดง
-//    - ข้อ 1-5 ทำงานจริง, ข้อ 6 placeholder
-//    - ข้อ 4 → /admin/goals?patient_id=...&from=care-pathway
-//    - ข้อ 5 → สรุปสถิติ + เหตุการณ์รายวัน (ทำได้/ไม่ได้ + หมายเหตุ)
+// ✅ v11: ข้อ 5 "ทดลองทำ" แสดงประวัติการทำตามเป้าหมายจริง (ตาราง records)
+//    - สถิติ 4 ช่อง (ทั้งหมด / ทำได้ / วันที่บันทึก / อัตราสำเร็จ)
+//    - เหตุการณ์รายวัน ✓ ทำได้ / ✗ ไม่ได้ + หมายเหตุ
+//    - ถ้าโหลด records ไม่ได้ → แสดงคำเตือนสีแดงบนหน้าทันที (ไม่เงียบ)
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -95,11 +95,11 @@ const STAGE_META = [
     id: 'trial',
     no: 5,
     title: 'ทดลองทำ',
-    description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
+    description: 'ประวัติการทำตามเป้าหมาย — ตั้งแต่ตั้งเป้า ทำอะไรไปได้อย่างไรบ้าง (รายวัน)',
     icon: Activity,
-    actionLabel: '➕ ดูบันทึกกิจกรรม',
+    actionLabel: '➕ ดูบันทึกกิจกรรมรายวัน',
     actionUrl: (p) => `/admin/patients/${p}/goals`,
-    historyLabel: '📋 ดูประวัติการทำ',
+    historyLabel: '📋 ดูประวัติการทำ (7 วัน / 30 วัน)',
     historyUrl: (p) => `/admin/patients/${p}/goals`,
   },
   {
@@ -121,7 +121,7 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
   pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
 };
 
-// ✅ แปลง records → เหตุการณ์รายวัน (กลุ่มตามวันที่)
+// ✅ แปลง records → เหตุการณ์รายวัน (กลุ่มตามวันที่) ใหม่→เก่า แสดง 14 วันล่าสุด
 function buildRecordEvents(records: any[]): PathEvent[] {
   const byDate = new Map<string, any[]>();
   records.forEach(r => {
@@ -132,8 +132,8 @@ function buildRecordEvents(records: any[]): PathEvent[] {
   });
 
   return Array.from(byDate.entries())
-    .sort(([a], [b]) => b.localeCompare(a)) // ใหม่ → เก่า
-    .slice(0, 14) // แสดง 14 วันล่าสุด
+    .sort(([a], [b]) => b.localeCompare(a))
+    .slice(0, 14)
     .map(([date, list]) => {
       const done = list.filter(r => r.is_completed);
       const notDone = list.filter(r => !r.is_completed);
@@ -220,6 +220,7 @@ export default function CarePathwayPage() {
   const [patient, setPatient] = useState<any>(null);
   const [stages, setStages] = useState<CareStage[]>([]);
   const [records, setRecords] = useState<any[]>([]);
+  const [trialWarning, setTrialWarning] = useState(''); // ✅ แจ้งเตือนเมื่อโหลด records ไม่ได้
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
   const [errorDetail, setErrorDetail] = useState('');
@@ -263,7 +264,7 @@ export default function CarePathwayPage() {
           .select('*').eq('user_id', patientId).eq('goal_type', 'weekly_activity')
           .in('status', ['active', 'archived'])
           .order('round_number', { ascending: false }).order('created_at', { ascending: false }),
-        // ✅ ข้อ 5: ดึงบันทึกกิจกรรมรายวัน (120 รายการล่าสุด ≈ 24 สัปดาห์)
+        // ✅ ข้อ 5: บันทึกกิจกรรมรายวัน (ล่าสุด 120 รายการ)
         supabase.from('records')
           .select(`*, activities ( activity_code, activity_name_th )`)
           .eq('user_id', patientId)
@@ -273,10 +274,22 @@ export default function CarePathwayPage() {
 
       if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
       if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
-      if (recRes.error) console.warn('[CarePathway] records:', recRes.error.message);
 
-      const recList = recRes.data || [];
-      setRecords(recList);
+      // ✅ ตรวจผล records ชัดเจน — ไม่ปล่อยเงียบ
+      if (recRes.error) {
+        console.error('[CarePathway] records error:', recRes.error);
+        setTrialWarning(`โหลดบันทึกกิจกรรมไม่ได้: ${recRes.error.message}`);
+        setRecords([]);
+      } else {
+        const list = recRes.data || [];
+        console.log(`✅ [CarePathway] records loaded: ${list.length} รายการ`);
+        if (list.length === 0) {
+          setTrialWarning(''); // ไม่มีบันทึกจริง → แสดง empty state ปกติ
+        } else {
+          setTrialWarning('');
+        }
+        setRecords(list);
+      }
 
       const p = {
         ...prof,
@@ -286,8 +299,9 @@ export default function CarePathwayPage() {
       };
 
       setPatient(p);
-      const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recList);
+      const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || []);
       setStages(built);
+      // ✅ ขยายทุกขั้นที่มีข้อมูล รวมถึงข้อ 5
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
       setErrorState('none');
       setErrorDetail('');
@@ -305,7 +319,7 @@ export default function CarePathwayPage() {
   const toggle = (id: string) =>
     setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
-  // ✅ สถิติข้อ 5 (ทดลองทำ)
+  // ✅ สถิติข้อ 5
   const trialStats = (() => {
     const total = records.length;
     const done = records.filter(r => r.is_completed).length;
@@ -428,7 +442,7 @@ export default function CarePathwayPage() {
               const ui = STATUS_UI[stage.status];
               const Icon = stage.icon;
               const isOpen = expanded.includes(stage.id);
-              // ✅ ข้อ 3, 6 เท่านั้นที่ยังรอปรับ — ข้อ 5 ทำงานแล้ว
+              // ✅ เหลือแค่ข้อ 3 และ 6 ที่เป็น placeholder — ข้อ 5 ทำงานจริงแล้ว
               const isComingSoon = ['oneday', 'follow'].includes(stage.id);
 
               return (
@@ -485,9 +499,21 @@ export default function CarePathwayPage() {
                         </div>
                       )}
 
+                      {/* ✅ คำเตือนเฉพาะข้อ 5 ถ้าโหลด records ไม่ได้ */}
+                      {stage.id === 'trial' && trialWarning && (
+                        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                          <p className="text-xs font-semibold text-red-600">⚠️ {trialWarning}</p>
+                          <p className="text-[11px] text-red-500 mt-1">
+                            ตรวจสอบ RLS ตาราง records (รัน SQL ในคู่มือ) แล้วกด "ลองใหม่"
+                          </p>
+                        </div>
+                      )}
+
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">
-                          {stage.id === 'trial' ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —' : '— ยังไม่มีบันทึกในขั้นนี้ —'}
+                          {stage.id === 'trial'
+                            ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้บันทึกจากมือถือ) —'
+                            : '— ยังไม่มีบันทึกในขั้นนี้ —'}
                         </p>
                       ) : (
                         <div className="space-y-2 mb-3">
