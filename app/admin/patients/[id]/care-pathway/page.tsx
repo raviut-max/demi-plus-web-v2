@@ -1,6 +1,7 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ สร้างใหม่: หน้า Care Pathway (เส้นทางดูแลสุขภาพรายบุคคล)
-// คำนวณสถานะ 6 ขั้นตอนอัตโนมัติจาก: screenings + appointment_followups + profiles
+// ✅ v2: แก้ "ไม่พบข้อมูลผู้ป่วย" ทุกคน
+//    1. เลิกใช้ embed users/hospitals (ต้นเหตุ query error) → ดึงทีละตารางแทน
+//    2. แสดง error จริงบนหน้าจอ + console.log เพื่อ debug
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -66,37 +67,31 @@ function buildStages(patient: any, screenings: any[], followups: any[]): CareSta
   const fmtBP = (s: any, d: any) => (s && d ? `${s}/${d}` : '-');
 
   const eventsByStage: StageEvent[][] = [
-    // 1: ทุกครั้งของการคัดกรอง/ประเมิน
     screenings.map((s, i) => ({
       date: s.screening_date,
       title: `คัดกรอง/ประเมินครั้งที่ ${i + 1}`,
       detail: `คะแนน PAM: ${s.pam_total_score ?? '-'} | วันที่ ${formatThaiDate(s.screening_date)}`,
     })),
-    // 2: ข้อมูลวินิจฉัย
     hasDiagnosis ? [{
       date: patient.updated_at,
       title: `กลุ่มเสี่ยง/ชนิด: ${patient.diabetes_type || 'บันทึกแล้ว'}`,
       detail: `HbA1C: ${patient.hba1c_level ?? '-'} | น้ำตาล: ${patient.blood_sugar ?? '-'} | BMI: ${patient.bmi ?? '-'}`,
     }] : [],
-    // 3: สถานะ PAM ปัจจุบัน
     pamNum >= 2 ? [{
       date: lastFu?.followup_date || patient.updated_at,
       title: `PAM Level ปัจจุบัน: ${patient.pam_level}`,
       detail: `ความมั่นใจล่าสุด: ${lastFu?.confidence_score ?? '-'}%`,
     }] : [],
-    // 4: นัดติดตามทั้งหมด
     followups.map((f, i) => ({
       date: f.followup_date,
       title: `นัดติดตามครั้งที่ ${i + 1}`,
       detail: `น้ำหนัก ${f.weight ?? '-'} กก. | รอบเอว ${f.waist_circumference ?? '-'} | ความดัน ${fmtBP(f.blood_pressure_sys, f.blood_pressure_dia)} | น้ำตาล ${f.blood_sugar_dtx ?? '-'} | ${formatThaiDate(f.followup_date)}`,
     })),
-    // 5: แผนปฏิบัติที่บันทึกไว้ (อาหาร/เคลื่อนไหว)
     followups.filter(f => f.food_type_status || f.movement_status).map((f, i) => ({
       date: f.followup_date,
       title: `ปรับแผนดูแลครั้งที่ ${i + 1}`,
       detail: `ชนิดอาหาร: ${f.food_type_status || '-'} | ปริมาณอาหาร: ${f.food_amount_status || '-'} | เคลื่อนไหว: ${f.movement_status || '-'}`,
     })),
-    // 6: ผลลัพธ์ระยะยาว
     (pamNum >= 3 && followups.length >= 6) ? [{
       date: lastFu?.followup_date,
       title: 'คงพฤติกรรมดูแลต่อเนื่อง',
@@ -121,6 +116,7 @@ export default function CarePathwayPage() {
   const [stages, setStages] = useState<CareStage[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
+  const [errorDetail, setErrorDetail] = useState<string>(''); // ✅ แสดง error จริง
   const [expanded, setExpanded] = useState<string[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -136,42 +132,72 @@ export default function CarePathwayPage() {
     setUser(userData);
   }, [router]);
 
-  // โหลดข้อมูล
+  // ✅ โหลดข้อมูลแบบไม่ใช้ embed (แก้ต้นเหตุ query error)
   const load = useCallback(async () => {
     if (!user || !patientId) return;
     setLoading(true);
     try {
-      const { data: prof } = await supabase
+      // 1) profiles — query เดี่ยว ไม่ embed
+      const { data: prof, error: e1 } = await supabase
         .from('profiles')
-        .select('*, hospitals:hospitals(id, name, type), users:users(id, id_card)')
-        .eq('id', patientId).maybeSingle();
+        .select('*')
+        .eq('id', patientId)
+        .maybeSingle();
 
-      if (!prof) { setErrorState('notfound'); return; }
+      if (e1) {
+        console.error('❌ [CarePathway] profiles query error:', e1);
+        throw new Error('profiles: ' + e1.message);
+      }
+      if (!prof) {
+        console.error('❌ [CarePathway] ไม่พบแถว profiles สำหรับ id =', patientId);
+        setErrorDetail(`ไม่พบข้อมูลผู้ป่วย id: ${patientId} ในตาราง profiles`);
+        setErrorState('notfound');
+        return;
+      }
 
-      // ✅ Permission: non-super admin ดูได้เฉพาะในเครือข่ายตัวเอง
+      // 2) Permission: non-super admin ดูได้เฉพาะในเครือข่ายตัวเอง
       if (!isSuperAdmin(user)) {
         const ids = await getAccessibleHospitalIds(user.id);
         if (prof.hospital_id && !ids.includes(prof.hospital_id)) {
-          setErrorState('denied'); return;
+          setErrorState('denied');
+          return;
         }
       }
 
-      const [{ data: coach }, { data: screenings }, { data: followups }] = await Promise.all([
+      // 3) ดึงข้อมูลเสริมแบบ query เดี่ยว (ไม่ fatal ถ้าบางตัว error)
+      const [hospRes, uRes, coachRes, scrRes, fuRes] = await Promise.all([
+        prof.hospital_id
+          ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+        supabase.from('users').select('id_card').eq('id', patientId).maybeSingle(),
         prof.coach_id
           ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle()
-          : Promise.resolve({ data: null } as any),
+          : Promise.resolve({ data: null, error: null } as any),
         supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
         supabase.from('appointment_followups').select('*').eq('user_id', patientId).order('followup_date', { ascending: true }),
       ]);
 
-      const p = { ...prof, coach_name: coach?.data?.full_name_th || '-' };
+      if (uRes.error) console.warn('[CarePathway] users query error (ไม่ fatal):', uRes.error.message);
+      if (scrRes.error) console.warn('[CarePathway] screenings query error:', scrRes.error.message);
+      if (fuRes.error) console.warn('[CarePathway] followups query error:', fuRes.error.message);
+
+      // ประกอบ object ให้หน้าตาเหมือนเดิม (patient.hospitals / patient.users)
+      const p = {
+        ...prof,
+        hospitals: hospRes.data || null,
+        users: uRes.data || null,
+        coach_name: coachRes.data?.full_name_th || '-',
+      };
+
       setPatient(p);
-      const built = buildStages(p, screenings || [], followups || []);
+      const built = buildStages(p, scrRes.data || [], fuRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
       setErrorState('none');
-    } catch (e) {
-      console.error('CarePathway load error', e);
+      setErrorDetail('');
+    } catch (e: any) {
+      console.error('❌ [CarePathway] load error:', e);
+      setErrorDetail(e?.message || String(e));
       setErrorState('notfound');
     } finally {
       setLoading(false);
@@ -221,18 +247,31 @@ export default function CarePathwayPage() {
   if (errorState !== 'none' || !patient) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center max-w-md">
+        <div className="text-center max-w-lg">
           <AlertCircle className="w-16 h-16 mx-auto mb-4 text-red-300" />
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
             {errorState === 'denied' ? 'ไม่มีสิทธิ์เข้าถึงข้อมูลผู้ป่วยนี้' : 'ไม่พบข้อมูลผู้ป่วย'}
           </h2>
-          <p className="text-gray-600 mb-6">
+          <p className="text-gray-600 mb-4">
             {errorState === 'denied' ? 'ผู้ป่วยอยู่นอกเครือข่ายโรงพยาบาลของท่าน' : 'ผู้ป่วยอาจถูกลบหรือลิงก์ไม่ถูกต้อง'}
           </p>
-          <button onClick={() => router.push('/admin/patients')}
-            className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
-            กลับหน้าผู้ป่วย
-          </button>
+          {/* ✅ แสดง error จริงเพื่อ debug */}
+          {errorDetail && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
+              <p className="text-xs font-semibold text-red-600 mb-1">รายละเอียดข้อผิดพลาด (สำหรับแจ้งทีม dev):</p>
+              <p className="text-xs text-red-700 font-mono break-all">{errorDetail}</p>
+            </div>
+          )}
+          <div className="flex gap-2 justify-center">
+            <button onClick={() => load()}
+              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
+              ลองใหม่
+            </button>
+            <button onClick={() => router.push('/admin/patients')}
+              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+              กลับหน้าผู้ป่วย
+            </button>
+          </div>
         </div>
       </div>
     );
