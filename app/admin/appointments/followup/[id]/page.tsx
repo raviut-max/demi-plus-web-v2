@@ -1,24 +1,53 @@
 // app/admin/appointments/followup/[id]/page.tsx
-// ✅ แก้ไขล่าสุด: 16 มิถุนายน 2569
-// ✅ การปรับปรุง:
-//    1. เพิ่มฟิลด์ "วันที่ทำการติดตาม" (Default: วันปัจจุบัน, แก้ไขได้)
-//    2. ย้ายตำแหน่ง Input วันที่ไปไว้ส่วนที่ 1 (ข้อมูลสุขภาพ)
-//    3. รองรับโหมดแก้ไข (Edit Mode) และสร้างใหม่ (Insert Mode)
-//    4. Confirmation Dialog ก่อนบันทึก
+// ✅ แก้ไขล่าสุด: 14 พฤศจิกายน 2569
+// ✅ การปรับปรุง (เฉพาะส่วนที่ 1):
+//    1. เพิ่ม "ข้อมูลการเก็บข้อมูล": วันที่เก็บข้อมูลจริง + วันที่คีย์เข้าระบบ (auto)
+//    2. เพิ่มติ๊ก "วันเดียวกัน" — ติ๊กแล้วไม่ต้องเลือกวันที่ (ค่าเริ่มต้น = วันนี้)
+//    3. เพิ่ม Dropdown วิธีการเก็บข้อมูล + สถานที่เก็บข้อมูล
+//    4. แสดงกล่องเตือน "บันทึกย้อนหลัง (Retroactive Entry)" อัตโนมัติเมื่อวันต่างกัน
+//       พร้อมบังคับกรอกเหตุผล
+//    5. รองรับ Edit Mode (โหลดค่าเดิมครบ) — ส่วนที่ 2-8 คงเดิม
 'use client';
-
 import { useState, useEffect } from 'react';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { checkSession, logout, getUserHospitalInfo, isSuperAdmin, isHospitalAdmin } from '@/lib/supabase/queries';
 import { ArrowLeft, Save, Upload, AlertCircle, FileText, Calendar, User, Hospital, Edit3 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
+// ---------- ✅ Helper สำหรับส่วนที่ 1 (ข้อมูลการเก็บข้อมูล) ----------
+const THAI_MONTHS_SHORT = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+
+// "15 ต.ค." (พ.ศ.) จาก YYYY-MM-DD หรือ ISO
+const formatThaiShort = (d: string | null | undefined) => {
+  if (!d) return '-';
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return '-';
+  return `${date.getDate()} ${THAI_MONTHS_SHORT[date.getMonth()]} ${date.getFullYear() + 543}`;
+};
+
+// "18 ต.ค. 2569, 14:30 น." จาก ISO
+const formatEntryDateTime = (iso: string | null) => {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '-';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${d.getDate()} ${THAI_MONTHS_SHORT[d.getMonth()]} ${d.getFullYear() + 543}, ${hh}:${mm} น.`;
+};
+
+// จำนวนวันที่ต่าง (entry - collected) นับเฉพาะวัน
+const diffDays = (collected: string, entryIso: string) => {
+  if (!collected || !entryIso) return 0;
+  const a = new Date(collected); a.setHours(0, 0, 0, 0);
+  const b = new Date(entryIso);  b.setHours(0, 0, 0, 0);
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+};
+
 export default function FollowupPage() {
   const router = useRouter();
   const params = useParams();
   const searchParams = useSearchParams();
-  
-  const appointmentId = params.id as string; 
+  const appointmentId = params.id as string;
   const patientIdFromQuery = searchParams.get('patient_id');
   const isEditMode = searchParams.get('edit') === 'true' || (appointmentId && appointmentId !== 'new');
 
@@ -35,7 +64,11 @@ export default function FollowupPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingFollowupId, setEditingFollowupId] = useState<string | null>(null);
 
-  // ✅ Helper function สำหรับจัดรูปแบบวันที่เป็น YYYY-MM-DD สำหรับ input type="date"
+  // ✅ ใหม่: วันที่คีย์เข้าระบบ (auto) + ติ๊กวันเดียวกัน
+  const [entryDate, setEntryDate] = useState<string>('');
+  const [isSameDay, setIsSameDay] = useState(true);
+
+  // Helper: YYYY-MM-DD ของวันนี้
   const getTodayDateString = () => {
     const today = new Date();
     const yyyy = today.getFullYear();
@@ -45,9 +78,12 @@ export default function FollowupPage() {
   };
 
   const [formData, setFormData] = useState({
-    // ✅ เพิ่มฟิลด์วันที่ทำการติดตาม (Default: วันนี้)
-    followup_date: getTodayDateString(), 
-    
+    // ✅ วันที่เก็บข้อมูลจริง (ค่าเดิม = วันนี้)
+    followup_date: getTodayDateString(),
+    // ✅ ใหม่: ข้อมูลการเก็บข้อมูล
+    collection_method: 'in_person',
+    collection_location: 'home_visit',
+    retroactive_reason: '',
     // 1. ข้อมูลสุขภาพ
     weight: '',
     waist_circumference: '',
@@ -83,16 +119,15 @@ export default function FollowupPage() {
     followup_status: 'fair',
   });
 
+  // ✅ คำนวณสถานะ "บันทึกย้อนหลัง"
+  const retroDays = diffDays(formData.followup_date, entryDate);
+  const isRetroactive = !isSameDay && !!formData.followup_date && retroDays > 0;
+
   useEffect(() => {
     const userData = checkSession();
-    if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
+    if (!userData) { router.push('/admin/login'); return; }
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
-      router.push('/admin/login');
-      return;
+      alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
     }
     setUser(userData);
     loadUserHospital(userData.id);
@@ -113,6 +148,9 @@ export default function FollowupPage() {
       setError(null);
       let patientId = patientIdFromQuery;
 
+      // ✅ ตั้งค่าวันที่คีย์เริ่มต้น = ตอนนี้ (กรณีสร้างใหม่)
+      setEntryDate(new Date().toISOString());
+
       // โหลดข้อมูลเดิมถ้าเป็นโหมดแก้ไข
       if (isEditMode && appointmentId && appointmentId !== 'new') {
         const { data: existingFollowup, error: followupError } = await supabase
@@ -120,21 +158,27 @@ export default function FollowupPage() {
           .select('*')
           .eq('id', appointmentId)
           .single();
-
         if (followupError) throw followupError;
-        
         if (existingFollowup) {
           setEditingFollowupId(existingFollowup.id);
           setFollowupRound(existingFollowup.followup_round);
           patientId = existingFollowup.user_id;
-          
-          // แปลงวันที่จาก ISO เป็น YYYY-MM-DD สำหรับ input date
-          const followupDateStr = existingFollowup.followup_date 
-            ? new Date(existingFollowup.followup_date).toISOString().split('T')[0] 
+
+          const followupDateStr = existingFollowup.followup_date
+            ? new Date(existingFollowup.followup_date).toISOString().split('T')[0]
             : getTodayDateString();
 
+          // ✅ วันที่คีย์เดิม (ถ้ามี) — ไม่ทับของเก่า
+          const oldEntry = existingFollowup.data_entry_date || existingFollowup.created_at || new Date().toISOString();
+          setEntryDate(oldEntry);
+          // ✅ ถ้าเก็บวันเดียวกับที่คีย์ → ติ๊กวันเดียวกันอัตโนมัติ
+          setIsSameDay(diffDays(followupDateStr, oldEntry) === 0);
+
           setFormData({
-            followup_date: followupDateStr, // ✅ โหลดวันที่เดิม
+            followup_date: followupDateStr,
+            collection_method: existingFollowup.collection_method || 'in_person',
+            collection_location: existingFollowup.collection_location || 'home_visit',
+            retroactive_reason: existingFollowup.retroactive_reason || '',
             weight: existingFollowup.weight?.toString() || '',
             waist_circumference: existingFollowup.waist_circumference?.toString() || '',
             blood_pressure_sys: existingFollowup.blood_pressure_sys?.toString() || '',
@@ -162,23 +206,17 @@ export default function FollowupPage() {
             followup_status: existingFollowup.followup_status || 'fair',
           });
         }
-      } 
+      }
       // โหลด Appointment ถ้าเป็นการสร้างใหม่ผ่านนัดหมาย
       else if (appointmentId && appointmentId !== 'new') {
         const { data: aptData, error: aptError } = await supabase
-          .from('appointments')
-          .select('*')
-          .eq('id', appointmentId)
-          .single();
+          .from('appointments').select('*').eq('id', appointmentId).single();
         if (aptError) throw aptError;
         setAppointment(aptData);
         patientId = aptData.user_id;
-        
-        // ✅ ถ้ามีนัดหมาย ให้ใช้วันนัดหมายเป็นค่าเริ่มต้น (หรือจะคงเป็นวันนี้ก็ได้ตามต้องการ)
-        // ในที่นี้ผมตั้งเป็นวันปัจจุบันตามที่ขอ แต่ถ้าอยากใช้วันนัดหมายให้แก้ตรง getTodayDateString()
       }
 
-      // โหลดข้อมูลผู้ป่วย
+      // โหลดข้อมูลผู้ป่วย + ประวัติย้อนหลัง
       if (patientId) {
         const { data: profileData } = await supabase
           .from('profiles')
@@ -187,7 +225,6 @@ export default function FollowupPage() {
           .single();
         if (profileData) setPatientProfile(profileData);
 
-        // โหลดประวัติย้อนหลัง
         let query = supabase
           .from('appointment_followups')
           .select('*')
@@ -203,7 +240,6 @@ export default function FollowupPage() {
       if (!isEditMode && (appointment?.user_id || patientIdFromQuery)) {
         loadFollowupRound(patientIdFromQuery || appointment?.user_id);
       }
-
     } catch (err: any) {
       console.error('Error loading data:', err);
       setError('❌ เกิดข้อผิดพลาดในการโหลดข้อมูล: ' + err.message);
@@ -235,31 +271,22 @@ export default function FollowupPage() {
     if (!file) return;
     try {
       setUploading(true);
-      if (file.size > 5 * 1024 * 1024) {
-        alert('❌ ไฟล์มีขนาดใหญ่เกิน 5MB');
-        return;
-      }
-      if (!file.type.startsWith('image/')) {
-        alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น');
-        return;
-      }
+      if (file.size > 5 * 1024 * 1024) { alert('❌ ไฟล์มีขนาดใหญ่เกิน 5MB'); return; }
+      if (!file.type.startsWith('image/')) { alert('❌ กรุณาเลือกไฟล์รูปภาพเท่านั้น'); return; }
 
       const fileExt = file.name.split('.').pop();
       const timestamp = Date.now();
       const randomStr = Math.random().toString(36).substring(2, 15);
       const userId = patientIdFromQuery || appointment?.user_id || (editingFollowupId ? 'edit' : 'unknown');
       const fileName = `${userId}_${followupRound}_${fieldName}_${timestamp}_${randomStr}.${fileExt}`;
-
       const { error: uploadError } = await supabase.storage
         .from('followup-images')
         .upload(fileName, file, { cacheControl: '3600', upsert: false, contentType: file.type });
       if (uploadError) throw uploadError;
-
       const { data: signedUrlData, error: signedUrlError } = await supabase.storage
         .from('followup-images')
         .createSignedUrl(fileName, 60 * 60 * 24 * 365);
       if (signedUrlError || !signedUrlData?.signedUrl) throw new Error('ไม่สามารถสร้าง Signed URL ได้');
-
       setFormData({ ...formData, [fieldName]: signedUrlData.signedUrl });
       alert('✅ อัปโหลดรูปภาพสำเร็จ!');
     } catch (err: any) {
@@ -269,7 +296,7 @@ export default function FollowupPage() {
     }
   };
 
-  // Auto-generate summary logic
+  // Auto-generate summary logic (คงเดิม)
   useEffect(() => {
     const successes: string[] = [];
     const failures: string[] = [];
@@ -279,7 +306,6 @@ export default function FollowupPage() {
     else if (formData.food_type_status === 'not_completed') failures.push('ปรับชนิดอาหาร');
     if (formData.movement_status === 'completed') successes.push('การออกกำลังกาย/เคลื่อนไหวร่างกาย');
     else if (formData.movement_status === 'not_completed') failures.push('การออกกำลังกาย/เคลื่อนไหวร่างกาย');
-
     let summaryText = '';
     if (successes.length > 0) summaryText += `✅ สิ่งที่ทำได้สำเร็จ: ${successes.join(', ')}\n`;
     if (failures.length > 0) {
@@ -287,69 +313,71 @@ export default function FollowupPage() {
       summaryText += ` คำแนะนำ: ควรพยายามทำให้สม่ำเสมอมากขึ้นในเรื่องดังกล่าว`;
     }
     if (successes.length === 0 && failures.length === 0) summaryText = 'ยังไม่มีข้อมูลการประเมินผลการปฏิบัติกิจกรรม';
-
     setFormData(prev => ({ ...prev, summary: summaryText }));
   }, [formData.food_amount_status, formData.food_type_status, formData.movement_status]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const confirmMsg = isEditMode 
+
+    // ✅ Validation ส่วนที่ 1 ใหม่
+    if (!formData.followup_date) {
+      alert('❗ กรุณาระบุ "วันที่เก็บข้อมูลจริง"');
+      return;
+    }
+    if (isRetroactive && !formData.retroactive_reason.trim()) {
+      alert('❗ กรุณากรอก "เหตุผลบันทึกย้อนหลัง" เนื่องจากวันที่เก็บข้อมูลกับวันที่คีย์ไม่ตรงกัน');
+      return;
+    }
+
+    const confirmMsg = isEditMode
       ? '⚠️ ยืนยันการแก้ไข\n\nคุณต้องการแก้ไขผลการติดตามครั้งที่ ' + followupRound + ' ใช่หรือไม่?'
       : '⚠️ ยืนยันการบันทึก\n\nคุณต้องการบันทึกผลการติดตามนี้ใช่หรือไม่?';
-
     if (!window.confirm(confirmMsg)) return;
 
     setSaving(true);
     setError(null);
-
     try {
       const currentUser = checkSession();
       if (!currentUser || !currentUser.id) throw new Error('กรุณาเข้าสู่ระบบใหม่');
-
-      const userId = patientIdFromQuery || appointment?.user_id || formData.user_id;
-      
-      // ✅ แปลงวันที่จาก input (YYYY-MM-DD) เป็น ISO String สำหรับเก็บลง DB
+      const userId = patientIdFromQuery || appointment?.user_id || (formData as any).user_id;
       const isoFollowupDate = formData.followup_date ? new Date(formData.followup_date).toISOString() : new Date().toISOString();
 
       const followupData = {
         appointment_id: (appointmentId && appointmentId !== 'new' && !isEditMode) ? appointmentId : (appointment?.id || null),
         user_id: userId,
-        followup_date: isoFollowupDate, // ✅ ใช้วันที่ที่เลือก
+        followup_date: isoFollowupDate, // ✅ = วันที่เก็บข้อมูลจริง
+        // ✅ ใหม่: ข้อมูลการเก็บข้อมูล
+        data_entry_date: entryDate || new Date().toISOString(),
+        collection_method: formData.collection_method || 'in_person',
+        collection_location: formData.collection_location || null,
+        is_retroactive: isRetroactive,
+        retroactive_reason: isRetroactive ? formData.retroactive_reason.trim() : null,
         followup_round: followupRound,
-        
         weight: formData.weight ? parseFloat(formData.weight) : null,
         waist_circumference: formData.waist_circumference ? parseFloat(formData.waist_circumference) : null,
         blood_pressure_sys: formData.blood_pressure_sys ? parseInt(formData.blood_pressure_sys) : null,
         blood_pressure_dia: formData.blood_pressure_dia ? parseInt(formData.blood_pressure_dia) : null,
         blood_sugar_dtx: formData.blood_sugar_dtx ? parseFloat(formData.blood_sugar_dtx) : null,
-        
         life_schedule_image_url: formData.life_schedule_image_url || null,
         adaptation_summary: formData.adaptation_summary || null,
         adaptation_obstacles: formData.adaptation_obstacles || null,
         adaptation_opportunities: formData.adaptation_opportunities || null,
         adaptation_other: formData.adaptation_other || null,
-        
         floating_chart_image_url: formData.floating_chart_image_url || null,
         floating_chart_summary: formData.floating_chart_summary || null,
-        
         dream_card_image_url: formData.dream_card_image_url || null,
         dream_card_description: formData.dream_card_description || null,
-        
         food_amount_status: formData.food_amount_status,
         food_type_status: formData.food_type_status,
         movement_status: formData.movement_status,
         food_amount_note: formData.food_amount_note || null,
         food_type_note: formData.food_type_note || null,
         movement_note: formData.movement_note || null,
-        
         confidence_score: parseInt(formData.confidence_score.toString()),
         confidence_improvement_plan: formData.confidence_improvement_plan || null,
-        
         summary: formData.summary || null,
         recommendations: formData.recommendations || null,
-        
         followup_status: formData.followup_status,
-        
         conducted_by: currentUser.id,
         updated_at: new Date().toISOString(),
       };
@@ -360,15 +388,12 @@ export default function FollowupPage() {
       } else {
         const { error } = await supabase.from('appointment_followups').insert(followupData);
         if (error) throw error;
-
         if (appointmentId && appointmentId !== 'new') {
           await supabase.from('appointments').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', appointmentId);
         }
       }
-
       alert(isEditMode ? '✅ แก้ไขผลการติดตามสำเร็จ!' : '✅ บันทึกผลการติดตามสำเร็จ!');
       router.push(`/admin/patients/${userId}/followup-history`);
-      
     } catch (err: any) {
       console.error('Error saving followup:', err);
       setError(err.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
@@ -393,7 +418,6 @@ export default function FollowupPage() {
           <button onClick={() => router.back()} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
             <ArrowLeft className="w-4 h-4" /> กลับ
           </button>
-          
           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
@@ -412,7 +436,6 @@ export default function FollowupPage() {
                 ครั้งที่: <span className="font-bold text-blue-600">{followupRound}</span>
               </p>
             </div>
-
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-3 shadow-sm min-w-[280px]">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
@@ -465,30 +488,146 @@ export default function FollowupPage() {
       )}
 
       <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        
-        {/* 1. ข้อมูลสุขภาพ (เพิ่ม Input วันที่ตรงนี้) */}
+        {/* 1. ข้อมูลสุขภาพ — ✅ เพิ่ม "ข้อมูลการเก็บข้อมูล" ด้านบน */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
             บันทึกข้อมูลสุขภาพ
           </h2>
-          
-          {/* ✅ ส่วนเพิ่มใหม่: วันที่ทำการติดตาม */}
-          <div className="mb-6 pb-6 border-b border-gray-100">
-            <label className="block text-sm font-bold text-gray-800 mb-2 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-blue-600" />
-              วันที่ทำการติดตามนัดหมาย
-            </label>
-            <input 
-              type="date" 
-              name="followup_date" 
-              value={formData.followup_date} 
-              onChange={handleChange} 
-              className="w-full md:w-1/3 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
-            <p className="text-xs text-gray-500 mt-1">* สามารถเปลี่ยนแปลงได้ หากวันที่ติดตามไม่ตรงกับวันที่บันทึก</p>
-          </div>
 
+          {/* ============================================ */}
+          {/* ✅ ส่วนใหม่: ข้อมูลการเก็บข้อมูล             */}
+          {/* ============================================ */}
+          <div className="mb-6 pb-6 border-b border-gray-100">
+            <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-blue-600" />
+              📥 ข้อมูลการเก็บข้อมูล
+            </h3>
+
+            {/* ✅ ติ๊ก "วันเดียวกัน" */}
+            <label className="flex items-center gap-2 mb-4 p-3 bg-blue-50/60 border border-blue-200 rounded-lg cursor-pointer select-none hover:bg-blue-50 transition-colors">
+              <input
+                type="checkbox"
+                checked={isSameDay}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setIsSameDay(checked);
+                  if (checked) {
+                    // ✅ วันเดียวกัน → set เป็นวันนี้ + ล้างเหตุผลย้อนหลัง
+                    setFormData(prev => ({ ...prev, followup_date: getTodayDateString(), retroactive_reason: '' }));
+                  }
+                }}
+                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-gray-700">
+                🗓️ เก็บข้อมูลวันนี้ (วันเดียวกันกับวันที่คีย์) — <span className="text-gray-500">ไม่ต้องเลือกวันที่</span>
+              </span>
+            </label>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* วันที่เก็บข้อมูลจริง */}
+              <div>
+                <label className="block text-sm font-bold text-gray-800 mb-2">
+                  วันที่เก็บข้อมูลจริง <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  name="followup_date"
+                  value={formData.followup_date}
+                  onChange={handleChange}
+                  disabled={isSameDay}
+                  className={`w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                    isSameDay ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : 'bg-white'
+                  }`}
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {isSameDay
+                    ? 'วันเดียวกันกับวันที่คีย์เข้าระบบ'
+                    : 'วันที่ไปเยี่ยมบ้าน/วัดค่าจริง (อาจต่างจากวันที่คีย์)'}
+                </p>
+              </div>
+
+              {/* วันที่คีย์เข้าระบบ (auto) */}
+              <div>
+                <label className="block text-sm font-bold text-gray-800 mb-2">วันที่คีย์เข้าระบบ</label>
+                <div className="w-full px-4 py-2 bg-gray-100 border border-gray-200 rounded-lg text-gray-700">
+                  {entryDate ? formatEntryDateTime(entryDate) : '-'}
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {isEditMode ? 'วันที่คีย์ครั้งแรกของระเบียนนี้ (ไม่ทับค่าเดิม)' : 'บันทึกอัตโนมัติเมื่อคุณกดบันทึก'}
+                </p>
+              </div>
+
+              {/* วิธีการเก็บข้อมูล */}
+              <div>
+                <label className="block text-sm font-bold text-gray-800 mb-2">
+                  วิธีการเก็บข้อมูล <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="collection_method"
+                  value={formData.collection_method}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="in_person">เยี่ยมบ้าน/พบตัว (In-person)</option>
+                  <option value="phone">ทางโทรศัพท์ (Phone)</option>
+                  <option value="online">ออนไลน์/Telemedicine</option>
+                  <option value="clinic">ที่สถานบริการ (คลินิก/โรงพยาบาล)</option>
+                  <option value="other">อื่นๆ</option>
+                </select>
+              </div>
+
+              {/* สถานที่เก็บข้อมูล */}
+              <div>
+                <label className="block text-sm font-bold text-gray-800 mb-2">สถานที่เก็บข้อมูล</label>
+                <select
+                  name="collection_location"
+                  value={formData.collection_location}
+                  onChange={handleChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="home_visit">เยี่ยมบ้าน</option>
+                  <option value="hospital">โรงพยาบาล</option>
+                  <option value="health_center">รพ.สต./ศูนย์สุขภาพชุมชน</option>
+                  <option value="clinic">คลินิก</option>
+                  <option value="online">ออนไลน์</option>
+                  <option value="other">อื่นๆ</option>
+                </select>
+              </div>
+            </div>
+
+            {/* ✅ กล่องเตือนบันทึกย้อนหลัง (แสดงเมื่อวันต่างกัน) */}
+            {isRetroactive && (
+              <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-bold text-amber-800">บันทึกย้อนหลัง (Retroactive Entry)</p>
+                    <p className="text-sm text-amber-700 mt-0.5">
+                      คุณกำลังบันทึกข้อมูลย้อนหลัง <strong>{retroDays} วัน</strong>
+                      {' '} (เก็บข้อมูล: {formatThaiShort(formData.followup_date)} | คีย์: {formatThaiShort(entryDate)})
+                    </p>
+                    <label className="block text-sm font-semibold text-amber-800 mt-3 mb-1">
+                      เหตุผลบันทึกย้อนหลัง <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      name="retroactive_reason"
+                      value={formData.retroactive_reason}
+                      onChange={handleChange}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-400"
+                      placeholder="เช่น ไปเยี่ยมบ้านวันที่ 15 แต่กลับมาคีย์ข้อมูลวันที่ 18 เพราะไม่มีอินเทอร์เน็ต"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* ============================================ */}
+          {/* ✅ จบส่วนข้อมูลการเก็บข้อมูล                 */}
+          {/* ============================================ */}
+
+          {/* ช่องกรอกข้อมูลสุขภาพ (คงเดิม) */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">น้ำหนัก (กก.)</label>
@@ -513,7 +652,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 2. ความก้าวหน้าในการปรับตัว */}
+        {/* 2. ความก้าวหน้าในการปรับตัว (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center text-green-600 text-sm font-bold">2</span>
@@ -544,7 +683,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 3. กราฟวัดลอยจม */}
+        {/* 3. กราฟวัดลอยจม (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">3</span>
@@ -567,7 +706,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 4. การ์ดภาพความฝัน */}
+        {/* 4. การ์ดภาพความฝัน (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-600 text-sm font-bold">4</span>
@@ -590,7 +729,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 5. ติดตามแผนปฏิบัติกิจกรรม */}
+        {/* 5. ติดตามแผนปฏิบัติกิจกรรม (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">5</span>
@@ -622,7 +761,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 6. คะแนนไม้บรรทัดวัดใจ */}
+        {/* 6. คะแนนไม้บรรทัดวัดใจ (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 text-sm font-bold">6</span>
@@ -651,7 +790,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 7. สรุป */}
+        {/* 7. สรุป (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-teal-100 rounded-full flex items-center justify-center text-teal-600 text-sm font-bold">7</span>
@@ -669,7 +808,7 @@ export default function FollowupPage() {
           </div>
         </div>
 
-        {/* 8. สถานะการติดตาม */}
+        {/* 8. สถานะการติดตาม (คงเดิม) */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-sm font-bold">8</span>
@@ -684,12 +823,12 @@ export default function FollowupPage() {
           </select>
         </div>
 
-        {/* ประวัติการติดตาม */}
+        {/* ประวัติการติดตาม (คงเดิม) */}
         {pastFollowups.length > 0 && (
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
               <Calendar className="w-6 h-6 text-gray-600" />
-               📋 ประวัติการติดตาม (3 ครั้งล่าสุด)
+              📋 ประวัติการติดตาม (3 ครั้งล่าสุด)
             </h2>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -729,7 +868,7 @@ export default function FollowupPage() {
           </div>
         )}
 
-        {/* Submit Button */}
+        {/* Submit Button (คงเดิม) */}
         <div className="flex gap-4">
           <button type="submit" disabled={saving} className="flex-1 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-bold py-4 rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             {saving ? (
