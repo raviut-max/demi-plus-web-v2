@@ -1,8 +1,5 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ Care Pathway - เส้นทางดูแลสุขภาพรายบุคคล
-// ข้อ 1: รู้จักตัวเอง (screening) → ชี้ไปหน้า screening + screening-history
-// ข้อ 2: ความฝันของฉัน → ชี้ไปหน้า dream
-// ข้อ 3-6: placeholder รอปรับในลำดับถัดไป
+// ✅ v8: ข้อ 4 เป้าหมายและแผนสุขภาพ — ชี้ไปหน้า goals + ดูประวัติ + แสดง events จริง
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -10,8 +7,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
-  ArrowLeft, Route, UserCheck, Sparkles, History, Loader2, Eye, Edit, Plus,
-  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2
+  ArrowLeft, Route, UserCheck, Sparkles, Target, Loader2, Eye, Edit, Plus,
+  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History
 } from 'lucide-react';
 
 const formatThaiDate = (d: string | null | undefined) => {
@@ -80,15 +77,15 @@ const STAGE_META = [
     historyUrl: (p) => `/admin/patients/${p}/care-pathway`,
   },
   {
-    id: 'plan',
+    id: 'goals',  // ✅ เปลี่ยนจาก 'plan' → 'goals'
     no: 4,
     title: 'เป้าหมายและแผนสุขภาพ',
-    description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ (รอปรับในขั้นตอนถัดไป)',
-    icon: History,
-    actionLabel: '➕ เพิ่มเป้าหมาย/แผน',
-    actionUrl: (p) => `/admin/patients/${p}/goals`,
-    historyLabel: '📋 ดูเป้าหมาย',
-    historyUrl: (p) => `/admin/patients/${p}/goals`,
+    description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
+    icon: Target,  // ✅ เปลี่ยนจาก History → Target
+    actionLabel: '➕ จัดการเป้าหมาย',
+    actionUrl: (p) => `/admin/patients/${p}/goals`,  // ✅ ชี้ไปหน้าจัดการเป้าหมาย
+    historyLabel: '📋 ดูประวัติเป้าหมาย',
+    historyUrl: (p) => `/admin/goals-history`,  // ✅ ชี้ไปหน้าประวัติเป้าหมาย
   },
   {
     id: 'trial',
@@ -120,7 +117,8 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
   pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
 };
 
-function buildStages(screenings: any[], dreams: any[]): CareStage[] {
+// ✅ buildStages รับ goals เพิ่มเข้ามา
+function buildStages(screenings: any[], dreams: any[], goals: any[]): CareStage[] {
   const eventsByStage: Record<string, PathEvent[]> = {
     // ข้อ 1: ทุกครั้งของ screening
     self: screenings.map((s, i) => ({
@@ -140,8 +138,28 @@ function buildStages(screenings: any[], dreams: any[]): CareStage[] {
         d.method === 'paper' ? `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป` : '🅰️ ออนไลน์',
       ].filter(Boolean).join(' | ') || '-',
     })),
+    // ✅ ข้อ 4: ประวัติเป้าหมาย (จัดกลุ่มตาม round_number)
+    goals: (() => {
+      const roundsMap = new Map<number, any[]>();
+      goals.forEach(g => {
+        const round = g.round_number || 1;
+        if (!roundsMap.has(round)) roundsMap.set(round, []);
+        roundsMap.get(round)!.push(g);
+      });
+      return Array.from(roundsMap.entries())
+        .sort(([a], [b]) => b - a) // เรียงรอบล่าสุดก่อน
+        .map(([round, goalsList]) => ({
+          key: `goal-round-${round}`,
+          date: goalsList[0]?.created_at,
+          title: `รอบที่ ${round} — ${goalsList.length} กิจกรรม`,
+          detail: [
+            goalsList[0]?.primary_goal_note ? `📝 ${goalsList[0].primary_goal_note}` : '',
+            goalsList[0]?.weekly_goal_note ? `📋 ${goalsList[0].weekly_goal_note}` : '',
+            `กิจกรรม: ${goalsList.map(g => g.goal_name_th).join(', ')}`,
+          ].filter(Boolean).join(' | ') || '-',
+        }));
+    })(),
     oneday: [],
-    plan: [],
     trial: [],
     follow: [],
   };
@@ -150,7 +168,7 @@ function buildStages(screenings: any[], dreams: any[]): CareStage[] {
     screenings.length > 0,
     dreams.some(d => d.status === 'active'),
     false,
-    false,
+    goals.length > 0,  // ✅ ข้อ 4: มี goals แล้ว = done
     false,
     false,
   ];
@@ -214,7 +232,8 @@ export default function CarePathwayPage() {
         }
       }
 
-      const [hospRes, uRes, coachRes, scrRes, drmRes] = await Promise.all([
+      // ✅ เพิ่ม goalsRes เพื่อดึงข้อมูลเป้าหมาย
+      const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes] = await Promise.all([
         prof.hospital_id
           ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
           : Promise.resolve({ data: null, error: null } as any),
@@ -224,9 +243,18 @@ export default function CarePathwayPage() {
           : Promise.resolve({ data: null, error: null } as any),
         supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
         supabase.from('patient_dreams').select('*').eq('user_id', patientId).order('created_at', { ascending: false }),
+        // ✅ ดึง goals ทั้งหมด (active + archived)
+        supabase.from('goals')
+          .select('*')
+          .eq('user_id', patientId)
+          .eq('goal_type', 'weekly_activity')
+          .in('status', ['active', 'archived'])
+          .order('round_number', { ascending: false })
+          .order('created_at', { ascending: false }),
       ]);
 
       if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
+      if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
 
       const p = {
         ...prof,
@@ -236,7 +264,8 @@ export default function CarePathwayPage() {
       };
 
       setPatient(p);
-      const built = buildStages(scrRes.data || [], drmRes.data || []);
+      // ✅ ส่ง goals เข้า buildStages
+      const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
       setErrorState('none');
@@ -391,6 +420,7 @@ export default function CarePathwayPage() {
                           <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
                             {stage.id === 'self' ? `ทำแบบประเมินแล้ว ${stage.events.length} ครั้ง` :
                              stage.id === 'dream' ? `บันทึกความฝัน ${stage.events.length} ครั้ง` :
+                             stage.id === 'goals' ? `${stage.events.length} รอบเป้าหมาย` :
                              `${stage.events.length} รายการ`}
                           </span>
                         )}
