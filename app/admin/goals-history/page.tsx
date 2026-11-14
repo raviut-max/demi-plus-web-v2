@@ -1,6 +1,6 @@
 // app/admin/goals-history/page.tsx
-// ✅ แก้ไข: ดึง patients จาก profiles โดยตรง + auto-load goals เมื่อมี patient_id
-// ✅ รองรับ from parameter สำหรับปุ่มกลับ
+// ✅ เพิ่มแสดงเป้าหมายหลัก 4 ประการ (Core Performance Goals)
+// ✅ รองรับ from parameter + patient_id auto-select
 'use client';
 
 import { useEffect, useState, Suspense, useCallback } from 'react';
@@ -9,7 +9,8 @@ import { checkSession, logout, isSuperAdmin, getAccessibleHospitalIds } from '@/
 import { supabase } from '@/lib/supabase/client';
 import {
   ArrowLeft, LogOut, Search, User, FileText, Calendar, History,
-  CheckCircle, XCircle, Target, Loader2, AlertCircle, ChevronDown, ChevronUp
+  CheckCircle, XCircle, Target, Loader2, AlertCircle, ChevronDown, ChevronUp,
+  Trophy, CheckCircle2, Circle
 } from 'lucide-react';
 
 // ---------- Types ----------
@@ -22,6 +23,7 @@ interface Patient {
   pam_level: string;
   phone?: string;
   hospital_id?: string;
+  primary_goal_code?: string; // ✅ เพิ่ม
   hospitals?: { name: string; type: string } | null;
 }
 
@@ -51,6 +53,14 @@ interface GoalRound {
   primary_goal_note?: string;
   weekly_goal_note?: string;
 }
+
+// ---------- Constants ----------
+const LONG_TERM_GOALS = [
+  { code: 'weight', name_th: 'น้ำหนักลด (Weight Reduction)', description: 'ลดลงอย่างน้อย 5-10% และลด Visceral Fat' },
+  { code: 'glucose', name_th: 'น้ำตาลลง (Glucose Control)', description: 'ควบคุมระดับน้ำตาลในเลือดให้เข้าสู่เกณฑ์ปกติ' },
+  { code: 'medication', name_th: 'ลดยาได้ (Medication De-escalation)', description: 'ปรับลดหรือหยุดยาภายใต้การกำกับของแพทย์' },
+  { code: 'remission', name_th: 'ภาวะเบาหวานสงบ (Remission)', description: 'บรรลุ HbA1c < 6.5% โดยไม่ต้องใช้ยาต่อเนื่อง' },
+];
 
 // ---------- Helpers ----------
 const formatThaiDate = (d: string | null | undefined) => {
@@ -141,7 +151,6 @@ function GoalsHistoryContent() {
     }
   };
 
-  // ✅ ดึง patients จาก profiles โดยตรง (ไม่ใช้ getPatientList)
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       let query = supabase
@@ -185,10 +194,11 @@ function GoalsHistoryContent() {
     }
   }, [patientIdFromQuery, patients]);
 
-  // ✅ โหลดประวัติเป้าหมาย
+  // ✅ โหลดประวัติเป้าหมาย + เป้าหมายหลัก
   const loadGoalHistory = useCallback(async (patientId: string) => {
     setHistoryLoading(true);
     try {
+      // ✅ ดึง goals ทั้งหมด (active + archived)
       const { data: goalsData, error } = await supabase
         .from('goals')
         .select('*')
@@ -203,9 +213,15 @@ function GoalsHistoryContent() {
         return;
       }
 
-      const allRecords: GoalRecord[] = goalsData || [];
+      // ✅ ดึง primary_goal_code จาก profiles
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('primary_goal_code')
+        .eq('id', patientId)
+        .maybeSingle();
 
       // จัดกลุ่มตาม round_number
+      const allRecords: GoalRecord[] = goalsData || [];
       const roundsMap = new Map<number, GoalRecord[]>();
       allRecords.forEach(goal => {
         const round = goal.round_number || 1;
@@ -226,6 +242,12 @@ function GoalsHistoryContent() {
         }));
 
       setGoalHistory(history);
+
+      // ✅ อัปเดต selectedPatient ให้มี primary_goal_code (เพื่อแสดงการ์ดเป้าหมายหลัก)
+      if (profileData?.primary_goal_code) {
+        setSelectedPatient(prev => prev ? { ...prev, primary_goal_code: profileData.primary_goal_code } : prev);
+      }
+
       // ขยายรอบแรกอัตโนมัติ
       if (history.length > 0) {
         setExpandedRounds(new Set([history[0].round_number]));
@@ -393,13 +415,80 @@ function GoalsHistoryContent() {
           </div>
         )}
 
-        {/* ✅ Goal History */}
+        {/* ✅ เป้าหมายหลัก 4 ประการ (Core Performance Goals) */}
+        {selectedPatient && (
+          <div className="bg-white rounded-xl shadow-sm border">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-purple-600" />
+                เป้าหมายหลัก 4 ประการ (Core Performance Goals)
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                {selectedPatient.primary_goal_code
+                  ? `เป้าหมายหลักที่เลือก: ${LONG_TERM_GOALS.find(g => g.code === selectedPatient.primary_goal_code)?.name_th || '-'}`
+                  : 'ยังไม่ได้เลือกเป้าหมายหลัก'}
+              </p>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {LONG_TERM_GOALS.map((goal) => {
+                  const isSelected = selectedPatient.primary_goal_code === goal.code;
+                  return (
+                    <div
+                      key={goal.code}
+                      className={`relative flex flex-col p-4 rounded-xl border-2 transition-all ${
+                        isSelected
+                          ? 'border-purple-500 bg-purple-50 shadow-md'
+                          : 'border-gray-200 bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1">
+                          {isSelected ? (
+                            <CheckCircle2 className="w-6 h-6 text-purple-600" />
+                          ) : (
+                            <Circle className="w-6 h-6 text-gray-400" />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <p className={`font-bold mb-1 ${isSelected ? 'text-purple-900' : 'text-gray-800'}`}>
+                            {goal.name_th}
+                          </p>
+                          <p className={`text-sm ${isSelected ? 'text-purple-700' : 'text-gray-600'}`}>
+                            {goal.description}
+                          </p>
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <div className="absolute top-2 right-2">
+                          <span className="px-2 py-1 bg-purple-600 text-white rounded-full text-xs font-bold">
+                            ✓ เลือกแล้ว
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ✅ แสดงหมายเหตุเป้าหมายหลัก (ถ้ามี) */}
+              {goalHistory[0]?.primary_goal_note && (
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="text-sm font-semibold text-blue-900 mb-2">📝 หมายเหตุเป้าหมายหลัก</h4>
+                  <p className="text-sm text-blue-800">{goalHistory[0].primary_goal_note}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ✅ Goal History (เป้าหมายรายสัปดาห์) */}
         {selectedPatient && (
           <div className="bg-white rounded-xl shadow-sm border">
             <div className="p-6 border-b border-gray-200">
               <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
                 <History className="w-5 h-5 text-blue-600" />
-                ประวัติการบันทึกเป้าหมาย
+                ประวัติการบันทึกเป้าหมายรายสัปดาห์
               </h2>
               <p className="text-sm text-gray-500 mt-1">
                 {goalHistory.length > 0
