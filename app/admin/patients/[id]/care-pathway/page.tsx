@@ -1,5 +1,6 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ v8: ข้อ 4 เป้าหมายและแผนสุขภาพ — ชี้ไปหน้า goals + ดูประวัติ + แสดง events จริง
+// ✅ v9: ข้อ 4 ชี้ไป /admin/goals?patient_id=...&from=care-pathway
+//        ข้อ 1-4 ทำงานจริง, ข้อ 3,5,6 placeholder
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -77,15 +78,15 @@ const STAGE_META = [
     historyUrl: (p) => `/admin/patients/${p}/care-pathway`,
   },
   {
-    id: 'goals',  // ✅ เปลี่ยนจาก 'plan' → 'goals'
+    id: 'goals',
     no: 4,
     title: 'เป้าหมายและแผนสุขภาพ',
     description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
-    icon: Target,  // ✅ เปลี่ยนจาก History → Target
+    icon: Target,
     actionLabel: '➕ จัดการเป้าหมาย',
-    actionUrl: (p) => `/admin/patients/${p}/goals`,  // ✅ ชี้ไปหน้าจัดการเป้าหมาย
+    actionUrl: (p) => `/admin/goals?patient_id=${p}&from=care-pathway`,
     historyLabel: '📋 ดูประวัติเป้าหมาย',
-    historyUrl: (p) => `/admin/goals-history`,  // ✅ ชี้ไปหน้าประวัติเป้าหมาย
+    historyUrl: (p) => `/admin/goals-history?patient_id=${p}&from=care-pathway`,
   },
   {
     id: 'trial',
@@ -117,17 +118,14 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
   pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
 };
 
-// ✅ buildStages รับ goals เพิ่มเข้ามา
 function buildStages(screenings: any[], dreams: any[], goals: any[]): CareStage[] {
   const eventsByStage: Record<string, PathEvent[]> = {
-    // ข้อ 1: ทุกครั้งของ screening
     self: screenings.map((s, i) => ({
       key: `scr-${s.id ?? i}`,
       date: s.screening_date,
       title: `แบบประเมินครั้งที่ ${i + 1}`,
       detail: `PAM: ${s.pam_total_score ?? '-'} | Level: ${s.pam_level_result || '-'} | Zone: ${s.proms_zone || '-'}`,
     })),
-    // ข้อ 2: ความฝันปัจจุบัน + ประวัติ
     dream: dreams.map((d, i) => ({
       key: `drm-${d.id ?? i}`,
       date: d.selected_date,
@@ -138,7 +136,6 @@ function buildStages(screenings: any[], dreams: any[], goals: any[]): CareStage[
         d.method === 'paper' ? `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป` : '🅰️ ออนไลน์',
       ].filter(Boolean).join(' | ') || '-',
     })),
-    // ✅ ข้อ 4: ประวัติเป้าหมาย (จัดกลุ่มตาม round_number)
     goals: (() => {
       const roundsMap = new Map<number, any[]>();
       goals.forEach(g => {
@@ -147,7 +144,7 @@ function buildStages(screenings: any[], dreams: any[], goals: any[]): CareStage[
         roundsMap.get(round)!.push(g);
       });
       return Array.from(roundsMap.entries())
-        .sort(([a], [b]) => b - a) // เรียงรอบล่าสุดก่อน
+        .sort(([a], [b]) => b - a)
         .map(([round, goalsList]) => ({
           key: `goal-round-${round}`,
           date: goalsList[0]?.created_at,
@@ -168,7 +165,7 @@ function buildStages(screenings: any[], dreams: any[], goals: any[]): CareStage[
     screenings.length > 0,
     dreams.some(d => d.status === 'active'),
     false,
-    goals.length > 0,  // ✅ ข้อ 4: มี goals แล้ว = done
+    goals.length > 0,
     false,
     false,
   ];
@@ -232,7 +229,6 @@ export default function CarePathwayPage() {
         }
       }
 
-      // ✅ เพิ่ม goalsRes เพื่อดึงข้อมูลเป้าหมาย
       const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes] = await Promise.all([
         prof.hospital_id
           ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
@@ -243,7 +239,6 @@ export default function CarePathwayPage() {
           : Promise.resolve({ data: null, error: null } as any),
         supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
         supabase.from('patient_dreams').select('*').eq('user_id', patientId).order('created_at', { ascending: false }),
-        // ✅ ดึง goals ทั้งหมด (active + archived)
         supabase.from('goals')
           .select('*')
           .eq('user_id', patientId)
@@ -264,7 +259,6 @@ export default function CarePathwayPage() {
       };
 
       setPatient(p);
-      // ✅ ส่ง goals เข้า buildStages
       const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
@@ -452,7 +446,6 @@ export default function CarePathwayPage() {
                         </div>
                       )}
 
-                      {/* ปุ่มไปทำกิจกรรมของตัวเอง */}
                       {isComingSoon ? (
                         <button disabled className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-sm cursor-not-allowed">
                           <Plus className="w-4 h-4" /> รอการปรับแต่งในลำดับถัดไป

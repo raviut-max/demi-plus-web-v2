@@ -1,29 +1,26 @@
 // app/admin/goals/page.tsx
-// ✅ แก้ไขล่าสุด: 10 พฤษภาคม 2569
+// ✅ แก้ไขล่าสุด: 14 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ เพิ่ม Suspense boundary สำหรับ useSearchParams
-//    2. ✅ รับ patient_id จาก query parameter อัตโนมัติ
-//    3. ✅ ปรับปรุง back navigation ให้ถูกต้อง
-//    4. ✅ ซ่อน dropdown เมื่อมี patient_id
+//    1. ✅ รับ `from` query param → ปุ่มกลับชี้ไปถูกหน้าตามผู้เรียก
+//    2. ✅ Fallback: ไม่มี from → เดาจาก patient_id / router.back()
+//    3. ✅ เพิ่มปุ่ม "ดูประวัติเป้าหมาย" ในหน้านี้ (ส่ง from=goals กลับมาได้)
+//    4. ✅ แก้ typo: patientPamLevel , / lastRecor dedDate / u seState
 'use client';
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
-  getPatientList,
   getGoalRoundCount,
   getLatestGoalRound,
-  saveGoalsNewRound,
   getAccessibleHospitalIds,
   getUserHospitalInfo,
-  getPatientDetail
 } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   ArrowLeft, LogOut, Save, Target, Trophy, Plus,
   CheckCircle2, Circle, Search, User, History, Calendar,
-  Hospital, Building2, UserCheck
+  Hospital, Building2, UserCheck, FileText
 } from 'lucide-react';
 
 // ✅ Default days ตาม PAM Level
@@ -53,7 +50,6 @@ interface Activity {
   unit: string | null;
   sort_order: number;
 }
-
 interface Goal {
   id: string;
   user_id: string;
@@ -71,7 +67,6 @@ interface Goal {
   primary_goal_note?: string;
   weekly_goal_note?: string;
 }
-
 interface GoalHistory {
   id: string;
   goals: Goal[];
@@ -79,16 +74,12 @@ interface GoalHistory {
   is_current: boolean;
   round_number?: number;
 }
-
 interface UserHospital {
   id: string;
   name: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-  };
+  parent_hospital?: { id: string; name: string };
 }
 
 // ✅ Component หลักที่ใช้งาน useSearchParams
@@ -96,6 +87,7 @@ function GoalsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const patientIdFromQuery = searchParams.get('patient_id');
+  const fromParam = searchParams.get('from'); // ✅ ตัวแปรใหม่: ใครเรียกเรามา
 
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
@@ -103,55 +95,97 @@ function GoalsPageContent() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState('');
-  const [patientPamLevel, setPatientPamLevel] = useState('');
+  const [patientPamLevel, setPatientPamLevel] = useState(''); // ✅ แก้ typo
   const [patientData, setPatientData] = useState<any>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [editedGoals, setEditedGoals] = useState<Record<string, { target_days: number; target_value?: string }>>({});
   const [goalHistory, setGoalHistory] = useState<GoalHistory[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
   const [primaryGoal, setPrimaryGoal] = useState('');
   const [savingPrimaryGoal, setSavingPrimaryGoal] = useState(false);
   const [primaryGoalNote, setPrimaryGoalNote] = useState('');
   const [weeklyNote, setWeeklyNote] = useState('');
   const [currentRound, setCurrentRound] = useState(1);
-  const [lastRecordedDate, setLastRecordedDate] = useState('');
+  const [lastRecordedDate, setLastRecordedDate] = useState(''); // ✅ แก้ typo
   const [isSameDay, setIsSameDay] = useState(false);
   const [searchHN, setSearchHN] = useState('');
-  const [searchName, setSearchName] = useState('');
+  const [searchName, setSearchName] = useState(''); // ✅ แก้ typo
   const [filteredPatients, setFilteredPatients] = useState<any[]>([]);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [searchType, setSearchType] = useState<'hn' | 'name' | null>(null);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
+  // ============================================================
+  // ✅ LOGIC ปุ่ม "กลับ" — ชี้ไปถูกหน้าตามผู้เรียก
+  // ============================================================
+  const backTarget = (() => {
+    const pid = patientIdFromQuery || selectedPatient;
+    switch (fromParam) {
+      case 'care-pathway':
+        return pid ? `/admin/patients/${pid}/care-pathway` : '/admin/patients';
+      case 'patient-goals':
+        return pid ? `/admin/patients/${pid}/goals` : '/admin/patients';
+      case 'goals-history':
+        return pid ? `/admin/goals-history?patient_id=${pid}` : '/admin/goals-history';
+      case 'dashboard':
+        return '/admin/dashboard';
+      default:
+        // ไม่มี from → เดาจากบริบท
+        if (pid) return `/admin/patients/${pid}`;
+        return '/admin/dashboard';
+    }
+  })();
+
+  const backLabel = (() => {
+    switch (fromParam) {
+      case 'care-pathway': return 'กลับ Care Pathway';
+      case 'patient-goals': return 'กลับประวัติเป้าหมาย';
+      case 'goals-history': return 'กลับหน้าประวัติ';
+      case 'dashboard': return 'กลับ Dashboard';
+      default: return patientIdFromQuery ? 'กลับหน้าผู้ป่วย' : 'กลับ Dashboard';
+    }
+  })();
+
+  const handleBack = () => {
+    // ถ้า from ว่างและเรามาจากใน app เดียวกัน → ใช้ history.back() ให้ UX ลื่นที่สุด
+    if (!fromParam && typeof window !== 'undefined' && window.history.length > 2) {
+      router.back();
+      return;
+    }
+    router.push(backTarget);
+  };
+
+  // ✅ ไปหน้าประวัติเป้าหมาย (พร้อม from=goals เพื่อกลับถูก)
+  const handleGoHistory = () => {
+    const pid = patientIdFromQuery || selectedPatient;
+    if (!pid) return alert('กรุณาเลือกผู้ป่วยก่อน');
+    router.push(`/admin/goals-history?patient_id=${pid}&from=goals`);
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const userData = checkSession();
-    if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
-
+    if (!userData) { router.push('/admin/login'); return; }
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
       alert('ไม่มีสิทธิ์เข้าถึง');
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadUserHospital(userData.id);
     loadAccessibleHospitals(userData.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   // ✅ โหลดผู้ป่วยอัตโนมัติเมื่อมี patient_id จาก query
   useEffect(() => {
     if (patientIdFromQuery && patients.length > 0) {
-      console.log(' [Auto-select] Patient ID from query:', patientIdFromQuery);
+      console.log('🔗 [Auto-select] Patient ID from query:', patientIdFromQuery);
       handlePatientSelect(patientIdFromQuery);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientIdFromQuery, patients]);
 
-  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้
   const loadUserHospital = async (userId: string) => {
     try {
       const hospitalInfo = await getUserHospitalInfo(userId);
@@ -161,7 +195,6 @@ function GoalsPageContent() {
     }
   };
 
-  // ✅ โหลดโรงพยาบาลที่เข้าถึงได้
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       const ids = await getAccessibleHospitalIds(userId);
@@ -173,7 +206,6 @@ function GoalsPageContent() {
     }
   };
 
-  // ✅ โหลดรายการผู้ป่วย (กรองตามสิทธิ์)
   const loadPatients = async (hospitalIds?: string[]) => {
     try {
       let query = supabase
@@ -181,25 +213,16 @@ function GoalsPageContent() {
         .select(`*, hospitals ( id, name, type )`)
         .eq('is_active', true)
         .order('first_name', { ascending: true });
-
       if (hospitalIds && hospitalIds.length > 0) {
         query = query.in('hospital_id', hospitalIds);
       }
-
       const { data, error } = await query;
-
-      if (error) {
-        console.error('Error loading patients:', error);
-        return;
-      }
-
+      if (error) { console.error('Error loading patients:', error); return; }
       const patientsWithData = data?.map(patient => ({
         ...patient,
         full_name: patient.first_name && patient.last_name
-          ? `${patient.first_name} ${patient.last_name}`
-          : '',
+          ? `${patient.first_name} ${patient.last_name}` : '',
       })) || [];
-
       console.log('📊 Loaded patients:', patientsWithData.length);
       setPatients(patientsWithData);
     } catch (error) {
@@ -209,156 +232,122 @@ function GoalsPageContent() {
     }
   };
 
-  // ✅ useEffect สำหรับโหลดข้อมูลผู้ป่วยเมื่อ selectedPatient เปลี่ยน
   useEffect(() => {
     if (selectedPatient && patients.length > 0) {
       loadPatientData(selectedPatient);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPatient, patients]);
 
-  // ✅ โหลดข้อมูลผู้ป่วยเมื่อเลือก
   const loadPatientData = async (patientId: string) => {
     try {
       const patient = patients.find(p => p.id === patientId);
-      if (patient) {
-        setPatientData(patient);
-        const pamLevel = patient.pam_level || 'L2';
-        setPatientPamLevel(pamLevel);
+      if (!patient) return;
+      setPatientData(patient);
+      const pamLevel = patient.pam_level || 'L2';
+      setPatientPamLevel(pamLevel);
 
-        // ✅ 1. ดึง activities
-        const { data: activitiesData, error: activitiesError } = await supabase
-          .from('activities')
-          .select('*')
-          .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true });
+      // 1. activities
+      const { data: activitiesData, error: activitiesError } = await supabase
+        .from('activities')
+        .select('*')
+        .or(`pam_level.eq.${pamLevel},pam_level.eq.ALL`)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+      if (activitiesError) { console.error('Error loading activities:', activitiesError); return; }
+      setActivities(activitiesData || []);
 
-        if (activitiesError) {
-          console.error('Error loading activities:', activitiesError);
-          return;
-        }
+      // 2. goals ปัจจุบัน
+      const { data: activeGoals, error: goalsError } = await supabase
+        .from('goals')
+        .select('*')
+        .eq('user_id', patientId)
+        .eq('goal_type', 'weekly_activity')
+        .eq('status', 'active')
+        .eq('is_current', true)
+        .order('created_at', { ascending: false });
+      if (goalsError) { console.error('Error loading goals:', goalsError); return; }
+      const uniqueGoalsMap = new Map<string, Goal>();
+      (activeGoals || []).forEach((goal: Goal) => {
+        if (!uniqueGoalsMap.has(goal.goal_name)) uniqueGoalsMap.set(goal.goal_name, goal);
+      });
+      const uniqueGoals = Array.from(uniqueGoalsMap.values());
+      setGoals(uniqueGoals);
 
-        console.log('📋 Loaded activities:', activitiesData?.length || 0);
-        setActivities(activitiesData || []);
+      // 3. ค่าที่แก้ไขแล้ว
+      const edits: Record<string, { target_days: number; target_value?: string }> = {};
+      uniqueGoals.forEach((goal: Goal) => {
+        edits[goal.goal_name] = {
+          target_days: goal.target_days,
+          target_value: goal.target_value?.toString() ?? '',
+        };
+      });
+      setEditedGoals(edits);
 
-        // ✅ 2. ดึง goals ปัจจุบัน
-        const { data: activeGoals, error: goalsError } = await supabase
-          .from('goals')
-          .select('*')
-          .eq('user_id', patientId)
-          .eq('goal_type', 'weekly_activity')
-          .eq('status', 'active')
-          .eq('is_current', true)
-          .order('created_at', { ascending: false });
-
-        if (goalsError) {
-          console.error('Error loading goals:', goalsError);
-          return;
-        }
-
-        // ✅ กรอง duplicate goals
-        const uniqueGoalsMap = new Map<string, Goal>();
-        (activeGoals || []).forEach((goal: Goal) => {
-          if (!uniqueGoalsMap.has(goal.goal_name)) {
-            uniqueGoalsMap.set(goal.goal_name, goal);
-          }
+      // 4. ประวัติ goals (archived)
+      const { data: archivedGoals } = await supabase
+        .from('goals')
+        .select('*')
+        .eq('user_id', patientId)
+        .eq('goal_type', 'weekly_activity')
+        .eq('status', 'archived')
+        .order('round_number', { ascending: false })
+        .order('created_at', { ascending: false });
+      const roundsMap = new Map<number, Goal[]>();
+      (archivedGoals || []).forEach((goal: Goal) => {
+        const round = goal.round_number || 1;
+        if (!roundsMap.has(round)) roundsMap.set(round, []);
+        roundsMap.get(round)!.push(goal);
+      });
+      const history = Array.from(roundsMap.entries()).map(([round, goalsList]) => ({
+        id: `round-${round}`,
+        goals: goalsList,
+        start_date: goalsList[0]?.created_at,
+        is_current: false,
+        round_number: round,
+      }));
+      if (uniqueGoals && uniqueGoals.length > 0) {
+        history.unshift({
+          id: 'current',
+          goals: uniqueGoals,
+          start_date: uniqueGoals[0].created_at,
+          is_current: true,
+          round_number: uniqueGoals[0].round_number || 1,
         });
-        const uniqueGoals = Array.from(uniqueGoalsMap.values());
+      }
+      setGoalHistory(history);
 
-        console.log('🎯 Loaded goals:', uniqueGoals.length);
-        setGoals(uniqueGoals);
+      // 5. primary goal
+      try {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('primary_goal_code')
+          .eq('id', patientId)
+          .single();
+        setPrimaryGoal(profileData?.primary_goal_code || '');
+      } catch (err) {
+        console.error('Error loading primary goal:', err);
+        setPrimaryGoal('');
+      }
 
-        // ✅ 3. โหลดค่าที่แก้ไขแล้ว
-        const edits: Record<string, { target_days: number; target_value?: string }> = {};
-        uniqueGoals.forEach((goal: Goal) => {
-          edits[goal.goal_name] = {
-            target_days: goal.target_days,
-            target_value: goal.target_value?.toString() ?? '',
-          };
-        });
-        setEditedGoals(edits);
+      // 6. หมายเหตุ
+      if (uniqueGoals && uniqueGoals.length > 0) {
+        setPrimaryGoalNote(uniqueGoals[0].primary_goal_note || '');
+        setWeeklyNote(uniqueGoals[0].weekly_goal_note || '');
+      } else {
+        setPrimaryGoalNote('');
+        setWeeklyNote('');
+      }
 
-        // ✅ 4. ดึงประวัติ goals (archived)
-        const { data: archivedGoals } = await supabase
-          .from('goals')
-          .select('*')
-          .eq('user_id', patientId)
-          .eq('goal_type', 'weekly_activity')
-          .eq('status', 'archived')
-          .order('round_number', { ascending: false })
-          .order('created_at', { ascending: false });
-
-        // จัดกลุ่มประวัติตาม round_number
-        const roundsMap = new Map<number, Goal[]>();
-        (archivedGoals || []).forEach((goal: Goal) => {
-          const round = goal.round_number || 1;
-          if (!roundsMap.has(round)) {
-            roundsMap.set(round, []);
-          }
-          roundsMap.get(round)!.push(goal);
-        });
-
-        const history = Array.from(roundsMap.entries()).map(([round, goalsList]) => ({
-          id: `round-${round}`,
-          goals: goalsList,
-          start_date: goalsList[0]?.created_at,
-          is_current: false,
-          round_number: round,
-        }));
-
-        // เพิ่ม current goals เข้าไปด้วย
-        if (uniqueGoals && uniqueGoals.length > 0) {
-          const currentRoundNum = uniqueGoals[0].round_number || 1;
-          history.unshift({
-            id: 'current',
-            goals: uniqueGoals,
-            start_date: uniqueGoals[0].created_at,
-            is_current: true,
-            round_number: currentRoundNum,
-          });
-        }
-
-        setGoalHistory(history);
-
-        // ✅ 5. โหลด primary goal
-        try {
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('primary_goal_code')
-            .eq('id', patientId)
-            .single();
-
-          setPrimaryGoal(profileData?.primary_goal_code || '');
-        } catch (err) {
-          console.error('Error loading primary goal:', err);
-          setPrimaryGoal('');
-        }
-
-        // ✅ 6. โหลดหมายเหตุ
-        if (uniqueGoals && uniqueGoals.length > 0) {
-          const firstGoal = uniqueGoals[0];
-          setPrimaryGoalNote(firstGoal.primary_goal_note || '');
-          setWeeklyNote(firstGoal.weekly_goal_note || '');
-        } else {
-          setPrimaryGoalNote('');
-          setWeeklyNote('');
-        }
-
-        // ✅ 7. โหลด Round Number และวันที่บันทึกครั้งล่าสุด
-        const roundCount = await getGoalRoundCount(patientId);
-        setCurrentRound(roundCount);
-
-        const latestRound = await getLatestGoalRound(patientId);
-        if (latestRound) {
-          setLastRecordedDate(latestRound.created_at);
-
-          // ✅ ตรวจสอบว่าบันทึกในวันเดิมหรือไม่
-          const today = new Date().toISOString().split('T')[0];
-          const lastDate = new Date(latestRound.created_at).toISOString().split('T')[0];
-          setIsSameDay(today === lastDate);
-
-          console.log('📅 Last recorded:', lastDate, '| Today:', today, '| Same day:', today === lastDate);
-        }
+      // 7. Round Number + วันล่าสุด
+      const roundCount = await getGoalRoundCount(patientId);
+      setCurrentRound(roundCount);
+      const latestRound = await getLatestGoalRound(patientId);
+      if (latestRound) {
+        setLastRecordedDate(latestRound.created_at);
+        const today = new Date().toISOString().split('T')[0];
+        const lastDate = new Date(latestRound.created_at).toISOString().split('T')[0];
+        setIsSameDay(today === lastDate);
       }
     } catch (error) {
       console.error('Error loading patient data:', error);
@@ -370,91 +359,54 @@ function GoalsPageContent() {
     if (patientId) {
       loadPatientData(patientId);
     } else {
-      setActivities([]);
-      setGoals([]);
-      setPatientPamLevel('');
-      setEditedGoals({});
-      setGoalHistory([]);
-      setPrimaryGoal('');
-      setPrimaryGoalNote('');
-      setWeeklyNote('');
-      setCurrentRound(1);
-      setLastRecordedDate('');
-      setIsSameDay(false);
-      setPatientData(null);
+      setActivities([]); setGoals([]); setPatientPamLevel(''); setEditedGoals({});
+      setGoalHistory([]); setPrimaryGoal(''); setPrimaryGoalNote(''); setWeeklyNote('');
+      setCurrentRound(1); setLastRecordedDate(''); setIsSameDay(false); setPatientData(null);
     }
   };
 
-  // ✅ ฟังก์ชันค้นหาผู้ป่วยด้วย HN
   const handleSearchHN = (value: string) => {
-    setSearchHN(value);
-    setSearchType('hn');
-    if (value.trim() === '') {
-      setFilteredPatients([]);
-      setShowSearchDropdown(false);
-      return;
-    }
+    setSearchHN(value); setSearchType('hn');
+    if (value.trim() === '') { setFilteredPatients([]); setShowSearchDropdown(false); return; }
     const filtered = patients.filter(patient =>
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase()) ||
       patient.full_name?.toLowerCase().includes(value.toLowerCase())
     ).slice(0, 10);
-    setFilteredPatients(filtered);
-    setShowSearchDropdown(true);
+    setFilteredPatients(filtered); setShowSearchDropdown(true);
   };
 
-  // ✅ ฟังก์ชันค้นหาผู้ป่วยด้วยชื่อ
   const handleSearchName = (value: string) => {
-    setSearchName(value);
-    setSearchType('name');
-    if (value.trim() === '') {
-      setFilteredPatients([]);
-      setShowSearchDropdown(false);
-      return;
-    }
+    setSearchName(value); setSearchType('name');
+    if (value.trim() === '') { setFilteredPatients([]); setShowSearchDropdown(false); return; }
     const filtered = patients.filter(patient =>
       patient.full_name?.toLowerCase().includes(value.toLowerCase()) ||
       patient.hospital_number?.toLowerCase().includes(value.toLowerCase())
     ).slice(0, 10);
-    setFilteredPatients(filtered);
-    setShowSearchDropdown(true);
+    setFilteredPatients(filtered); setShowSearchDropdown(true);
   };
 
   const handleSelectPatient = (patient: any) => {
     setSelectedPatient(patient.id);
-    setSearchHN('');
-    setSearchName('');
-    setShowSearchDropdown(false);
-    setFilteredPatients([]);
+    setSearchHN(''); setSearchName(''); setShowSearchDropdown(false); setFilteredPatients([]);
     loadPatientData(patient.id);
   };
 
-  // ✅ เปลี่ยนเป้าหมายหลัก
   const handlePrimaryGoalChange = async (goalCode: string) => {
     if (!selectedPatient) return;
     setSavingPrimaryGoal(true);
     try {
       const { error } = await supabase
         .from('profiles')
-        .update({
-          primary_goal_code: goalCode,
-          updated_at: new Date().toISOString()
-        })
+        .update({ primary_goal_code: goalCode, updated_at: new Date().toISOString() })
         .eq('id', selectedPatient);
-
       if (error) {
         console.error('Error updating primary goal:', error);
-        if (error.code === '42P01') {
-          alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
-        } else if (error.code === '42703') {
-          alert('ไม่พบคอลัมน์ primary_goal_code กรุณาติดต่อผู้ดูแลระบบ');
-        } else {
-          alert('เกิดข้อผิดพลาด: ' + error.message);
-        }
+        if (error.code === '42P01') alert('ไม่พบตาราง profiles กรุณาตรวจสอบการเชื่อมต่อฐานข้อมูล');
+        else if (error.code === '42703') alert('ไม่พบคอลัมน์ primary_goal_code กรุณาติดต่อผู้ดูแลระบบ');
+        else alert('เกิดข้อผิดพลาด: ' + error.message);
         return;
       }
-
       setPrimaryGoal(goalCode);
-      console.log('✅ Primary goal updated:', goalCode);
     } catch (err) {
       console.error('Update primary goal error:', err);
       alert('เกิดข้อผิดพลาดในการบันทึก');
@@ -463,92 +415,62 @@ function GoalsPageContent() {
     }
   };
 
-  // ✅ สร้างเป้าหมายเริ่มต้นอัตโนมัติ
   const handleCreateDefaultGoals = async () => {
-    if (!selectedPatient || !patientPamLevel) {
-      alert('กรุณาเลือกผู้ป่วย');
-      return;
-    }
-    if (confirm(`ต้องการสร้างเป้าหมายเริ่มต้นสำหรับผู้ป่วยระดับ ${patientPamLevel} หรือไม่?`)) {
-      setSaving(true);
-      try {
-        await supabase
-          .from('goals')
-          .delete()
-          .eq('user_id', selectedPatient)
-          .eq('goal_type', 'weekly_activity');
-
-        const { data: activitiesData, error: activitiesError } = await supabase
-          .from('activities')
-          .select('*')
-          .or(`pam_level.eq.${patientPamLevel},pam_level.eq.ALL`)
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true });
-
-        if (activitiesError || !activitiesData || activitiesData.length === 0) {
-          alert('ไม่พบกิจกรรมในฐานข้อมูล กรุณาตรวจสอบตาราง activities');
-          return;
-        }
-
-        const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
-        const today = new Date().toISOString().split('T')[0];
-
-        const newGoals = activitiesData.map(activity => ({
-          user_id: selectedPatient,
-          goal_type: 'weekly_activity',
-          goal_name: activity.activity_code,
-          goal_name_th: activity.activity_name_th,
-          target_days: defaultDays,
-          target_value: activity.target_value ? parseFloat(activity.target_value) : null,
-          target_unit: activity.unit || null,
-          activity_id: activity.id,
-          start_date: today,
-          status: 'active',
-          priority: 1,
-          is_core_goal: true,
-          created_by: user?.id,
-        }));
-
-        const { error } = await supabase.from('goals').insert(newGoals);
-
-        if (error) {
-          alert('เกิดข้อผิดพลาด: ' + error.message);
-          return;
-        }
-
-        alert(`✅ สร้างเป้าหมายสำเร็จ: ${newGoals.length} กิจกรรม`);
-        loadPatientData(selectedPatient);
-      } catch (error) {
-        console.error('Error creating default goals:', error);
-        alert('เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
-      } finally {
-        setSaving(false);
+    if (!selectedPatient || !patientPamLevel) { alert('กรุณาเลือกผู้ป่วย'); return; }
+    if (!confirm(`ต้องการสร้างเป้าหมายเริ่มต้นสำหรับผู้ป่วยระดับ ${patientPamLevel} หรือไม่?`)) return;
+    setSaving(true);
+    try {
+      await supabase.from('goals').delete()
+        .eq('user_id', selectedPatient).eq('goal_type', 'weekly_activity');
+      const { data: activitiesData, error: activitiesError } = await supabase
+        .from('activities')
+        .select('*')
+        .or(`pam_level.eq.${patientPamLevel},pam_level.eq.ALL`)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+      if (activitiesError || !activitiesData || activitiesData.length === 0) {
+        alert('ไม่พบกิจกรรมในฐานข้อมูล กรุณาตรวจสอบตาราง activities'); return;
       }
+      const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
+      const today = new Date().toISOString().split('T')[0];
+      const newGoals = activitiesData.map(activity => ({
+        user_id: selectedPatient,
+        goal_type: 'weekly_activity',
+        goal_name: activity.activity_code,
+        goal_name_th: activity.activity_name_th,
+        target_days: defaultDays,
+        target_value: activity.target_value ? parseFloat(activity.target_value) : null,
+        target_unit: activity.unit || null,
+        activity_id: activity.id,
+        start_date: today,
+        status: 'active',
+        priority: 1,
+        is_core_goal: true,
+        created_by: user?.id,
+      }));
+      const { error } = await supabase.from('goals').insert(newGoals);
+      if (error) { alert('เกิดข้อผิดพลาด: ' + error.message); return; }
+      alert(`✅ สร้างเป้าหมายสำเร็จ: ${newGoals.length} กิจกรรม`);
+      loadPatientData(selectedPatient);
+    } catch (error) {
+      console.error('Error creating default goals:', error);
+      alert('เกิดข้อผิดพลาดในการสร้างเป้าหมาย');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // ✅ อัปเดตค่าเป้าหมาย
   const handleUpdateGoal = (goalName: string, field: 'target_days' | 'target_value', value: number | string) => {
-    console.log(`📝 Updating ${goalName} ${field}:`, value);
     setEditedGoals(prev => ({
       ...prev,
-      [goalName]: {
-        ...prev[goalName],
-        [field]: value,
-      },
+      [goalName]: { ...prev[goalName], [field]: value },
     }));
   };
 
-  // ✅ บันทึกเป้าหมายรอบใหม่
   const handleSaveNewRound = async () => {
-    if (!selectedPatient || !patientPamLevel) {
-      alert('กรุณาเลือกผู้ป่วย');
-      return;
-    }
+    if (!selectedPatient || !patientPamLevel) { alert('กรุณาเลือกผู้ป่วย'); return; }
     const today = new Date().toISOString().split('T')[0];
-    console.log('🔍 [DEBUG] handleSaveNewRound - Today:', today);
 
-    // ✅ 1. ตรวจสอบว่าวันนี้มี goals อยู่แล้วหรือไม่
     const { data: existingToday, error: fetchError } = await supabase
       .from('goals')
       .select('id, goal_name, round_number, created_at')
@@ -557,116 +479,60 @@ function GoalsPageContent() {
       .eq('is_current', true)
       .gte('created_at', today + 'T00:00:00')
       .lte('created_at', today + 'T23:59:59');
-
-    if (fetchError) {
-      console.error('❌ [DEBUG] Error fetching:', fetchError);
-    }
-
-    console.log('📋 [DEBUG] Existing goals today:', existingToday?.length || 0);
+    if (fetchError) console.error('❌ Error fetching:', fetchError);
 
     let confirmMessage = 'ต้องการบันทึกเป้าหมายรอบใหม่หรือไม่?\n\n';
-
     if (existingToday && existingToday.length > 0) {
       confirmMessage += `⚠️ คุณได้บันทึกเป้าหมายไปแล้ววันนี้ (${existingToday.length} กิจกรรม)\n\n`;
-      confirmMessage += 'การบันทึกครั้งนี้จะลบข้อมูลเดิมของวันนี้และบันทึกใหม่\n\n';
-      confirmMessage += 'ต้องการบันทึกทับหรือไม่?';
+      confirmMessage += 'การบันทึกครั้งนี้จะลบข้อมูลเดิมของวันนี้และบันทึกใหม่\n\nต้องการบันทึกทับหรือไม่?';
     } else {
       confirmMessage += 'ระบบจะเก็บเป้าหมายเดิมเป็นประวัติ และสร้างเป้าหมายใหม่แทน';
     }
-
-    if (!confirm(confirmMessage)) {
-      console.log('❌ [DEBUG] User cancelled');
-      return;
-    }
+    if (!confirm(confirmMessage)) return;
 
     setSaving(true);
-
     try {
-      // ✅ 2. ลบ goals ของวันนี้ก่อน (ถ้ามี)
+      // 2. ลบ goals ของวันนี้ก่อน (ถ้ามี)
       if (existingToday && existingToday.length > 0) {
-        console.log('🗑️ [DEBUG] Deleting goals...');
-        console.log('🗑️ [DEBUG] Goal IDs:', existingToday.map(g => g.id));
-
         const { error: deleteError } = await supabase
-          .from('goals')
-          .delete()
+          .from('goals').delete()
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity')
           .eq('is_current', true)
           .gte('created_at', today + 'T00:00:00')
           .lte('created_at', today + 'T23:59:59');
-
-        if (deleteError) {
-          console.error('❌ [DEBUG] Delete error:', deleteError);
-        } else {
-          console.log('✅ [DEBUG] Deleted successfully');
-        }
+        if (deleteError) console.error('❌ Delete error:', deleteError);
       }
 
-      // ✅ 3. Archive goals เดิม (เฉพาะของวันก่อนหน้า)
+      // 3. Archive goals เดิม (เฉพาะของวันก่อนหน้า)
       if (!existingToday || existingToday.length === 0) {
-        console.log('📦 [DEBUG] Archiving old goals...');
-
-        const { data: goalsToArchive } = await supabase
+        const { error: archiveError } = await supabase
           .from('goals')
-          .select('id, goal_name, round_number')
+          .update({ is_current: false, status: 'archived', updated_at: new Date().toISOString() })
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity')
           .eq('is_current', true);
-
-        console.log('📦 [DEBUG] Goals to archive:', goalsToArchive?.length || 0);
-
-        if (goalsToArchive && goalsToArchive.length > 0) {
-          const { error: archiveError } = await supabase
-            .from('goals')
-            .update({
-              is_current: false,
-              status: 'archived',
-              updated_at: new Date().toISOString(),
-            })
-            .eq('user_id', selectedPatient)
-            .eq('goal_type', 'weekly_activity')
-            .eq('is_current', true);
-
-          if (archiveError) {
-            console.error('❌ [DEBUG] Archive error:', archiveError);
-          } else {
-            console.log('✅ [DEBUG] Archived successfully');
-          }
-        }
+        if (archiveError) console.error('❌ Archive error:', archiveError);
       }
 
-      // ✅ 4. นับ round_number ใหม่ (นับจากวันที่ไม่ซ้ำ)
-      console.log('🔢 [DEBUG] Calculating new round number...');
-
+      // 4. นับ round_number ใหม่
       let newRoundNumber: number;
-
       if (existingToday && existingToday.length > 0) {
-        // วันนี้บันทึกไปแล้ว → ใช้ round เดิม
         newRoundNumber = existingToday[0].round_number || 1;
-        console.log('📅 [DEBUG] Same day - using existing round:', newRoundNumber);
       } else {
-        // วันใหม่ → archive ของเก่า + นับรอบใหม่
         const { data: allGoals } = await supabase
           .from('goals')
           .select('created_at')
           .eq('user_id', selectedPatient)
           .eq('goal_type', 'weekly_activity');
-
-        // ✅ นับจำนวนวันที่ไม่ซ้ำ (ไม่ต้องบวก 1)
         const uniqueDates = new Set(allGoals?.map(g => g.created_at.split('T')[0]) || []);
         newRoundNumber = uniqueDates.size;
-
-        console.log('🔢 [DEBUG] Unique dates:', Array.from(uniqueDates));
-        console.log('🔢 [DEBUG] New round number:', newRoundNumber);
       }
 
-      // ✅ 5. สร้าง goals ใหม่
+      // 5. สร้าง goals ใหม่
       const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
-
       const newGoals = activities.map(activity => {
         const edit = editedGoals[activity.activity_code] || { target_days: defaultDays };
-
         return {
           user_id: selectedPatient,
           goal_type: 'weekly_activity' as const,
@@ -689,60 +555,28 @@ function GoalsPageContent() {
         };
       });
 
-      console.log('💾 [DEBUG] Saving goals:', newGoals.length);
-      console.log('💾 [DEBUG] Round number:', newRoundNumber);
-
       const { error } = await supabase.from('goals').insert(newGoals);
-
-      if (error) {
-        console.error('❌ [DEBUG] Insert error:', error);
-        alert('เกิดข้อผิดพลาด: ' + error.message);
-        return;
-      }
-
-      console.log('✅ [DEBUG] Saved successfully');
+      if (error) { alert('เกิดข้อผิดพลาด: ' + error.message); return; }
       alert(`✅ บันทึกเป้าหมายรอบใหม่สำเร็จ: ${newGoals.length} กิจกรรม`);
-
       await loadPatientData(selectedPatient);
-
     } catch (error) {
-      console.error('❌ [DEBUG] Error:', error);
+      console.error('❌ Error:', error);
       alert('เกิดข้อผิดพลาดในการบันทึก');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
-  };
-
-  // ✅ ปุ่ม back ที่ถูกต้อง
-  const handleBack = () => {
-    if (patientIdFromQuery) {
-      // ✅ ถ้ามี patient_id → กลับไปหน้า goals ของผู้ป่วยนั้น
-      router.push(`/admin/patients/${patientIdFromQuery}/goals`);
-    } else {
-      // ✅ ไม่มี → กลับไป dashboard
-      router.push('/admin/dashboard');
-    }
-  };
+  const handleLogout = () => { logout(); router.push('/admin/login'); };
 
   const foodActivities = activities.filter(a => a.activity_type === 'food');
   const exerciseActivities = activities.filter(a => a.activity_type === 'exercise');
   const measurementActivities = activities.filter(a => a.activity_type === 'measurement');
   const restActivities = activities.filter(a => a.activity_type === 'rest');
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('th-TH', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-  };
+  const formatDate = (dateString: string) =>
+    new Date(dateString).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  // ✅ ตรวจสอบว่าควรแสดง search/dropdown หรือไม่
   const shouldShowSearch = !patientIdFromQuery;
 
   if (loading) {
@@ -758,62 +592,59 @@ function GoalsPageContent() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button
-            onClick={handleBack}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            {patientIdFromQuery ? 'กลับหน้าผู้ป่วย' : 'กลับ Dashboard'}
-          </button>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <button
+              onClick={handleBack}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-800"
+              title={`กลับ → ${backTarget}`}
+            >
+              <ArrowLeft className="w-4 h-4" /> {backLabel}
+            </button>
+            {/* ✅ ปุ่มดูประวัติ */}
+            {(patientIdFromQuery || selectedPatient) && (
+              <button
+                onClick={handleGoHistory}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-purple-300 text-purple-700 rounded-lg text-sm hover:bg-purple-50"
+              >
+                <FileText className="w-4 h-4" /> ดูประวัติเป้าหมาย
+              </button>
+            )}
+          </div>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-800 mb-1">
-                🎯 จัดการเป้าหมาย
-              </h1>
+              <h1 className="text-2xl font-bold text-gray-800 mb-1">🎯 จัดการเป้าหมาย</h1>
               <p className="text-gray-600">กำหนดและจัดการเป้าหมายผู้ป่วย</p>
+              {/* ✅ แสดงแหล่งที่มาให้ debug ง่าย */}
+              {fromParam && (
+                <p className="text-xs text-gray-400 mt-1">🔗 มาจาก: {fromParam}</p>
+              )}
             </div>
-
             <div className="flex items-center gap-4">
-              {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
                     <UserCheck className="w-5 h-5 text-blue-600" />
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-800">
-                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
-                    </p>
+                    <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
                         user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
-
-                {/* ✅ แสดงข้อมูลโรงพยาบาล */}
                 {userHospital ? (
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
-                      <span className="text-xs text-gray-600 font-medium">
-                        {userHospital.name}
-                      </span>
+                      <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
                     </div>
-
-                    {/* ✅ Badge ประเภทโรงพยาบาล */}
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                          🏥 แม่ข่าย
-                        </span>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
                       ) : (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
-                          🏥 ลูกข่าย
-                        </span>
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">🏥 ลูกข่าย</span>
                       )}
-
-                      {/* ✅ แสดงแม่ข่าย (ถ้าเป็นลูกข่าย) */}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
                           <Building2 className="w-3 h-3" />
@@ -823,18 +654,11 @@ function GoalsPageContent() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-2">
-                    ไม่สังกัดโรงพยาบาล
-                  </p>
+                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
                 )}
               </div>
-
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
-              >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
+              <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+                <LogOut className="w-4 h-4" /> ออกจากระบบ
               </button>
             </div>
           </div>
@@ -848,98 +672,58 @@ function GoalsPageContent() {
           <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
-                <Target className="w-5 h-5 text-blue-600" />
-                เลือกผู้ป่วย
+                <Target className="w-5 h-5 text-blue-600" /> เลือกผู้ป่วย
               </h2>
               {selectedPatient && goals.length === 0 && (
-                <button
-                  onClick={handleCreateDefaultGoals}
-                  disabled={saving}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50"
-                >
-                  <Plus className="w-4 h-4" />
-                  {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
+                <button onClick={handleCreateDefaultGoals} disabled={saving}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm disabled:opacity-50">
+                  <Plus className="w-4 h-4" /> {saving ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
                 </button>
               )}
             </div>
-
-            {/* Search by HN */}
             <div className="mb-4">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                🔍 ค้นหาด้วย HN (Hospital Number)
-              </label>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">🔍 ค้นหาด้วย HN (Hospital Number)</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  value={searchHN}
-                  onChange={(e) => handleSearchHN(e.target.value)}
+                <input type="text" value={searchHN} onChange={(e) => handleSearchHN(e.target.value)}
                   placeholder="พิมพ์ HN เพื่อค้นหา..."
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
               </div>
             </div>
-
-            {/* Search by Name */}
             <div className="mb-4">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                👤 ค้นหาด้วยชื่อผู้ป่วย
-              </label>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">👤 ค้นหาด้วยชื่อผู้ป่วย</label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  value={searchName}
-                  onChange={(e) => handleSearchName(e.target.value)}
+                <input type="text" value={searchName} onChange={(e) => handleSearchName(e.target.value)}
                   placeholder="พิมพ์ชื่อผู้ป่วยเพื่อค้นหา..."
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
               </div>
             </div>
-
-            {/* Search Results Dropdown */}
             {showSearchDropdown && filteredPatients.length > 0 && (
               <div className="mb-4 border border-gray-200 rounded-lg max-h-64 overflow-y-auto">
                 {filteredPatients.map((patient) => (
-                  <button
-                    key={patient.id}
-                    onClick={() => handleSelectPatient(patient)}
-                    className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b border-gray-100 last:border-b-0 transition-colors"
-                  >
+                  <button key={patient.id} onClick={() => handleSelectPatient(patient)}
+                    className="w-full px-4 py-3 text-left hover:bg-blue-50 border-b border-gray-100 last:border-b-0 transition-colors">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-semibold text-gray-800">
-                          {patient.hospital_number} - {patient.full_name}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          PAM: {patient.pam_level} | {patient.phone || 'ไม่มีเบอร์โทร'}
-                        </p>
-                        {/* ✅ แสดงโรงพยาบาลของผู้ป่วย */}
+                        <p className="font-semibold text-gray-800">{patient.hospital_number} - {patient.full_name}</p>
+                        <p className="text-sm text-gray-500">PAM: {patient.pam_level} | {patient.phone || 'ไม่มีเบอร์โทร'}</p>
                         {patient.hospitals && (
                           <p className="text-xs text-blue-600 mt-1">
                             🏥 {patient.hospitals.name} {patient.hospitals.type === 'main' ? '(แม่ข่าย)' : '(ลูกข่าย)'}
                           </p>
                         )}
                       </div>
-                      <div className="text-sm text-blue-600 font-medium">
-                        คลิกเลือก
-                      </div>
+                      <div className="text-sm text-blue-600 font-medium">คลิกเลือก</div>
                     </div>
                   </button>
                 ))}
               </div>
             )}
-
-            {/* Dropdown แบบเดิม (สำรอง) */}
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                หรือเลือกรายการทั้งหมด
-              </label>
-              <select
-                value={selectedPatient}
-                onChange={(e) => handlePatientSelect(e.target.value)}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
+              <label className="block text-sm font-semibold text-gray-700 mb-2">หรือเลือกรายการทั้งหมด</label>
+              <select value={selectedPatient} onChange={(e) => handlePatientSelect(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                 <option value="">-- เลือกผู้ป่วย --</option>
                 {patients.map((patient) => (
                   <option key={patient.id} value={patient.id}>
@@ -957,7 +741,7 @@ function GoalsPageContent() {
           </div>
         )}
 
-        {/* ✅ แสดงข้อมูลผู้ป่วยที่เลือก (จาก query หรือ manual) */}
+        {/* ✅ แสดงข้อมูลผู้ป่วยที่เลือก */}
         {patientData && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
             <div className="flex items-start justify-between gap-4">
@@ -966,14 +750,12 @@ function GoalsPageContent() {
                   <strong>ผู้ป่วยที่เลือก:</strong> {patientData.hospital_number} - {patientData.full_name}
                 </p>
                 <p className="text-sm text-blue-800 mt-1">
-                  <strong>PAM Level:</strong> {patientPamLevel} | 
+                  <strong>PAM Level:</strong> {patientPamLevel} |
                   <strong> จำนวนเป้าหมาย:</strong> {goals.length} กิจกรรม
                   {patientPamLevel === 'L2' && ' (กฎทอง 5 ข้อ - เริ่มต้น 3 วัน/สัปดาห์)'}
                   {patientPamLevel === 'L3' && ' (กฎทอง 5 ข้อ - เริ่มต้น 4 วัน/สัปดาห์)'}
                   {patientPamLevel === 'L4' && ' (แชมป์ 8 กิจกรรม - เริ่มต้น 5 วัน/สัปดาห์)'}
                 </p>
-
-                {/* ✅ แสดง Round Number และวันที่บันทึก */}
                 <div className="mt-2 flex items-center gap-4">
                   <div className="flex items-center gap-1 text-xs text-blue-600">
                     <History className="w-3 h-3" />
@@ -986,12 +768,9 @@ function GoalsPageContent() {
                     </div>
                   )}
                   {isSameDay && (
-                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
-                      ⚠️ บันทึกวันนี้แล้ว
-                    </span>
+                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">⚠️ บันทึกวันนี้แล้ว</span>
                   )}
                 </div>
-
                 {goalHistory[0]?.is_current && (
                   <p className="text-xs text-blue-600 mt-1">
                     📅 เป้าหมายปัจจุบันเริ่มใช้: {formatDate(goalHistory[0].start_date)}
@@ -1001,13 +780,9 @@ function GoalsPageContent() {
                   💡 ปรับเปลี่ยนจำนวนวัน/สัปดาห์ แล้วกด "บันทึกเป้าหมายรอบใหม่" เพื่อบันทึกเป็นรอบใหม่
                 </p>
               </div>
-
               {goals.length === 0 && (
-                <button
-                  onClick={handleCreateDefaultGoals}
-                  disabled={saving}
-                  className="shrink-0 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
-                >
+                <button onClick={handleCreateDefaultGoals} disabled={saving}
+                  className="shrink-0 px-4 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50">
                   🎯 สร้างเป้าหมาย
                 </button>
               )}
@@ -1024,70 +799,38 @@ function GoalsPageContent() {
                 เป้าหมายหลัก 4 ประการ (Core Performance Goals)
                 <span className="text-sm font-normal text-gray-500 ml-2">- เลือก 1 ข้อที่เป็นเป้าหมายหลักของผู้ป่วย</span>
               </h2>
-
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {LONG_TERM_GOALS.map((goal) => {
                   const isSelected = primaryGoal === goal.code;
                   return (
-                    <label
-                      key={goal.code}
+                    <label key={goal.code}
                       className={`relative flex flex-col p-4 rounded-xl border-2 cursor-pointer transition-all ${isSelected
                         ? 'border-purple-500 bg-purple-50 shadow-md'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                        }`}
-                    >
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}>
                       <div className="flex items-start gap-3">
                         <div className="mt-1">
-                          {isSelected ? (
-                            <CheckCircle2 className="w-6 h-6 text-purple-600" />
-                          ) : (
-                            <Circle className="w-6 h-6 text-gray-400" />
-                          )}
+                          {isSelected ? <CheckCircle2 className="w-6 h-6 text-purple-600" /> : <Circle className="w-6 h-6 text-gray-400" />}
                         </div>
                         <div className="flex-1">
-                          <p className={`font-bold mb-1 ${isSelected ? 'text-purple-900' : 'text-gray-800'}`}>
-                            {goal.name_th}
-                          </p>
-                          <p className={`text-sm ${isSelected ? 'text-purple-700' : 'text-gray-600'}`}>
-                            {goal.description}
-                          </p>
+                          <p className={`font-bold mb-1 ${isSelected ? 'text-purple-900' : 'text-gray-800'}`}>{goal.name_th}</p>
+                          <p className={`text-sm ${isSelected ? 'text-purple-700' : 'text-gray-600'}`}>{goal.description}</p>
                         </div>
                       </div>
-                      <input
-                        type="radio"
-                        name="primaryGoal"
-                        value={goal.code}
-                        checked={isSelected}
+                      <input type="radio" name="primaryGoal" value={goal.code} checked={isSelected}
                         onChange={(e) => handlePrimaryGoalChange(e.target.value)}
-                        disabled={savingPrimaryGoal}
-                        className="hidden"
-                      />
+                        disabled={savingPrimaryGoal} className="hidden" />
                     </label>
                   );
                 })}
               </div>
-
               <div className="mt-4 pt-4 border-t border-gray-200">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  📝 เป้าหมาย(หลัก) - หมายเหตุเพิ่มเติม
-                </label>
-                <textarea
-                  value={primaryGoalNote}
-                  onChange={(e) => setPrimaryGoalNote(e.target.value)}
+                <label className="block text-sm font-semibold text-gray-700 mb-2">📝 เป้าหมาย(หลัก) - หมายเหตุเพิ่มเติม</label>
+                <textarea value={primaryGoalNote} onChange={(e) => setPrimaryGoalNote(e.target.value)}
                   placeholder="กรอกหมายเหตุหรือคำแนะนำสำหรับเป้าหมายหลัก..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
-                  rows={3}
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  💡 หมายเหตุนี้จะถูกบันทึกกับเป้าหมายหลักของผู้ป่วย
-                </p>
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none" rows={3} />
+                <p className="text-xs text-gray-500 mt-1">💡 หมายเหตุนี้จะถูกบันทึกกับเป้าหมายหลักของผู้ป่วย</p>
               </div>
-
-              {savingPrimaryGoal && (
-                <p className="text-sm text-gray-500 mt-3 text-center">
-                  กำลังบันทึก...
-                </p>
-              )}
+              {savingPrimaryGoal && <p className="text-sm text-gray-500 mt-3 text-center">กำลังบันทึก...</p>}
             </div>
 
             {/* Food Activities */}
@@ -1099,38 +842,28 @@ function GoalsPageContent() {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
                     const existingGoal = goals.find(g => g.goal_name === activity.activity_code);
                     const currentDays = editedGoals[activity.activity_code]?.target_days || existingGoal?.target_days || defaultDays;
-
                     return (
                       <div key={activity.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                         <div className="flex-1">
                           <p className="font-semibold text-gray-800">{activity.activity_name_th}</p>
-                          {activity.description_th && (
-                            <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>
-                          )}
+                          {activity.description_th && <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>}
                         </div>
                         <div className="flex items-center gap-4">
                           {activity.target_value && (
                             <div>
                               <label className="block text-xs text-gray-500 mb-1">ค่าเป้าหมาย</label>
-                              <input
-                                type="number"
-                                step="0.1"
+                              <input type="number" step="0.1"
                                 value={editedGoals[activity.activity_code]?.target_value || existingGoal?.target_value?.toString() || activity.target_value}
                                 onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_value', e.target.value)}
-                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
-                              />
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24" />
                             </div>
                           )}
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
-                            <select
-                              value={currentDays}
+                            <select value={currentDays}
                               onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_days', parseInt(e.target.value))}
-                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                            >
-                              {[1, 2, 3, 4, 5, 6, 7].map(day => (
-                                <option key={day} value={day}>{day} วัน</option>
-                              ))}
+                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                              {[1, 2, 3, 4, 5, 6, 7].map(day => <option key={day} value={day}>{day} วัน</option>)}
                             </select>
                           </div>
                         </div>
@@ -1150,38 +883,26 @@ function GoalsPageContent() {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
                     const existingGoal = goals.find(g => g.goal_name === activity.activity_code);
                     const currentDays = editedGoals[activity.activity_code]?.target_days || existingGoal?.target_days || defaultDays;
-
                     return (
                       <div key={activity.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                         <div className="flex-1">
                           <p className="font-semibold text-gray-800">{activity.activity_name_th}</p>
-                          {activity.description_th && (
-                            <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>
-                          )}
+                          {activity.description_th && <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>}
                         </div>
                         <div className="flex items-center gap-4">
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">นาที/วัน</label>
-                            <input
-                              type="number"
-                              min="5"
-                              max="120"
-                              step="5"
+                            <input type="number" min="5" max="120" step="5"
                               value={editedGoals[activity.activity_code]?.target_value || existingGoal?.target_value?.toString() || activity.target_value || '10'}
                               onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_value', e.target.value)}
-                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24"
-                            />
+                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-24" />
                           </div>
                           <div>
                             <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
-                            <select
-                              value={currentDays}
+                            <select value={currentDays}
                               onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_days', parseInt(e.target.value))}
-                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                            >
-                              {[1, 2, 3, 4, 5, 6, 7].map(day => (
-                                <option key={day} value={day}>{day} วัน</option>
-                              ))}
+                              className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                              {[1, 2, 3, 4, 5, 6, 7].map(day => <option key={day} value={day}>{day} วัน</option>)}
                             </select>
                           </div>
                         </div>
@@ -1201,25 +922,18 @@ function GoalsPageContent() {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
                     const existingGoal = goals.find(g => g.goal_name === activity.activity_code);
                     const currentDays = editedGoals[activity.activity_code]?.target_days || existingGoal?.target_days || defaultDays;
-
                     return (
                       <div key={activity.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                         <div className="flex-1">
                           <p className="font-semibold text-gray-800">{activity.activity_name_th}</p>
-                          {activity.description_th && (
-                            <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>
-                          )}
+                          {activity.description_th && <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>}
                         </div>
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
-                          <select
-                            value={currentDays}
+                          <select value={currentDays}
                             onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_days', parseInt(e.target.value))}
-                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                          >
-                            {[1, 2, 3, 4, 5, 6, 7].map(day => (
-                              <option key={day} value={day}>{day} วัน</option>
-                            ))}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            {[1, 2, 3, 4, 5, 6, 7].map(day => <option key={day} value={day}>{day} วัน</option>)}
                           </select>
                         </div>
                       </div>
@@ -1238,25 +952,18 @@ function GoalsPageContent() {
                     const defaultDays = DEFAULT_DAYS_BY_LEVEL[patientPamLevel] || 5;
                     const existingGoal = goals.find(g => g.goal_name === activity.activity_code);
                     const currentDays = editedGoals[activity.activity_code]?.target_days || existingGoal?.target_days || defaultDays;
-
                     return (
                       <div key={activity.id} className="flex items-center justify-between p-4 rounded-xl border border-gray-200">
                         <div className="flex-1">
                           <p className="font-semibold text-gray-800">{activity.activity_name_th}</p>
-                          {activity.description_th && (
-                            <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>
-                          )}
+                          {activity.description_th && <p className="text-sm text-gray-500 mt-1">{activity.description_th}</p>}
                         </div>
                         <div>
                           <label className="block text-xs text-gray-500 mb-1">วัน/สัปดาห์</label>
-                          <select
-                            value={currentDays}
+                          <select value={currentDays}
                             onChange={(e) => handleUpdateGoal(activity.activity_code, 'target_days', parseInt(e.target.value))}
-                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                          >
-                            {[1, 2, 3, 4, 5, 6, 7].map(day => (
-                              <option key={day} value={day}>{day} วัน</option>
-                            ))}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                            {[1, 2, 3, 4, 5, 6, 7].map(day => <option key={day} value={day}>{day} วัน</option>)}
                           </select>
                         </div>
                       </div>
@@ -1266,18 +973,14 @@ function GoalsPageContent() {
               </div>
             )}
 
-            {/* หมายเหตุรายสัปดาห์ (รวม) */}
+            {/* หมายเหตุรายสัปดาห์ */}
             <div className="bg-white rounded-xl shadow-sm p-6 border mb-6">
               <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                 📝 หมายเหตุ(สัปดาห์) - คำแนะนำเพิ่มเติม
               </h2>
-              <textarea
-                value={weeklyNote}
-                onChange={(e) => setWeeklyNote(e.target.value)}
+              <textarea value={weeklyNote} onChange={(e) => setWeeklyNote(e.target.value)}
                 placeholder="กรอกหมายเหตุหรือคำแนะนำสำหรับเป้าหมายรายสัปดาห์ทั้งหมด..."
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                rows={4}
-              />
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none" rows={4} />
               <p className="text-xs text-gray-500 mt-2">
                 💡 หมายเหตุนี้จะถูกบันทึกกับทุกกิจกรรมในสัปดาห์นี้ และจะแสดงเมื่อผู้ป่วยบันทึกกิจกรรมรายวัน
               </p>
@@ -1286,11 +989,8 @@ function GoalsPageContent() {
             {/* Save Button */}
             {goals.length > 0 && (
               <div className="flex gap-4">
-                <button
-                  onClick={handleSaveNewRound}
-                  disabled={saving || activities.length === 0}
-                  className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                >
+                <button onClick={handleSaveNewRound} disabled={saving || activities.length === 0}
+                  className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold py-4 rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                   {saving ? (
                     <>
                       <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
