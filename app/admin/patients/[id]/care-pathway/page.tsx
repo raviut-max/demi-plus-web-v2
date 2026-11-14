@@ -1,13 +1,7 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
 // ✅ ฉบับเต็ม: ทุกขั้นตอน (1-6) ทำงานสมบูรณ์
-//    - ข้อ 1: รู้จักตัวเอง (Screening)
-//    - ข้อ 2: ความฝันของฉัน (Dream)
-//    - ข้อ 3: ชีวิต 1 วันของฉัน (OneDay) → ชี้ไป /oneday
-//    - ข้อ 4: เป้าหมายและแผนสุขภาพ (Goals)
-//    - ข้อ 5: ทดลองทำ (Trial/Records)
-//    - ข้อ 6: ติดตามต่อเนื่อง (Followup) → ชี้ไป /followup-history
+//    ✅ แก้ไขล่าสุด: ลบ Avatar (วงกลมตัวอักษร) ด้านหน้าชื่อคนไข้ออก — ส่วนอื่นคงเดิม
 'use client';
-
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
@@ -56,9 +50,9 @@ const STAGE_META = [
     description: 'ทำแบบประเมิน PAM / PROMS — แจ้งจำนวนครั้งที่ทำแล้ว และเพิ่มรอบใหม่ได้',
     icon: UserCheck,
     actionLabel: '➕ เพิ่มรอบทำแบบประเมิน',
-    actionUrl: (p) => `/admin/screening?patient_id=${p}`,
+    actionUrl: (p: string) => `/admin/screening?patient_id=${p}`,
     historyLabel: '📋 ดูประวัติการประเมิน',
-    historyUrl: (p) => `/admin/patients/${p}/screening-history`,
+    historyUrl: (p: string) => `/admin/patients/${p}/screening-history`,
   },
   {
     id: 'dream',
@@ -67,9 +61,9 @@ const STAGE_META = [
     description: 'ชี้ไปที่การทำความฝัน — เลือกการ์ดความฝัน บันทึก และดูย้อนหลังได้',
     icon: Sparkles,
     actionLabel: '➕ เลือกความฝันใหม่',
-    actionUrl: (p) => `/admin/patients/${p}/dream`,
+    actionUrl: (p: string) => `/admin/patients/${p}/dream`,
     historyLabel: '📋 ดูความฝันของฉัน',
-    historyUrl: (p) => `/admin/patients/${p}/dream`,
+    historyUrl: (p: string) => `/admin/patients/${p}/dream`,
   },
   {
     id: 'oneday',
@@ -78,9 +72,9 @@ const STAGE_META = [
     description: 'สรุปกิจวัตรรายวันที่ผู้ป่วยบันทึก แยกตามระดับ PAM Level (L2/L3 หรือ L4)',
     icon: Activity,
     actionLabel: '➕ ดูสรุปชีวิต 1 วัน',
-    actionUrl: (p) => `/admin/patients/${p}/oneday?from=care-pathway`,
+    actionUrl: (p: string) => `/admin/patients/${p}/oneday?from=care-pathway`,
     historyLabel: '📋 ดูย้อนหลัง',
-    historyUrl: (p) => `/admin/patients/${p}/oneday?from=care-pathway`,
+    historyUrl: (p: string) => `/admin/patients/${p}/oneday?from=care-pathway`,
   },
   {
     id: 'goals',
@@ -89,9 +83,9 @@ const STAGE_META = [
     description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
     icon: Target,
     actionLabel: '➕ จัดการเป้าหมาย',
-    actionUrl: (p) => `/admin/goals?patient_id=${p}&from=care-pathway`,
+    actionUrl: (p: string) => `/admin/goals?patient_id=${p}&from=care-pathway`,
     historyLabel: '📋 ดูประวัติเป้าหมาย',
-    historyUrl: (p) => `/admin/goals-history?patient_id=${p}&from=care-pathway`,
+    historyUrl: (p: string) => `/admin/goals-history?patient_id=${p}&from=care-pathway`,
   },
   {
     id: 'trial',
@@ -100,9 +94,9 @@ const STAGE_META = [
     description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
     icon: History,
     actionLabel: '➕ ดูบันทึกกิจกรรม',
-    actionUrl: (p) => `/admin/patients/${p}/goals`,
+    actionUrl: (p: string) => `/admin/patients/${p}/goals`,
     historyLabel: '📋 ดูประวัติการทำ',
-    historyUrl: (p) => `/admin/patients/${p}/goals`,
+    historyUrl: (p: string) => `/admin/patients/${p}/goals`,
   },
   {
     id: 'follow',
@@ -111,9 +105,9 @@ const STAGE_META = [
     description: 'การตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติ',
     icon: FileText,
     actionLabel: '➕ บันทึกการติดตามผล',
-    actionUrl: (p) => `/admin/appointments/followup/new?patient_id=${p}`,
+    actionUrl: (p: string) => `/admin/appointments/followup/new?patient_id=${p}`,
     historyLabel: '📋 ดูประวัติการติดตามผล',
-    historyUrl: (p) => `/admin/patients/${p}/followup-history?from=care-pathway`,
+    historyUrl: (p: string) => `/admin/patients/${p}/followup-history?from=care-pathway`,
   },
 ];
 
@@ -125,7 +119,7 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
 
 function buildStages(screenings: any[], dreams: any[], goals: any[], records: any[], followups: any[]): CareStage[] {
   const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
-  
+
   const eventsByStage: Record<string, PathEvent[]> = {
     self: screenings.map((s, i) => ({
       key: `scr-${s.id ?? i}`,
@@ -260,15 +254,12 @@ export default function CarePathwayPage() {
     try {
       const { data: prof, error: e1 } = await supabase
         .from('profiles').select('*').eq('id', patientId).maybeSingle();
-
       if (e1) throw new Error('profiles: ' + e1.message);
       if (!prof) { setErrorDetail(`ไม่พบผู้ป่วย id: ${patientId}`); setErrorState('notfound'); return; }
-
       if (!isSuperAdmin(user)) {
         const ids = await getAccessibleHospitalIds(user.id);
         if (prof.hospital_id && !ids.includes(prof.hospital_id)) { setErrorState('denied'); return; }
       }
-
       const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes, recRes, fuRes] = await Promise.all([
         prof.hospital_id
           ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
@@ -294,21 +285,18 @@ export default function CarePathwayPage() {
           .order('followup_date', { ascending: false })
           .limit(30),
       ]);
-
       if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
       if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
       if (recRes.error) console.warn('[CarePathway] records:', recRes.error.message);
       if (fuRes.error) console.warn('[CarePathway] appointment_followups:', fuRes.error.message);
 
       setRecords(recRes.data || []);
-
       const p = {
         ...prof,
         hospitals: hospRes.data || null,
         users: uRes.data || null,
         coach_name: coachRes.data?.full_name_th || '-',
       };
-
       setPatient(p);
       const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || [], fuRes.data || []);
       setStages(built);
@@ -400,13 +388,10 @@ export default function CarePathwayPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        {/* Patient Card */}
+        {/* ✅ Patient Card — ลบ Avatar (วงกลม) ออกแล้ว */}
         <div className="bg-white rounded-xl shadow-lg p-6 border">
-          <div className="flex items-start gap-4 flex-wrap">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-2xl font-bold text-blue-700">
-              {patient.first_name?.charAt(0) || '?'}
-            </div>
-            <div className="flex-1">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
               <h2 className="text-xl font-bold text-gray-800">{patient.first_name} {patient.last_name}</h2>
               <div className="flex flex-wrap gap-2 mt-2 text-xs">
                 <span className="px-2 py-1 bg-gray-100 rounded-full">HN: {patient.hospital_number || '-'}</span>
@@ -511,9 +496,9 @@ export default function CarePathwayPage() {
 
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">
-                          {stage.id === 'trial' || stage.id === 'oneday' 
-                            ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —' 
-                            : stage.id === 'follow' 
+                          {stage.id === 'trial' || stage.id === 'oneday'
+                            ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —'
+                            : stage.id === 'follow'
                               ? '— ยังไม่มีประวัติการตามผล —'
                               : '— ยังไม่มีบันทึกในขั้นนี้ —'}
                         </p>
