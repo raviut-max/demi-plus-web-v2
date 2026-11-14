@@ -1,5 +1,11 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ v13: ข้อ 6 "ติดตามต่อเนื่อง" เชื่อมโยงไปยังหน้าบันทึกการติดตามผล และ ประวัติการติดตามผล พร้อมปุ่มกลับที่ถูกต้อง
+// ✅ ฉบับเต็ม: ทุกขั้นตอน (1-6) ทำงานสมบูรณ์
+//    - ข้อ 1: รู้จักตัวเอง (Screening)
+//    - ข้อ 2: ความฝันของฉัน (Dream)
+//    - ข้อ 3: ชีวิต 1 วันของฉัน (OneDay) → ชี้ไป /oneday
+//    - ข้อ 4: เป้าหมายและแผนสุขภาพ (Goals)
+//    - ข้อ 5: ทดลองทำ (Trial/Records)
+//    - ข้อ 6: ติดตามต่อเนื่อง (Followup) → ชี้ไป /followup-history
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -8,7 +14,7 @@ import { supabase } from '@/lib/supabase/client';
 import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
   ArrowLeft, Route, UserCheck, Sparkles, Target, Loader2, Eye, Edit, Plus,
-  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History
+  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History, Activity
 } from 'lucide-react';
 
 const formatThaiDate = (d: string | null | undefined) => {
@@ -69,12 +75,12 @@ const STAGE_META = [
     id: 'oneday',
     no: 3,
     title: 'ชีวิต 1 วันของฉัน',
-    description: 'บันทึกวิถีชีวิตจริง 1 วัน (รอปรับในขั้นตอนถัดไป)',
-    icon: History,
-    actionLabel: '➕ บันทึกชีวิต 1 วัน',
-    actionUrl: (p) => `/admin/patients/${p}/care-pathway`,
+    description: 'สรุปกิจวัตรรายวันที่ผู้ป่วยบันทึก แยกตามระดับ PAM Level (L2/L3 หรือ L4)',
+    icon: Activity,
+    actionLabel: '➕ ดูสรุปชีวิต 1 วัน',
+    actionUrl: (p) => `/admin/patients/${p}/oneday?from=care-pathway`,
     historyLabel: '📋 ดูย้อนหลัง',
-    historyUrl: (p) => `/admin/patients/${p}/care-pathway`,
+    historyUrl: (p) => `/admin/patients/${p}/oneday?from=care-pathway`,
   },
   {
     id: 'goals',
@@ -102,8 +108,8 @@ const STAGE_META = [
     id: 'follow',
     no: 6,
     title: 'ติดตามต่อเนื่อง',
-    description: 'ติดตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติแต่ละครั้ง',
-    icon: History,
+    description: 'การตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติ',
+    icon: FileText,
     actionLabel: '➕ บันทึกการติดตามผล',
     actionUrl: (p) => `/admin/appointments/followup/new?patient_id=${p}`,
     historyLabel: '📋 ดูประวัติการติดตามผล',
@@ -118,6 +124,8 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
 };
 
 function buildStages(screenings: any[], dreams: any[], goals: any[], records: any[], followups: any[]): CareStage[] {
+  const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
+  
   const eventsByStage: Record<string, PathEvent[]> = {
     self: screenings.map((s, i) => ({
       key: `scr-${s.id ?? i}`,
@@ -135,7 +143,12 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
         d.method === 'paper' ? `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป` : '🅰️ ออนไลน์',
       ].filter(Boolean).join(' | ') || '-',
     })),
-    oneday: [],
+    oneday: uniqueDays > 0 ? [{
+      key: 'oneday-summary',
+      date: records[0]?.record_date || null,
+      title: `มีการบันทึกกิจกรรมแล้ว ${uniqueDays} วัน`,
+      detail: 'กดปุ่มด้านล่างเพื่อดูรายละเอียดแยกตามหมวดหมู่และวันที่',
+    }] : [],
     goals: (() => {
       const roundsMap = new Map<number, any[]>();
       goals.forEach(g => {
@@ -197,9 +210,6 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
           bp ? `🩸 BP ${bp}` : '',
           f.blood_sugar_dtx != null ? `🍬 น้ำตาล ${f.blood_sugar_dtx}` : '',
           f.confidence_score != null ? `💪 มั่นใจ ${f.confidence_score}/10` : '',
-          f.food_type_status ? `🍚 อาหาร: ${f.food_type_status}` : '',
-          f.food_amount_status ? `ปริมาณ: ${f.food_amount_status}` : '',
-          f.movement_status ? `🚶 เคลื่อนไหว: ${f.movement_status}` : '',
         ].filter(Boolean).join(' | ') || '-',
       };
     }),
@@ -208,7 +218,7 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
   const doneFlags = [
     screenings.length > 0,
     dreams.some(d => d.status === 'active'),
-    false,
+    uniqueDays > 0,
     goals.length > 0,
     records.length > 0,
     followups.length > 0,
@@ -230,7 +240,6 @@ export default function CarePathwayPage() {
   const [patient, setPatient] = useState<any>(null);
   const [stages, setStages] = useState<CareStage[]>([]);
   const [records, setRecords] = useState<any[]>([]);
-  const [followups, setFollowups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
   const [errorDetail, setErrorDetail] = useState('');
@@ -292,7 +301,6 @@ export default function CarePathwayPage() {
       if (fuRes.error) console.warn('[CarePathway] appointment_followups:', fuRes.error.message);
 
       setRecords(recRes.data || []);
-      setFollowups(fuRes.data || []);
 
       const p = {
         ...prof,
@@ -321,10 +329,11 @@ export default function CarePathwayPage() {
   const toggle = (id: string) =>
     setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
+  const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
   const trialStats = (() => {
     const total = records.length;
     const done = records.filter(r => r.is_completed).length;
-    const days = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
+    const days = uniqueDays;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     return { total, done, days, pct };
   })();
@@ -367,6 +376,7 @@ export default function CarePathwayPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-5xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/patients')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
@@ -390,6 +400,7 @@ export default function CarePathwayPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        {/* Patient Card */}
         <div className="bg-white rounded-xl shadow-lg p-6 border">
           <div className="flex items-start gap-4 flex-wrap">
             <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-2xl font-bold text-blue-700">
@@ -432,6 +443,7 @@ export default function CarePathwayPage() {
           </div>
         </div>
 
+        {/* Stages */}
         <div>
           <h3 className="text-lg font-bold text-gray-800 mb-1">ขั้นตอนการดูแลสุขภาพ (Care Pathway)</h3>
           <p className="text-sm text-gray-500 mb-4">แต่ละขั้นมีปุ่มไปทำกิจกรรมของตัวเอง + ดูย้อนหลังได้</p>
@@ -440,7 +452,6 @@ export default function CarePathwayPage() {
               const ui = STATUS_UI[stage.status];
               const Icon = stage.icon;
               const isOpen = expanded.includes(stage.id);
-              const isComingSoon = ['oneday'].includes(stage.id);
 
               return (
                 <div key={stage.id} className={`rounded-xl border shadow-sm ${ui.card}`}>
@@ -456,6 +467,7 @@ export default function CarePathwayPage() {
                           <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
                             {stage.id === 'self' ? `ทำแบบประเมินแล้ว ${stage.events.length} ครั้ง` :
                              stage.id === 'dream' ? `บันทึกความฝัน ${stage.events.length} ครั้ง` :
+                             stage.id === 'oneday' ? `บันทึกแล้ว ${uniqueDays} วัน` :
                              stage.id === 'goals' ? `${stage.events.length} รอบเป้าหมาย` :
                              stage.id === 'trial' ? `บันทึกแล้ว ${stage.events.length} วัน` :
                              stage.id === 'follow' ? `ตามผลแล้ว ${stage.events.length} ครั้ง` :
@@ -473,6 +485,7 @@ export default function CarePathwayPage() {
 
                   {isOpen && (
                     <div className="px-4 pb-4 pl-16">
+                      {/* สถิติรวมของข้อ 5 */}
                       {stage.id === 'trial' && trialStats.total > 0 && (
                         <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
                           <div className="bg-white border rounded-lg p-2 text-center">
@@ -498,9 +511,11 @@ export default function CarePathwayPage() {
 
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">
-                          {stage.id === 'trial' ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —' : 
-                           stage.id === 'follow' ? '— ยังไม่มีประวัติการตามผล —' :
-                           '— ยังไม่มีบันทึกในขั้นนี้ —'}
+                          {stage.id === 'trial' || stage.id === 'oneday' 
+                            ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —' 
+                            : stage.id === 'follow' 
+                              ? '— ยังไม่มีประวัติการตามผล —'
+                              : '— ยังไม่มีบันทึกในขั้นนี้ —'}
                         </p>
                       ) : (
                         <div className="space-y-2 mb-3">
@@ -517,28 +532,23 @@ export default function CarePathwayPage() {
                         </div>
                       )}
 
-                      {isComingSoon ? (
-                        <button disabled className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-400 rounded-lg text-sm cursor-not-allowed">
-                          <Plus className="w-4 h-4" /> รอการปรับแต่งในลำดับถัดไป
+                      {/* ปุ่มทำงาน (ทุกขั้นตอนทำงานได้จริงแล้ว) */}
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => router.push(stage.actionUrl(patientId))}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"
+                        >
+                          <Plus className="w-4 h-4" />
+                          {stage.actionLabel}
                         </button>
-                      ) : (
-                        <div className="flex gap-2 flex-wrap">
-                          <button
-                            onClick={() => router.push(stage.actionUrl(patientId))}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"
-                          >
-                            <Plus className="w-4 h-4" />
-                            {stage.actionLabel}
-                          </button>
-                          <button
-                            onClick={() => router.push(stage.historyUrl(patientId))}
-                            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
-                          >
-                            <FileText className="w-4 h-4" />
-                            {stage.historyLabel}
-                          </button>
-                        </div>
-                      )}
+                        <button
+                          onClick={() => router.push(stage.historyUrl(patientId))}
+                          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
+                        >
+                          <FileText className="w-4 h-4" />
+                          {stage.historyLabel}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
