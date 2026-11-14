@@ -1,7 +1,8 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ v2: แก้ "ไม่พบข้อมูลผู้ป่วย" ทุกคน
-//    1. เลิกใช้ embed users/hospitals (ต้นเหตุ query error) → ดึงทีละตารางแทน
-//    2. แสดง error จริงบนหน้าจอ + console.log เพื่อ debug
+// ✅ v3: Care Pathway แบบทำงานได้จริง (Repeatable)
+//    - ทุกขั้นตอนมีปุ่ม "เพิ่มนัด" บันทึกกิจกรรมซ้ำได้ (ตาราง care_pathway_activities)
+//    - ทุก event มี "ดูรายละเอียด" แสดงครบทุกฟิลด์
+//    - ทุกขั้นตอนมี "ดูสรุป" + header มี "ดู Trace" (timeline รวม)
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
@@ -10,7 +11,8 @@ import { supabase } from '@/lib/supabase/client';
 import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
   ArrowLeft, Route, ShieldCheck, Stethoscope, Activity, HeartPulse, Pill, Leaf,
-  CheckCircle2, Loader2, Eye, Edit, Plus, X, Users, Building2, AlertCircle
+  CheckCircle2, Loader2, Eye, Edit, Plus, X, Users, Building2, AlertCircle,
+  FileText, Clock, Trash2, History
 } from 'lucide-react';
 
 // ---------- Helpers ----------
@@ -23,11 +25,21 @@ const formatThaiDate = (dateString: string | null | undefined) => {
 };
 
 type StageStatus = 'done' | 'active' | 'pending';
+type EventStatus = 'done' | 'inprogress' | 'scheduled';
 
-interface StageEvent { date: string | null; title: string; detail: string; }
+interface PathEvent {
+  key: string;
+  source: 'screening' | 'followup' | 'manual';
+  stageId: string;
+  date: string | null;
+  title: string;
+  detail: string;
+  status: EventStatus;
+  raw: any;
+}
 interface CareStage {
   id: string; no: number; title: string; description: string;
-  icon: any; status: StageStatus; events: StageEvent[];
+  icon: any; status: StageStatus; events: PathEvent[];
 }
 
 const STAGE_META = [
@@ -45,64 +57,93 @@ const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: str
   pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
 };
 
-// ---------- คำนวณ 6 ขั้นตอนจากข้อมูลจริง ----------
-function buildStages(patient: any, screenings: any[], followups: any[]): CareStage[] {
+const EVENT_STATUS_UI: Record<EventStatus, { label: string; chip: string }> = {
+  done:       { label: '✔ เสร็จแล้ว',      chip: 'bg-green-100 text-green-700' },
+  inprogress: { label: '🔄 กำลังดำเนินการ', chip: 'bg-blue-100 text-blue-700' },
+  scheduled:  { label: '📅 นัดหมายล่วงหน้า', chip: 'bg-amber-100 text-amber-700' },
+};
+
+// label ภาษาไทยสำหรับแสดงใน modal รายละเอียด
+const FIELD_LABELS: Record<string, string> = {
+  screening_date: 'วันที่ประเมิน', pam_total_score: 'คะแนน PAM', proms_total_score: 'คะแนน PROMS',
+  created_at: 'บันทึกเมื่อ', updated_at: 'แก้ไขล่าสุด',
+  followup_date: 'วันที่ติดตาม', weight: 'น้ำหนัก (กก.)', waist_circumference: 'รอบเอว (ซม.)',
+  blood_pressure_sys: 'ความดัน (SYS)', blood_pressure_dia: 'ความดัน (DIA)',
+  blood_sugar_dtx: 'ค่าน้ำตาล', confidence_score: 'ความมั่นใจ (%)',
+  food_amount_status: 'แผนปริมาณอาหาร', food_type_status: 'แผนชนิดอาหาร', movement_status: 'แผนการเคลื่อนไหว',
+  activity_date: 'วันที่กิจกรรม', title: 'ชื่อรายการ', note: 'รายละเอียด/หมายเหตุ',
+  status: 'สถานะ', created_by: 'ผู้บันทึก',
+};
+
+// ---------- คำนวณ + merge กิจกรรม ----------
+function buildStages(patient: any, screenings: any[], followups: any[], activities: any[]): CareStage[] {
   const pamNum = parseInt((patient.pam_level || 'L0').replace('L', '')) || 0;
   const hasDiagnosis = !!(patient.diabetes_type || patient.hba1c_level || patient.blood_sugar);
   const lastFu = followups.length ? followups[followups.length - 1] : null;
-  const sugarControlled = lastFu?.blood_sugar_dtx != null && Number(lastFu.blood_sugar_dtx) <= 130;
-
-  const flags = [
-    screenings.length > 0,                       // 1 คัดกรอง
-    hasDiagnosis,                                // 2 วินิจฉัย
-    pamNum >= 2,                                 // 3 PAM L2 ขึ้นไป
-    followups.length >= 2,                       // 4 ติดตาม >= 2 ครั้ง
-    followups.length >= 4 || sugarControlled,    // 5 เยียวยา/ควบคุมได้
-    pamNum >= 3 && followups.length >= 6,        // 6 ยั่งยืน
-  ];
-  const firstIncomplete = flags.indexOf(false);
-  const statusOf = (i: number): StageStatus =>
-    flags[i] ? 'done' : (i === firstIncomplete ? 'active' : 'pending');
-
   const fmtBP = (s: any, d: any) => (s && d ? `${s}/${d}` : '-');
 
-  const eventsByStage: StageEvent[][] = [
-    screenings.map((s, i) => ({
-      date: s.screening_date,
-      title: `คัดกรอง/ประเมินครั้งที่ ${i + 1}`,
+  // 1) events ที่ derive จากข้อมูลจริง (read-only)
+  const derived: PathEvent[] = [
+    ...screenings.map((s, i) => ({
+      key: `scr-${s.id ?? i}`, source: 'screening' as const, stageId: 'screening',
+      date: s.screening_date, title: `คัดกรอง/ประเมินครั้งที่ ${i + 1}`,
       detail: `คะแนน PAM: ${s.pam_total_score ?? '-'} | วันที่ ${formatThaiDate(s.screening_date)}`,
+      status: 'done' as EventStatus, raw: s,
     })),
-    hasDiagnosis ? [{
-      date: patient.updated_at,
-      title: `กลุ่มเสี่ยง/ชนิด: ${patient.diabetes_type || 'บันทึกแล้ว'}`,
+    ...(hasDiagnosis ? [{
+      key: 'diag-0', source: 'followup' as const, stageId: 'diagnosis',
+      date: patient.updated_at, title: `กลุ่มเสี่ยง/ชนิด: ${patient.diabetes_type || 'บันทึกแล้ว'}`,
       detail: `HbA1C: ${patient.hba1c_level ?? '-'} | น้ำตาล: ${patient.blood_sugar ?? '-'} | BMI: ${patient.bmi ?? '-'}`,
-    }] : [],
-    pamNum >= 2 ? [{
-      date: lastFu?.followup_date || patient.updated_at,
-      title: `PAM Level ปัจจุบัน: ${patient.pam_level}`,
+      status: 'done' as EventStatus, raw: { diabetes_type: patient.diabetes_type, hba1c_level: patient.hba1c_level, blood_sugar: patient.blood_sugar, bmi: patient.bmi, updated_at: patient.updated_at },
+    }] : []),
+    ...(pamNum >= 2 ? [{
+      key: 'pam-0', source: 'followup' as const, stageId: 'selfcare',
+      date: lastFu?.followup_date || patient.updated_at, title: `PAM Level ปัจจุบัน: ${patient.pam_level}`,
       detail: `ความมั่นใจล่าสุด: ${lastFu?.confidence_score ?? '-'}%`,
-    }] : [],
-    followups.map((f, i) => ({
-      date: f.followup_date,
-      title: `นัดติดตามครั้งที่ ${i + 1}`,
-      detail: `น้ำหนัก ${f.weight ?? '-'} กก. | รอบเอว ${f.waist_circumference ?? '-'} | ความดัน ${fmtBP(f.blood_pressure_sys, f.blood_pressure_dia)} | น้ำตาล ${f.blood_sugar_dtx ?? '-'} | ${formatThaiDate(f.followup_date)}`,
+      status: 'done' as EventStatus, raw: { pam_level: patient.pam_level, confidence_score: lastFu?.confidence_score },
+    }] : []),
+    ...followups.map((f, i) => ({
+      key: `fu-${f.id ?? i}`, source: 'followup' as const, stageId: 'monitoring',
+      date: f.followup_date, title: `นัดติดตามครั้งที่ ${i + 1}`,
+      detail: `น้ำหนัก ${f.weight ?? '-'} กก. | ความดัน ${fmtBP(f.blood_pressure_sys, f.blood_pressure_dia)} | น้ำตาล ${f.blood_sugar_dtx ?? '-'}`,
+      status: 'done' as EventStatus, raw: f,
     })),
-    followups.filter(f => f.food_type_status || f.movement_status).map((f, i) => ({
-      date: f.followup_date,
-      title: `ปรับแผนดูแลครั้งที่ ${i + 1}`,
-      detail: `ชนิดอาหาร: ${f.food_type_status || '-'} | ปริมาณอาหาร: ${f.food_amount_status || '-'} | เคลื่อนไหว: ${f.movement_status || '-'}`,
+    ...followups.filter(f => f.food_type_status || f.movement_status).map((f, i) => ({
+      key: `rem-${f.id ?? i}`, source: 'followup' as const, stageId: 'remedy',
+      date: f.followup_date, title: `ปรับแผนดูแลครั้งที่ ${i + 1}`,
+      detail: `ชนิดอาหาร: ${f.food_type_status || '-'} | เคลื่อนไหว: ${f.movement_status || '-'}`,
+      status: 'done' as EventStatus, raw: f,
     })),
-    (pamNum >= 3 && followups.length >= 6) ? [{
-      date: lastFu?.followup_date,
-      title: 'คงพฤติกรรมดูแลต่อเนื่อง',
-      detail: `ติดตามครบ ${followups.length} ครั้ง | PAM ${patient.pam_level} | Zone: ${patient.zone || '-'}`,
-    }] : [],
   ];
 
-  return STAGE_META.map((m, i) => ({
-    id: m.id, no: i + 1, title: m.title, description: m.description,
-    icon: m.icon, status: statusOf(i), events: eventsByStage[i],
+  // 2) events ที่บันทึกเองจากตาราง care_pathway_activities (เพิ่มซ้ำได้)
+  const manual: PathEvent[] = (activities || []).map((a: any) => ({
+    key: `ma-${a.id}`, source: 'manual' as const, stageId: a.stage_id,
+    date: a.activity_date, title: a.title || 'กิจกรรม',
+    detail: a.note || '-', status: (a.status as EventStatus) || 'done', raw: a,
   }));
+
+  // 3) เกณฑ์ auto เดิม (ใช้เฉพาะขั้นที่ยังไม่มี event)
+  const sugarControlled = lastFu?.blood_sugar_dtx != null && Number(lastFu.blood_sugar_dtx) <= 130;
+  const flags = [
+    screenings.length > 0, hasDiagnosis, pamNum >= 2,
+    followups.length >= 2, followups.length >= 4 || sugarControlled,
+    pamNum >= 3 && followups.length >= 6,
+  ];
+  const firstIncomplete = flags.indexOf(false);
+
+  return STAGE_META.map((m, i) => {
+    const events = [...derived, ...manual]
+      .filter(e => e.stageId === m.id)
+      .sort((a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+
+    let status: StageStatus;
+    if (events.some(e => e.status === 'done')) status = 'done';
+    else if (events.some(e => e.status !== 'done')) status = 'active';
+    else status = flags[i] ? 'done' : (i === firstIncomplete ? 'active' : 'pending');
+
+    return { id: m.id, no: i + 1, title: m.title, description: m.description, icon: m.icon, status, events };
+  });
 }
 
 // ---------- Page ----------
@@ -116,13 +157,17 @@ export default function CarePathwayPage() {
   const [stages, setStages] = useState<CareStage[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
-  const [errorDetail, setErrorDetail] = useState<string>(''); // ✅ แสดง error จริง
+  const [errorDetail, setErrorDetail] = useState<string>('');
   const [expanded, setExpanded] = useState<string[]>([]);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [fuForm, setFuForm] = useState({ followup_date: '', weight: '', blood_sugar_dtx: '' });
 
-  // Session + Role
+  // modals
+  const [addStage, setAddStage] = useState<CareStage | null>(null);
+  const [detailEvent, setDetailEvent] = useState<PathEvent | null>(null);
+  const [summaryStage, setSummaryStage] = useState<CareStage | null>(null);
+  const [showTrace, setShowTrace] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({ activity_date: '', title: '', note: '', status: 'done' });
+
   useEffect(() => {
     const userData = checkSession();
     if (!userData) { router.push('/admin/login'); return; }
@@ -132,71 +177,39 @@ export default function CarePathwayPage() {
     setUser(userData);
   }, [router]);
 
-  // ✅ โหลดข้อมูลแบบไม่ใช้ embed (แก้ต้นเหตุ query error)
   const load = useCallback(async () => {
     if (!user || !patientId) return;
     setLoading(true);
     try {
-      // 1) profiles — query เดี่ยว ไม่ embed
-      const { data: prof, error: e1 } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', patientId)
-        .maybeSingle();
+      const { data: prof, error: e1 } = await supabase.from('profiles').select('*').eq('id', patientId).maybeSingle();
+      if (e1) throw new Error('profiles: ' + e1.message);
+      if (!prof) { setErrorDetail(`ไม่พบข้อมูลผู้ป่วย id: ${patientId}`); setErrorState('notfound'); return; }
 
-      if (e1) {
-        console.error('❌ [CarePathway] profiles query error:', e1);
-        throw new Error('profiles: ' + e1.message);
-      }
-      if (!prof) {
-        console.error('❌ [CarePathway] ไม่พบแถว profiles สำหรับ id =', patientId);
-        setErrorDetail(`ไม่พบข้อมูลผู้ป่วย id: ${patientId} ในตาราง profiles`);
-        setErrorState('notfound');
-        return;
-      }
-
-      // 2) Permission: non-super admin ดูได้เฉพาะในเครือข่ายตัวเอง
       if (!isSuperAdmin(user)) {
         const ids = await getAccessibleHospitalIds(user.id);
-        if (prof.hospital_id && !ids.includes(prof.hospital_id)) {
-          setErrorState('denied');
-          return;
-        }
+        if (prof.hospital_id && !ids.includes(prof.hospital_id)) { setErrorState('denied'); return; }
       }
 
-      // 3) ดึงข้อมูลเสริมแบบ query เดี่ยว (ไม่ fatal ถ้าบางตัว error)
-      const [hospRes, uRes, coachRes, scrRes, fuRes] = await Promise.all([
-        prof.hospital_id
-          ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
-          : Promise.resolve({ data: null, error: null } as any),
+      const [hospRes, uRes, coachRes, scrRes, fuRes, actRes] = await Promise.all([
+        prof.hospital_id ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
         supabase.from('users').select('id_card').eq('id', patientId).maybeSingle(),
-        prof.coach_id
-          ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle()
-          : Promise.resolve({ data: null, error: null } as any),
+        prof.coach_id ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
         supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
         supabase.from('appointment_followups').select('*').eq('user_id', patientId).order('followup_date', { ascending: true }),
+        supabase.from('care_pathway_activities').select('*').eq('user_id', patientId).order('activity_date', { ascending: true }),
       ]);
 
-      if (uRes.error) console.warn('[CarePathway] users query error (ไม่ fatal):', uRes.error.message);
-      if (scrRes.error) console.warn('[CarePathway] screenings query error:', scrRes.error.message);
-      if (fuRes.error) console.warn('[CarePathway] followups query error:', fuRes.error.message);
+      // ⚠️ ถ้ายังไม่ได้รัน SQL สร้างตาราง → เตือนแต่ไม่พัง (แสดงเฉพาะ data เดิม)
+      if (actRes.error) console.warn('[CarePathway] care_pathway_activities:', actRes.error.message);
 
-      // ประกอบ object ให้หน้าตาเหมือนเดิม (patient.hospitals / patient.users)
-      const p = {
-        ...prof,
-        hospitals: hospRes.data || null,
-        users: uRes.data || null,
-        coach_name: coachRes.data?.full_name_th || '-',
-      };
-
+      const p = { ...prof, hospitals: hospRes.data || null, users: uRes.data || null, coach_name: coachRes.data?.full_name_th || '-' };
       setPatient(p);
-      const built = buildStages(p, scrRes.data || [], fuRes.data || []);
+      const built = buildStages(p, scrRes.data || [], fuRes.data || [], actRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
-      setErrorState('none');
-      setErrorDetail('');
+      setErrorState('none'); setErrorDetail('');
     } catch (e: any) {
-      console.error('❌ [CarePathway] load error:', e);
+      console.error('❌ [CarePathway]', e);
       setErrorDetail(e?.message || String(e));
       setErrorState('notfound');
     } finally {
@@ -206,33 +219,44 @@ export default function CarePathwayPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  // เพิ่มนัดติดตาม
-  const handleAddFollowup = async () => {
-    if (!fuForm.followup_date) { alert('กรุณาเลือกวันที่นัด'); return; }
+  const openAdd = (stage: CareStage) => {
+    setForm({
+      activity_date: new Date().toISOString().slice(0, 10),
+      title: `นัดที่ ${stage.events.length + 1} - ${stage.title}`,
+      note: '', status: 'done',
+    });
+    setAddStage(stage);
+  };
+
+  const handleSaveActivity = async () => {
+    if (!addStage || !form.activity_date) { alert('กรุณาเลือกวันที่'); return; }
     setSaving(true);
     try {
-      const { error } = await supabase.from('appointment_followups').insert({
-        user_id: patientId,
-        followup_date: fuForm.followup_date,
-        weight: fuForm.weight ? Number(fuForm.weight) : null,
-        blood_sugar_dtx: fuForm.blood_sugar_dtx ? Number(fuForm.blood_sugar_dtx) : null,
+      const { error } = await supabase.from('care_pathway_activities').insert({
+        user_id: patientId, stage_id: addStage.id,
+        activity_date: form.activity_date, title: form.title,
+        note: form.note || null, status: form.status, created_by: user?.id,
       });
       if (error) throw error;
-      alert('✅ บันทึกนัดติดตามแล้ว');
-      setShowAddModal(false);
-      setFuForm({ followup_date: '', weight: '', blood_sugar_dtx: '' });
+      setAddStage(null);
       await load();
     } catch (e: any) {
-      alert('❌ บันทึกไม่สำเร็จ: ' + (e?.message || 'ตรวจสอบคอลัมน์ของตาราง appointment_followups'));
+      alert('❌ บันทึกไม่สำเร็จ: ' + (e?.message || '') + '\n\n💡 ถ้าขึ้นว่าตารางไม่มีอยู่ → กรุณารัน SQL สร้างตาราง care_pathway_activities ใน Supabase ก่อน');
     } finally {
       setSaving(false);
     }
   };
 
-  const toggle = (id: string) =>
-    setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const handleDeleteActivity = async (ev: PathEvent) => {
+    if (!confirm('ลบรายการนี้?')) return;
+    const { error } = await supabase.from('care_pathway_activities').delete().eq('id', ev.raw.id);
+    if (error) { alert('❌ ลบไม่สำเร็จ: ' + error.message); return; }
+    await load();
+  };
 
-  // ---------- States: loading / error ----------
+  const toggle = (id: string) => setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  // ---------- Loading / Error ----------
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -252,25 +276,15 @@ export default function CarePathwayPage() {
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
             {errorState === 'denied' ? 'ไม่มีสิทธิ์เข้าถึงข้อมูลผู้ป่วยนี้' : 'ไม่พบข้อมูลผู้ป่วย'}
           </h2>
-          <p className="text-gray-600 mb-4">
-            {errorState === 'denied' ? 'ผู้ป่วยอยู่นอกเครือข่ายโรงพยาบาลของท่าน' : 'ผู้ป่วยอาจถูกลบหรือลิงก์ไม่ถูกต้อง'}
-          </p>
-          {/* ✅ แสดง error จริงเพื่อ debug */}
           {errorDetail && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
-              <p className="text-xs font-semibold text-red-600 mb-1">รายละเอียดข้อผิดพลาด (สำหรับแจ้งทีม dev):</p>
+              <p className="text-xs font-semibold text-red-600 mb-1">รายละเอียดข้อผิดพลาด:</p>
               <p className="text-xs text-red-700 font-mono break-all">{errorDetail}</p>
             </div>
           )}
           <div className="flex gap-2 justify-center">
-            <button onClick={() => load()}
-              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
-              ลองใหม่
-            </button>
-            <button onClick={() => router.push('/admin/patients')}
-              className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
-              กลับหน้าผู้ป่วย
-            </button>
+            <button onClick={() => load()} className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">ลองใหม่</button>
+            <button onClick={() => router.push('/admin/patients')} className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">กลับหน้าผู้ป่วย</button>
           </div>
         </div>
       </div>
@@ -278,6 +292,8 @@ export default function CarePathwayPage() {
   }
 
   const doneCount = stages.filter(s => s.status === 'done').length;
+  const allEvents = stages.flatMap(s => s.events.map(e => ({ ...e, stageNo: s.no, stageTitle: s.title })))
+    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
 
   // ---------- Render ----------
   return (
@@ -285,8 +301,7 @@ export default function CarePathwayPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-5xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/patients')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
+          <button onClick={() => router.push('/admin/patients')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
             <ArrowLeft className="w-4 h-4" /> กลับหน้าผู้ป่วย
           </button>
           <div className="flex items-center justify-between flex-wrap gap-3">
@@ -300,12 +315,9 @@ export default function CarePathwayPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
-                สำเร็จ {doneCount}/{stages.length} ขั้นตอน
-              </span>
-              <button onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">
-                <Plus className="w-4 h-4" /> เพิ่มนัดติดตาม
+              <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">สำเร็จ {doneCount}/{stages.length} ขั้นตอน</span>
+              <button onClick={() => setShowTrace(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 text-sm">
+                <History className="w-4 h-4" /> ดู Trace
               </button>
             </div>
           </div>
@@ -336,14 +348,8 @@ export default function CarePathwayPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => router.push(`/admin/patients/${patient.id}`)}
-                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด">
-                <Eye className="w-5 h-5" />
-              </button>
-              <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)}
-                className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข">
-                <Edit className="w-5 h-5" />
-              </button>
+              <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด"><Eye className="w-5 h-5" /></button>
+              <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข"><Edit className="w-5 h-5" /></button>
             </div>
           </div>
         </div>
@@ -351,7 +357,7 @@ export default function CarePathwayPage() {
         {/* Stages */}
         <div>
           <h3 className="text-lg font-bold text-gray-800 mb-1">ขั้นตอนการดูแลสุขภาพ (Care Pathway)</h3>
-          <p className="text-sm text-gray-500 mb-4">สถานะคำนวณอัตโนมัติจากข้อมูลการประเมินและการติดตามจริง</p>
+          <p className="text-sm text-gray-500 mb-4">กด "เพิ่มนัด" ในแต่ละขั้นเพื่อบันทึกกิจกรรมได้ไม่จำกัด (ทำได้ซ้ำ)</p>
           <div className="space-y-3">
             {stages.map((stage) => {
               const ui = STATUS_UI[stage.status];
@@ -359,6 +365,7 @@ export default function CarePathwayPage() {
               const isOpen = expanded.includes(stage.id);
               return (
                 <div key={stage.id} className={`rounded-xl border shadow-sm ${ui.card}`}>
+                  {/* หัวข้อขั้น */}
                   <button onClick={() => toggle(stage.id)} className="w-full flex items-center gap-4 p-4 text-left">
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold shrink-0 ${ui.circle}`}>
                       {stage.status === 'done' ? <CheckCircle2 className="w-5 h-5" /> : stage.no}
@@ -376,22 +383,48 @@ export default function CarePathwayPage() {
 
                   {isOpen && (
                     <div className="px-4 pb-4 pl-16">
+                      {/* รายการกิจกรรม */}
                       {stage.events.length === 0 ? (
-                        <p className="text-sm text-gray-400 italic">— ยังไม่มีบันทึกในขั้นนี้ —</p>
+                        <p className="text-sm text-gray-400 italic mb-3">— ยังไม่มีบันทึกในขั้นนี้ —</p>
                       ) : (
-                        <div className="space-y-2">
-                          {stage.events.map((ev, i) => (
-                            <div key={i} className="bg-white rounded-lg border p-3 flex items-start gap-3">
-                              <div className="w-6 h-6 rounded-full bg-green-100 text-green-600 flex items-center justify-center text-xs shrink-0 mt-0.5">✓</div>
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-gray-800">{ev.title}</p>
-                                <p className="text-xs text-gray-500">{ev.detail}</p>
-                                <p className="text-xs text-blue-600 mt-0.5">📅 {formatThaiDate(ev.date)}</p>
+                        <div className="space-y-2 mb-3">
+                          {stage.events.map((ev) => {
+                            const evUi = EVENT_STATUS_UI[ev.status];
+                            return (
+                              <div key={ev.key} className="bg-white rounded-lg border p-3 flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="text-sm font-medium text-gray-800">{ev.title}</p>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${evUi.chip}`}>{evUi.label}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-500">{ev.detail}</p>
+                                  <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1"><Clock className="w-3 h-3" /> {formatThaiDate(ev.date)}</p>
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button onClick={() => setDetailEvent(ev)} className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg">
+                                    <FileText className="w-3 h-3" /> ดูรายละเอียด
+                                  </button>
+                                  {ev.source === 'manual' && (
+                                    <button onClick={() => handleDeleteActivity(ev)} className="p-1 text-red-400 hover:text-red-600" title="ลบรายการ">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
+
+                      {/* ปุ่มทำงานของแต่ละขั้น */}
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => openAdd(stage)} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">
+                          <Plus className="w-4 h-4" /> {stage.status === 'done' ? 'เพิ่มนัด (ทำซ้ำ)' : 'เพิ่มนัด'}
+                        </button>
+                        <button onClick={() => setSummaryStage(stage)} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm">
+                          <FileText className="w-4 h-4" /> ดูสรุปข้อมูล
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -401,45 +434,129 @@ export default function CarePathwayPage() {
         </div>
       </div>
 
-      {/* Modal เพิ่มนัด */}
-      {showAddModal && (
+      {/* ===== Modal: เพิ่มนัด ===== */}
+      {addStage && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-bold">➕ เพิ่มนัดติดตาม — {patient.first_name} {patient.last_name}</h3>
-              <button onClick={() => setShowAddModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <h3 className="text-lg font-bold">➕ เพิ่มนัด — ขั้น {addStage.no}. {addStage.title}</h3>
+              <button onClick={() => setAddStage(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium mb-1">วันที่นัด *</label>
-                <input type="date" value={fuForm.followup_date}
-                  onChange={e => setFuForm({ ...fuForm, followup_date: e.target.value })}
-                  className="w-full px-3 py-2 border rounded-lg" />
-              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium mb-1">น้ำหนัก (กก.)</label>
-                  <input type="number" value={fuForm.weight}
-                    onChange={e => setFuForm({ ...fuForm, weight: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" />
+                  <label className="block text-sm font-medium mb-1">วันที่ *</label>
+                  <input type="date" value={form.activity_date} onChange={e => setForm({ ...form, activity_date: e.target.value })} className="w-full px-3 py-2 border rounded-lg" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">ค่าน้ำตาล</label>
-                  <input type="number" value={fuForm.blood_sugar_dtx}
-                    onChange={e => setFuForm({ ...fuForm, blood_sugar_dtx: e.target.value })}
-                    className="w-full px-3 py-2 border rounded-lg" />
+                  <label className="block text-sm font-medium mb-1">สถานะ</label>
+                  <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="w-full px-3 py-2 border rounded-lg">
+                    <option value="done">✔ เสร็จแล้ว</option>
+                    <option value="inprogress">🔄 กำลังดำเนินการ</option>
+                    <option value="scheduled">📅 นัดหมายล่วงหน้า</option>
+                  </select>
                 </div>
               </div>
-              <p className="text-xs text-gray-500">* ข้อมูลอื่น (ความดัน/รอบเอว/แผนปฏิบัติ) เติมเพิ่มได้ที่หน้าแก้ไขผู้ป่วย</p>
+              <div>
+                <label className="block text-sm font-medium mb-1">ชื่อรายการ</label>
+                <input type="text" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="w-full px-3 py-2 border rounded-lg" placeholder="เช่น นัดที่ 4 - ติดตามผล" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">รายละเอียด/หมายเหตุ</label>
+                <textarea value={form.note} onChange={e => setForm({ ...form, note: e.target.value })} rows={3} className="w-full px-3 py-2 border rounded-lg" placeholder="สิ่งที่ทำ, ผลที่ได้, แผนต่อไป..." />
+              </div>
               <div className="flex gap-2 pt-2">
-                <button onClick={handleAddFollowup} disabled={saving}
-                  className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50">
+                <button onClick={handleSaveActivity} disabled={saving} className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin inline" /> : <Plus className="w-4 h-4 inline" />} บันทึกนัด
                 </button>
-                <button onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">ปิด</button>
+                <button onClick={() => setAddStage(null)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">ปิด</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal: ดูรายละเอียด ===== */}
+      {detailEvent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">📋 {detailEvent.title}</h3>
+              <button onClick={() => setDetailEvent(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-1">
+              {Object.entries(detailEvent.raw)
+                .filter(([k, v]) => v != null && v !== '' && !['id', 'user_id'].includes(k))
+                .map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-4 py-2 border-b last:border-0">
+                    <span className="text-sm text-gray-500 shrink-0">{FIELD_LABELS[k] || k}</span>
+                    <span className="text-sm font-medium text-gray-800 text-right break-all">
+                      {['screening_date','followup_date','activity_date','created_at','updated_at'].includes(k)
+                        ? formatThaiDate(v as string)
+                        : k === 'status' ? (EVENT_STATUS_UI[v as EventStatus]?.label || v) : String(v)}
+                    </span>
+                  </div>
+                ))}
+            </div>
+            <p className="text-xs text-gray-400 mt-3">
+              {detailEvent.source === 'manual' ? 'รายการบันทึกเอง — ลบ/แก้ไขได้' : 'ข้อมูลจากระบบ (อ่านอย่างเดียว)'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal: ดูสรุปขั้น ===== */}
+      {summaryStage && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">📊 สรุปขั้น {summaryStage.no}. {summaryStage.title}</h3>
+              <button onClick={() => setSummaryStage(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="grid grid-cols-3 gap-3 mb-4 text-center">
+              <div className="bg-gray-50 rounded-lg p-3"><p className="text-2xl font-bold">{summaryStage.events.length}</p><p className="text-xs text-gray-500">จำนวนครั้ง</p></div>
+              <div className="bg-green-50 rounded-lg p-3"><p className="text-2xl font-bold text-green-600">{summaryStage.events.filter(e => e.status === 'done').length}</p><p className="text-xs text-gray-500">เสร็จแล้ว</p></div>
+              <div className="bg-amber-50 rounded-lg p-3"><p className="text-2xl font-bold text-amber-600">{summaryStage.events.filter(e => e.status !== 'done').length}</p><p className="text-xs text-gray-500">ค้าง/นัดใหม่</p></div>
+            </div>
+            <p className="text-sm text-gray-600">
+              {summaryStage.events.length > 0
+                ? <>เริ่มครั้งแรก {formatThaiDate(summaryStage.events[0].date)} → ล่าสุด {formatThaiDate(summaryStage.events[summaryStage.events.length - 1].date)}</>
+                : 'ยังไม่มีกิจกรรมในขั้นนี้'}
+            </p>
+            <button onClick={() => { const s = summaryStage; setSummaryStage(null); openAdd(s); }} className="mt-4 w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm">
+              ➕ เพิ่มนัดในขั้นนี้
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal: ดู Trace ===== */}
+      {showTrace && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full p-6 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">🕘 Trace — กิจกรรมทั้งหมดของ {patient.first_name} {patient.last_name}</h3>
+              <button onClick={() => setShowTrace(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            {allEvents.length === 0 ? (
+              <p className="text-gray-500 text-center py-8">ยังไม่มีกิจกรรม</p>
+            ) : (
+              <div className="relative pl-6 border-l-2 border-gray-200 space-y-4">
+                {allEvents.map((ev) => (
+                  <div key={ev.key} className="relative">
+                    <div className="absolute -left-[31px] w-4 h-4 rounded-full bg-blue-500 border-2 border-white" />
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-gray-800">ขั้น {ev.stageNo}: {ev.title}</p>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${EVENT_STATUS_UI[ev.status].chip}`}>{EVENT_STATUS_UI[ev.status].label}</span>
+                      </div>
+                      <p className="text-xs text-gray-500">{ev.detail}</p>
+                      <p className="text-xs text-blue-600 mt-1">📅 {formatThaiDate(ev.date)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
