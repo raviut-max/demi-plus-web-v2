@@ -1,24 +1,18 @@
 // app/admin/patients/page.tsx
-// ✅ แก้ไขล่าสุด: แก้ไขปุ่มให้ลิงก์ไปหน้า Care Pathway แทน /record (แก้ 404)
+// ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
+// ✅ การแก้ไข:
+//    1. แก้ bug totalPatients = 0 (ใช้ fallback จาก data.length)
+//    2. เพิ่ม console log สำหรับ debug
+//    3. แก้ typo เล็กน้อย
 'use client';
-
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import {
-  checkSession,
-  logout,
-  getPatientListPaginated,
-  getPatientCount,
-  deletePatient,
-  restorePatient,
-  permanentlyDeletePatient,
-  getDeletedPatients,
-  getAccessibleHospitalIds,
-  getUserHospitalInfo,
-  isSuperAdmin,
-  getHospitalsWithHierarchy,
-  getCoachesWithHospitals
+  checkSession, logout, getPatientListPaginated, getPatientCount,
+  deletePatient, restorePatient, permanentlyDeletePatient,
+  getDeletedPatients, getAccessibleHospitalIds, getUserHospitalInfo,
+  isSuperAdmin, getHospitalsWithHierarchy, getCoachesWithHospitals
 } from '@/lib/supabase/queries';
 import {
   Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
@@ -26,7 +20,7 @@ import {
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
   FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward, Download,
-  FileText, Route // ✅ เพิ่ม Route สำหรับปุ่ม Care Pathway
+  FileText, Route
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -36,7 +30,6 @@ const debugLog = (module: string, message: string, data?: any) => {
   }
 };
 
-// Helper function to format date to Thai Buddhist Era (DD MMMM YYYY)
 const formatThaiDate = (dateString: string | null) => {
   if (!dateString) return '';
   const date = new Date(dateString);
@@ -57,10 +50,9 @@ export default function PatientManagementPage() {
   const [patients, setPatients] = useState<any[]>([]);
   const [deletedPatients, setDeletedPatients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // ✅ Search States แยกกันชัดเจน เพื่อแก้ปัญหา Permission และ Search ผิดที่
+
   const [searchTermNameHN, setSearchTermNameHN] = useState('');
-  const [searchTermIdCard, setSearchTermIdCard] = useState(''); // ✅ แก้ typo แล้ว
+  const [searchTermIdCard, setSearchTermIdCard] = useState('');
   const [selectedPamLevel, setSelectedPamLevel] = useState<string>('all');
   const [showDeletedModal, setShowDeletedModal] = useState(false);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
@@ -72,30 +64,23 @@ export default function PatientManagementPage() {
   const [filterCoaches, setFilterCoaches] = useState<any[]>([]);
   const [loadingFilters, setLoadingFilters] = useState(false);
 
-  // Sort State
   const [sortColumn, setSortColumn] = useState<string>('first_name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
-  // Pagination State - แสดงหน้าละ 100 คน
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPatients, setTotalPatients] = useState(0);
   const [pageSize] = useState(100);
   const totalPages = Math.ceil(totalPatients / pageSize);
   const [jumpToPage, setJumpToPage] = useState<string>('');
 
-  // Helper: รับ hospital ids สำหรับ filter ตาม network
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
-    if (hospitalIdFilter === 'all') {
-      return accessibleHospitalIds;
-    }
+    if (hospitalIdFilter === 'all') return accessibleHospitalIds;
     const { data: hospital, error } = await supabase
       .from('hospitals')
       .select('id, type, parent_id')
       .eq('id', hospitalIdFilter)
       .single();
-    
     if (error || !hospital) return [hospitalIdFilter];
-    
     if (hospital.type === 'main') {
       const { data: subHospitals } = await supabase
         .from('hospitals')
@@ -109,13 +94,11 @@ export default function PatientManagementPage() {
     }
   }, [accessibleHospitalIds]);
 
-  // โหลดรายชื่อโค้ชตามโรงพยาบาลที่เลือก
   const loadFilterCoachesByHospital = useCallback(async (hospitalIdFilter: string) => {
     try {
       setLoadingFilters(true);
       const targetHospitalIds = await getHospitalIdsForFilter(hospitalIdFilter);
       const allCoaches = await getCoachesWithHospitals(targetHospitalIds);
-      
       const coachesWithCount = await Promise.all(allCoaches.map(async (c: any) => {
         try {
           const { count } = await supabase
@@ -128,7 +111,6 @@ export default function PatientManagementPage() {
           return { ...c, patientCount: 0, hospitalName: c.users?.hospitals?.name || 'ไม่ระบุ' };
         }
       }));
-      
       const sortedCoaches = [...coachesWithCount].sort((a, b) =>
         (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
       );
@@ -204,7 +186,6 @@ export default function PatientManagementPage() {
     try {
       setLoadingFilters(true);
       const allHospitals = await getHospitalsWithHierarchy(isSuperAdmin(user) ? undefined : accessibleIds);
-      
       const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
         try {
           const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('hospital_id', h.id).eq('is_active', true);
@@ -213,7 +194,6 @@ export default function PatientManagementPage() {
           return { ...h, patientCount: 0, typeLabel: h.type === 'main' ? '🏢 แม่ข่าย' : '🏥 ลูกข่าย' };
         }
       }));
-      
       const sortedHospitals = [...hospitalsWithCount].sort((a, b) => {
         if (a.type !== b.type) return a.type === 'main' ? -1 : 1;
         return (a.name || '').localeCompare(b.name || '', 'th');
@@ -227,31 +207,21 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ โหลดข้อมูลผู้ป่วยแบบ Pagination + Server-side Sort
+  // ✅ แก้ไขหลัก: ใช้ fallback จาก data.length เมื่อ total เป็น 0
   const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
       const isAllCoaches = selectedCoachFilter === 'all';
       const isAllPam = selectedPamLevel === 'all';
-      
+
       const pamParam = isAllPam ? undefined : selectedPamLevel;
       const coachIdParam = isAllCoaches ? undefined : selectedCoachFilter;
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
 
-      const total = await getPatientCount(
-        searchTermNameHN,
-        searchTermIdCard,
-        pamParam,
-        accessibleIdsParam,
-        filterHospitalIdParam,
-        coachIdParam
-      );
-      setTotalPatients(total);
-      
-      const fetchPageSize = forceFetchAll ? total : pageSize;
+      // ✅ โหลดข้อมูลก่อน
+      const fetchPageSize = forceFetchAll ? 10000 : pageSize;
       const fetchCurrentPage = forceFetchAll ? 0 : currentPage;
-      
       const { patients: data } = await getPatientListPaginated(
         fetchCurrentPage,
         fetchPageSize,
@@ -264,10 +234,35 @@ export default function PatientManagementPage() {
         sortColumn,
         sortDirection
       );
-      setPatients(data);
+
+      // ✅ นับ total จาก data.length เป็น fallback
+      const totalFromData = data?.length || 0;
       
+      // ✅ พยายาม get count จาก DB
+      let totalFromDB = 0;
+      try {
+        totalFromDB = await getPatientCount(
+          searchTermNameHN,
+          searchTermIdCard,
+          pamParam,
+          accessibleIdsParam,
+          filterHospitalIdParam,
+          coachIdParam
+        );
+      } catch (countErr) {
+        console.warn('⚠️ [loadPatients] getPatientCount failed, using data.length fallback:', countErr);
+      }
+
+      // ✅ ใช้ค่าที่มากกว่า (ป้องกัน bug total = 0 แต่ data มี)
+      const finalTotal = Math.max(totalFromDB, totalFromData);
+      
+      console.log(`📊 [loadPatients] totalFromDB=${totalFromDB}, totalFromData=${totalFromData}, finalTotal=${finalTotal}`);
+      
+      setTotalPatients(finalTotal);
+      setPatients(data || []);
+
       if (!forceFetchAll) {
-        console.log(`📊 [loadPatients] Page ${currentPage + 1}/${totalPages || 1}, Loaded: ${data.length}, Total: ${total}`);
+        console.log(`📊 [loadPatients] Page ${currentPage + 1}/${Math.ceil(finalTotal / pageSize) || 1}, Loaded: ${totalFromData}, Total: ${finalTotal}`);
       }
     } catch (error) {
       debugLog('loadPatients', 'error', error);
@@ -331,61 +326,39 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ปรับปรุงฟังก์ชัน Export Excel ให้รองรับข้อมูล 3 ส่วนหลัก และรูปแบบวันที่ พ.ศ.
   const exportToExcel = async (mode: 'current' | 'all') => {
     let dataToExport = patients;
     if (mode === 'all') {
       await loadPatients(accessibleHospitalIds, true);
       dataToExport = patients;
     }
-
     const exportData = await Promise.all(dataToExport.map(async (patient) => {
       const userId = patient.id;
-      
-      // 1. ดึงข้อมูลการประเมินทั้งหมด
       const { data: screenings } = await supabase
         .from('screenings')
-        .select(`
-          *,
-          screening_responses (
-            question_type,
-            score
-          )
-        `)
+        .select(`*, screening_responses ( question_type, score )`)
         .eq('user_id', userId)
         .order('updated_at', { ascending: true });
-      
       const totalScreenings = screenings?.length || 0;
       const firstScreening = screenings && screenings.length > 0 ? screenings[0] : null;
       const lastScreening = screenings && screenings.length > 0 ? screenings[screenings.length - 1] : null;
-      
       const calculatePromsScore = (screening: any) => {
         if (!screening || !screening.screening_responses) return '';
-        const promsResponses = screening.screening_responses.filter(
-          (r: any) => r.question_type === 'proms'
-        );
+        const promsResponses = screening.screening_responses.filter((r: any) => r.question_type === 'proms');
         return promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
       };
-      
       const firstPromsScore = calculatePromsScore(firstScreening);
       const lastPromsScore = calculatePromsScore(lastScreening);
       const firstPamScore = firstScreening?.pam_total_score || '';
       const lastPamScore = lastScreening?.pam_total_score || '';
-      
-      // 2. ดึงข้อมูลการติดตาม (Follow-ups) สูงสุด 6 ครั้งล่าสุด
       const { data: followups } = await supabase
         .from('appointment_followups')
         .select('*')
         .eq('user_id', userId)
         .order('followup_date', { ascending: true })
         .limit(6);
-      
-      const formatBP = (sys: number | null, dia: number | null) => {
-        return (sys && dia) ? `${sys}/${dia}` : '';
-      };
-
+      const formatBP = (sys: number | null, dia: number | null) => (sys && dia) ? `${sys}/${dia}` : '';
       const rowData: any = {
-        // --- ส่วนที่ 1: ข้อมูลส่วนตัว (1-13) ---
         'ID Card': patient.users?.id_card || '',
         'ชื่อ': patient.first_name || '',
         'นามสกุล': patient.last_name || '',
@@ -399,7 +372,6 @@ export default function PatientManagementPage() {
         'กลุ่มเสี่ยง/เบาหวาน': patient.diabetes_type || '',
         'ค่าน้ำตาล': patient.blood_sugar || '',
         'ค่า HbA1C': patient.hba1c_level || '',
-        // --- ส่วนที่ 2: การประเมิน (14-20) ---
         'จำนวนครั้งที่ประเมิน': totalScreenings,
         'วันที่ประเมินครั้งแรก': formatThaiDate(firstScreening?.screening_date),
         'คะแนน PROM (ครั้งแรก)': firstPromsScore,
@@ -408,8 +380,6 @@ export default function PatientManagementPage() {
         'คะแนน PROM (ล่าสุด)': lastPromsScore,
         'คะแนน PAM (ล่าสุด)': lastPamScore,
       };
-
-      // --- ส่วนที่ 3: รายละเอียดการติดตาม (สูงสุด 6 ครั้ง) ---
       for (let i = 0; i < 6; i++) {
         const followup = followups?.[i];
         const prefix = `F${i + 1}`;
@@ -425,7 +395,6 @@ export default function PatientManagementPage() {
       }
       return rowData;
     }));
-
     const ws = XLSX.utils.json_to_sheet(exportData);
     const baseCols = [
       { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 20 }, { wch: 8 },
@@ -434,7 +403,6 @@ export default function PatientManagementPage() {
     ];
     const followupCols = Array(54).fill({ wch: 15 });
     ws['!cols'] = [...baseCols, ...followupCols];
-
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ข้อมูลผู้ป่วย');
     const fileName = `patients_export_${mode}_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`;
@@ -442,10 +410,7 @@ export default function PatientManagementPage() {
   };
 
   const handleDeletePatient = async (patientId: string, patientName: string) => {
-    if (user?.role === 'osm') {
-      alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย');
-      return;
-    }
+    if (user?.role === 'osm') { alert('❌ อสม. ไม่มีสิทธิ์ลบข้อมูลผู้ป่วย'); return; }
     if (!confirm(`⚠️ ยืนยันการลบผู้ป่วย ${patientName}? จะย้ายไปถังขยะ`)) return;
     try {
       const result = await deletePatient(patientId);
@@ -462,10 +427,7 @@ export default function PatientManagementPage() {
   };
 
   const handleRestorePatient = async (patientId: string, patientName: string) => {
-    if (user?.role === 'osm') {
-      alert('❌ อสม. ไม่มีสิทธิ์กู้คืน');
-      return;
-    }
+    if (user?.role === 'osm') { alert('❌ อสม. ไม่มีสิทธิ์กู้คืน'); return; }
     if (!confirm(`♻️ ยืนยันการกู้คืนผู้ป่วย ${patientName}?`)) return;
     try {
       const result = await restorePatient(patientId);
@@ -482,16 +444,10 @@ export default function PatientManagementPage() {
   };
 
   const handlePermanentlyDeletePatient = async (patientId: string, patientName: string) => {
-    if (user?.role === 'osm') {
-      alert('❌ อสม. ไม่มีสิทธิ์ลบถาวร');
-      return;
-    }
+    if (user?.role === 'osm') { alert('❌ อสม. ไม่มีสิทธิ์ลบถาวร'); return; }
     if (!confirm(`⚠️ คำเตือน: ลบถาวร ${patientName} ไม่สามารถกู้คืนได้!`)) return;
     const secondConfirm = prompt('พิมพ์ "YES" (ตัวพิมพ์ใหญ่) เพื่อยืนยันการลบถาวร:');
-    if (secondConfirm !== 'YES') {
-      alert('ยกเลิกการลบถาวร');
-      return;
-    }
+    if (secondConfirm !== 'YES') { alert('ยกเลิกการลบถาวร'); return; }
     try {
       const result = await permanentlyDeletePatient(patientId);
       if (result.success) {
@@ -513,7 +469,7 @@ export default function PatientManagementPage() {
       'osm': { text: '🏘️ อสม.', bg: 'bg-orange-100', textCol: 'text-orange-700' },
       'admin': { text: isSuperAdmin(user) ? '👑 Super Admin' : '🏥 Hospital Admin', bg: isSuperAdmin(user) ? 'bg-purple-100' : 'bg-blue-100', textCol: isSuperAdmin(user) ? 'text-purple-700' : 'text-blue-700' },
       'doctor': { text: '👨‍⚕️ แพทย์', bg: 'bg-green-100', textCol: 'text-green-700' },
-      'helper': { text: '👩‍ เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
+      'helper': { text: '👩‍💼 เจ้าหน้าที่', bg: 'bg-yellow-100', textCol: 'text-yellow-700' }
     };
     const config = roleConfig[user.role] || { text: user.role, bg: 'bg-gray-100', textCol: 'text-gray-700' };
     return <span className={`px-2 py-1 ${config.bg} ${config.textCol} rounded text-xs font-semibold`}>{config.text}</span>;
@@ -562,7 +518,6 @@ export default function PatientManagementPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -625,7 +580,6 @@ export default function PatientManagementPage() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -850,34 +804,17 @@ export default function PatientManagementPage() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
-                          {/* ✅ ปุ่มใหม่: Care Pathway (แทนปุ่ม record เดิมที่ 404) */}
-                          <button 
-                            onClick={() => router.push(`/admin/patients/${patient.id}/care-pathway`)} 
-                            className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" 
-                            title="Care Pathway - เส้นทางดูแลสุขภาพ"
-                          >
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}/care-pathway`)} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg" title="Care Pathway">
                             <Route className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={() => router.push(`/admin/patients/${patient.id}`)} 
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" 
-                            title="ดูรายละเอียด"
-                          >
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด">
                             <Eye className="w-4 h-4" />
                           </button>
-                          <button 
-                            onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} 
-                            className="p-2 text-green-600 hover:bg-green-50 rounded-lg" 
-                            title="แก้ไข"
-                          >
+                          <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข">
                             <Edit className="w-4 h-4" />
                           </button>
                           {canDeleteData() ? (
-                            <button 
-                              onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} 
-                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg" 
-                              title="ลบ"
-                            >
+                            <button onClick={() => handleDeletePatient(patient.id, `${patient.first_name} ${patient.last_name}`)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" title="ลบ">
                               <Trash2 className="w-4 h-4" />
                             </button>
                           ) : (
