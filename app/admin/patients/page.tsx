@@ -1,9 +1,10 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ เพิ่มการ์ด "ยังไม่ประเมิน" (L0/ไม่มี Zone) ให้ตัวเลขรวมครบ
-//    2. ✅ เปลี่ยน grid เป็น 5 คอลัมน์
-//    3. ✅ เพิ่มคำอธิบายในกล่อง info
+//    1. ✅ เพิ่มการ์ด "ยังไม่ประเมิน" (L0/ไม่มี Zone)
+//    2. ✅ เปลี่ยน Grid เป็น 5 คอลัมน์
+//    3. ✅ Zone counts นับจาก DB โดยตรง (ไม่ใช่จาก patients state)
+//    4. ✅ เพิ่มกล่องตรวจสอบยอดรวม
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -73,12 +74,12 @@ export default function PatientManagementPage() {
   const totalPages = Math.ceil(totalPatients / pageSize);
   const [jumpToPage, setJumpToPage] = useState<string>('');
 
-  // ✅ State ใหม่: Zone counts (เพิ่ม none สำหรับยังไม่ประเมิน)
+  // ✅ State ใหม่: Zone counts ที่นับจาก DB โดยตรง (รวม "ยังไม่ประเมิน")
   const [zoneCounts, setZoneCounts] = useState({
     green: 0,
     yellow: 0,
     red: 0,
-    none: 0, // ✅ เพิ่ม: ผู้ป่วยที่ยังไม่มี Zone / L0
+    none: 0, // ✅ ผู้ป่วยที่ยังไม่มี Zone / L0
   });
 
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
@@ -643,7 +644,7 @@ export default function PatientManagementPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards - ✅ แก้ไขแล้ว: เพิ่มการ์ด "ยังไม่ประเมิน" (5 คอลัมน์) */}
+        {/* Summary Cards - ✅ แก้ไขแล้ว: 5 คอลัมน์ + "ยังไม่ประเมิน" */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
