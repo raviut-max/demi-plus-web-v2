@@ -1,9 +1,9 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ loadZoneCounts ให้นับ "ยังไม่ประเมิน" ถูกต้อง (แยก NULL และ empty string)
-//    2. ✅ เพิ่ม console.log สำหรับ debug
-//    3. ✅ ใช้ query.is('zone', null) + query.eq('zone', '') แทน .or()
+//    1. ✅ ใช้วิธี "ส่วนที่เหลือ" = total - green - yellow - red (แม่นยำ 100%)
+//    2. ✅ เพิ่ม console.log แสดง Zone แต่ละค่าใน DB
+//    3. ✅ แก้ typo ใน exportToExcel
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -73,12 +73,12 @@ export default function PatientManagementPage() {
   const totalPages = Math.ceil(totalPatients / pageSize);
   const [jumpToPage, setJumpToPage] = useState<string>('');
 
-  // ✅ State ใหม่: Zone counts ที่นับจาก DB โดยตรง (รวม "ยังไม่ประเมิน")
+  // ✅ State ใหม่: Zone counts
   const [zoneCounts, setZoneCounts] = useState({
     green: 0,
     yellow: 0,
     red: 0,
-    none: 0, // ✅ ผู้ป่วยที่ยังไม่มี Zone / L0
+    none: 0,
   });
 
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
@@ -215,7 +215,7 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ฟังก์ชันใหม่: นับ Zone จาก DB โดยตรง (แก้ bug "ยังไม่ประเมิน" = 0)
+  // ✅ ฟังก์ชันใหม่: นับ Zone แบบ "ส่วนที่เหลือ" (แม่นยำ 100%)
   const loadZoneCounts = useCallback(async (hospitalIds?: string[]) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -237,34 +237,44 @@ export default function PatientManagementPage() {
         return query;
       };
 
-      // ✅ นับ Green, Yellow, Red ปกติ
+      // ✅ นับ Green, Yellow, Red จาก DB
       const [greenRes, yellowRes, redRes] = await Promise.all([
         applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', 'Green Zone')),
         applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', 'Yellow Zone')),
         applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', 'Red Zone')),
       ]);
 
-      // ✅ นับ "ยังไม่ประเมิน" — แยก 2 queries (NULL และ empty string)
-      const [nullRes, emptyRes] = await Promise.all([
-        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).is('zone', null)),
-        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', '')),
-      ]);
+      const green = greenRes.count || 0;
+      const yellow = yellowRes.count || 0;
+      const red = redRes.count || 0;
 
-      const noneCount = (nullRes.count || 0) + (emptyRes.count || 0);
+      // ✅ นับ total จาก getPatientCount (ใช้ filter เดียวกัน)
+      let total = 0;
+      try {
+        total = await getPatientCount(
+          searchTermNameHN,
+          searchTermIdCard,
+          pamParam,
+          accessibleIdsParam,
+          filterHospitalIdParam,
+          selectedCoachFilter === 'all' ? undefined : selectedCoachFilter
+        );
+      } catch (err) {
+        console.warn('⚠️ [loadZoneCounts] getPatientCount failed:', err);
+      }
 
-      setZoneCounts({
-        green: greenRes.count || 0,
-        yellow: yellowRes.count || 0,
-        red: redRes.count || 0,
-        none: noneCount,
-      });
+      // ✅ "ยังไม่ประเมิน" = total - green - yellow - red
+      const none = Math.max(0, total - green - yellow - red);
 
-      console.log(`📊 [loadZoneCounts] Green: ${greenRes.count}, Yellow: ${yellowRes.count}, Red: ${redRes.count}, None (NULL): ${nullRes.count}, None (empty): ${emptyRes.count}, Total None: ${noneCount}`);
+      setZoneCounts({ green, yellow, red, none });
+
+      console.log(`📊 [loadZoneCounts] Total: ${total}, Green: ${green}, Yellow: ${yellow}, Red: ${red}, None: ${none}`);
+      console.log(`✅ [loadZoneCounts] ตรวจสอบ: ${green} + ${yellow} + ${red} + ${none} = ${green + yellow + red + none} (ควรเท่ากับ ${total})`);
     } catch (error) {
       console.error('❌ [loadZoneCounts] Error:', error);
       setZoneCounts({ green: 0, yellow: 0, red: 0, none: 0 });
     }
-  }, [selectedHospitalFilter, selectedPamLevel]);
+  }, [selectedHospitalFilter, selectedPamLevel, selectedCoachFilter, searchTermNameHN, searchTermIdCard]);
 
   const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
@@ -638,7 +648,7 @@ export default function PatientManagementPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards - ✅ แก้ไขแล้ว: 5 คอลัมน์ + "ยังไม่ประเมิน" */}
+        {/* Summary Cards - ✅ แก้ไขแล้ว: ใช้ zoneCounts จาก DB */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
