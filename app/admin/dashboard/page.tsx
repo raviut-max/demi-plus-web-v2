@@ -1,10 +1,9 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 29 ตุลาคม 2569
+// ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มเมนู "ระเบียนคนไข้ (PDF)" ในเมนูหลัก (ตำแหน่งที่ 2)
-//    2. เพิ่ม Quick Actions 2 ปุ่ม: Export PDF ทั้งโรงพยาบาล + เฉพาะราย
-//    3. เพิ่ม import FileSpreadsheet, Download, Printer จาก lucide-react
-//    4. แสดง badge จำนวนผู้ป่วยทั้งหมดบนเมนูระเบียนคนไข้
+//    1. เพิ่มเมนู "ภาพรวม Care Pathway" (ตำแหน่งที่ 2 หลังจัดการผู้ป่วย)
+//    2. เพิ่ม import Route จาก lucide-react
+//    3. แก้ typo เล็กน้อย (ico n → icon, แ บบ → แบบ)
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -26,7 +25,8 @@ import {
   Building2,
   FileSpreadsheet,
   Download,
-  Printer
+  Printer,
+  Route  // ✅ เพิ่ม Route สำหรับเมนูภาพรวม Care Pathway
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -90,7 +90,7 @@ export default function AdminDashboard() {
 
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log(' [loadUserHospital] Loading for user:', userId);
+      console.log('🔍 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
       console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
@@ -131,7 +131,7 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - เพิ่มปุ่มระเบียนคนไข้ PDF
+  // ✅ เมนูจัดการระบบ - เพิ่มเมนูภาพรวม Care Pathway (ตำแหน่งที่ 2)
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -139,6 +139,14 @@ export default function AdminDashboard() {
       icon: <Users className="w-6 h-6" />,
       color: 'from-blue-500 to-cyan-500',
       href: '/admin/patients',
+      allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
+    },
+    {
+      title: 'ภาพรวม Care Pathway',
+      description: 'ดูสถานะเส้นทางสุขภาพผู้ป่วยทั้งระบบ',
+      icon: <Route className="w-6 h-6" />,
+      color: 'from-indigo-500 to-purple-500',
+      href: '/admin/care-pathway',
       allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
@@ -236,8 +244,8 @@ export default function AdminDashboard() {
                     </p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                          user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -340,7 +348,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Quick Actions - เพิ่มปุ่ม Export PDF */}
+        {/* Quick Actions */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4">ดำเนินการด่วน</h2>
           <div className="flex flex-wrap gap-3">
@@ -358,7 +366,6 @@ export default function AdminDashboard() {
               <FileText className="w-4 h-4" />
               ทำแบบประเมิน
             </button>
-            {/* ✅ ปุ่มใหม่: Export PDF ทั้งโรงพยาบาล */}
             <button
               onClick={() => router.push('/admin/reports/patient-record?mode=hospital')}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
@@ -366,7 +373,6 @@ export default function AdminDashboard() {
               <Download className="w-4 h-4" />
               Export PDF ทั้งโรงพยาบาล
             </button>
-            {/* ✅ ปุ่มใหม่: Export PDF เฉพาะราย */}
             <button
               onClick={() => router.push('/admin/reports/patient-record?mode=select')}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all"
@@ -389,6 +395,14 @@ export default function AdminDashboard() {
             >
               <Target className="w-4 h-4" />
               จัดการเป้าหมาย
+            </button>
+            {/* ✅ ปุ่มลัดไปหน้าภาพรวม Care Pathway */}
+            <button
+              onClick={() => router.push('/admin/care-pathway')}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg hover:from-indigo-600 hover:to-purple-600 transition-all shadow-sm"
+            >
+              <Route className="w-4 h-4" />
+              ภาพรวม Care Pathway
             </button>
           </div>
         </div>
