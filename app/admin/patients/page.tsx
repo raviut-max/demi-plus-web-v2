@@ -1,10 +1,9 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ เพิ่มการ์ด "ยังไม่ประเมิน" (L0/ไม่มี Zone)
-//    2. ✅ เปลี่ยน Grid เป็น 5 คอลัมน์
-//    3. ✅ Zone counts นับจาก DB โดยตรง (ไม่ใช่จาก patients state)
-//    4. ✅ เพิ่มกล่องตรวจสอบยอดรวม
+//    1. ✅ แก้ loadZoneCounts ให้นับ "ยังไม่ประเมิน" ถูกต้อง (แยก NULL และ empty string)
+//    2. ✅ เพิ่ม console.log สำหรับ debug
+//    3. ✅ ใช้ query.is('zone', null) + query.eq('zone', '') แทน .or()
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -216,7 +215,7 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ฟังก์ชันใหม่: นับ Zone จาก DB โดยตรง (รวม "ยังไม่ประเมิน")
+  // ✅ ฟังก์ชันใหม่: นับ Zone จาก DB โดยตรง (แก้ bug "ยังไม่ประเมิน" = 0)
   const loadZoneCounts = useCallback(async (hospitalIds?: string[]) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -225,19 +224,7 @@ export default function PatientManagementPage() {
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
 
-      const buildZoneQuery = (zone: string | null) => {
-        let query = supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true })
-          .eq('is_active', true);
-
-        if (zone === null) {
-          // ✅ นับผู้ป่วยที่ไม่มี Zone (NULL หรือ ว่าง)
-          query = query.or('zone.is.null,zone.eq.');
-        } else {
-          query = query.eq('zone', zone);
-        }
-
+      const applyFilters = (query: any) => {
         if (accessibleIdsParam && accessibleIdsParam.length > 0) {
           query = query.in('hospital_id', accessibleIdsParam);
         }
@@ -250,22 +237,29 @@ export default function PatientManagementPage() {
         return query;
       };
 
-      // ✅ นับทั้ง 4 กลุ่มพร้อมกัน
-      const [greenRes, yellowRes, redRes, noneRes] = await Promise.all([
-        buildZoneQuery('Green Zone'),
-        buildZoneQuery('Yellow Zone'),
-        buildZoneQuery('Red Zone'),
-        buildZoneQuery(null), // ✅ ยังไม่มี Zone
+      // ✅ นับ Green, Yellow, Red ปกติ
+      const [greenRes, yellowRes, redRes] = await Promise.all([
+        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', 'Green Zone')),
+        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', 'Yellow Zone')),
+        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', 'Red Zone')),
       ]);
+
+      // ✅ นับ "ยังไม่ประเมิน" — แยก 2 queries (NULL และ empty string)
+      const [nullRes, emptyRes] = await Promise.all([
+        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).is('zone', null)),
+        applyFilters(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('zone', '')),
+      ]);
+
+      const noneCount = (nullRes.count || 0) + (emptyRes.count || 0);
 
       setZoneCounts({
         green: greenRes.count || 0,
         yellow: yellowRes.count || 0,
         red: redRes.count || 0,
-        none: noneRes.count || 0,
+        none: noneCount,
       });
 
-      console.log(`📊 [loadZoneCounts] Green: ${greenRes.count}, Yellow: ${yellowRes.count}, Red: ${redRes.count}, None: ${noneRes.count}`);
+      console.log(`📊 [loadZoneCounts] Green: ${greenRes.count}, Yellow: ${yellowRes.count}, Red: ${redRes.count}, None (NULL): ${nullRes.count}, None (empty): ${emptyRes.count}, Total None: ${noneCount}`);
     } catch (error) {
       console.error('❌ [loadZoneCounts] Error:', error);
       setZoneCounts({ green: 0, yellow: 0, red: 0, none: 0 });
