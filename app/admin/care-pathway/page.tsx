@@ -1,336 +1,236 @@
 // app/admin/care-pathway/page.tsx
-// ✅ v12: แก้ไข Syntax Error (.sort) + ปรับ UI ให้สมบูรณ์
+// 🛤️ ภาพรวม Care Pathway (System Overview)
+// ⚠️ ไฟล์นี้ใช้ 'useRouter' เท่านั้น ห้ามมี 'useParams'
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { checkSession, logout, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
+import { useEffect, useState, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { checkSession, logout, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
-  ArrowLeft, Route, UserCheck, Sparkles, Target, Loader2, Eye, Edit, Plus,
-  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History, Activity
+  ArrowLeft, Route, Users, CheckCircle, AlertTriangle, Clock,
+  TrendingUp, FileText, Calendar, LogOut, Search, User, Hospital, Building2
 } from 'lucide-react';
 
-const formatThaiDate = (d: string | null | undefined) => {
-  if (!d) return '-';
-  const date = new Date(d);
-  if (isNaN(date.getTime())) return '-';
-  const m = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
-  return `${date.getDate()} ${m[date.getMonth()]} ${date.getFullYear() + 543}`;
-};
-
-const daysFromNow = (d: string | null) => {
-  if (!d) return 0;
-  const t = new Date(); t.setHours(0, 0, 0, 0);
-  const a = new Date(d); a.setHours(0, 0, 0, 0);
-  return Math.round((t.getTime() - a.getTime()) / 86400000);
-};
-
-type StageStatus = 'done' | 'active' | 'pending';
-
-interface PathEvent {
-  key: string;
-  date: string | null;
-  title: string;
-  detail: string;
-}
-
-interface CareStage {
+interface PatientSummary {
   id: string;
-  no: number;
-  title: string;
-  description: string;
-  icon: any;
-  status: StageStatus;
-  events: PathEvent[];
-  actionLabel: string;
-  actionUrl: (pid: string) => string;
-  historyLabel: string;
-  historyUrl: (pid: string) => string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  hospital_number: string;
+  pam_level: string;
+  zone: string;
+  hospital_id: string | null;
+  hospitals: { name: string; type: string } | null;
+  stepsCompleted: number;
+  daysSinceLastFollowup: number;
+  isOverdue: boolean;
 }
 
-const STAGE_META = [
-  {
-    id: 'self', no: 1, title: 'รู้จักตัวเอง',
-    description: 'ทำแบบประเมิน PAM / PROMS — แจ้งจำนวนครั้งที่ทำแล้ว และเพิ่มรอบใหม่ได้',
-    icon: UserCheck, actionLabel: '➕ เพิ่มรอบทำแบบประเมิน',
-    actionUrl: (p) => `/admin/screening?patient_id=${p}`,
-    historyLabel: '📋 ดูประวัติการประเมิน', historyUrl: (p) => `/admin/patients/${p}/screening-history`,
-  },
-  {
-    id: 'dream', no: 2, title: 'ความฝันของฉัน',
-    description: 'ชี้ไปที่การทำความฝัน — เลือกการ์ดความฝัน บันทึก และดูย้อนหลังได้',
-    icon: Sparkles, actionLabel: '➕ เลือกความฝันใหม่',
-    actionUrl: (p) => `/admin/patients/${p}/dream`,
-    historyLabel: '📋 ดูความฝันของฉัน', historyUrl: (p) => `/admin/patients/${p}/dream`,
-  },
-  {
-    id: 'oneday', no: 3, title: 'ชีวิต 1 วันของฉัน',
-    description: 'สรุปกิจวัตรรายวันที่ผู้ป่วยบันทึก แยกตามระดับ PAM Level (L2/L3 หรือ L4)',
-    icon: Activity, actionLabel: '➕ ดูสรุปชีวิต 1 วัน',
-    actionUrl: (p) => `/admin/patients/${p}/oneday?from=care-pathway`,
-    historyLabel: '📋 ดูย้อนหลัง', historyUrl: (p) => `/admin/patients/${p}/oneday?from=care-pathway`,
-  },
-  {
-    id: 'goals', no: 4, title: 'เป้าหมายและแผนสุขภาพ',
-    description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
-    icon: Target, actionLabel: '➕ จัดการเป้าหมาย',
-    actionUrl: (p) => `/admin/goals?patient_id=${p}&from=care-pathway`,
-    historyLabel: '📋 ดูประวัติเป้าหมาย', historyUrl: (p) => `/admin/goals-history?patient_id=${p}&from=care-pathway`,
-  },
-  {
-    id: 'trial', no: 5, title: 'ทดลองทำ',
-    description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
-    icon: History, actionLabel: '➕ ดูบันทึกกิจกรรม',
-    actionUrl: (p) => `/admin/patients/${p}/goals`,
-    historyLabel: '📋 ดูประวัติการทำ', historyUrl: (p) => `/admin/patients/${p}/goals`,
-  },
-  {
-    id: 'follow', no: 6, title: 'ติดตามต่อเนื่อง',
-    description: 'การตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติ',
-    icon: FileText, actionLabel: '➕ บันทึกการติดตามผล',
-    actionUrl: (p) => `/admin/appointments/followup/new?patient_id=${p}`,
-    historyLabel: '📋 ดูประวัติการติดตามผล', historyUrl: (p) => `/admin/patients/${p}/followup-history?from=care-pathway`,
-  },
-];
-
-const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: string; card: string }> = {
-  done:    { label: 'เสร็จสิ้น',       badge: 'bg-green-100 text-green-700',   circle: 'bg-green-500 text-white',   card: 'bg-green-50/60 border-green-200' },
-  active:  { label: 'กำลังดำเนินการ',  badge: 'bg-blue-100 text-blue-700',     circle: 'bg-blue-500 text-white',    card: 'bg-blue-50/60 border-blue-300' },
-  pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
-};
-
-function buildStages(screenings: any[], dreams: any[], goals: any[], records: any[], followups: any[]): CareStage[] {
-  const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
-  const eventsByStage: Record<string, PathEvent[]> = {
-    self: screenings.map((s, i) => ({ key: `scr-${s.id ?? i}`, date: s.screening_date, title: `แบบประเมินครั้งที่ ${i + 1}`, detail: `PAM: ${s.pam_total_score ?? '-'} | Level: ${s.pam_level_result || '-'} | Zone: ${s.proms_zone || '-'}` })),
-    dream: dreams.map((d, i) => ({ key: `drm-${d.id ?? i}`, date: d.selected_date, title: d.status === 'active' ? `ความฝันปัจจุบัน: "${d.dream_text}"` : `ความฝันเดิม: "${d.dream_text}"`, detail: [d.intention ? `🎯 ${d.intention}` : '', d.confidence != null ? `ความมั่นใจ ${d.confidence}/10` : '', d.method === 'paper' ? `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป` : '🅰️ ออนไลน์'].filter(Boolean).join(' | ') || '-' })),
-    oneday: uniqueDays > 0 ? [{ key: 'oneday-summary', date: records[0]?.record_date || null, title: `มีการบันทึกกิจกรรมแล้ว ${uniqueDays} วัน`, detail: 'กดปุ่มด้านล่างเพื่อดูรายละเอียดแยกตามหมวดหมู่และวันที่' }] : [],
-    goals: (() => {
-      const roundsMap = new Map<number, any[]>();
-      goals.forEach(g => { const round = g.round_number || 1; if (!roundsMap.has(round)) roundsMap.set(round, []); roundsMap.get(round)!.push(g); });
-      return Array.from(roundsMap.entries()).sort(([a], [b]) => b - a).map(([round, goalsList]) => ({ key: `goal-round-${round}`, date: goalsList[0]?.created_at, title: `รอบที่ ${round} — ${goalsList.length} กิจกรรม`, detail: [goalsList[0]?.primary_goal_note ? `📝 ${goalsList[0].primary_goal_note}` : '', goalsList[0]?.weekly_goal_note ? `📋 ${goalsList[0].weekly_goal_note}` : '', `กิจกรรม: ${goalsList.map(g => g.goal_name_th).join(', ')}`].filter(Boolean).join(' | ') || '-' }));
-    })(),
-    trial: (() => {
-      const byDate = new Map<string, any[]>();
-      records.forEach(r => { const d = (r.record_date || '').slice(0, 10); if (!d) return; if (!byDate.has(d)) byDate.set(d, []); byDate.get(d)!.push(r); });
-      return Array.from(byDate.entries()).sort(([a], [b]) => b.localeCompare(a)).slice(0, 14).map(([date, list]) => {
-        const done = list.filter(r => r.is_completed);
-        const notDone = list.filter(r => !r.is_completed);
-        const nameOf = (r: any) => r.activities?.activity_name_th || r.goal_name_th || r.goal_name || '-';
-        const notes = list.map(r => r.notes).filter(Boolean).join(' / ');
-        return { key: `rec-${date}`, date, title: `ทำกิจกรรม ${done.length}/${list.length} รายการ`, detail: [done.length > 0 ? `✓ ${done.map(nameOf).join(', ')}` : '', notDone.length > 0 ? `✗ ${notDone.map(nameOf).join(', ')}` : '', notes ? `📝 ${notes}` : ''].filter(Boolean).join('  |  ') || '-' };
-      });
-    })(),
-    follow: followups.map((f, i, arr) => {
-      const no = arr.length - i;
-      const bp = (f.blood_pressure_sys && f.blood_pressure_dia) ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : null;
-      return { key: `fu-${f.id ?? i}`, date: f.followup_date, title: `ติดตามผลครั้งที่ ${no}`, detail: [f.weight != null ? `⚖️ ${f.weight} กก.` : '', f.waist_circumference != null ? `รอบเอว ${f.waist_circumference} ซม.` : '', bp ? `🩸 BP ${bp}` : '', f.blood_sugar_dtx != null ? `🍬 น้ำตาล ${f.blood_sugar_dtx}` : '', f.confidence_score != null ? `💪 มั่นใจ ${f.confidence_score}/10` : ''].filter(Boolean).join(' | ') || '-' };
-    }),
-  };
-
-  const doneFlags = [screenings.length > 0, dreams.some(d => d.status === 'active'), uniqueDays > 0, goals.length > 0, records.length > 0, followups.length > 0];
-  const firstIncomplete = doneFlags.indexOf(false);
-
-  return STAGE_META.map((m, i) => {
-    const status: StageStatus = doneFlags[i] ? 'done' : (i === firstIncomplete ? 'active' : 'pending');
-    return { ...m, status, events: eventsByStage[m.id] || [] };
-  });
-}
-
-export default function CarePathwayPage() {
+export default function CarePathwayOverviewPage() {
   const router = useRouter();
-  const params = useParams();
-  const patientId = params.id as string;
-
   const [user, setUser] = useState<any>(null);
-  const [patient, setPatient] = useState<any>(null);
-  const [stages, setStages] = useState<CareStage[]>([]);
-  const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
-  const [errorDetail, setErrorDetail] = useState('');
-  const [expanded, setExpanded] = useState<string[]>([]);
+  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
+  
+  const [totalPatients, setTotalPatients] = useState(0);
+  const [completedAll, setCompletedAll] = useState(0);
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [patients, setPatients] = useState<PatientSummary[]>([]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const userData = checkSession();
     if (!userData) { router.push('/admin/login'); return; }
-    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) { alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return; }
+    if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
+      alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
+    }
     setUser(userData);
+    loadData(userData.id);
   }, [router]);
 
-  const load = useCallback(async () => {
-    if (!user || !patientId) return;
+  const loadData = async (userId: string) => {
     setLoading(true);
     try {
-      const { data: prof, error: e1 } = await supabase.from('profiles').select('*').eq('id', patientId).maybeSingle();
-      if (e1) throw new Error('profiles: ' + e1.message);
-      if (!prof) { setErrorDetail(`ไม่พบผู้ป่วย id: ${patientId}`); setErrorState('notfound'); return; }
-      if (!isSuperAdmin(user)) {
-        const ids = await getAccessibleHospitalIds(user.id);
-        if (prof.hospital_id && !ids.includes(prof.hospital_id)) { setErrorState('denied'); return; }
-      }
+      const ids = await getAccessibleHospitalIds(userId);
+      setAccessibleHospitalIds(ids);
 
-      const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes, recRes, fuRes] = await Promise.all([
-        prof.hospital_id ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
-        supabase.from('users').select('id_card').eq('id', patientId).maybeSingle(),
-        prof.coach_id ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle() : Promise.resolve({ data: null, error: null } as any),
-        supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
-        supabase.from('patient_dreams').select('*').eq('user_id', patientId).order('created_at', { ascending: false }),
-        supabase.from('goals').select('*').eq('user_id', patientId).eq('goal_type', 'weekly_activity').in('status', ['active', 'archived']).order('round_number', { ascending: false }).order('created_at', { ascending: false }),
-        supabase.from('records').select(`*, activities ( activity_code, activity_name_th )`).eq('user_id', patientId).order('record_date', { ascending: false }).limit(120),
-        supabase.from('appointment_followups').select('*').eq('user_id', patientId).order('followup_date', { ascending: false }).limit(30),
-      ]);
+      let query = supabase
+        .from('profiles')
+        .select(`id, first_name, last_name, hospital_number, pam_level, zone, hospital_id, hospitals ( name, type )`)
+        .eq('is_active', true);
+      
+      if (ids.length > 0) query = query.in('hospital_id', ids);
+      const { data: profiles, error: pErr } = await query;
+      if (pErr) throw pErr;
 
-      setRecords(recRes.data || []);
-      const p = { ...prof, hospitals: hospRes.data || null, users: uRes.data || null, coach_name: coachRes.data?.full_name_th || '-' };
-      setPatient(p);
-      const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || [], fuRes.data || []);
-      setStages(built);
-      setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
-      setErrorState('none'); setErrorDetail('');
-    } catch (e: any) {
-      console.error('❌ [CarePathway]', e);
-      setErrorDetail(e?.message || String(e));
-      setErrorState('notfound');
+      const summaries: PatientSummary[] = await Promise.all((profiles || []).map(async (p: any) => {
+        const pid = p.id;
+        const [scr, drm, rec, goals, fu] = await Promise.all([
+          supabase.from('screenings').select('id', { count: 'exact', head: true }).eq('user_id', pid),
+          supabase.from('patient_dreams').select('id', { count: 'exact', head: true }).eq('user_id', pid).eq('status', 'active'),
+          supabase.from('records').select('id', { count: 'exact', head: true }).eq('user_id', pid),
+          supabase.from('goals').select('id', { count: 'exact', head: true }).eq('user_id', pid).eq('goal_type', 'weekly_activity'),
+          supabase.from('appointment_followups').select('followup_date').eq('user_id', pid).order('followup_date', { ascending: false }).limit(1)
+        ]);
+
+        let steps = 0;
+        if ((scr.count || 0) > 0) steps++;
+        if ((drm.count || 0) > 0) steps++;
+        if ((rec.count || 0) > 0) steps++; 
+        if ((goals.count || 0) > 0) steps++;
+        if ((rec.count || 0) > 0) steps++; 
+        if ((fu.count || 0) > 0) steps++;
+
+        let daysSince = 999;
+        if (fu.data && fu.data.length > 0 && fu.data[0].followup_date) {
+          const lastDate = new Date(fu.data[0].followup_date);
+          const today = new Date();
+          daysSince = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        return {
+          ...p,
+          full_name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+          stepsCompleted: steps,
+          daysSinceLastFollowup: daysSince,
+          isOverdue: daysSince > 30,
+        };
+      }));
+
+      setPatients(summaries);
+      setTotalPatients(summaries.length);
+      setCompletedAll(summaries.filter(s => s.stepsCompleted === 6).length);
+      setOverdueCount(summaries.filter(s => s.isOverdue).length);
+    } catch (error) {
+      console.error('❌ [CarePathwayOverview] Error:', error);
     } finally {
       setLoading(false);
     }
-  }, [user, patientId]);
+  };
 
-  useEffect(() => { load(); }, [load]);
+  const filteredPatients = useMemo(() => {
+    if (!searchTerm) return patients;
+    const lower = searchTerm.toLowerCase();
+    return patients.filter(p => 
+      p.full_name.toLowerCase().includes(lower) ||
+      p.hospital_number.toLowerCase().includes(lower)
+    );
+  }, [patients, searchTerm]);
 
-  const toggle = (id: string) => setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
-  const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
-  const trialStats = useMemo(() => {
-    const total = records.length;
-    const done = records.filter(r => r.is_completed).length;
-    const days = uniqueDays;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    return { total, done, days, pct };
-  }, [records, uniqueDays]);
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-gray-50"><div className="text-center"><Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" /><p className="text-gray-600">กำลังโหลดเส้นทางดูแลสุขภาพ...</p></div></div>;
-
-  if (errorState !== 'none' || !patient) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center max-w-lg">
-          <AlertCircle className="w-16 h-16 mx-auto mb-4 text-red-300" />
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">{errorState === 'denied' ? 'ไม่มีสิทธิ์เข้าถึงข้อมูลผู้ป่วยนี้' : 'ไม่พบข้อมูลผู้ป่วย'}</h2>
-          {errorDetail && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-left"><p className="text-xs font-semibold text-red-600 mb-1">รายละเอียดข้อผิดพลาด:</p><p className="text-xs text-red-700 font-mono break-all">{errorDetail}</p></div>}
-          <div className="flex gap-2 justify-center">
-            <button onClick={() => load()} className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">ลองใหม่</button>
-            <button onClick={() => router.push('/admin/patients')} className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">กลับหน้าผู้ป่วย</button>
-          </div>
-        </div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500"></div>
       </div>
     );
   }
 
-  const doneCount = stages.filter(s => s.status === 'done').length;
-
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow-sm border-b">
-        <div className="max-w-5xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/patients')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3"><ArrowLeft className="w-4 h-4" /> กลับหน้าผู้ป่วย</button>
-          <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="max-w-7xl mx-auto px-4 py-5">
+          <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center"><Route className="w-5 h-5 text-indigo-600" /></div>
-              <div><h1 className="text-2xl font-bold text-gray-800">เส้นทางสุขภาพผู้ป่วย (Care Pathway)</h1><p className="text-sm text-gray-500">แต่ละขั้นชี้ไปทำกิจกรรมของตัวเอง — ทำซ้ำได้</p></div>
+              <button onClick={() => router.push('/admin/dashboard')} className="p-2 hover:bg-gray-100 rounded-lg">
+                <ArrowLeft className="w-5 h-5 text-gray-600" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                  <Route className="w-6 h-6 text-indigo-600" />
+                  ภาพรวม Care Pathway
+                </h1>
+                <p className="text-sm text-gray-500">ติดตามสถานะเส้นทางสุขภาพของผู้ป่วยทั้งหมดในเครือข่าย</p>
+              </div>
             </div>
-            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">สำเร็จ {doneCount}/{stages.length} ขั้นตอน</span>
+            <button onClick={() => { logout(); router.push('/admin/login'); }} className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
+              <LogOut className="w-4 h-4" /> ออกจากระบบ
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        <div className="bg-white rounded-xl shadow-lg p-6 border">
-          <div className="flex items-start gap-4 flex-wrap">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-2xl font-bold text-blue-700">{patient.first_name?.charAt(0) || '?'}</div>
-            <div className="flex-1">
-              <h2 className="text-xl font-bold text-gray-800">{patient.first_name} {patient.last_name}</h2>
-              <div className="flex flex-wrap gap-2 mt-2 text-xs">
-                <span className="px-2 py-1 bg-gray-100 rounded-full">HN: {patient.hospital_number || '-'}</span>
-                <span className="px-2 py-1 bg-gray-100 rounded-full font-mono">ID: {patient.users?.id_card || '-'}</span>
-                <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full">PAM: {patient.pam_level || 'L0'}</span>
-                <span className={`px-2 py-1 rounded-full ${patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' : patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{patient.zone || 'Green Zone'}</span>
-                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full">โค้ช: {patient.coach_name}</span>
-              </div>
-              <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-600">
-                <span className="flex items-center gap-1"><Building2 className="w-4 h-4 text-blue-500" />{patient.hospitals?.name || '-'}</span>
-                <span className="flex items-center gap-1"><Users className="w-4 h-4" />อายุ {patient.age || '-'} ปี | BMI {patient.bmi || '-'}</span>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด"><Eye className="w-5 h-5" /></button>
-              <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข"><Edit className="w-5 h-5" /></button>
-            </div>
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white rounded-xl shadow-sm border p-6 flex items-center gap-4">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center"><Users className="w-6 h-6 text-blue-600" /></div>
+            <div><p className="text-sm text-gray-500">ผู้ป่วยในระบบ</p><p className="text-2xl font-bold text-gray-800">{totalPatients}</p></div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border p-6 flex items-center gap-4">
+            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center"><CheckCircle className="w-6 h-6 text-green-600" /></div>
+            <div><p className="text-sm text-gray-500">เสร็จสิ้น 6 ขั้นตอน</p><p className="text-2xl font-bold text-green-600">{completedAll}</p></div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border p-6 flex items-center gap-4">
+            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center"><AlertTriangle className="w-6 h-6 text-red-600" /></div>
+            <div><p className="text-sm text-gray-500">เกินกำหนดติดตาม (&gt;30 วัน)</p><p className="text-2xl font-bold text-red-600">{overdueCount}</p></div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border p-6 flex items-center gap-4">
+            <div className="w-12 h-12 bg-indigo-100 rounded-full flex items-center justify-center"><TrendingUp className="w-6 h-6 text-indigo-600" /></div>
+            <div><p className="text-sm text-gray-500">อัตราการสำเร็จ</p><p className="text-2xl font-bold text-indigo-600">{totalPatients > 0 ? Math.round((completedAll / totalPatients) * 100) : 0}%</p></div>
           </div>
         </div>
 
-        <div>
-          <h3 className="text-lg font-bold text-gray-800 mb-1">ขั้นตอนการดูแลสุขภาพ (Care Pathway)</h3>
-          <p className="text-sm text-gray-500 mb-4">แต่ละขั้นมีปุ่มไปทำกิจกรรมของตัวเอง + ดูย้อนหลังได้</p>
-          <div className="space-y-3">
-            {stages.map((stage) => {
-              const ui = STATUS_UI[stage.status];
-              const Icon = stage.icon;
-              const isOpen = expanded.includes(stage.id);
-              return (
-                <div key={stage.id} className={`rounded-xl border shadow-sm ${ui.card}`}>
-                  <button onClick={() => toggle(stage.id)} className="w-full flex items-center gap-4 p-4 text-left">
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold shrink-0 ${ui.circle}`}>{stage.status === 'done' ? <CheckCircle2 className="w-5 h-5" /> : stage.no}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Icon className="w-4 h-4 text-gray-600 shrink-0" />
-                        <span className="font-semibold text-gray-800">{stage.no}. {stage.title}</span>
-                        {stage.events.length > 0 && (
-                          <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
-                            {stage.id === 'self' ? `ทำแบบประเมินแล้ว ${stage.events.length} ครั้ง` : stage.id === 'dream' ? `บันทึกความฝัน ${stage.events.length} ครั้ง` : stage.id === 'oneday' ? `บันทึกแล้ว ${uniqueDays} วัน` : stage.id === 'goals' ? `${stage.events.length} รอบเป้าหมาย` : stage.id === 'trial' ? `บันทึกแล้ว ${stage.events.length} วัน` : stage.id === 'follow' ? `ตามผลแล้ว ${stage.events.length} ครั้ง` : `${stage.events.length} รายการ`}
+        <div className="bg-white rounded-xl shadow-sm border p-4">
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ค้นหา ชื่อ หรือ HN..." className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500" />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b">
+                <tr>
+                  <th className="px-6 py-3 text-left font-semibold text-gray-700">ผู้ป่วย / HN</th>
+                  <th className="px-6 py-3 text-center font-semibold text-gray-700">PAM / Zone</th>
+                  <th className="px-6 py-3 text-center font-semibold text-gray-700">ความคืบหน้า (6 ขั้น)</th>
+                  <th className="px-6 py-3 text-center font-semibold text-gray-700">ติดตามล่าสุด</th>
+                  <th className="px-6 py-3 text-center font-semibold text-gray-700">จัดการ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filteredPatients.length === 0 ? (
+                  <tr><td colSpan={5} className="px-6 py-12 text-center text-gray-500">ไม่พบข้อมูลที่ตรงกับคำค้นหา</td></tr>
+                ) : (
+                  filteredPatients.map((p) => (
+                    <tr key={p.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <p className="font-medium text-gray-800">{p.full_name}</p>
+                        <p className="text-xs text-gray-500 font-mono">{p.hospital_number}</p>
+                        <p className="text-xs text-gray-400">{p.hospitals?.name || '-'}</p>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="inline-block px-2 py-1 bg-indigo-100 text-indigo-700 rounded text-xs font-bold mb-1">{p.pam_level || 'L0'}</span>
+                        <br />
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-bold ${p.zone === 'Red Zone' ? 'bg-red-100 text-red-700' : p.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{p.zone || 'Green'}</span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${p.stepsCompleted === 6 ? 'bg-green-500' : p.stepsCompleted >= 4 ? 'bg-blue-500' : p.stepsCompleted >= 2 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${(p.stepsCompleted / 6) * 100}%` }} />
+                          </div>
+                          <span className="text-xs font-bold text-gray-700">{p.stepsCompleted}/6</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        {p.daysSinceLastFollowup === 999 ? (
+                          <span className="text-xs text-gray-400">ยังไม่เคยติดตาม</span>
+                        ) : (
+                          <span className={`text-xs font-bold ${p.isOverdue ? 'text-red-600' : 'text-gray-600'}`}>
+                            {p.daysSinceLastFollowup} วันที่แล้ว {p.isOverdue && <AlertTriangle className="w-3 h-3 inline ml-1" />}
                           </span>
                         )}
-                      </div>
-                      <p className="text-sm text-gray-500 truncate">{stage.description}</p>
-                    </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${ui.badge}`}>{ui.label}</span>
-                    <span className="text-gray-400 text-sm shrink-0">{isOpen ? '▾' : '▸'}</span>
-                  </button>
-
-                  {isOpen && (
-                    <div className="px-4 pb-4 pl-16">
-                      {stage.id === 'trial' && trialStats.total > 0 && (
-                        <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                          <div className="bg-white border rounded-lg p-2 text-center"><p className="text-[10px] text-gray-500">บันทึกทั้งหมด</p><p className="text-lg font-bold text-gray-800">{trialStats.total}</p></div>
-                          <div className="bg-white border rounded-lg p-2 text-center"><p className="text-[10px] text-gray-500">ทำได้</p><p className="text-lg font-bold text-green-600">{trialStats.done}</p></div>
-                          <div className="bg-white border rounded-lg p-2 text-center"><p className="text-[10px] text-gray-500">วันที่บันทึก</p><p className="text-lg font-bold text-blue-600">{trialStats.days} วัน</p></div>
-                          <div className="bg-white border rounded-lg p-2 text-center"><p className="text-[10px] text-gray-500">อัตราสำเร็จ</p><p className={`text-lg font-bold ${trialStats.pct >= 70 ? 'text-green-600' : trialStats.pct >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>{trialStats.pct}%</p></div>
-                        </div>
-                      )}
-                      {stage.events.length === 0 ? (
-                        <p className="text-sm text-gray-400 italic mb-3">{stage.id === 'trial' || stage.id === 'oneday' ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —' : stage.id === 'follow' ? '— ยังไม่มีประวัติการตามผล —' : '— ยังไม่มีบันทึกในขั้นนี้ —'}</p>
-                      ) : (
-                        <div className="space-y-2 mb-3">
-                          {stage.events.map((ev) => (
-                            <div key={ev.key} className="bg-white rounded-lg border p-3">
-                              <p className="text-sm font-medium text-gray-800">{ev.title}</p>
-                              <p className="text-xs text-gray-500">{ev.detail}</p>
-                              <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1"><Clock className="w-3 h-3" />{formatThaiDate(ev.date)}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="flex gap-2 flex-wrap">
-                        <button onClick={() => router.push(stage.actionUrl(patientId))} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"><Plus className="w-4 h-4" />{stage.actionLabel}</button>
-                        <button onClick={() => router.push(stage.historyUrl(patientId))} className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"><FileText className="w-4 h-4" />{stage.historyLabel}</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <button onClick={() => router.push(`/admin/patients/${p.id}/care-pathway`)} className="px-3 py-1.5 bg-indigo-500 text-white rounded-lg text-xs font-medium hover:bg-indigo-600">ดูรายละเอียด</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
