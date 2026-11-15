@@ -1,10 +1,5 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. เพิ่มเมนู "ภาพรวม Care Pathway" ในเมนูหลัก (ตำแหน่งที่ 2)
-//    2. เพิ่มปุ่มลัด "ภาพรวม Care Pathway" ใน Quick Actions
-//    3. เพิ่ม import Route จาก lucide-react
-//    4. แก้ typo เล็กน้อย
+// ✅ แก้ไขล่าสุด: เพิ่มลิงก์ชี้ไปหน้า "ภาพรวม Care Pathway" อย่างชัดเจน
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -13,7 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import {
   Users, FileText, Calendar, Clock, LogOut, UserPlus, UserCheck,
   Target, ClipboardCheck, BarChart3, Settings, Hospital, Building2,
-  FileSpreadsheet, Download, Printer, Route  // ✅ เพิ่ม Route
+  FileSpreadsheet, Download, Printer, Route // ✅ เพิ่ม Route icon
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -39,11 +34,7 @@ interface UserHospital {
   code: string;
   type: 'main' | 'sub';
   parent_id: string | null;
-  parent_hospital?: {
-    id: string;
-    name: string;
-    code: string;
-  };
+  parent_hospital?: { id: string; name: string; code: string };
 }
 
 export default function AdminDashboard() {
@@ -110,7 +101,7 @@ export default function AdminDashboard() {
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - เพิ่มเมนูภาพรวม Care Pathway (ตำแหน่งที่ 2)
+  // ✅ เมนูจัดการระบบ - เพิ่มเมนูภาพรวม Care Pathway
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -121,7 +112,7 @@ export default function AdminDashboard() {
       allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
-      title: 'ภาพรวม Care Pathway',
+      title: 'ภาพรวม Care Pathway', // ✅ เพิ่มเมนูใหม่
       description: 'ดูสถานะเส้นทางสุขภาพผู้ป่วยทั้งระบบ',
       icon: <Route className="w-6 h-6" />,
       color: 'from-indigo-500 to-purple-500',
@@ -206,9 +197,7 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                DeMi+ หน้าหลัก
-              </h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">DeMi+ หน้าหลัก</h1>
               <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
             </div>
             <div className="flex items-center gap-4">
@@ -218,13 +207,11 @@ export default function AdminDashboard() {
                     <UserCheck className="w-5 h-5 text-blue-600" />
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-800">
-                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
-                    </p>
+                    <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                          user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                       user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                       user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -232,19 +219,13 @@ export default function AdminDashboard() {
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
-                      <span className="text-xs text-gray-600 font-medium">
-                        {userHospital.name}
-                      </span>
+                      <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                          🏥 แม่ข่าย
-                        </span>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
                       ) : (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
-                          🏥 ลูกข่าย
-                        </span>
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">🏥 ลูกข่าย</span>
                       )}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -255,17 +236,14 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-2">
-                    ไม่สังกัดโรงพยาบาล
-                  </p>
+                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
                 )}
               </div>
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
               >
-                <LogOut className="w-4 h-4" />
-                ออกจากระบบ
+                <LogOut className="w-4 h-4" /> ออกจากระบบ
               </button>
             </div>
           </div>
@@ -282,9 +260,7 @@ export default function AdminDashboard() {
                 <p className="text-sm text-gray-600 mb-1">ผู้ป่วยทั้งหมด</p>
                 <p className="text-3xl font-bold text-gray-800">{stats.totalPatients}</p>
                 {accessibleHospitalIds.length > 0 && accessibleHospitalIds.length < 100 && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    🔒 จาก {accessibleHospitalIds.length} รพ.
-                  </p>
+                  <p className="text-xs text-gray-400 mt-1">🔒 จาก {accessibleHospitalIds.length} รพ.</p>
                 )}
               </div>
               <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
@@ -335,53 +311,40 @@ export default function AdminDashboard() {
               onClick={() => router.push('/admin/patients/new')}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
             >
-              <UserPlus className="w-4 h-4" />
-              ลงทะเบียนผู้ป่วยใหม่
+              <UserPlus className="w-4 h-4" /> ลงทะเบียนผู้ป่วยใหม่
             </button>
             <button
               onClick={() => router.push('/admin/screening')}
               className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all"
             >
-              <FileText className="w-4 h-4" />
-              ทำแบบประเมิน
+              <FileText className="w-4 h-4" /> ทำแบบประเมิน
+            </button>
+            {/* ✅ ปุ่มใหม่: ชี้ไปหน้าภาพรวม Care Pathway */}
+            <button
+              onClick={() => router.push('/admin/care-pathway')}
+              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg hover:from-indigo-600 hover:to-purple-600 transition-all shadow-sm"
+            >
+              <Route className="w-4 h-4" /> ภาพรวม Care Pathway
             </button>
             <button
               onClick={() => router.push('/admin/reports/patient-record?mode=hospital')}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
-            >
-              <Download className="w-4 h-4" />
-              Export PDF ทั้งโรงพยาบาล
-            </button>
-            <button
-              onClick={() => router.push('/admin/reports/patient-record?mode=select')}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all"
             >
-              <Printer className="w-4 h-4" />
-              Export PDF เฉพาะราย
+              <Download className="w-4 h-4" /> Export PDF ทั้ง รพ.
             </button>
             {user?.role === 'admin' && (
               <button
                 onClick={() => router.push('/admin/staff')}
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all"
               >
-                <UserCheck className="w-4 h-4" />
-                จัดการเจ้าหน้าที่
+                <UserCheck className="w-4 h-4" /> จัดการเจ้าหน้าที่
               </button>
             )}
             <button
               onClick={() => router.push('/admin/goals')}
               className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all"
             >
-              <Target className="w-4 h-4" />
-              จัดการเป้าหมาย
-            </button>
-            {/* ✅ ปุ่มลัดใหม่: ภาพรวม Care Pathway */}
-            <button
-              onClick={() => router.push('/admin/care-pathway')}
-              className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg hover:from-indigo-600 hover:to-purple-600 transition-all shadow-sm"
-            >
-              <Route className="w-4 h-4" />
-              ภาพรวม Care Pathway
+              <Target className="w-4 h-4" /> จัดการเป้าหมาย
             </button>
           </div>
         </div>
@@ -395,9 +358,7 @@ export default function AdminDashboard() {
               className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl hover:scale-105 transition-all text-left group relative"
             >
               <div className={`w-14 h-14 bg-gradient-to-br ${item.color} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
-                <div className="text-white">
-                  {item.icon}
-                </div>
+                <div className="text-white">{item.icon}</div>
               </div>
               <h3 className="text-lg font-bold text-gray-800 mb-1">{item.title}</h3>
               <p className="text-sm text-gray-600">{item.description}</p>
