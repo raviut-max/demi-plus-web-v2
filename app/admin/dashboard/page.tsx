@@ -1,32 +1,19 @@
 // app/admin/dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มเมนู "ภาพรวม Care Pathway" (ตำแหน่งที่ 2 หลังจัดการผู้ป่วย)
-//    2. เพิ่ม import Route จาก lucide-react
-//    3. แก้ typo เล็กน้อย (ico n → icon, แ บบ → แบบ)
+//    1. เพิ่มเมนู "ภาพรวม Care Pathway" ในเมนูหลัก (ตำแหน่งที่ 2)
+//    2. เพิ่มปุ่มลัด "ภาพรวม Care Pathway" ใน Quick Actions
+//    3. เพิ่ม import Route จาก lucide-react
+//    4. แก้ typo เล็กน้อย
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getDashboardStats, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
-  Users,
-  FileText,
-  Calendar,
-  Clock,
-  LogOut,
-  UserPlus,
-  UserCheck,
-  Target,
-  ClipboardCheck,
-  BarChart3,
-  Settings,
-  Hospital,
-  Building2,
-  FileSpreadsheet,
-  Download,
-  Printer,
-  Route  // ✅ เพิ่ม Route สำหรับเมนูภาพรวม Care Pathway
+  Users, FileText, Calendar, Clock, LogOut, UserPlus, UserCheck,
+  Target, ClipboardCheck, BarChart3, Settings, Hospital, Building2,
+  FileSpreadsheet, Download, Printer, Route  // ✅ เพิ่ม Route
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -90,10 +77,8 @@ export default function AdminDashboard() {
 
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🔍 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
       console.error('❌ [loadUserHospital] Error:', error);
     }
@@ -101,11 +86,8 @@ export default function AdminDashboard() {
 
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       loadDashboardStats(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
@@ -114,9 +96,7 @@ export default function AdminDashboard() {
 
   const loadDashboardStats = async (hospitalIds?: string[]) => {
     try {
-      console.log('📊 [loadDashboardStats] Loading stats with hospitalIds:', hospitalIds);
       const data = await getDashboardStats(hospitalIds);
-      console.log('📊 [loadDashboardStats] Dashboard stats:', data);
       setStats(data);
     } catch (error) {
       console.error('❌ [loadDashboardStats] Error:', error);
@@ -126,7 +106,6 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = () => {
-    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
@@ -348,7 +327,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Quick Actions */}
+        {/* Quick Actions - เพิ่มปุ่มภาพรวม Care Pathway */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4">ดำเนินการด่วน</h2>
           <div className="flex flex-wrap gap-3">
@@ -396,7 +375,7 @@ export default function AdminDashboard() {
               <Target className="w-4 h-4" />
               จัดการเป้าหมาย
             </button>
-            {/* ✅ ปุ่มลัดไปหน้าภาพรวม Care Pathway */}
+            {/* ✅ ปุ่มลัดใหม่: ภาพรวม Care Pathway */}
             <button
               onClick={() => router.push('/admin/care-pathway')}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg hover:from-indigo-600 hover:to-purple-600 transition-all shadow-sm"
