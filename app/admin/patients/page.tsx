@@ -1,9 +1,9 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. แก้ bug totalPatients = 0 (ใช้ fallback จาก data.length)
-//    2. เพิ่ม console log สำหรับ debug
-//    3. แก้ typo เล็กน้อย
+//    1. ✅ แก้ Zone counts ให้นับจาก DB โดยตรง (ไม่ใช่จาก patients state)
+//    2. ✅ เพิ่ม loadZoneCounts() ที่ query supabase.count แยกแต่ละ Zone
+//    3. ✅ Zone counts จะถูกต้องแม้จะอยู่หน้าใดก็ตาม
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -72,6 +72,13 @@ export default function PatientManagementPage() {
   const [pageSize] = useState(100);
   const totalPages = Math.ceil(totalPatients / pageSize);
   const [jumpToPage, setJumpToPage] = useState<string>('');
+
+  // ✅ State ใหม่: Zone counts ที่นับจาก DB โดยตรง
+  const [zoneCounts, setZoneCounts] = useState({
+    green: 0,
+    yellow: 0,
+    red: 0,
+  });
 
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
     if (hospitalIdFilter === 'all') return accessibleHospitalIds;
@@ -207,7 +214,55 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ แก้ไขหลัก: ใช้ fallback จาก data.length เมื่อ total เป็น 0
+  // ✅ ฟังก์ชันใหม่: นับ Zone จาก DB โดยตรง (ไม่ขึ้นกับ patients state)
+  const loadZoneCounts = useCallback(async (hospitalIds?: string[]) => {
+    try {
+      const isAllHospitals = selectedHospitalFilter === 'all';
+      const isAllPam = selectedPamLevel === 'all';
+      const pamParam = isAllPam ? undefined : selectedPamLevel;
+      const accessibleIdsParam = hospitalIds;
+      const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
+
+      // สร้าง base query สำหรับนับ Zone
+      const buildZoneQuery = (zone: string) => {
+        let query = supabase
+          .from('profiles')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true)
+          .eq('zone', zone);
+
+        if (accessibleIdsParam && accessibleIdsParam.length > 0) {
+          query = query.in('hospital_id', accessibleIdsParam);
+        }
+        if (filterHospitalIdParam) {
+          query = query.eq('hospital_id', filterHospitalIdParam);
+        }
+        if (pamParam) {
+          query = query.eq('pam_level', pamParam);
+        }
+        return query;
+      };
+
+      // นับทั้ง 3 Zone พร้อมกัน
+      const [greenRes, yellowRes, redRes] = await Promise.all([
+        buildZoneQuery('Green Zone'),
+        buildZoneQuery('Yellow Zone'),
+        buildZoneQuery('Red Zone'),
+      ]);
+
+      setZoneCounts({
+        green: greenRes.count || 0,
+        yellow: yellowRes.count || 0,
+        red: redRes.count || 0,
+      });
+
+      console.log(`📊 [loadZoneCounts] Green: ${greenRes.count}, Yellow: ${yellowRes.count}, Red: ${redRes.count}`);
+    } catch (error) {
+      console.error('❌ [loadZoneCounts] Error:', error);
+      setZoneCounts({ green: 0, yellow: 0, red: 0 });
+    }
+  }, [selectedHospitalFilter, selectedPamLevel]);
+
   const loadPatients = async (hospitalIds?: string[], forceFetchAll: boolean = false) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -219,7 +274,6 @@ export default function PatientManagementPage() {
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
 
-      // ✅ โหลดข้อมูลก่อน
       const fetchPageSize = forceFetchAll ? 10000 : pageSize;
       const fetchCurrentPage = forceFetchAll ? 0 : currentPage;
       const { patients: data } = await getPatientListPaginated(
@@ -235,10 +289,8 @@ export default function PatientManagementPage() {
         sortDirection
       );
 
-      // ✅ นับ total จาก data.length เป็น fallback
       const totalFromData = data?.length || 0;
-      
-      // ✅ พยายาม get count จาก DB
+
       let totalFromDB = 0;
       try {
         totalFromDB = await getPatientCount(
@@ -253,13 +305,15 @@ export default function PatientManagementPage() {
         console.warn('⚠️ [loadPatients] getPatientCount failed, using data.length fallback:', countErr);
       }
 
-      // ✅ ใช้ค่าที่มากกว่า (ป้องกัน bug total = 0 แต่ data มี)
       const finalTotal = Math.max(totalFromDB, totalFromData);
-      
+
       console.log(`📊 [loadPatients] totalFromDB=${totalFromDB}, totalFromData=${totalFromData}, finalTotal=${finalTotal}`);
-      
+
       setTotalPatients(finalTotal);
       setPatients(data || []);
+
+      // ✅ โหลด Zone counts จาก DB (ทุกครั้งที่โหลด patients)
+      await loadZoneCounts(hospitalIds);
 
       if (!forceFetchAll) {
         console.log(`📊 [loadPatients] Page ${currentPage + 1}/${Math.ceil(finalTotal / pageSize) || 1}, Loaded: ${totalFromData}, Total: ${finalTotal}`);
@@ -581,7 +635,7 @@ export default function PatientManagementPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards */}
+        {/* Summary Cards - ✅ แก้ไขแล้ว: ใช้ zoneCounts จาก DB */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
@@ -592,19 +646,19 @@ export default function PatientManagementPage() {
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center"><CheckCircle className="w-5 h-5 text-green-600" /></div>
-              <div><p className="text-sm text-gray-500">Green Zone</p><p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Green Zone').length}</p></div>
+              <div><p className="text-sm text-gray-500">Green Zone</p><p className="text-2xl font-bold">{zoneCounts.green.toLocaleString()}</p></div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center"><AlertCircle className="w-5 h-5 text-yellow-600" /></div>
-              <div><p className="text-sm text-gray-500">Yellow Zone</p><p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Yellow Zone').length}</p></div>
+              <div><p className="text-sm text-gray-500">Yellow Zone</p><p className="text-2xl font-bold">{zoneCounts.yellow.toLocaleString()}</p></div>
             </div>
           </div>
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center"><XCircle className="w-5 h-5 text-red-600" /></div>
-              <div><p className="text-sm text-gray-500">Red Zone</p><p className="text-2xl font-bold">{patients.filter(p => p.zone === 'Red Zone').length}</p></div>
+              <div><p className="text-sm text-gray-500">Red Zone</p><p className="text-2xl font-bold">{zoneCounts.red.toLocaleString()}</p></div>
             </div>
           </div>
         </div>
