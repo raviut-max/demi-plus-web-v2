@@ -1,9 +1,9 @@
 // app/admin/patients/page.tsx
 // ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ แก้ Zone counts ให้นับจาก DB โดยตรง (ไม่ใช่จาก patients state)
-//    2. ✅ เพิ่ม loadZoneCounts() ที่ query supabase.count แยกแต่ละ Zone
-//    3. ✅ Zone counts จะถูกต้องแม้จะอยู่หน้าใดก็ตาม
+//    1. ✅ เพิ่มการ์ด "ยังไม่ประเมิน" (L0/ไม่มี Zone) ให้ตัวเลขรวมครบ
+//    2. ✅ เปลี่ยน grid เป็น 5 คอลัมน์
+//    3. ✅ เพิ่มคำอธิบายในกล่อง info
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,7 +20,7 @@ import {
   Calendar, Phone, Mail, MapPin, XCircle, CheckCircle, Lock, Shield,
   ChevronUp, ChevronDown, ChevronsUpDown, User, Building2, Loader2,
   FileSpreadsheet, ChevronLeft, ChevronRight, SkipBack, SkipForward, Download,
-  FileText, Route
+  FileText, Route, HelpCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
@@ -73,11 +73,12 @@ export default function PatientManagementPage() {
   const totalPages = Math.ceil(totalPatients / pageSize);
   const [jumpToPage, setJumpToPage] = useState<string>('');
 
-  // ✅ State ใหม่: Zone counts ที่นับจาก DB โดยตรง
+  // ✅ State ใหม่: Zone counts (เพิ่ม none สำหรับยังไม่ประเมิน)
   const [zoneCounts, setZoneCounts] = useState({
     green: 0,
     yellow: 0,
     red: 0,
+    none: 0, // ✅ เพิ่ม: ผู้ป่วยที่ยังไม่มี Zone / L0
   });
 
   const getHospitalIdsForFilter = useCallback(async (hospitalIdFilter: string): Promise<string[]> => {
@@ -214,7 +215,7 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ฟังก์ชันใหม่: นับ Zone จาก DB โดยตรง (ไม่ขึ้นกับ patients state)
+  // ✅ ฟังก์ชันใหม่: นับ Zone จาก DB โดยตรง (รวม "ยังไม่ประเมิน")
   const loadZoneCounts = useCallback(async (hospitalIds?: string[]) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -223,13 +224,18 @@ export default function PatientManagementPage() {
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
 
-      // สร้าง base query สำหรับนับ Zone
-      const buildZoneQuery = (zone: string) => {
+      const buildZoneQuery = (zone: string | null) => {
         let query = supabase
           .from('profiles')
           .select('*', { count: 'exact', head: true })
-          .eq('is_active', true)
-          .eq('zone', zone);
+          .eq('is_active', true);
+
+        if (zone === null) {
+          // ✅ นับผู้ป่วยที่ไม่มี Zone (NULL หรือ ว่าง)
+          query = query.or('zone.is.null,zone.eq.');
+        } else {
+          query = query.eq('zone', zone);
+        }
 
         if (accessibleIdsParam && accessibleIdsParam.length > 0) {
           query = query.in('hospital_id', accessibleIdsParam);
@@ -243,23 +249,25 @@ export default function PatientManagementPage() {
         return query;
       };
 
-      // นับทั้ง 3 Zone พร้อมกัน
-      const [greenRes, yellowRes, redRes] = await Promise.all([
+      // ✅ นับทั้ง 4 กลุ่มพร้อมกัน
+      const [greenRes, yellowRes, redRes, noneRes] = await Promise.all([
         buildZoneQuery('Green Zone'),
         buildZoneQuery('Yellow Zone'),
         buildZoneQuery('Red Zone'),
+        buildZoneQuery(null), // ✅ ยังไม่มี Zone
       ]);
 
       setZoneCounts({
         green: greenRes.count || 0,
         yellow: yellowRes.count || 0,
         red: redRes.count || 0,
+        none: noneRes.count || 0,
       });
 
-      console.log(`📊 [loadZoneCounts] Green: ${greenRes.count}, Yellow: ${yellowRes.count}, Red: ${redRes.count}`);
+      console.log(`📊 [loadZoneCounts] Green: ${greenRes.count}, Yellow: ${yellowRes.count}, Red: ${redRes.count}, None: ${noneRes.count}`);
     } catch (error) {
       console.error('❌ [loadZoneCounts] Error:', error);
-      setZoneCounts({ green: 0, yellow: 0, red: 0 });
+      setZoneCounts({ green: 0, yellow: 0, red: 0, none: 0 });
     }
   }, [selectedHospitalFilter, selectedPamLevel]);
 
@@ -635,8 +643,8 @@ export default function PatientManagementPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards - ✅ แก้ไขแล้ว: ใช้ zoneCounts จาก DB */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        {/* Summary Cards - ✅ แก้ไขแล้ว: เพิ่มการ์ด "ยังไม่ประเมิน" (5 คอลัมน์) */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center"><Users className="w-5 h-5 text-blue-600" /></div>
@@ -659,6 +667,39 @@ export default function PatientManagementPage() {
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center"><XCircle className="w-5 h-5 text-red-600" /></div>
               <div><p className="text-sm text-gray-500">Red Zone</p><p className="text-2xl font-bold">{zoneCounts.red.toLocaleString()}</p></div>
+            </div>
+          </div>
+          {/* ✅ การ์ดใหม่: ยังไม่ประเมิน */}
+          <div className="bg-white rounded-xl shadow-lg p-4 border-2 border-dashed border-gray-300">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center"><HelpCircle className="w-5 h-5 text-gray-600" /></div>
+              <div>
+                <p className="text-sm text-gray-500">ยังไม่ประเมิน</p>
+                <p className="text-2xl font-bold text-gray-600">{zoneCounts.none.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">L0 / ไม่มี Zone</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ✅ คำอธิบาย Zone + สรุปตัวเลข */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6 text-sm text-blue-800">
+          <div className="flex items-start justify-between flex-wrap gap-3">
+            <div>
+              <p className="font-semibold mb-1">📌 คำอธิบาย Zone:</p>
+              <p>• <strong>Green Zone:</strong> ผู้ป่วยที่มีความพร้อมสูง (PAM L3-L4, PROMs สูง)</p>
+              <p>• <strong>Yellow Zone:</strong> ผู้ป่วยที่มีความพร้อมปานกลาง (PAM L2-L3)</p>
+              <p>• <strong>Red Zone:</strong> ผู้ป่วยที่ต้องการการดูแลใกล้ชิด (PAM L1, PROMs ต่ำ)</p>
+              <p>• <strong>ยังไม่ประเมิน:</strong> ผู้ป่วยที่ยังไม่ได้ทำแบบประเมิน PAM/PROMs (L0 หรือไม่มี Zone)</p>
+            </div>
+            <div className="text-right bg-white/60 rounded-lg px-3 py-2 border border-blue-200">
+              <p className="text-xs text-gray-600">ตรวจสอบยอดรวม</p>
+              <p className="font-bold text-blue-900">
+                {zoneCounts.green + zoneCounts.yellow + zoneCounts.red + zoneCounts.none} / {totalPatients.toLocaleString()}
+              </p>
+              <p className="text-xs text-gray-500">
+                {zoneCounts.green + zoneCounts.yellow + zoneCounts.red + zoneCounts.none === totalPatients ? '✅ ครบถ้วน' : '⚠️ ไม่ตรงกัน'}
+              </p>
             </div>
           </div>
         </div>
