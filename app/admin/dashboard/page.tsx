@@ -1,33 +1,17 @@
 // app/admin/dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 15 พฤศจิกายน 2569
+// ✅ แก้ไขล่าสุด: 16 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. เพิ่มเมนู "ภาพรวม Care Pathway" ในเมนูหลัก (ตำแหน่งที่ 2)
-//    2. เพิ่มปุ่มลัด "ภาพรวม Care Pathway" ใน Quick Actions
-//    3. เพิ่ม import Route จาก lucide-react
-//    4. แก้ typo เล็กน้อย
+//    1. ✅ แก้ href จาก /admin/care-pathway → /admin/care-pathway-dashboard
+//    2. ✅ แก้ทั้งใน menuItems และ Quick Actions
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkSession, logout, getDashboardStats, getAccessibleHospitalIds, getUserHospitalInfo } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
-  Users,
-  FileText,
-  Calendar,
-  Clock,
-  LogOut,
-  UserPlus,
-  UserCheck,
-  Target,
-  ClipboardCheck,
-  BarChart3,
-  Settings,
-  Hospital,
-  Building2,
-  FileSpreadsheet,
-  Download,
-  Printer,
-  Route  // ✅ เพิ่ม Route สำหรับเมนูภาพรวม Care Pathway
+  Users, FileText, Calendar, Clock, LogOut, UserPlus, UserCheck,
+  Target, ClipboardCheck, BarChart3, Settings, Hospital, Building2,
+  FileSpreadsheet, Download, Printer, Route
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -91,10 +75,8 @@ export default function AdminDashboard() {
 
   const loadUserHospital = async (userId: string) => {
     try {
-      console.log('🔍 [loadUserHospital] Loading for user:', userId);
       const hospitalInfo = await getUserHospitalInfo(userId);
       setUserHospital(hospitalInfo);
-      console.log('✅ [loadUserHospital] User hospital:', hospitalInfo);
     } catch (error) {
       console.error('❌ [loadUserHospital] Error:', error);
     }
@@ -102,11 +84,8 @@ export default function AdminDashboard() {
 
   const loadAccessibleHospitals = async (userId: string) => {
     try {
-      console.log('🔍 [loadAccessibleHospitals] Getting accessible hospitals for user:', userId);
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-      console.log('🏥 [loadAccessibleHospitals] Accessible hospitals:', ids.length, 'hospitals');
-      console.log('🏥 [loadAccessibleHospitals] Hospital IDs:', ids);
       loadDashboardStats(ids);
     } catch (error) {
       console.error('❌ [loadAccessibleHospitals] Error:', error);
@@ -115,9 +94,7 @@ export default function AdminDashboard() {
 
   const loadDashboardStats = async (hospitalIds?: string[]) => {
     try {
-      console.log('📊 [loadDashboardStats] Loading stats with hospitalIds:', hospitalIds);
       const data = await getDashboardStats(hospitalIds);
-      console.log('📊 [loadDashboardStats] Dashboard stats:', data);
       setStats(data);
     } catch (error) {
       console.error('❌ [loadDashboardStats] Error:', error);
@@ -127,12 +104,11 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = () => {
-    console.log('🚪 [handleLogout] User logging out...');
     logout();
     router.push('/admin/login');
   };
 
-  // ✅ เมนูจัดการระบบ - เพิ่มเมนูภาพรวม Care Pathway (ตำแหน่งที่ 2)
+  // ✅ เมนูจัดการระบบ - แก้ href เป็น /admin/care-pathway-dashboard
   const menuItems: MenuItem[] = [
     {
       title: 'จัดการผู้ป่วย',
@@ -147,7 +123,7 @@ export default function AdminDashboard() {
       description: 'ดูสถานะเส้นทางสุขภาพผู้ป่วยทั้งระบบ',
       icon: <Route className="w-6 h-6" />,
       color: 'from-indigo-500 to-purple-500',
-      href: '/admin/care-pathway',
+      href: '/admin/care-pathway-dashboard', // ✅ แก้ไขตรงนี้
       allowedRoles: ['admin', 'doctor', 'helper', 'osm'],
     },
     {
@@ -228,9 +204,7 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                DeMi+ หน้าหลัก
-              </h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">DeMi+ หน้าหลัก</h1>
               <p className="text-gray-600">ระบบจัดการสำหรับเจ้าหน้าที่</p>
             </div>
             <div className="flex items-center gap-4">
@@ -240,9 +214,7 @@ export default function AdminDashboard() {
                     <UserCheck className="w-5 h-5 text-blue-600" />
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-800">
-                      {user?.full_name_th || 'ผู้ดูแลระบบ'}
-                    </p>
+                    <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
                       {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
@@ -254,19 +226,13 @@ export default function AdminDashboard() {
                   <div className="border-t border-blue-200 pt-2 mt-2">
                     <div className="flex items-center gap-1 mb-1">
                       <Hospital className="w-3 h-3 text-blue-600" />
-                      <span className="text-xs text-gray-600 font-medium">
-                        {userHospital.name}
-                      </span>
+                      <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       {userHospital.type === 'main' ? (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">
-                          🏥 แม่ข่าย
-                        </span>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
                       ) : (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">
-                          🏥 ลูกข่าย
-                        </span>
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">🏥 ลูกข่าย</span>
                       )}
                       {userHospital.type === 'sub' && userHospital.parent_hospital && (
                         <div className="flex items-center gap-1 text-xs text-gray-500">
@@ -277,9 +243,7 @@ export default function AdminDashboard() {
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-gray-400 mt-2">
-                    ไม่สังกัดโรงพยาบาล
-                  </p>
+                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
                 )}
               </div>
               <button
@@ -304,9 +268,7 @@ export default function AdminDashboard() {
                 <p className="text-sm text-gray-600 mb-1">ผู้ป่วยทั้งหมด</p>
                 <p className="text-3xl font-bold text-gray-800">{stats.totalPatients}</p>
                 {accessibleHospitalIds.length > 0 && accessibleHospitalIds.length < 100 && (
-                  <p className="text-xs text-gray-400 mt-1">
-                    🔒 จาก {accessibleHospitalIds.length} รพ.
-                  </p>
+                  <p className="text-xs text-gray-400 mt-1">🔒 จาก {accessibleHospitalIds.length} รพ.</p>
                 )}
               </div>
               <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
@@ -349,7 +311,7 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* Quick Actions - เพิ่มปุ่มภาพรวม Care Pathway */}
+        {/* Quick Actions */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-8">
           <h2 className="text-lg font-bold text-gray-800 mb-4">ดำเนินการด่วน</h2>
           <div className="flex flex-wrap gap-3">
@@ -397,9 +359,9 @@ export default function AdminDashboard() {
               <Target className="w-4 h-4" />
               จัดการเป้าหมาย
             </button>
-            {/* ✅ ปุ่มลัดใหม่: ภาพรวม Care Pathway */}
+            {/* ✅ ปุ่มลัดใหม่: ภาพรวม Care Pathway → ชี้ไปที่ /admin/care-pathway-dashboard */}
             <button
-              onClick={() => router.push('/admin/care-pathway')}
+              onClick={() => router.push('/admin/care-pathway-dashboard')}
               className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg hover:from-indigo-600 hover:to-purple-600 transition-all shadow-sm"
             >
               <Route className="w-4 h-4" />
@@ -417,9 +379,7 @@ export default function AdminDashboard() {
               className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 hover:shadow-xl hover:scale-105 transition-all text-left group relative"
             >
               <div className={`w-14 h-14 bg-gradient-to-br ${item.color} rounded-xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
-                <div className="text-white">
-                  {item.icon}
-                </div>
+                <div className="text-white">{item.icon}</div>
               </div>
               <h3 className="text-lg font-bold text-gray-800 mb-1">{item.title}</h3>
               <p className="text-sm text-gray-600">{item.description}</p>
