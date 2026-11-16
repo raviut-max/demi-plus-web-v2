@@ -1,6 +1,8 @@
 // app/admin/reports/patient-record/page.tsx
-// ✅ ฉบับสมบูรณ์: 30 ตุลาคม 2569
-// ✅ แก้ไข: showDirectoryPicker ต้องเรียกทันทีใน click handler (ห้ามมี confirm คั่น)
+// ✅ แก้ไขล่าสุด: 16 พฤศจิกายน 2569
+// ✅ การแก้ไข:
+//    1. ✅ เปลี่ยน count: 'exact' → count: 'planned' (ไม่มี limit 1000)
+//    2. ✅ แก้ไขการ์ดสรุปให้แสดงจำนวนที่ถูกต้อง
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -47,7 +49,6 @@ function PatientRecordContent() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-
   const urlHospital = searchParams.get('hospital') || 'all';
   const urlPam = searchParams.get('pam') || 'all';
   const urlZone = searchParams.get('zone') || 'all';
@@ -62,13 +63,10 @@ function PatientRecordContent() {
   const [searchTerm, setSearchTerm] = useState(urlSearch);
   const [pamFilter, setPamFilter] = useState(urlPam);
   const [zoneFilter, setZoneFilter] = useState(urlZone);
-
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(10);
-
   const [showExportList, setShowExportList] = useState(false);
   const [exportQueue, setExportQueue] = useState<Patient[]>([]);
-
   const [isBatchRecording, setIsBatchRecording] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [batchTotal, setBatchTotal] = useState(0);
@@ -107,6 +105,7 @@ function PatientRecordContent() {
     setCurrentPage(1);
   }, [selectedHospital, searchTerm, pamFilter, zoneFilter]);
 
+  // ✅ แก้ไข: ใช้ count: 'planned' แทน 'exact' (ไม่มี limit 1000)
   const loadHospitals = async (userId: string) => {
     try {
       const accessibleIds = await getAccessibleHospitalIds(userId);
@@ -115,21 +114,27 @@ function PatientRecordContent() {
         .select('id, name, code, type')
         .eq('is_active', true)
         .order('name', { ascending: true });
+      
       if (accessibleIds.length > 0 && accessibleIds.length < 100) {
         query = query.in('id', accessibleIds);
       }
+      
       const { data, error } = await query;
       if (error) throw error;
+      
       const hospitalsWithCount = await Promise.all(
         (data || []).map(async (h: any) => {
+          // ✅ ใช้ count: 'planned' แทน 'exact' (ไม่มี limit 1000)
           const { count } = await supabase
             .from('profiles')
-            .select('*', { count: 'exact', head: true })
+            .select('*', { count: 'planned', head: true })
             .eq('hospital_id', h.id)
             .eq('is_active', true);
+          
           return { ...h, patientCount: count || 0 };
         })
       );
+      
       setHospitals(hospitalsWithCount);
     } catch (error) {
       console.error('Error loading hospitals:', error);
@@ -141,33 +146,34 @@ function PatientRecordContent() {
       const accessibleIds = await getAccessibleHospitalIds(userId);
       let query = supabase
         .from('profiles')
-        .select(`
-          id, first_name, last_name, hospital_number, age, gender,
-          pam_level, zone, current_weight, blood_sugar, hospital_id,
-          hospitals:hospital_id (name)
-        `)
+        .select(`id, first_name, last_name, hospital_number, age, gender, pam_level, zone, current_weight, blood_sugar, hospital_id, hospitals:hospital_id (name)`)
         .eq('is_active', true)
         .order('first_name', { ascending: true });
+      
       if (accessibleIds.length > 0 && accessibleIds.length < 100) {
         query = query.in('hospital_id', accessibleIds);
       }
+      
       if (selectedHospital !== 'all') {
         query = query.eq('hospital_id', selectedHospital);
       }
+      
       const { data, error } = await query;
       if (error) throw error;
-
+      
       const patientIds = (data || []).map(p => p.id);
       let followupData: any[] = [];
+      
       if (patientIds.length > 0) {
         const { data: followups } = await supabase
           .from('appointment_followups')
           .select('user_id, followup_date, weight, blood_sugar_dtx')
           .in('user_id', patientIds)
           .order('followup_date', { ascending: false });
+        
         followupData = followups || [];
       }
-
+      
       const patientsWithFollowup = (data || []).map(patient => {
         const patientFollowups = followupData.filter(f => f.user_id === patient.id);
         const latestFollowup = patientFollowups[0];
@@ -179,6 +185,7 @@ function PatientRecordContent() {
           latest_followup_date: latestFollowup?.followup_date || null,
         };
       });
+      
       setPatients(patientsWithFollowup);
     } catch (error) {
       console.error('Error loading patients:', error);
@@ -243,14 +250,12 @@ function PatientRecordContent() {
     setShowExportList(true);
   };
 
-  // ✅ สร้าง PDF ฉบับสมบูรณ์ผ่านเทมเพลตกลาง
   const generatePatientPDF = async (patientId: string): Promise<Blob> => {
     const { patient, followups, screenings, coachName } = await fetchPatientRecordData(patientId);
     const meta = buildRecordMeta(user?.full_name_th || 'เจ้าหน้าที่ระบบ', coachName, patient);
     return generatePatientPDFBlob(patient, followups, screenings, meta);
   };
 
-  // ✅ ลูปบันทึกลงโฟลเดอร์ที่เลือกไว้
   const runBatchSaveToDirectory = async (dirHandle: any) => {
     setIsBatchRecording(true);
     setBatchStatus('recording');
@@ -259,18 +264,18 @@ function PatientRecordContent() {
     setBatchSuccess(0);
     setBatchFailed(0);
     setTargetFolderName(dirHandle.name);
-
+    
     let successCount = 0;
     let failedCount = 0;
     const errors: string[] = [];
-
+    
     try {
       for (let i = 0; i < exportQueue.length; i++) {
         const patient = exportQueue[i];
         const patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim();
         setBatchCurrentName(patientName);
         setBatchProgress(i + 1);
-
+        
         try {
           const pdfBlob = await generatePatientPDF(patient.id);
           const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
@@ -278,12 +283,12 @@ function PatientRecordContent() {
           const firstName = patient.first_name || 'ไม่ระบุชื่อ';
           const lastName = patient.last_name || '';
           const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_') + '.pdf';
-
+          
           const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
           const writable = await fileHandle.createWritable();
           await writable.write(pdfBlob);
           await writable.close();
-
+          
           successCount++;
           setBatchSuccess(successCount);
         } catch (error: any) {
@@ -293,7 +298,7 @@ function PatientRecordContent() {
           errors.push(`${patientName}: ${error.message || error}`);
         }
       }
-
+      
       setBatchStatus('done');
       const msg = `✅ บันทึกรายการเสร็จสิ้น!\n\n✓ สำเร็จ: ${successCount} ไฟล์\n✗ ล้มเหลว: ${failedCount} ไฟล์\n\nโฟลเดอร์ปลายทาง: ${dirHandle.name}`;
       if (errors.length > 0) {
@@ -308,14 +313,12 @@ function PatientRecordContent() {
     }
   };
 
-  // ✅ บันทึกรวม: เรียก showDirectoryPicker ทันทีที่คลิก (ห้ามมี confirm/alert คั่น)
   const handleBatchRecord = async () => {
     if (exportQueue.length === 0) {
       alert('ไม่มีรายการที่จะบันทึก');
       return;
     }
-
-    // Browser ไม่รองรับ → ไป ZIP ทันที
+    
     if (!('showDirectoryPicker' in window)) {
       const confirmed = window.confirm(
         `เบราว์เซอร์ของคุณไม่รองรับการเลือกโฟลเดอร์โดยตรง\n\nระบบจะบันทึกรวมเป็นไฟล์ ZIP (${exportQueue.length} ไฟล์) แทน\n\nต้องการดำเนินการต่อหรือไม่?`
@@ -324,17 +327,14 @@ function PatientRecordContent() {
       await handleBatchRecordAsZip();
       return;
     }
-
-    // ✅ เรียก picker ทันทีภายใน user gesture (ไม่มี confirm คั่น)
+    
     let dirHandle: any;
     try {
       dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
     } catch (error: any) {
       if (error?.name === 'AbortError') {
-        // ผู้ใช้กดยกเลิกหน้าต่างเลือกโฟลเดอร์เอง → จบเงียบๆ
         return;
       }
-      // Error อื่น (เช่น permission) → เสนอโหมด ZIP แทน
       console.error('❌ [DirectoryPicker] Error:', error);
       const fallback = window.confirm(
         `ไม่สามารถเปิดหน้าต่างเลือกโฟลเดอร์ได้ (${error?.message || 'ไม่ทราบสาเหตุ'})\n\nต้องการบันทึกรวมเป็นไฟล์ ZIP แทนหรือไม่?`
@@ -342,12 +342,10 @@ function PatientRecordContent() {
       if (fallback) await handleBatchRecordAsZip();
       return;
     }
-
-    // เลือกโฟลเดอร์สำเร็จ → เริ่มบันทึกทันที
+    
     await runBatchSaveToDirectory(dirHandle);
   };
 
-  // ✅ Fallback: บันทึกรวมเป็น ZIP
   const handleBatchRecordAsZip = async () => {
     setIsBatchRecording(true);
     setBatchStatus('recording');
@@ -356,21 +354,23 @@ function PatientRecordContent() {
     setBatchSuccess(0);
     setBatchFailed(0);
     setTargetFolderName('ไฟล์ ZIP');
-
+    
     const zip = new JSZip();
     let successCount = 0;
     let failedCount = 0;
-
+    
     try {
       for (let i = 0; i < exportQueue.length; i++) {
         const patient = exportQueue[i];
         setBatchCurrentName(`${patient.first_name || ''} ${patient.last_name || ''}`.trim());
         setBatchProgress(i + 1);
+        
         try {
           const pdfBlob = await generatePatientPDF(patient.id);
           const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
           const hn = patient.hospital_number || 'ไม่มีHN';
           const fileName = `${hospitalName}_${hn}_${patient.first_name || ''}_${patient.last_name || ''}`.replace(/\s+/g, '_') + '.pdf';
+          
           zip.file(fileName, pdfBlob);
           successCount++;
           setBatchSuccess(successCount);
@@ -379,7 +379,7 @@ function PatientRecordContent() {
           setBatchFailed(failedCount);
         }
       }
-
+      
       setBatchCurrentName('กำลังสร้างไฟล์ ZIP...');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(zipBlob);
@@ -390,7 +390,7 @@ function PatientRecordContent() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
+      
       setBatchStatus('done');
       alert(`✅ บันทึกรายการเสร็จสิ้น!\n\n✓ สำเร็จ: ${successCount} ไฟล์\n✗ ล้มเหลว: ${failedCount} ไฟล์\n\nไฟล์ ZIP ถูกดาวน์โหลดแล้ว`);
     } catch (error: any) {
@@ -439,6 +439,8 @@ function PatientRecordContent() {
     );
   };
 
+  // ✅ แก้ไข: คำนวณจำนวนผู้ป่วยทั้งหมดจาก hospitals (ไม่ใช่จาก filteredPatients)
+  const totalPatientsCount = hospitals.reduce((sum, h) => sum + (h.patientCount || 0), 0);
   const patientsWithFollowup = filteredPatients.filter(p => p.followup_count && p.followup_count > 0).length;
   const patientsWithoutFollowup = filteredPatients.filter(p => !p.followup_count || p.followup_count === 0).length;
 
@@ -507,7 +509,7 @@ function PatientRecordContent() {
                 onChange={(e) => setSelectedHospital(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
-                <option value="all">ทั้งหมด ({hospitals.reduce((sum, h) => sum + (h.patientCount || 0), 0)} คน)</option>
+                <option value="all">ทั้งหมด ({totalPatientsCount} คน)</option>
                 {hospitals.map((hospital) => (
                   <option key={hospital.id} value={hospital.id}>
                     {hospital.name} ({hospital.patientCount || 0} คน){hospital.type === 'main' ? ' - แม่ข่าย' : ' - ลูกข่าย'}
@@ -680,7 +682,6 @@ function PatientRecordContent() {
               </tbody>
             </table>
           </div>
-
           {totalPages > 1 && (
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between">
               <div className="text-sm text-gray-600">แสดง {startIndex + 1} - {Math.min(endIndex, filteredPatients.length)} จาก {filteredPatients.length} คน</div>
@@ -720,7 +721,6 @@ function PatientRecordContent() {
                 <X className="w-6 h-6" />
               </button>
             </div>
-
             <div className="p-6">
               {batchStatus === 'idle' && (
                 <>
@@ -756,7 +756,6 @@ function PatientRecordContent() {
                   </div>
                 </>
               )}
-
               {batchStatus === 'recording' && (
                 <div className="mb-6 p-6 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg text-white">
                   <div className="flex items-center gap-3 mb-4">
@@ -784,7 +783,6 @@ function PatientRecordContent() {
                   </div>
                 </div>
               )}
-
               {batchStatus === 'done' && (
                 <div className="mb-6 p-6 bg-green-50 rounded-lg border border-green-200">
                   <div className="flex items-start gap-3">
@@ -798,7 +796,6 @@ function PatientRecordContent() {
                   </div>
                 </div>
               )}
-
               {batchStatus === 'error' && (
                 <div className="mb-6 p-6 bg-red-50 rounded-lg border border-red-200">
                   <div className="flex items-start gap-3">
@@ -810,7 +807,6 @@ function PatientRecordContent() {
                   </div>
                 </div>
               )}
-
               <div className="space-y-3">
                 <h4 className="font-semibold text-gray-700">รายการที่จะบันทึก ({exportQueue.length} คน):</h4>
                 {exportQueue.map((patient, index) => (
@@ -827,7 +823,6 @@ function PatientRecordContent() {
                 ))}
               </div>
             </div>
-
             <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 flex justify-end">
               <button onClick={closeExportList} disabled={isBatchRecording} className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-medium disabled:opacity-50">
                 ปิด
