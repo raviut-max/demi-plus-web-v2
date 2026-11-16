@@ -1,8 +1,10 @@
 // app/admin/reports/patient-record/page.tsx
 // ✅ แก้ไขล่าสุด: 16 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ เปลี่ยน count: 'exact' → count: 'planned' (ไม่มี limit 1000)
-//    2. ✅ แก้ไขการ์ดสรุปให้แสดงจำนวนที่ถูกต้อง
+//    1. ✅ เพิ่ม state totalPatientsCount (นับจาก DB โดยตรง)
+//    2. ✅ แก้ loadHospitals ใช้ count: 'planned' + fallback
+//    3. ✅ แก้การ์ดสรุปใช้ totalPatientsCount (ไม่ใช่ filteredPatients.length)
+//    4. ✅ แก้ Dropdown "ทั้งหมด" ใช้ totalPatientsCount
 'use client';
 import { useEffect, useState, Suspense, useCallback } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
@@ -77,6 +79,9 @@ function PatientRecordContent() {
   const [batchErrorMessage, setBatchErrorMessage] = useState('');
   const [targetFolderName, setTargetFolderName] = useState('');
 
+  // ✅ State ใหม่: จำนวนผู้ป่วยทั้งหมดในโรงพยาบาลที่เลือก (นับจาก DB)
+  const [totalPatientsCount, setTotalPatientsCount] = useState(0);
+
   const updateUrlParams = useCallback(() => {
     const params = new URLSearchParams();
     if (selectedHospital !== 'all') params.set('hospital', selectedHospital);
@@ -105,7 +110,32 @@ function PatientRecordContent() {
     setCurrentPage(1);
   }, [selectedHospital, searchTerm, pamFilter, zoneFilter]);
 
-  // ✅ แก้ไข: ใช้ count: 'planned' แทน 'exact' (ไม่มี limit 1000)
+  // ✅ แก้ไข: นับจำนวนผู้ป่วยทั้งหมดจาก DB โดยตรง (ไม่จำกัด pagination)
+  const loadTotalPatientsCount = useCallback(async (userId: string, hospitalFilter: string) => {
+    try {
+      const accessibleIds = await getAccessibleHospitalIds(userId);
+      let query = supabase
+        .from('profiles')
+        .select('*', { count: 'planned', head: true })
+        .eq('is_active', true);
+
+      if (accessibleIds.length > 0 && accessibleIds.length < 100) {
+        query = query.in('hospital_id', accessibleIds);
+      }
+      if (hospitalFilter !== 'all') {
+        query = query.eq('hospital_id', hospitalFilter);
+      }
+
+      const { count } = await query;
+      setTotalPatientsCount(count || 0);
+      console.log(`📊 [loadTotalPatientsCount] Total: ${count}`);
+    } catch (error) {
+      console.error('❌ [loadTotalPatientsCount] Error:', error);
+      setTotalPatientsCount(0);
+    }
+  }, []);
+
+  // ✅ แก้ไข: ใช้ count: 'planned' + fallback
   const loadHospitals = async (userId: string) => {
     try {
       const accessibleIds = await getAccessibleHospitalIds(userId);
@@ -114,33 +144,38 @@ function PatientRecordContent() {
         .select('id, name, code, type')
         .eq('is_active', true)
         .order('name', { ascending: true });
-      
+
       if (accessibleIds.length > 0 && accessibleIds.length < 100) {
         query = query.in('id', accessibleIds);
       }
-      
+
       const { data, error } = await query;
       if (error) throw error;
-      
+
       const hospitalsWithCount = await Promise.all(
         (data || []).map(async (h: any) => {
-          // ✅ ใช้ count: 'planned' แทน 'exact' (ไม่มี limit 1000)
-          const { count } = await supabase
-            .from('profiles')
-            .select('*', { count: 'planned', head: true })
-            .eq('hospital_id', h.id)
-            .eq('is_active', true);
-          
-          return { ...h, patientCount: count || 0 };
+          try {
+            // ✅ ใช้ count: 'planned' (ไม่มี limit 1000)
+            const { count } = await supabase
+              .from('profiles')
+              .select('*', { count: 'planned', head: true })
+              .eq('hospital_id', h.id)
+              .eq('is_active', true);
+
+            return { ...h, patientCount: count || 0 };
+          } catch {
+            return { ...h, patientCount: 0 };
+          }
         })
       );
-      
+
       setHospitals(hospitalsWithCount);
     } catch (error) {
-      console.error('Error loading hospitals:', error);
+      console.error('❌ [loadHospitals] Error:', error);
     }
   };
 
+  // ✅ แก้ไข: โหลดผู้ป่วยทั้งหมด (ไม่จำกัด pagination) สำหรับการ์ดสรุป
   const loadPatients = async (userId: string) => {
     try {
       const accessibleIds = await getAccessibleHospitalIds(userId);
@@ -149,31 +184,31 @@ function PatientRecordContent() {
         .select(`id, first_name, last_name, hospital_number, age, gender, pam_level, zone, current_weight, blood_sugar, hospital_id, hospitals:hospital_id (name)`)
         .eq('is_active', true)
         .order('first_name', { ascending: true });
-      
+
       if (accessibleIds.length > 0 && accessibleIds.length < 100) {
         query = query.in('hospital_id', accessibleIds);
       }
-      
+
       if (selectedHospital !== 'all') {
         query = query.eq('hospital_id', selectedHospital);
       }
-      
+
       const { data, error } = await query;
       if (error) throw error;
-      
+
       const patientIds = (data || []).map(p => p.id);
       let followupData: any[] = [];
-      
+
       if (patientIds.length > 0) {
         const { data: followups } = await supabase
           .from('appointment_followups')
           .select('user_id, followup_date, weight, blood_sugar_dtx')
           .in('user_id', patientIds)
           .order('followup_date', { ascending: false });
-        
+
         followupData = followups || [];
       }
-      
+
       const patientsWithFollowup = (data || []).map(patient => {
         const patientFollowups = followupData.filter(f => f.user_id === patient.id);
         const latestFollowup = patientFollowups[0];
@@ -185,10 +220,13 @@ function PatientRecordContent() {
           latest_followup_date: latestFollowup?.followup_date || null,
         };
       });
-      
+
       setPatients(patientsWithFollowup);
+
+      // ✅ นับจำนวนผู้ป่วยทั้งหมดจาก DB
+      await loadTotalPatientsCount(userId, selectedHospital);
     } catch (error) {
-      console.error('Error loading patients:', error);
+      console.error('❌ [loadPatients] Error:', error);
     } finally {
       setLoading(false);
     }
@@ -264,18 +302,18 @@ function PatientRecordContent() {
     setBatchSuccess(0);
     setBatchFailed(0);
     setTargetFolderName(dirHandle.name);
-    
+
     let successCount = 0;
     let failedCount = 0;
     const errors: string[] = [];
-    
+
     try {
       for (let i = 0; i < exportQueue.length; i++) {
         const patient = exportQueue[i];
         const patientName = `${patient.first_name || ''} ${patient.last_name || ''}`.trim();
         setBatchCurrentName(patientName);
         setBatchProgress(i + 1);
-        
+
         try {
           const pdfBlob = await generatePatientPDF(patient.id);
           const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
@@ -283,12 +321,12 @@ function PatientRecordContent() {
           const firstName = patient.first_name || 'ไม่ระบุชื่อ';
           const lastName = patient.last_name || '';
           const fileName = `${hospitalName}_${hn}_${firstName}_${lastName}`.replace(/\s+/g, '_') + '.pdf';
-          
+
           const fileHandle = await dirHandle.getFileHandle(fileName, { create: true });
           const writable = await fileHandle.createWritable();
           await writable.write(pdfBlob);
           await writable.close();
-          
+
           successCount++;
           setBatchSuccess(successCount);
         } catch (error: any) {
@@ -298,7 +336,7 @@ function PatientRecordContent() {
           errors.push(`${patientName}: ${error.message || error}`);
         }
       }
-      
+
       setBatchStatus('done');
       const msg = `✅ บันทึกรายการเสร็จสิ้น!\n\n✓ สำเร็จ: ${successCount} ไฟล์\n✗ ล้มเหลว: ${failedCount} ไฟล์\n\nโฟลเดอร์ปลายทาง: ${dirHandle.name}`;
       if (errors.length > 0) {
@@ -318,7 +356,7 @@ function PatientRecordContent() {
       alert('ไม่มีรายการที่จะบันทึก');
       return;
     }
-    
+
     if (!('showDirectoryPicker' in window)) {
       const confirmed = window.confirm(
         `เบราว์เซอร์ของคุณไม่รองรับการเลือกโฟลเดอร์โดยตรง\n\nระบบจะบันทึกรวมเป็นไฟล์ ZIP (${exportQueue.length} ไฟล์) แทน\n\nต้องการดำเนินการต่อหรือไม่?`
@@ -327,7 +365,7 @@ function PatientRecordContent() {
       await handleBatchRecordAsZip();
       return;
     }
-    
+
     let dirHandle: any;
     try {
       dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite', startIn: 'downloads' });
@@ -342,7 +380,7 @@ function PatientRecordContent() {
       if (fallback) await handleBatchRecordAsZip();
       return;
     }
-    
+
     await runBatchSaveToDirectory(dirHandle);
   };
 
@@ -354,23 +392,23 @@ function PatientRecordContent() {
     setBatchSuccess(0);
     setBatchFailed(0);
     setTargetFolderName('ไฟล์ ZIP');
-    
+
     const zip = new JSZip();
     let successCount = 0;
     let failedCount = 0;
-    
+
     try {
       for (let i = 0; i < exportQueue.length; i++) {
         const patient = exportQueue[i];
         setBatchCurrentName(`${patient.first_name || ''} ${patient.last_name || ''}`.trim());
         setBatchProgress(i + 1);
-        
+
         try {
           const pdfBlob = await generatePatientPDF(patient.id);
           const hospitalName = patient.hospitals?.name || 'ไม่ระบุโรงพยาบาล';
           const hn = patient.hospital_number || 'ไม่มีHN';
           const fileName = `${hospitalName}_${hn}_${patient.first_name || ''}_${patient.last_name || ''}`.replace(/\s+/g, '_') + '.pdf';
-          
+
           zip.file(fileName, pdfBlob);
           successCount++;
           setBatchSuccess(successCount);
@@ -379,7 +417,7 @@ function PatientRecordContent() {
           setBatchFailed(failedCount);
         }
       }
-      
+
       setBatchCurrentName('กำลังสร้างไฟล์ ZIP...');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(zipBlob);
@@ -390,7 +428,7 @@ function PatientRecordContent() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      
+
       setBatchStatus('done');
       alert(`✅ บันทึกรายการเสร็จสิ้น!\n\n✓ สำเร็จ: ${successCount} ไฟล์\n✗ ล้มเหลว: ${failedCount} ไฟล์\n\nไฟล์ ZIP ถูกดาวน์โหลดแล้ว`);
     } catch (error: any) {
@@ -439,8 +477,7 @@ function PatientRecordContent() {
     );
   };
 
-  // ✅ แก้ไข: คำนวณจำนวนผู้ป่วยทั้งหมดจาก hospitals (ไม่ใช่จาก filteredPatients)
-  const totalPatientsCount = hospitals.reduce((sum, h) => sum + (h.patientCount || 0), 0);
+  // ✅ คำนวณจำนวนผู้ป่วยที่มี/ไม่มีข้อมูลติดตาม (จาก filteredPatients)
   const patientsWithFollowup = filteredPatients.filter(p => p.followup_count && p.followup_count > 0).length;
   const patientsWithoutFollowup = filteredPatients.filter(p => !p.followup_count || p.followup_count === 0).length;
 
@@ -509,6 +546,7 @@ function PatientRecordContent() {
                 onChange={(e) => setSelectedHospital(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
               >
+                {/* ✅ ใช้ totalPatientsCount จาก DB */}
                 <option value="all">ทั้งหมด ({totalPatientsCount} คน)</option>
                 {hospitals.map((hospital) => (
                   <option key={hospital.id} value={hospital.id}>
@@ -520,7 +558,8 @@ function PatientRecordContent() {
             <div className="flex items-end">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex-1">
                 <p className="text-sm text-blue-800"><span className="font-semibold">🏥 โรงพยาบาล:</span> {getSelectedHospitalName()}</p>
-                <p className="text-sm text-blue-600 mt-1"><span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {filteredPatients.length} คน</p>
+                {/* ✅ ใช้ totalPatientsCount จาก DB (ไม่ใช่ filteredPatients.length) */}
+                <p className="text-sm text-blue-600 mt-1"><span className="font-semibold">👥 ผู้ป่วยทั้งหมด:</span> {totalPatientsCount} คน</p>
                 <p className="text-sm text-blue-600"><span className="font-semibold">✅ เลือกแล้ว:</span> {selectedPatients.size} คน</p>
                 <div className="mt-2 pt-2 border-t border-blue-200 space-y-1">
                   <p className="text-xs text-green-700 font-medium">✓ มีข้อมูลติดตาม: <span className="font-bold">{patientsWithFollowup}</span> คน</p>
