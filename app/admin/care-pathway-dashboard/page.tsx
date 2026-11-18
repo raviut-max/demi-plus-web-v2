@@ -3,7 +3,7 @@
 // ✅ การแก้ไข:
 //    1. ✅ ใช้ fetchAllWithPagination ดึงข้อมูลจริงแบบ loop จนครบ (ไม่ใช่ count: 'planned')
 //    2. ✅ นับจำนวนจาก patients.length โดยตรง (แม่นยำ 100%)
-//    3. ✅ แบ่ง chunk 900 items สำหรับ in filter
+//    3. ✅ แบ่ง chunk 900 items สำหรับ in filter (แก้ Supabase limit)
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
