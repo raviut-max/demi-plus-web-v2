@@ -2,14 +2,23 @@
 // ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
 // ✅ ใช้ Database View (v_care_pathway_stats, v_overdue_patients)
 // ✅ เร็วขึ้น 10-20 เท่า (จาก 10-20 วินาที → 0.5-1 วินาที)
+// ✅ เพิ่มส่วนหัว: แสดง "ผู้ทำรายการ" (ชื่อ/บทบาท/โรงพยาบาล) + ปุ่มออกจากระบบ แบบเดียวกับ Dashboard
 'use client';
+
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { checkSession, getAccessibleHospitalIds, isSuperAdmin } from '@/lib/supabase/queries';
+import {
+  checkSession,
+  getAccessibleHospitalIds,
+  isSuperAdmin,
+  getUserHospitalInfo,
+  logout,
+} from '@/lib/supabase/queries';
 import {
   Users, CalendarCheck, CalendarX, TrendingUp, TrendingDown,
-  AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye
+  AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye,
+  UserCheck, Hospital, Building2, LogOut,
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -41,6 +50,7 @@ interface OverduePatient {
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null); // ✅ State ใหม่: ข้อมูล รพ. ของผู้ใช้
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [overduePatients, setOverduePatients] = useState<OverduePatient[]>([]);
@@ -52,8 +62,25 @@ export default function CarePathwayDashboardPage() {
       alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
     }
     setUser(userData);
+    loadUserHospital(userData.id); // ✅ โหลดข้อมูล รพ. สำหรับ Header
     loadData(userData);
   }, [router]);
+
+  // ✅ โหลดข้อมูลโรงพยาบาลของผู้ใช้ (แบบเดียวกับหน้า Dashboard)
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('❌ [loadUserHospital] Error:', error);
+    }
+  };
+
+  // ✅ ออกจากระบบ (แบบเดียวกับ Dashboard)
+  const handleLogout = () => {
+    logout();
+    router.push('/admin/login');
+  };
 
   const loadData = useCallback(async (userData: any) => {
     setLoading(true);
@@ -102,7 +129,6 @@ export default function CarePathwayDashboardPage() {
 
       const endTime = performance.now();
       console.log(`✅ [loadData] Complete in ${(endTime - startTime).toFixed(0)}ms`);
-
     } catch (error) {
       console.error('❌ [CarePathwayDashboard] Error:', error);
     } finally {
@@ -134,14 +160,69 @@ export default function CarePathwayDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
+      {/* ============================================================ */}
+      {/* Header - ✅ เพิ่มการ์ด "ผู้ทำรายการ" + ออกจากระบบ แบบ Dashboard */}
+      {/* ============================================================ */}
+      <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-2">
+          <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
             <ArrowRight className="w-4 h-4 rotate-180" /> กลับ Dashboard
           </button>
-          <h1 className="text-2xl font-bold text-gray-800">📊 ภาพรวม Care Pathway Dashboard</h1>
-          <p className="text-sm text-gray-500">สรุปผลการดูแลผู้ป่วยตามเส้นทางสุขภาพ (ข้อมูลย้อนหลัง 30 วัน)</p>
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">📊 ภาพรวม Care Pathway Dashboard</h1>
+              <p className="text-sm text-gray-500">สรุปผลการดูแลผู้ป่วยตามเส้นทางสุขภาพ (ข้อมูลย้อนหลัง 30 วัน)</p>
+            </div>
+
+            {/* ✅ การ์ดผู้ทำรายการ + ปุ่มออกจากระบบ (สไตล์เดียวกับ /admin/dashboard) */}
+            <div className="flex items-center gap-4">
+              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <UserCheck className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
+                    <p className="text-xs text-gray-500">
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
+                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                          user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                    </p>
+                  </div>
+                </div>
+                {userHospital ? (
+                  <div className="border-t border-blue-200 pt-2 mt-2">
+                    <div className="flex items-center gap-1 mb-1">
+                      <Hospital className="w-3 h-3 text-blue-600" />
+                      <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {userHospital.type === 'main' ? (
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">🏥 ลูกข่าย</span>
+                      )}
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                          <Building2 className="w-3 h-3" />
+                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
+                )}
+              </div>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
+              >
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -181,7 +262,7 @@ export default function CarePathwayDashboardPage() {
         {/* หมวดที่ 2: รายชื่อผู้ป่วยที่ต้องให้ความสนใจ (Watchlist) */}
         {/* ============================================================ */}
         <div>
-          {/* ✅ เพิ่ม badge แสดงจำนวนทั้งหมด */}
+          {/* ✅ badge แสดงจำนวนทั้งหมด */}
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <AlertTriangle className="w-5 h-5 text-red-500" />
             หมวดที่ 2: ผู้ป่วยที่ต้องให้ความสนใจ (เลยกำหนด &gt;30 วัน)
@@ -217,9 +298,9 @@ export default function CarePathwayDashboardPage() {
                         <td className="px-6 py-3 text-center">
                           <span className={`px-2 py-1 rounded-full text-xs font-bold ${
                             p.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
-                            p.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
-                            p.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
-                            'bg-red-100 text-red-700'
+                              p.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
+                                p.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
+                                  'bg-red-100 text-red-700'
                           }`}>
                             {p.pam_level || 'L0'}
                           </span>
