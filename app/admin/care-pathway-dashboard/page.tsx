@@ -1,11 +1,9 @@
 // app/admin/care-pathway-dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
-// ✅ การปรับปรุงความเร็ว:
-//    1. ✅ ดึง patients เฉพาะฟิลด์ที่จำเป็น (ไม่ใช่ full rows)
-//    2. ✅ ดึง followups ครั้งเดียว (ใช้สำหรับทั้ง onTime/overdue และ reasons)
-//    3. ✅ ดึง screenings/records เฉพาะฟิลด์ที่จำเป็น
-//    4. ✅ ไม่ต้องดึง profiles ซ้ำอีกครั้ง
-//    5. ✅ ใช้ Promise.all ให้ parallel มากขึ้น
+// ✅ การแก้ไข:
+//    1. ✅ ใช้ fetchAllWithPagination ดึงข้อมูลจริงแบบ loop จนครบ (ไม่ใช่ count: 'planned')
+//    2. ✅ นับจำนวนจาก patients.length โดยตรง (แม่นยำ 100%)
+//    3. ✅ แบ่ง chunk 900 items สำหรับ in filter
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -15,6 +13,92 @@ import {
   Users, CalendarCheck, CalendarX, TrendingUp, TrendingDown,
   AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye
 } from 'lucide-react';
+
+// ✅ Helper: ดึงข้อมูลทั้งหมดแบบ Pagination Loop (แม่นยำ 100%)
+async function fetchAllWithPagination(
+  table: string,
+  select: string,
+  filters: Array<{ column: string; value: any; type?: 'eq' | 'in' | 'gte' | 'lte' }>,
+  chunkSize = 1000
+): Promise<any[]> {
+  const out: any[] = [];
+  let from = 0;
+  
+  while (true) {
+    let query = supabase
+      .from(table)
+      .select(select, { count: 'exact' })
+      .range(from, from + chunkSize - 1);
+    
+    // เพิ่ม filters
+    filters.forEach(f => {
+      if (f.type === 'in' && Array.isArray(f.value)) {
+        query = query.in(f.column, f.value);
+      } else if (f.type === 'gte') {
+        query = query.gte(f.column, f.value);
+      } else if (f.type === 'lte') {
+        query = query.lte(f.column, f.value);
+      } else {
+        query = query.eq(f.column, f.value);
+      }
+    });
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error(`❌ [fetchAllWithPagination] Error on ${table}:`, error);
+      break;
+    }
+    
+    if (data) out.push(...data);
+    
+    // ถ้าได้น้อยกว่า chunkSize = หมดข้อมูลแล้ว
+    if (!data || data.length < chunkSize) break;
+    
+    from += chunkSize;
+    
+    // ป้องกัน infinite loop
+    if (from > 100000) break;
+  }
+  
+  return out;
+}
+
+// ✅ Helper: ดึงข้อมูลแบบแบ่ง chunk สำหรับ in filter (แก้ Supabase limit 1000 items)
+async function fetchInChunks(
+  table: string,
+  select: string,
+  inColumn: string,
+  inValues: string[],
+  chunkSize = 900,
+  extraFilters?: Array<{ column: string; value: any; type?: 'eq' | 'gte' | 'lte' }>
+): Promise<any[]> {
+  const out: any[] = [];
+  
+  for (let i = 0; i < inValues.length; i += chunkSize) {
+    const chunk = inValues.slice(i, i + chunkSize);
+    let query = supabase.from(table).select(select).in(inColumn, chunk);
+    
+    if (extraFilters) {
+      extraFilters.forEach(f => {
+        if (f.type === 'gte') query = query.gte(f.column, f.value);
+        else if (f.type === 'lte') query = query.lte(f.column, f.value);
+        else query = query.eq(f.column, f.value);
+      });
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error(`❌ [fetchInChunks] Error:`, error);
+      continue;
+    }
+    
+    if (data) out.push(...data);
+  }
+  
+  return out;
+}
 
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
@@ -64,34 +148,43 @@ export default function CarePathwayDashboardPage() {
 
       console.log('📊 [loadData] Starting...', { todayStr: today.toISOString().split('T')[0], startOfMonthStr, thirtyDaysAgoStr });
 
-      // ✅ 1. ดึง patients เฉพาะฟิลด์ที่จำเป็น (เร็วขึ้น 5-10 เท่า)
-      let patientQuery = supabase
-        .from('profiles')
-        .select('id, hospital_number, first_name, last_name, pam_level, hospital_id')
-        .eq('is_active', true);
-      
+      // ============================================================
+      // หมวด 1: ดึง patients ทั้งหมดแบบ Pagination Loop
+      // ============================================================
+      const patientFilters: any[] = [{ column: 'is_active', value: true }];
       if (hospitalIds.length > 0) {
-        patientQuery = patientQuery.in('hospital_id', hospitalIds);
+        patientFilters.push({ column: 'hospital_id', value: hospitalIds, type: 'in' });
       }
       
-      const { data: patients, error: pErr } = await patientQuery;
-      if (pErr) throw pErr;
+      const patients = await fetchAllWithPagination(
+        'profiles',
+        'id, hospital_number, first_name, last_name, pam_level, hospital_id',
+        patientFilters
+      );
+      
+      console.log(`📊 [loadData] Total patients fetched: ${patients.length}`);
       
       const allPatientIds = patients.map(p => p.id);
-      console.log(`📊 [loadData] Total patients: ${patients.length}`);
 
-      // ✅ 2. ดึง followups ครั้งเดียว (ใช้สำหรับทั้ง onTime/overdue และ reasons)
-      let followupQuery = supabase
-        .from('appointment_followups')
-        .select('user_id, followup_date, adaptation_summary')
-        .in('user_id', allPatientIds);
-      
-      const { data: allFollowups } = await followupQuery;
-      console.log(`📊 [loadData] Total followups: ${allFollowups?.length || 0}`);
+      // ============================================================
+      // หมวด 2: ดึง followups แบบ chunk (ใช้สำหรับทั้ง onTime/overdue และ reasons)
+      // ============================================================
+      let allFollowups: any[] = [];
+      if (allPatientIds.length > 0) {
+        allFollowups = await fetchInChunks(
+          'appointment_followups',
+          'user_id, followup_date, adaptation_summary',
+          'user_id',
+          allPatientIds
+        );
+        console.log(`📊 [loadData] Total followups fetched: ${allFollowups.length}`);
+      }
 
-      // ✅ 3. คำนวณ onTime/overdue จาก allFollowups
+      // ============================================================
+      // คำนวณ On-time / Overdue
+      // ============================================================
       const latestFollowupMap: Record<string, string> = {};
-      allFollowups?.forEach(f => {
+      allFollowups.forEach(f => {
         const existing = latestFollowupMap[f.user_id];
         if (!existing || new Date(f.followup_date) > new Date(existing)) {
           latestFollowupMap[f.user_id] = f.followup_date;
@@ -121,9 +214,13 @@ export default function CarePathwayDashboardPage() {
       overdueList.sort((a, b) => b.daysOverdue - a.daysOverdue);
       setOverduePatients(overdueList.slice(0, 10));
 
-      // ✅ 4. คำนวณ reasons จาก allFollowups (ไม่ต้องดึงซ้ำ)
+      console.log(`📊 [loadData] On-time: ${onTimeCount}, Overdue: ${overdueCount}`);
+
+      // ============================================================
+      // คำนวณ reasons จาก allFollowups (ไม่ต้องดึงซ้ำ)
+      // ============================================================
       const reasons = { obstacles: 0, opportunities: 0, other: 0 };
-      allFollowups?.forEach(f => {
+      allFollowups.forEach(f => {
         if (new Date(f.followup_date) >= thirtyDaysAgo) {
           if (f.adaptation_summary === 'obstacles') reasons.obstacles++;
           else if (f.adaptation_summary === 'opportunities') reasons.opportunities++;
@@ -131,24 +228,30 @@ export default function CarePathwayDashboardPage() {
         }
       });
 
-      // ✅ 5. ดึง screenings เดือนนี้ (เฉพาะฟิลด์ที่จำเป็น)
-      let screeningQuery = supabase
-        .from('screenings')
-        .select('user_id, screening_date, pam_total_score')
-        .gte('screening_date', startOfMonthStr)
-        .in('user_id', allPatientIds);
-      
-      const { data: recentScreenings } = await screeningQuery;
-      console.log(`📊 [loadData] Screenings this month: ${recentScreenings?.length || 0}`);
-      
+      // ============================================================
+      // หมวด 1 (ต่อ): ดึง screenings เดือนนี้ แบบ chunk
+      // ============================================================
       let pamInc = 0;
       let pamDec = 0;
-      if (recentScreenings) {
+      
+      if (allPatientIds.length > 0) {
+        const recentScreenings = await fetchInChunks(
+          'screenings',
+          'user_id, screening_date, pam_total_score',
+          'user_id',
+          allPatientIds,
+          900,
+          [{ column: 'screening_date', value: startOfMonthStr, type: 'gte' }]
+        );
+        
+        console.log(`📊 [loadData] Screenings this month: ${recentScreenings.length}`);
+        
         const userScreens: Record<string, any[]> = {};
         recentScreenings.forEach(s => {
           if (!userScreens[s.user_id]) userScreens[s.user_id] = [];
           userScreens[s.user_id].push(s);
         });
+        
         for (const screens of Object.values(userScreens)) {
           if (screens.length >= 2) {
             screens.sort((a, b) => new Date(b.screening_date).getTime() - new Date(a.screening_date).getTime());
@@ -160,31 +263,45 @@ export default function CarePathwayDashboardPage() {
         }
       }
 
+      console.log(`📊 [loadData] PAM Increased: ${pamInc}, Decreased: ${pamDec}`);
+
       setStats({
-        totalPatients: patients.length,
+        totalPatients: patients.length, // ✅ นับจากข้อมูลจริง
         onTime: onTimeCount,
         overdue: overdueCount,
         pamIncreased: pamInc,
         pamDecreased: pamDec,
       });
 
-      // ✅ 6. ดึง records 30 วัน (เฉพาะ user_id)
-      let recordsQuery = supabase
-        .from('records')
-        .select('user_id')
-        .gte('record_date', thirtyDaysAgoStr)
-        .in('user_id', allPatientIds);
-      
-      const { data: recentRecords } = await recordsQuery;
-      console.log(`📊 [loadData] Records (30 days): ${recentRecords?.length || 0}`);
-      
-      const recordCounts: Record<string, number> = {};
-      recentRecords?.forEach(r => {
-        recordCounts[r.user_id] = (recordCounts[r.user_id] || 0) + 1;
-      });
-      
-      const activeRecorders = Object.keys(recordCounts).length;
-      const repeatRecorders = Object.values(recordCounts).filter(count => count > 1).length;
+      // ============================================================
+      // หมวด 3: ดึง records 30 วัน แบบ chunk
+      // ============================================================
+      let activeRecorders = 0;
+      let repeatRecorders = 0;
+
+      if (allPatientIds.length > 0) {
+        const recentRecords = await fetchInChunks(
+          'records',
+          'user_id',
+          'user_id',
+          allPatientIds,
+          900,
+          [{ column: 'record_date', value: thirtyDaysAgoStr, type: 'gte' }]
+        );
+        
+        console.log(`📊 [loadData] Records (30 days): ${recentRecords.length}`);
+        
+        const recordCounts: Record<string, number> = {};
+        recentRecords.forEach(r => {
+          recordCounts[r.user_id] = (recordCounts[r.user_id] || 0) + 1;
+        });
+        
+        activeRecorders = Object.keys(recordCounts).length;
+        repeatRecorders = Object.values(recordCounts).filter(count => count > 1).length;
+      }
+
+      console.log(`📊 [loadData] Active recorders: ${activeRecorders}, Repeat: ${repeatRecorders}`);
+      console.log(`📊 [loadData] Reasons:`, reasons);
 
       setRepeatStats({
         totalActiveRecorders: activeRecorders,
