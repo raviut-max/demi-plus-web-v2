@@ -1,8 +1,9 @@
 // app/admin/care-pathway-dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ เปลี่ยน count: 'exact' → count: 'planned' (ไม่มี limit 1000)
-//    2. ✅ แก้ไขการนับผู้ป่วยทั้งหมด, มาตามนัด, เลยกำหนด ให้ถูกต้อง
+//    1. ✅ แก้ปัญหานับจำนวนผู้ป่วยผิด (แสดง 1000 แทน 4523)
+//    2. ✅ เพิ่ม fetchAll helper ดึงข้อมูลแบบ batch (ไม่มี limit 1000)
+//    3. ✅ แก้ไขการนับ PAM เปลี่ยน, สถิติการทำซ้ำ ให้ถูกต้อง
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -13,13 +14,44 @@ import {
   AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye
 } from 'lucide-react';
 
+// ✅ Helper: ดึงข้อมูลแบบ batch (ไม่มี limit 1000)
+async function fetchAll(
+  table: string,
+  select: string,
+  filters?: Array<{ column: string; value: any; type?: 'eq' | 'in' | 'gte' }>,
+  chunk = 1000
+) {
+  const out: any[] = [];
+  let from = 0;
+  while (true) {
+    let query = supabase.from(table).select(select).range(from, from + chunk - 1);
+    if (filters) {
+      filters.forEach(f => {
+        if (f.type === 'in' && Array.isArray(f.value)) {
+          query = query.in(f.column, f.value);
+        } else if (f.type === 'gte') {
+          query = query.gte(f.column, f.value);
+        } else {
+          query = query.eq(f.column, f.value);
+        }
+      });
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    out.push(...data);
+    if (data.length < chunk) break;
+    from += chunk;
+  }
+  return out;
+}
+
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
 
-  // หมวด 1: ตัวเลขสรุป
   const [stats, setStats] = useState({
     totalPatients: 0,
     onTime: 0,
@@ -28,10 +60,8 @@ export default function CarePathwayDashboardPage() {
     pamDecreased: 0,
   });
 
-  // หมวด 2: Watchlist (เลยกำหนด)
   const [overduePatients, setOverduePatients] = useState<any[]>([]);
 
-  // หมวด 3: สถิติการทำซ้ำและเหตุผล
   const [repeatStats, setRepeatStats] = useState({
     totalActiveRecorders: 0,
     repeatRecorders: 0,
@@ -58,30 +88,30 @@ export default function CarePathwayDashboardPage() {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(today.getDate() - 30);
       const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+      const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+      const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
       // ============================================================
-      // หมวด 1 & 2: โหลดข้อมูลผู้ป่วย และการติดตาม
+      // หมวด 1 & 2: โหลดข้อมูลผู้ป่วย (แบบ batch - ไม่มี limit 1000)
       // ============================================================
-      let patientQuery = supabase
-        .from('profiles')
-        .select('id, first_name, last_name, hospital_number, pam_level, hospital_id, hospitals(name)')
-        .eq('is_active', true);
-      
-      if (hospitalIds.length > 0) patientQuery = patientQuery.in('hospital_id', hospitalIds);
-      
-      const { data: patients, error: pErr } = await patientQuery;
-      if (pErr) throw pErr;
-
-      let followupQuery = supabase
-        .from('appointment_followups')
-        .select('user_id, followup_date');
+      const patientFilters: any[] = [{ column: 'is_active', value: true }];
       if (hospitalIds.length > 0) {
-        const validPatientIds = patients?.map(p => p.id) || [];
-        if (validPatientIds.length > 0) followupQuery = followupQuery.in('user_id', validPatientIds);
+        patientFilters.push({ column: 'hospital_id', value: hospitalIds, type: 'in' });
       }
-      const { data: followups } = await followupQuery.order('followup_date', { ascending: false });
+      const patients = await fetchAll('profiles', 'id, first_name, last_name, hospital_number, pam_level, hospital_id', patientFilters);
 
-      // คำนวณ On-time / Overdue และสร้าง Watchlist
+      console.log(`📊 [loadData] Total patients fetched: ${patients.length}`);
+
+      // ============================================================
+      // โหลด followups (แบบ batch)
+      // ============================================================
+      const followupFilters: any[] = [];
+      if (patients.length > 0) {
+        followupFilters.push({ column: 'user_id', value: patients.map(p => p.id), type: 'in' });
+      }
+      const followups = await fetchAll('appointment_followups', 'user_id, followup_date', followupFilters);
+
+      // คำนวณ On-time / Overdue
       const followupMap: Record<string, string> = {};
       followups?.forEach(f => {
         if (!followupMap[f.user_id]) followupMap[f.user_id] = f.followup_date;
@@ -108,24 +138,19 @@ export default function CarePathwayDashboardPage() {
         }
       });
 
-      // เรียง Watchlist ตามวันที่เลยกำหนดมากที่สุด (จำกัด 10 คนแรก)
       overdueList.sort((a, b) => b.daysOverdue - a.daysOverdue);
       setOverduePatients(overdueList.slice(0, 10));
 
       // ============================================================
-      // หมวด 1 (ต่อ): คำนวณ PAM ที่เปลี่ยนในเดือนนี้
+      // หมวด 1 (ต่อ): คำนวณ PAM ที่เปลี่ยนในเดือนนี้ (แบบ batch)
       // ============================================================
-      let screeningQuery = supabase
-        .from('screenings')
-        .select('user_id, screening_date, pam_total_score')
-        .gte('screening_date', startOfMonth.toISOString().split('T')[0])
-        .order('screening_date', { ascending: false });
-      
-      if (hospitalIds.length > 0 && patients) {
-        const validIds = patients.map(p => p.id);
-        if (validIds.length > 0) screeningQuery = screeningQuery.in('user_id', validIds);
+      const screeningFilters: any[] = [
+        { column: 'screening_date', value: startOfMonthStr, type: 'gte' }
+      ];
+      if (patients.length > 0) {
+        screeningFilters.push({ column: 'user_id', value: patients.map(p => p.id), type: 'in' });
       }
-      const { data: recentScreenings } = await screeningQuery;
+      const recentScreenings = await fetchAll('screenings', 'user_id, screening_date, pam_total_score', screeningFilters);
 
       let pamInc = 0;
       let pamDec = 0;
@@ -156,18 +181,15 @@ export default function CarePathwayDashboardPage() {
       });
 
       // ============================================================
-      // หมวด 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน)
+      // หมวด 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน) - แบบ batch
       // ============================================================
-      let recordsQuery = supabase
-        .from('records')
-        .select('user_id')
-        .gte('record_date', thirtyDaysAgo.toISOString().split('T')[0]);
-      
-      if (hospitalIds.length > 0 && patients) {
-        const validIds = patients.map(p => p.id);
-        if (validIds.length > 0) recordsQuery = recordsQuery.in('user_id', validIds);
+      const recordsFilters: any[] = [
+        { column: 'record_date', value: thirtyDaysAgoStr, type: 'gte' }
+      ];
+      if (patients.length > 0) {
+        recordsFilters.push({ column: 'user_id', value: patients.map(p => p.id), type: 'in' });
       }
-      const { data: recentRecords } = await recordsQuery;
+      const recentRecords = await fetchAll('records', 'user_id', recordsFilters);
 
       const recordCounts: Record<string, number> = {};
       recentRecords?.forEach(r => {
@@ -177,16 +199,13 @@ export default function CarePathwayDashboardPage() {
       const activeRecorders = Object.keys(recordCounts).length;
       const repeatRecorders = Object.values(recordCounts).filter(count => count > 1).length;
 
-      let followupReasonsQuery = supabase
-        .from('appointment_followups')
-        .select('adaptation_summary')
-        .gte('followup_date', thirtyDaysAgo.toISOString().split('T')[0]);
-      
-      if (hospitalIds.length > 0 && patients) {
-        const validIds = patients.map(p => p.id);
-        if (validIds.length > 0) followupReasonsQuery = followupReasonsQuery.in('user_id', validIds);
+      const followupReasonsFilters: any[] = [
+        { column: 'followup_date', value: thirtyDaysAgoStr, type: 'gte' }
+      ];
+      if (patients.length > 0) {
+        followupReasonsFilters.push({ column: 'user_id', value: patients.map(p => p.id), type: 'in' });
       }
-      const { data: recentFollowups } = await followupReasonsQuery;
+      const recentFollowups = await fetchAll('appointment_followups', 'adaptation_summary', followupReasonsFilters);
 
       const reasons = { obstacles: 0, opportunities: 0, other: 0 };
       recentFollowups?.forEach(f => {
