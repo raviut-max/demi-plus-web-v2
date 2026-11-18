@@ -1,10 +1,8 @@
 // app/admin/care-pathway-dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
-// ✅ การปรับปรุง:
-//    1. ✅ ใช้ Database View (v_care_pathway_stats, v_overdue_patients, v_today_appointments)
-//    2. ✅ เพิ่ม Section "นัดวันนี้" พร้อม badge จำนวน
-//    3. ✅ เพิ่ม Toggle Scope: "ทั้งหมด" / "ในการดูแลของฉัน"
-//    4. ✅ รองรับ filter coach_id เมื่อ scope = 'mine'
+// ✅ การเพิ่มใหม่:
+//    1. ✅ เพิ่มส่วน "ผู้ป่วยใกล้ถึงวันนัด" พร้อม dropdown เลือก 1-5 วัน
+//    2. ✅ แสดงจำนวนผู้ป่วยและตารางรายชื่อ
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -19,7 +17,7 @@ import {
 import {
   Users, CalendarCheck, CalendarX, TrendingUp, TrendingDown,
   AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye,
-  UserCheck, Hospital, Building2, LogOut, Calendar, Clock, Bell
+  UserCheck, Hospital, Building2, LogOut, Calendar, Clock
 } from 'lucide-react';
 
 interface DashboardStats {
@@ -46,16 +44,15 @@ interface OverduePatient {
   hospital_name: string;
   last_followup: string | null;
   days_overdue: number;
-  coach_id: string | null;
 }
 
-interface TodayAppointment {
+// ✅ Interface ใหม่: ผู้ป่วยใกล้ถึงวันนัด
+interface UpcomingAppointment {
   appointment_id: string;
   patient_id: string;
   appointment_date: string;
   appointment_type: string;
   status: string;
-  notes: string | null;
   hospital_number: string;
   first_name: string;
   last_name: string;
@@ -64,6 +61,7 @@ interface TodayAppointment {
   hospital_name: string;
   coach_id: string | null;
   coach_name: string | null;
+  days_until: number;
 }
 
 export default function CarePathwayDashboardPage() {
@@ -73,8 +71,9 @@ export default function CarePathwayDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [overduePatients, setOverduePatients] = useState<OverduePatient[]>([]);
-  const [todayAppointments, setTodayAppointments] = useState<TodayAppointment[]>([]);
-  const [todayTotal, setTodayTotal] = useState(0);
+  const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointment[]>([]);
+  const [upcomingTotal, setUpcomingTotal] = useState(0);
+  const [selectedDays, setSelectedDays] = useState<number>(3); // ✅ Default: 3 วัน
   const [scope, setScope] = useState<'all' | 'mine'>('all');
 
   useEffect(() => {
@@ -85,7 +84,6 @@ export default function CarePathwayDashboardPage() {
     }
     setUser(userData);
     loadUserHospital(userData.id);
-    // ✅ Default scope ตามบทบาท
     const initialScope = ['doctor', 'helper', 'osm'].includes(userData.role) ? 'mine' : 'all';
     setScope(initialScope);
     loadData(userData);
@@ -115,21 +113,18 @@ export default function CarePathwayDashboardPage() {
       console.log('📊 [loadData] Starting...', { scope, isSuper, hospitalIdsCount: hospitalIds.length });
 
       // ============================================================
-      // 1. Stats View (รวมทุกอย่างใน query เดียว)
+      // 1. Stats View
       // ============================================================
       const { data: statsData, error: statsError } = await supabase
         .from('v_care_pathway_stats')
         .select('*')
         .single();
 
-      if (statsError) {
-        console.error('❌ [loadData] Stats View Error:', statsError);
-        throw statsError;
-      }
+      if (statsError) throw statsError;
       setStats(statsData);
 
       // ============================================================
-      // 2. Overdue Watchlist (รองรับ scope)
+      // 2. Overdue Watchlist
       // ============================================================
       let overdueQuery = supabase
         .from('v_overdue_patients')
@@ -148,35 +143,49 @@ export default function CarePathwayDashboardPage() {
       setOverduePatients(overdueData || []);
 
       // ============================================================
-      // 3. นัดวันนี้ (รองรับ scope)
+      // ✅ 3. Upcoming Appointments (ใกล้ถึงวันนัด)
       // ============================================================
-      let todayQuery = supabase
-        .from('v_today_appointments')
-        .select('*')
-        .order('appointment_date', { ascending: true });
-
-      if (scope === 'mine') {
-        todayQuery = todayQuery.eq('coach_id', userData.id);
-      } else if (!isSuper && hospitalIds.length > 0) {
-        todayQuery = todayQuery.in('hospital_id', hospitalIds);
-      }
-
-      const { data: todayData, error: todayError } = await todayQuery;
-      if (todayError) throw todayError;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const untilDate = new Date(today);
+      untilDate.setDate(today.getDate() + selectedDays);
+      const todayStr = today.toISOString().split('T')[0];
+      const untilStr = untilDate.toISOString().split('T')[0];
 
       // นับจำนวนทั้งหมด (สำหรับ badge)
-      let todayCountQuery = supabase
-        .from('v_today_appointments')
-        .select('*', { count: 'exact', head: true });
-      if (scope === 'mine') {
-        todayCountQuery = todayCountQuery.eq('coach_id', userData.id);
-      } else if (!isSuper && hospitalIds.length > 0) {
-        todayCountQuery = todayCountQuery.in('hospital_id', hospitalIds);
-      }
-      const { count: todayCount } = await todayCountQuery;
+      let upcomingCountQuery = supabase
+        .from('v_upcoming_appointments')
+        .select('*', { count: 'exact', head: true })
+        .gte('appointment_date', todayStr)
+        .lte('appointment_date', untilStr);
 
-      setTodayAppointments(todayData || []);
-      setTodayTotal(todayCount || 0);
+      if (scope === 'mine') {
+        upcomingCountQuery = upcomingCountQuery.eq('coach_id', userData.id);
+      } else if (!isSuper && hospitalIds.length > 0) {
+        upcomingCountQuery = upcomingCountQuery.in('hospital_id', hospitalIds);
+      }
+
+      const { count: upcomingCount } = await upcomingCountQuery;
+      setUpcomingTotal(upcomingCount || 0);
+
+      // ดึงรายชื่อ (จำกัด 50 คนแรก)
+      let upcomingQuery = supabase
+        .from('v_upcoming_appointments')
+        .select('*')
+        .gte('appointment_date', todayStr)
+        .lte('appointment_date', untilStr)
+        .order('appointment_date', { ascending: true })
+        .limit(50);
+
+      if (scope === 'mine') {
+        upcomingQuery = upcomingQuery.eq('coach_id', userData.id);
+      } else if (!isSuper && hospitalIds.length > 0) {
+        upcomingQuery = upcomingQuery.in('hospital_id', hospitalIds);
+      }
+
+      const { data: upcomingData, error: upcomingError } = await upcomingQuery;
+      if (upcomingError) throw upcomingError;
+      setUpcomingAppointments(upcomingData || []);
 
       const endTime = performance.now();
       console.log(`✅ [loadData] Complete in ${(endTime - startTime).toFixed(0)}ms`);
@@ -185,12 +194,12 @@ export default function CarePathwayDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [scope]);
+  }, [scope, selectedDays]);
 
-  // ✅ เมื่อเปลี่ยน scope → reload data
+  // ✅ เมื่อเปลี่ยน scope หรือ selectedDays → reload data
   useEffect(() => {
     if (user) loadData(user);
-  }, [scope, user, loadData]);
+  }, [scope, selectedDays, user, loadData]);
 
   const switchScope = (newScope: 'all' | 'mine') => {
     setScope(newScope);
@@ -220,9 +229,7 @@ export default function CarePathwayDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
-      {/* ============================================================ */}
-      {/* Header - พร้อม Toggle Scope */}
-      {/* ============================================================ */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -234,9 +241,8 @@ export default function CarePathwayDashboardPage() {
               <p className="text-sm text-gray-500">สรุปผลการดูแลผู้ป่วยตามเส้นทางสุขภาพ (ข้อมูลย้อนหลัง 30 วัน)</p>
             </div>
 
-            {/* ✅ Toggle Scope + User Card + Logout */}
+            {/* Toggle Scope + User Card + Logout */}
             <div className="flex items-center gap-4 flex-wrap">
-              {/* Toggle Scope */}
               <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm font-medium bg-white">
                 <button
                   onClick={() => switchScope('all')}
@@ -256,7 +262,6 @@ export default function CarePathwayDashboardPage() {
                 </button>
               </div>
 
-              {/* User Card */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -296,7 +301,6 @@ export default function CarePathwayDashboardPage() {
                 )}
               </div>
 
-              {/* Logout */}
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
@@ -311,26 +315,44 @@ export default function CarePathwayDashboardPage() {
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
         {/* ============================================================ */}
-        {/* ✅ Section ใหม่: นัดวันนี้ */}
+        {/* ✅ ส่วนใหม่: ผู้ป่วยใกล้ถึงวันนัด */}
         {/* ============================================================ */}
         <div>
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
-            <Calendar className="w-5 h-5 text-cyan-600" />
-            นัดหมายวันนี้
-            <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-sm font-bold">
-              {todayTotal} คน
-            </span>
-            {scope === 'mine' && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
-                👤 ในการดูแลของฉัน
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-cyan-600" />
+              ผู้ป่วยใกล้ถึงวันนัด
+              <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-sm font-bold">
+                {upcomingTotal} คน
               </span>
-            )}
-          </h2>
+              {scope === 'mine' && (
+                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">
+                  👤 ในการดูแลของฉัน
+                </span>
+              )}
+            </h2>
+            {/* ✅ Dropdown เลือกจำนวนวัน */}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">แสดงผู้ป่วยที่นัดภายใน:</label>
+              <select
+                value={selectedDays}
+                onChange={(e) => setSelectedDays(Number(e.target.value))}
+                className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+              >
+                <option value={1}>1 วัน</option>
+                <option value={2}>2 วัน</option>
+                <option value={3}>3 วัน</option>
+                <option value={4}>4 วัน</option>
+                <option value={5}>5 วัน</option>
+              </select>
+            </div>
+          </div>
+
           <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            {todayAppointments.length === 0 ? (
+            {upcomingAppointments.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p>ไม่มีนัดหมายในวันนี้</p>
+                <p>ไม่มีผู้ป่วยที่นัดหมายใน {selectedDays} วันนี้</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -342,13 +364,13 @@ export default function CarePathwayDashboardPage() {
                       <th className="px-6 py-3 text-center font-semibold text-gray-700">PAM</th>
                       <th className="px-6 py-3 text-center font-semibold text-gray-700">โรงพยาบาล</th>
                       <th className="px-6 py-3 text-center font-semibold text-gray-700">โค้ช</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">ประเภท</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">สถานะ</th>
+                      <th className="px-6 py-3 text-center font-semibold text-gray-700">วันนัด</th>
+                      <th className="px-6 py-3 text-center font-semibold text-gray-700">เหลือ</th>
                       <th className="px-6 py-3 text-center font-semibold text-gray-700">จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {todayAppointments.map((a) => (
+                    {upcomingAppointments.map((a) => (
                       <tr key={a.appointment_id} className="hover:bg-cyan-50/50 transition-colors">
                         <td className="px-6 py-3 font-mono text-gray-600">{a.hospital_number}</td>
                         <td className="px-6 py-3 font-medium text-gray-800">{a.first_name} {a.last_name}</td>
@@ -366,16 +388,16 @@ export default function CarePathwayDashboardPage() {
                         <td className="px-6 py-3 text-center text-gray-600">{a.coach_name || '—'}</td>
                         <td className="px-6 py-3 text-center">
                           <span className="px-2 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-medium">
-                            {a.appointment_type || 'ทั่วไป'}
+                            {new Date(a.appointment_date).toLocaleDateString('th-TH')}
                           </span>
                         </td>
                         <td className="px-6 py-3 text-center">
                           <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                            a.status === 'confirmed' ? 'bg-green-100 text-green-700' :
-                              a.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                                'bg-gray-100 text-gray-700'
+                            a.days_until <= 1 ? 'bg-red-100 text-red-700' :
+                              a.days_until <= 3 ? 'bg-orange-100 text-orange-700' :
+                                'bg-cyan-100 text-cyan-700'
                           }`}>
-                            {a.status === 'confirmed' ? 'ยืนยันแล้ว' : a.status === 'scheduled' ? 'รอติดตาม' : a.status}
+                            {a.days_until === 0 ? 'วันนี้!' : `${a.days_until} วัน`}
                           </span>
                         </td>
                         <td className="px-6 py-3 text-center">
