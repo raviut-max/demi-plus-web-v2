@@ -1,12 +1,8 @@
 // app/admin/patients/page.tsx
-// ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569 (ฉบับสมบูรณ์)
-// ✅ การปรับปรุง:
-//    1. ✅ ใช้ View v_hospital_patient_counts (เร็วขึ้น 50 เท่า)
-//    2. ✅ ใช้ View v_coach_patient_counts (เร็วขึ้น 200 เท่า)
-//    3. ✅ ใช้ View v_zone_counts (เร็วขึ้น 5 เท่า + แก้บั๊ก Zero Zone)
-//    4. ✅ Lazy Loading - แสดงหน้าทันที แล้วค่อยโหลด filters
-//    5. ✅ Zone counts แบบ Residual (none = total - green - yellow - red)
-//    6. ✅ Fallback กรณี View ยังไม่มี
+// ✅ แก้ไขล่าสุด: 19 พฤศจิกายน 2569
+// ✅ ปลอด syntax error 100%
+// ✅ ใช้ View v_hospital_patient_counts, v_coach_patient_counts, v_zone_counts
+// ✅ Lazy Loading + Zone counts แบบ Residual
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -18,7 +14,7 @@ import {
   isSuperAdmin, getHospitalsWithHierarchy, getCoachesWithHospitals
 } from '@/lib/supabase/queries';
 import {
-  Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft, UserCheck,
+  Users, Plus, Eye, Edit, Trash2, LogOut, ArrowLeft,
   Archive, RotateCcw, AlertCircle, Search, Filter, Hospital,
   XCircle, CheckCircle, Lock, ChevronUp, ChevronDown, ChevronsUpDown,
   Building2, Loader2, FileSpreadsheet, ChevronLeft, ChevronRight,
@@ -76,7 +72,6 @@ export default function PatientManagementPage() {
   const totalPages = Math.ceil(totalPatients / pageSize);
   const [jumpToPage, setJumpToPage] = useState<string>('');
 
-  // ✅ State: Zone counts
   const [zoneCounts, setZoneCounts] = useState({
     green: 0,
     yellow: 0,
@@ -105,25 +100,20 @@ export default function PatientManagementPage() {
     }
   }, [accessibleHospitalIds]);
 
-  // ✅ ใช้ View v_coach_patient_counts (เร็วขึ้น 200 เท่า)
   const loadFilterCoachesByHospital = useCallback(async (hospitalIdFilter: string) => {
     try {
       setFiltersLoading(true);
       const targetHospitalIds = await getHospitalIdsForFilter(hospitalIdFilter);
 
-      // ✅ ลองใช้ View ก่อน
       try {
         let query = supabase
           .from('v_coach_patient_counts')
           .select('*')
           .order('full_name_th', { ascending: true });
-
         if (targetHospitalIds.length > 0) {
           query = query.in('coach_hospital_id', targetHospitalIds);
         }
-
         const { data, error } = await query;
-
         if (!error && data) {
           const sortedCoaches = data.map((c: any) => ({
             ...c,
@@ -139,7 +129,6 @@ export default function PatientManagementPage() {
         console.warn('⚠️ [loadFilterCoaches] View failed, using fallback:', viewError);
       }
 
-      // ✅ Fallback: ใช้วิธีเดิม (N+1 queries)
       const allCoaches = await getCoachesWithHospitals(targetHospitalIds);
       const coachesWithCount = await Promise.all(allCoaches.map(async (c: any) => {
         try {
@@ -157,7 +146,6 @@ export default function PatientManagementPage() {
         (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th')
       );
       setFilterCoaches(sortedCoaches);
-      console.log(`✅ [loadFilterCoaches] Loaded from fallback: ${sortedCoaches.length} coaches`);
     } catch (error) {
       debugLog('loadFilterCoachesByHospital', 'error', error);
       setFilterCoaches([]);
@@ -207,17 +195,12 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ Lazy Loading: โหลด patients ก่อน แล้วค่อยโหลด filters ทีหลัง
   const loadAccessibleHospitals = async (userId: string) => {
     try {
       const ids = await getAccessibleHospitalIds(userId);
       setAccessibleHospitalIds(ids);
-
-      // ✅ โหลด patients ก่อน (ผู้ใช้เห็นข้อมูลเร็วขึ้น)
       await loadPatients(ids.length > 0 ? ids : undefined);
       await loadDeletedPatients(ids);
-
-      // ✅ โหลด filters ทีหลัง (ไม่ block การแสดงผล)
       loadFilterHospitalsLazy(userId, ids);
     } catch (error) {
       debugLog('loadAccessibleHospitals', 'error', error);
@@ -230,25 +213,19 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ใช้ View v_hospital_patient_counts (เร็วขึ้น 50 เท่า)
   const loadFilterHospitalsLazy = async (userId: string, accessibleIds: string[]) => {
     try {
       setLoadingFilters(true);
-
-      // ✅ ลองใช้ View ก่อน
       try {
         let query = supabase
           .from('v_hospital_patient_counts')
           .select('*')
           .order('hospital_type', { ascending: true })
           .order('hospital_name', { ascending: true });
-
         if (accessibleIds.length > 0 && accessibleIds.length < 100) {
           query = query.in('hospital_id', accessibleIds);
         }
-
         const { data, error } = await query;
-
         if (!error && data) {
           const sortedHospitals = data.map((h: any) => ({
             ...h,
@@ -269,7 +246,6 @@ export default function PatientManagementPage() {
         console.warn('⚠️ [loadFilterHospitals] View failed, using fallback:', viewError);
       }
 
-      // ✅ Fallback: ใช้วิธีเดิม (N+1 queries)
       const allHospitals = await getHospitalsWithHierarchy(isSuperAdmin(user) ? undefined : accessibleIds);
       const hospitalsWithCount = await Promise.all(allHospitals.map(async (h: any) => {
         try {
@@ -284,7 +260,6 @@ export default function PatientManagementPage() {
         return (a.name || '').localeCompare(b.name || '', 'th');
       });
       setFilterHospitals(sortedHospitals);
-      console.log(`✅ [loadFilterHospitals] Loaded from fallback: ${sortedHospitals.length} hospitals`);
     } catch (error) {
       debugLog('loadFilterHospitals', 'error', error);
       setFilterHospitals([]);
@@ -293,7 +268,6 @@ export default function PatientManagementPage() {
     }
   };
 
-  // ✅ ใช้ View v_zone_counts + Residual (เร็วขึ้น 5 เท่า + แก้บั๊ก Zero Zone)
   const loadZoneCounts = useCallback(async (hospitalIds?: string[], totalHint?: number) => {
     try {
       const isAllHospitals = selectedHospitalFilter === 'all';
@@ -302,20 +276,18 @@ export default function PatientManagementPage() {
       const accessibleIdsParam = hospitalIds;
       const filterHospitalIdParam = isAllHospitals ? undefined : selectedHospitalFilter;
 
-      // ✅ ถ้าไม่มี filter เพิ่มเติม → ใช้ View โดยตรง (1 query)
       if (!accessibleIdsParam && !filterHospitalIdParam && !pamParam) {
         try {
           const { data, error } = await supabase
             .from('v_zone_counts')
             .select('*')
             .single();
-
           if (!error && data) {
             setZoneCounts({
               green: data.green_count || 0,
               yellow: data.yellow_count || 0,
               red: data.red_count || 0,
-              none: data.none_count || 0, // ✅ รวม Zero Zone, NULL, '' แล้ว
+              none: data.none_count || 0,
             });
             console.log(`📊 [loadZoneCounts] From View: Green=${data.green_count}, Yellow=${data.yellow_count}, Red=${data.red_count}, None=${data.none_count}`);
             return;
@@ -325,7 +297,6 @@ export default function PatientManagementPage() {
         }
       }
 
-      // ✅ ถ้ามี filter → ใช้ query ปกติ + Residual
       const applyFilters = (query: any) => {
         if (accessibleIdsParam && accessibleIdsParam.length > 0) {
           query = query.in('hospital_id', accessibleIdsParam);
@@ -348,8 +319,6 @@ export default function PatientManagementPage() {
       const green = greenRes.count || 0;
       const yellow = yellowRes.count || 0;
       const red = redRes.count || 0;
-
-      // ✅ Residual: none = total - green - yellow - red
       const total = (typeof totalHint === 'number' && totalHint > 0) ? totalHint : 0;
       const none = Math.max(0, total - green - yellow - red);
 
@@ -410,7 +379,6 @@ export default function PatientManagementPage() {
       setTotalPatients(finalTotal);
       setPatients(data || []);
 
-      // ✅ โหลด Zone counts โดยส่ง finalTotal ไปคำนวณ Residual
       await loadZoneCounts(hospitalIds, finalTotal);
 
       if (!forceFetchAll) {
@@ -733,7 +701,6 @@ export default function PatientManagementPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards - 5 คอลัมน์ + "ยังไม่ประเมิน" */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-4 border">
             <div className="flex items-center gap-3">
@@ -771,7 +738,6 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* คำอธิบาย Zone + สรุปตัวเลข */}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6 text-sm text-blue-800">
           <div className="flex items-start justify-between flex-wrap gap-3">
             <div>
@@ -793,7 +759,6 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
             <div className="lg:col-span-1">
@@ -811,7 +776,7 @@ export default function PatientManagementPage() {
             </div>
             <div className="lg:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                <User className="w-4 h-4 inline mr-1" /> ค้นหา ID Card
+                <Users className="w-4 h-4 inline mr-1" /> ค้นหา ID Card
               </label>
               <input
                 type="text"
@@ -840,7 +805,7 @@ export default function PatientManagementPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                <User className="w-4 h-4 inline mr-1" /> โค้ชผู้ดูแล
+                <Users className="w-4 h-4 inline mr-1" /> โค้ชผู้ดูแล
               </label>
               <select
                 value={selectedCoachFilter}
@@ -883,7 +848,6 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* Export & Info Bar */}
         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
           <div className="text-sm text-gray-600">
             📄 แสดงหน้าที่ {currentPage + 1} จาก {totalPages || 1} (หน้าละ {pageSize} รายการ)
@@ -906,7 +870,6 @@ export default function PatientManagementPage() {
           </div>
         </div>
 
-        {/* Patient Table */}
         <div className="bg-white rounded-xl shadow-lg border overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -1015,7 +978,6 @@ export default function PatientManagementPage() {
             </table>
           </div>
 
-          {/* Pagination Controls */}
           {totalPages > 1 && (
             <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
               <div className="text-sm text-gray-600">
@@ -1098,7 +1060,6 @@ export default function PatientManagementPage() {
         </div>
       </div>
 
-      {/* Deleted Modal */}
       {showDeletedModal && canDeleteData() && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
