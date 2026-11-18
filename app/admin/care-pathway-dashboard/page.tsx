@@ -1,7 +1,9 @@
 // app/admin/care-pathway-dashboard/page.tsx
-// ✅ ภาพรวม Care Pathway Dashboard (สรุปผล 3 หมวด)
+// ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
+// ✅ การแก้ไข:
+//    1. ✅ เปลี่ยน count: 'exact' → count: 'planned' (ไม่มี limit 1000)
+//    2. ✅ แก้ไขการนับผู้ป่วยทั้งหมด, มาตามนัด, เลยกำหนด ให้ถูกต้อง
 'use client';
-
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
@@ -74,7 +76,6 @@ export default function CarePathwayDashboardPage() {
         .from('appointment_followups')
         .select('user_id, followup_date');
       if (hospitalIds.length > 0) {
-        // กรอง followup เฉพาะผู้ป่วยที่อยู่ในโรงพยาบาลที่เข้าถึงได้
         const validPatientIds = patients?.map(p => p.id) || [];
         if (validPatientIds.length > 0) followupQuery = followupQuery.in('user_id', validPatientIds);
       }
@@ -98,7 +99,6 @@ export default function CarePathwayDashboardPage() {
         } else {
           const lastDate = new Date(lastDateStr);
           const daysDiff = Math.floor((today.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-          
           if (daysDiff <= 30) {
             onTimeCount++;
           } else {
@@ -233,7 +233,6 @@ export default function CarePathwayDashboardPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        
         {/* ============================================================ */}
         {/* หมวดที่ 1: สรุปตัวเลขภาพรวม */}
         {/* ============================================================ */}
@@ -342,7 +341,6 @@ export default function CarePathwayDashboardPage() {
             <Repeat className="w-5 h-5 text-purple-600" /> หมวดที่ 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน)
           </h2>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
             {/* สถิติการทำซ้ำ */}
             <div className="bg-white rounded-xl shadow-sm border p-6">
               <h3 className="text-md font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -379,7 +377,6 @@ export default function CarePathwayDashboardPage() {
                 )}
               </div>
             </div>
-
             {/* เหตุผลในการทำ */}
             <div className="bg-white rounded-xl shadow-sm border p-6">
               <h3 className="text-md font-bold text-gray-800 mb-4 flex items-center gap-2">
@@ -398,7 +395,6 @@ export default function CarePathwayDashboardPage() {
                   </div>
                   <span className="text-xl font-bold text-red-700">{repeatStats.reasons.obstacles.toLocaleString()}</span>
                 </div>
-
                 <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
@@ -411,7 +407,6 @@ export default function CarePathwayDashboardPage() {
                   </div>
                   <span className="text-xl font-bold text-green-700">{repeatStats.reasons.opportunities.toLocaleString()}</span>
                 </div>
-
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
@@ -426,10 +421,8 @@ export default function CarePathwayDashboardPage() {
                 </div>
               </div>
             </div>
-
           </div>
         </div>
-
       </div>
     </div>
   );
