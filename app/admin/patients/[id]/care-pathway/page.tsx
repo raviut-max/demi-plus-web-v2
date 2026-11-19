@@ -1,9 +1,5 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. ✅ รองรับ ?from=care-pathway-dashboard → ปุ่ม "กลับ" พาไปถูกหน้า
-//    2. ✅ จำ "หน้าต้นทาง" ใน sessionStorage → แม้กระโดดไปหน้าอื่นแล้วกลับมาก็ยังถูก
-//    3. ✅ ใช้ useSearchParams + Suspense (กัน build error ใน Next.js App Router)
+// ✅ แก้ไขล่าสุด: ตรวจสอบให้ลิงก์ไปยัง Goals แนบ ?from=care-pathway ไปอย่างถูกต้อง
 'use client';
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -50,7 +46,7 @@ const STAGE_META = [
     id: 'self', no: 1, title: 'รู้จักตัวเอง',
     description: 'ทำแบบประเมิน PAM / PROMS — แจ้งจำนวนครั้งที่ทำแล้ว และเพิ่มรอบใหม่ได้',
     icon: UserCheck,
-    actionLabel: '➕ เพิ่มรอบทำแบบประเมิน',
+    actionLabel:  '➕ เพิ่มรอบทำแบบประเมิน',
     actionUrl: (p: string) => `/admin/screening?patient_id=${p}`,
     historyLabel: '📋 ดูประวัติการประเมิน',
     historyUrl: (p: string) => `/admin/patients/${p}/screening-history`,
@@ -78,18 +74,19 @@ const STAGE_META = [
     description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
     icon: Target,
     actionLabel: '➕ จัดการเป้าหมาย',
-    actionUrl: (p: string) => `/admin/goals?patient_id=${p}&from=care-pathway`,
+    // ✅ แนบ ?from=care-pathway เพื่อให้หน้า Goals กลับมาถูกที่
+    actionUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
     historyLabel: '📋 ดูประวัติเป้าหมาย',
-    historyUrl: (p: string) => `/admin/goals-history?patient_id=${p}&from=care-pathway`,
+    historyUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
   },
   {
     id: 'trial', no: 5, title: 'ทดลองทำ',
     description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
     icon: History,
     actionLabel: '➕ ดูบันทึกกิจกรรม',
-    actionUrl: (p: string) => `/admin/patients/${p}/goals`,
+    actionUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
     historyLabel: '📋 ดูประวัติการทำ',
-    historyUrl: (p: string) => `/admin/patients/${p}/goals`,
+    historyUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
   },
   {
     id: 'follow', no: 6, title: 'ติดตามต่อเนื่อง',
@@ -198,6 +195,7 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
       };
     }),
   };
+
   const doneFlags = [
     screenings.length > 0,
     dreams.some(d => d.status === 'active'),
@@ -207,6 +205,7 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
     followups.length > 0,
   ];
   const firstIncomplete = doneFlags.indexOf(false);
+  
   return STAGE_META.map((m, i) => {
     const status: StageStatus = doneFlags[i] ? 'done' : (i === firstIncomplete ? 'active' : 'pending');
     return { ...m, status, events: eventsByStage[m.id] || [] };
@@ -219,23 +218,19 @@ function CarePathwayContent() {
   const searchParams = useSearchParams();
   const patientId = params.id as string;
 
-  // ✅ จัดการ "หน้าต้นทาง" (from)
   const fromParam = searchParams.get('from');
   const [fromSource, setFromSource] = useState<string>('patients');
 
   useEffect(() => {
     if (fromParam) {
-      // มี ?from=... → บันทึกไว้เป็นต้นทางล่าสุด
       sessionStorage.setItem('care_pathway_from', fromParam);
       setFromSource(fromParam);
     } else {
-      // ไม่มี param (เช่น กลับมาจากหน้า followup-history) → ใช้ค่าที่บันทึกไว้
       const saved = sessionStorage.getItem('care_pathway_from');
       setFromSource(saved || 'patients');
     }
   }, [fromParam]);
 
-  // ✅ ปุ่มกลับ: ไปถูกหน้าตามต้นทาง
   const handleBack = () => {
     if (fromSource === 'care-pathway-dashboard') {
       router.push('/admin/care-pathway-dashboard');
@@ -270,10 +265,12 @@ function CarePathwayContent() {
         .from('profiles').select('*').eq('id', patientId).maybeSingle();
       if (e1) throw new Error('profiles: ' + e1.message);
       if (!prof) { setErrorDetail(`ไม่พบผู้ป่วย id: ${patientId}`); setErrorState('notfound'); return; }
+      
       if (!isSuperAdmin(user)) {
         const ids = await getAccessibleHospitalIds(user.id);
         if (prof.hospital_id && !ids.includes(prof.hospital_id)) { setErrorState('denied'); return; }
       }
+
       const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes, recRes, fuRes] = await Promise.all([
         prof.hospital_id
           ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
@@ -299,6 +296,7 @@ function CarePathwayContent() {
           .order('followup_date', { ascending: false })
           .limit(30),
       ]);
+
       if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
       if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
       if (recRes.error) console.warn('[CarePathway] records:', recRes.error.message);
@@ -312,6 +310,7 @@ function CarePathwayContent() {
         coach_name: coachRes.data?.full_name_th || '-',
       };
       setPatient(p);
+      
       const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || [], fuRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
@@ -414,8 +413,8 @@ function CarePathwayContent() {
                 <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full">PAM: {patient.pam_level || 'L0'}</span>
                 <span className={`px-2 py-1 rounded-full ${
                   patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
-                    patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-green-100 text-green-700'
+                  patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-green-100 text-green-700'
                 }`}>
                   {patient.zone || 'Green Zone'}
                 </span>
@@ -465,12 +464,12 @@ function CarePathwayContent() {
                         {stage.events.length > 0 && (
                           <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
                             {stage.id === 'self' ? `ทำแบบประเมินแล้ว ${stage.events.length} ครั้ง` :
-                              stage.id === 'dream' ? `บันทึกความฝัน ${stage.events.length} ครั้ง` :
-                                stage.id === 'oneday' ? `บันทึกแล้ว ${uniqueDays} วัน` :
-                                  stage.id === 'goals' ? `${stage.events.length} รอบเป้าหมาย` :
-                                    stage.id === 'trial' ? `บันทึกแล้ว ${stage.events.length} วัน` :
-                                      stage.id === 'follow' ? `ตามผลแล้ว ${stage.events.length} ครั้ง` :
-                                        `${stage.events.length} รายการ`}
+                             stage.id === 'dream' ? `บันทึกความฝัน ${stage.events.length} ครั้ง` :
+                             stage.id === 'oneday' ? `บันทึกแล้ว ${uniqueDays} วัน` :
+                             stage.id === 'goals' ? `${stage.events.length} รอบเป้าหมาย` :
+                             stage.id === 'trial' ? `บันทึกแล้ว ${stage.events.length} วัน` :
+                             stage.id === 'follow' ? `ตามผลแล้ว ${stage.events.length} ครั้ง` :
+                             `${stage.events.length} รายการ`}
                           </span>
                         )}
                       </div>
@@ -481,6 +480,7 @@ function CarePathwayContent() {
                     </span>
                     <span className="text-gray-400 text-sm shrink-0">{isOpen ? '▾' : '▸'}</span>
                   </button>
+                  
                   {isOpen && (
                     <div className="px-4 pb-4 pl-16">
                       {stage.id === 'trial' && trialStats.total > 0 && (
@@ -505,6 +505,7 @@ function CarePathwayContent() {
                           </div>
                         </div>
                       )}
+                      
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">
                           {stage.id === 'trial' || stage.id === 'oneday'
@@ -527,6 +528,7 @@ function CarePathwayContent() {
                           ))}
                         </div>
                       )}
+                      
                       <div className="flex gap-2 flex-wrap">
                         <button
                           onClick={() => router.push(stage.actionUrl(patientId))}

@@ -1,64 +1,49 @@
 // app/admin/patients/[id]/goals/page.tsx
-// ✅ แก้ไขล่าสุด: 9 พฤษภาคม 2569
-// ✅ การแก้ไข:
-//    1. ✅ เพิ่มปุ่ม "จัดการเป้าหมาย" ลิงก์ไปหน้า /admin/goals พร้อม patient_id และ from parameter
-//    2. ✅ ปรับปรุง Header ให้แสดงข้อมูลผู้ใช้และโรงพยาบาลชัดเจน
-//    3. ✅ เพิ่มการตรวจสอบสิทธิ์และสถานะผู้ป่วยก่อนแสดงปุ่มจัดการ
-//    4. ✅ ปรับปรุง UX: แสดงข้อความแนะนำเมื่อผู้ป่วยยังไม่มีเป้าหมาย
-//    5. ✅ แก้ไข getGroupedGoals ใช้ activity_id ในการจับคู่กับ records
+// ✅ แก้ไขล่าสุด: เพิ่มการรองรับ from=care-pathway เพื่อให้ปุ่มกลับทำงานถูกต้อง
 'use client';
-
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import {
   checkSession,
   logout,
   getPatientDetail,
+  getUserHospitalInfo,
+  isSuperAdmin,
+  isHospitalAdmin,
   getPatientGoals,
   getGoalRoundCount,
   createDefaultGoals,
   getPatientRecords
 } from '@/lib/supabase/queries';
 import {
-  ArrowLeft, Target, TrendingUp, Calendar, CheckCircle, Clock, Archive,
-  Award, RefreshCw, AlertCircle, FileText, ChevronDown, ChevronUp,
-  Edit, LogOut, Activity, ClipboardCheck, UserCheck, Hospital, Settings, ArrowRight
+  ArrowLeft, Target, Calendar, Edit, LogOut, Activity, ClipboardCheck,
+  FileText, Phone, User, Heart, Hospital, Shield, Building2, Route,
+  Plus, CheckCircle, XCircle, Clock, History, ChevronDown, ChevronUp,
+  TrendingUp, Award
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-
-type ViewMode = 'goals' | 'weekly' | 'calendar';
-
-interface GoalRecord {
-  date: string;
-  isCompleted: boolean;
-  notes?: string;
-}
-
-interface GoalWithRecords {
-  goal: any;
-  completedCount: number;
-  notCompletedCount: number;
-  records: GoalRecord[];
-  percentage: number;
-}
 
 export default function PatientGoalsPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const patientId = params.id as string;
   
+  // ✅ อ่านค่า from parameter เพื่อกลับให้ถูกหน้า
+  const from = searchParams.get('from');
+
   const [user, setUser] = useState<any>(null);
+  const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
+  
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
   const [goals, setGoals] = useState<any[]>([]);
   const [goalRounds, setGoalRounds] = useState(1);
   const [selectedRound, setSelectedRound] = useState(1);
   const [records, setRecords] = useState<any[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>('goals');
   const [creatingGoals, setCreatingGoals] = useState(false);
-  const [expandedGoals, setExpandedGoals] = useState<Set<string>>(new Set());
 
-  // ✅ ตรวจสอบการเข้าสู่ระบบ
   useEffect(() => {
     const userData = checkSession();
     if (!userData) {
@@ -71,23 +56,32 @@ export default function PatientGoalsPage() {
       return;
     }
     setUser(userData);
+    loadUserHospital(userData.id);
     loadData();
   }, [router]);
 
-  // ✅ โหลดข้อมูลทั้งหมด
+  const loadUserHospital = async (userId: string) => {
+    try {
+      const hospitalInfo = await getUserHospitalInfo(userId);
+      setUserHospital(hospitalInfo);
+    } catch (error) {
+      console.error('❌ [loadUserHospital] Error:', error);
+    }
+  };
+
   const loadData = async () => {
     try {
-      console.log('📊 [loadData] Loading data for patient:', patientId);
+      console.log('📡 Loading patient detail:', patientId);
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
-      
+
       const rounds = await getGoalRoundCount(patientId);
       setGoalRounds(rounds);
       
       await loadGoals(selectedRound);
       await loadRecords();
     } catch (error) {
-      console.error('❌ [loadData] Error:', error);
+      console.error('❌ Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
     } finally {
       setLoading(false);
@@ -102,13 +96,13 @@ export default function PatientGoalsPage() {
         .eq('user_id', patientId)
         .eq('round_number', round)
         .eq('goal_type', 'weekly_activity')
-        .eq('status', 'active')
+        .eq('status', activeTab === 'active' ? 'active' : 'archived')
         .order('priority', { ascending: true });
-      
+
       if (error) throw error;
       setGoals(data || []);
-    } catch (error) {
-      console.error('❌ [loadGoals] Error:', error);
+    } catch (err) {
+      console.error('❌ [loadGoals] Error:', err);
       setGoals([]);
     }
   };
@@ -117,26 +111,24 @@ export default function PatientGoalsPage() {
     try {
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 90);
-      
       const { data, error } = await supabase
         .from('records')
         .select(`*, activities ( activity_code, activity_name_th )`)
         .eq('user_id', patientId)
         .gte('record_date', startDate.toISOString())
         .order('record_date', { ascending: false });
-      
+
       if (error) throw error;
       setRecords(data || []);
-    } catch (error) {
-      console.error('❌ [loadRecords] Error:', error);
+    } catch (err) {
+      console.error('❌ [loadRecords] Error:', err);
       setRecords([]);
     }
   };
 
-  const handleRoundChange = (round: number) => {
-    setSelectedRound(round);
-    loadGoals(round);
-  };
+  useEffect(() => {
+    if (patientId) loadGoals(selectedRound);
+  }, [selectedRound, activeTab, patientId]);
 
   const handleCreateDefaultGoals = async () => {
     if (!patient) return;
@@ -148,6 +140,9 @@ export default function PatientGoalsPage() {
       const result = await createDefaultGoals(patientId, patient.pam_level || 'L2', user.id);
       if (result.success) {
         alert(`✅ สร้างเป้าหมายสำเร็จ!\n\nจำนวน: ${result.count || 0} กิจกรรม`);
+        setGoalRounds(prev => prev + 1);
+        setSelectedRound(prev => prev + 1);
+        setActiveTab('active');
         loadData();
       } else {
         alert('เกิดข้อผิดพลาด: ' + result.error);
@@ -160,7 +155,7 @@ export default function PatientGoalsPage() {
     }
   };
 
-  const handleArchiveCurrentRound = async () => {
+  const handleArchiveRound = async () => {
     if (!confirm('ต้องการเก็บถาวรเป้าหมายรอบปัจจุบันหรือไม่?')) return;
     try {
       const { error } = await supabase
@@ -170,146 +165,23 @@ export default function PatientGoalsPage() {
         .eq('round_number', selectedRound)
         .eq('goal_type', 'weekly_activity')
         .eq('status', 'active');
+
       if (error) throw error;
       alert('✅ เก็บถาวรเป้าหมายสำเร็จ!');
       loadData();
-    } catch (error) {
-      console.error('❌ [handleArchiveCurrentRound] Error:', error);
+    } catch (err) {
+      console.error('❌ [handleArchiveRound] Error:', err);
       alert('เกิดข้อผิดพลาดในการเก็บถาวร');
     }
   };
 
-  const toggleGoalExpansion = (goalKey: string) => {
-    const newExpanded = new Set(expandedGoals);
-    if (newExpanded.has(goalKey)) {
-      newExpanded.delete(goalKey);
+  // ✅ ปุ่มกลับที่ตรวจสอบ from parameter
+  const handleBack = () => {
+    if (from === 'care-pathway') {
+      router.push(`/admin/patients/${patientId}/care-pathway`);
     } else {
-      newExpanded.add(goalKey);
+      router.push(`/admin/patients/${patientId}`);
     }
-    setExpandedGoals(newExpanded);
-  };
-
-  const getGoalIcon = (goalName: string) => {
-    if (goalName?.includes('sweet')) return '🍬';
-    if (goalName?.includes('rice') || goalName?.includes('carb')) return '🍚';
-    if (goalName?.includes('protein') || goalName?.includes('vegetable')) return '🥗';
-    if (goalName?.includes('exercise') || goalName?.includes('walk')) return '🚶';
-    if (goalName?.includes('weight') || goalName?.includes('sugar')) return '⚖️';
-    if (goalName?.includes('water')) return '💧';
-    if (goalName?.includes('sleep')) return '😴';
-    if (goalName?.includes('cardio')) return '🏃';
-    return '🎯';
-  };
-
-  // ✅ จัดกลุ่มเป้าหมายและคำนวณสถิติ (ใช้ activity_id ในการ match)
-  const getGroupedGoals = (): GoalWithRecords[] => {
-    const grouped: Record<string, any[]> = {};
-    goals.forEach(goal => {
-      const key = goal.activity_id || goal.id;
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(goal);
-    });
-
-    const goalGroups = Object.values(grouped).sort((a, b) => {
-      const priorityA = a[0]?.priority || 999;
-      const priorityB = b[0]?.priority || 999;
-      return priorityA - priorityB;
-    });
-
-    return goalGroups.map(goalGroup => {
-      const firstGoal = goalGroup[0];
-      const activityId = firstGoal.activity_id;
-      
-      const goalRecords = records.filter(record => record.activity_id === activityId);
-      const completedRecords = goalRecords.filter(r => r.is_completed);
-      const notCompletedRecords = goalRecords.filter(r => !r.is_completed);
-      
-      const formattedRecords: GoalRecord[] = [
-        ...completedRecords.map(r => ({ date: r.record_date, isCompleted: true, notes: r.notes })),
-        ...notCompletedRecords.map(r => ({ date: r.record_date, isCompleted: false, notes: r.notes })),
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      
-      const totalRecords = goalRecords.length;
-      const percentage = totalRecords > 0 
-        ? Math.round((completedRecords.length / totalRecords) * 100) 
-        : 0;
-      
-      return {
-        goal: firstGoal,
-        completedCount: completedRecords.length,
-        notCompletedCount: notCompletedRecords.length,
-        records: formattedRecords,
-        percentage,
-      };
-    });
-  };
-
-  const groupedGoals = getGroupedGoals();
-  const stats = {
-    total: goals.length,
-    completed: goals.filter(g => g.is_completed).length,
-    active: goals.filter(g => g.status === 'active').length,
-    progress: goals.length > 0 ? Math.round((goals.filter(g => g.is_completed).length / goals.length) * 100) : 0,
-  };
-
-  const getWeeklyData = () => {
-    const weekData = [];
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      const dayRecords = records.filter(r => r.record_date?.startsWith(dateStr));
-      weekData.push({
-        date: dateStr,
-        dayName: date.toLocaleDateString('th-TH', { weekday: 'short' }),
-        dayNumber: date.getDate(),
-        records: dayRecords,
-        completed: dayRecords.filter(r => r.is_completed).length,
-        total: goals.length,
-      });
-    }
-    return weekData;
-  };
-
-  const getCalendarData = () => {
-    const today = new Date();
-    const days = [];
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
-      const dayRecords = records.filter(r => r.record_date?.startsWith(dateStr));
-      const completedCount = dayRecords.filter(r => r.is_completed).length;
-      const totalCount = goals.length || 5;
-      const percentage = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
-      days.push({
-        date: dateStr,
-        dayNumber: date.getDate(),
-        month: date.getMonth(),
-        dayOfWeek: date.getDay(),
-        completedCount,
-        totalCount,
-        percentage,
-        color: percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-green-300' : percentage >= 20 ? 'bg-yellow-300' : 'bg-gray-200',
-      });
-    }
-    return days;
-  };
-
-  const weeklyData = getWeeklyData();
-  const calendarData = getCalendarData();
-
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
-  };
-
-  // ✅ ฟังก์ชันไปหน้าจัดการเป้าหมาย - ส่ง patient_id และ from parameter
-  const handleManageGoals = () => {
-    if (!patient) return;
-    // ✅ ส่ง patient_id และ from=patient-goals เพื่อกลับมายังหน้านี้ได้ถูกต้อง
-    router.push(`/admin/goals?patient_id=${patientId}&from=patient-goals`);
   };
 
   if (loading) {
@@ -322,75 +194,89 @@ export default function PatientGoalsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* ✅ Header - เพิ่มปุ่มจัดการเป้าหมาย */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button
-            onClick={() => router.push(`/admin/patients/${patientId}`)}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
-          >
-            <ArrowLeft className="w-4 h-4" /> กลับหน้าผู้ป่วย
+          {/* ✅ ปุ่มกลับที่ตรวจสอบ from parameter */}
+          <button onClick={handleBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
+            <ArrowLeft className="w-4 h-4" />
+            กลับ{from === 'care-pathway' ? ' Care Pathway' : 'หน้าผู้ป่วย'}
           </button>
           
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">📋 ประวัติเป้าหมาย</h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">🎯 เป้าหมายและแผนสุขภาพ</h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
                 HN: {patient?.hospital_number} | 
-                PAM Level: {patient?.pam_level || 'L1'}
+                PAM: {patient?.pam_level || 'L1'}
               </p>
             </div>
             
-            {/* ✅ แสดงข้อมูลผู้ใช้และโรงพยาบาล + ปุ่มจัดการเป้าหมาย */}
-            <div className="flex items-center gap-3">
-              {user && (
-                <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
+            {/* User Info Card */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <Shield className="w-5 h-5 text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                      <UserCheck className="w-4 h-4 text-blue-600" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-800 text-sm">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
-                      <p className="text-xs text-gray-500">
-                        {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : '👩‍💼 เจ้าหน้าที่'}
-                      </p>
-                    </div>
+                    <h3 className="font-semibold text-gray-800 text-sm">
+                      {user?.full_name_th || 'ผู้ใช้งาน'}
+                    </h3>
+                    {user && (
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        isSuperAdmin(user) ? 'bg-purple-200 text-purple-800' :
+                        isHospitalAdmin(user) ? 'bg-blue-200 text-blue-800' :
+                        user.role === 'doctor' ? 'bg-green-200 text-green-800' :
+                        user.role === 'helper' ? 'bg-yellow-200 text-yellow-800' :
+                        'bg-gray-200 text-gray-800'
+                      }`}>
+                        {isSuperAdmin(user) ? '👑 Super Admin' :
+                         isHospitalAdmin(user) ? '🏥 Hospital Admin' :
+                         user.role === 'doctor' ? '👨‍⚕️ แพทย์' :
+                         user.role === 'helper' ? '👩‍💼 เจ้าหน้าที่' : '🏘️ อสม.'}
+                      </span>
+                    )}
                   </div>
-                  {patient?.hospitals && (
-                    <div className="border-t border-blue-200 pt-2 mt-2">
-                      <div className="flex items-center gap-1">
-                        <Hospital className="w-3 h-3 text-blue-600" />
-                        <span className="text-xs text-gray-600 font-medium">{patient.hospitals.name}</span>
-                        {patient.hospitals.type === 'main' ? (
-                          <span className="ml-2 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">🏥 แม่ข่าย</span>
-                        ) : (
-                          <span className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs">🏥 ลูกข่าย</span>
-                        )}
+                  {userHospital && (
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center gap-1.5 text-gray-600">
+                        <Hospital className="w-3.5 h-3.5 text-blue-600 flex-shrink-0" />
+                        <span className="truncate font-medium">{userHospital.name}</span>
                       </div>
+                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
+                        <div className="flex items-center gap-1.5 text-green-600">
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">ลูกข่าย: {userHospital.parent_hospital.name}</span>
+                        </div>
+                      )}
+                      {userHospital.type === 'main' && (
+                        <div className="flex items-center gap-1.5 text-purple-600">
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span>แม่ข่าย</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
-              
-              {/* ✅ ปุ่มจัดการเป้าหมาย - ใหม่ */}
-              {patient?.pam_level && patient.pam_level !== 'L1' && (
-                <button
-                  onClick={handleManageGoals}
-                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-semibold rounded-xl hover:from-purple-600 hover:to-indigo-700 transition-all shadow-lg hover:shadow-xl"
-                  title="ไปหน้าจัดการเป้าหมายผู้ป่วยนี้"
-                >
-                  <Settings className="w-4 h-4" />
-                  จัดการเป้าหมาย
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              )}
-              
+              </div>
+            </div>
+
+            <div className="flex gap-2">
               <button
-                onClick={handleLogout}
+                onClick={() => router.push(`/admin/patients/${patientId}/edit`)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
+              >
+                <Edit className="w-4 h-4" />
+                แก้ไขข้อมูล
+              </button>
+              <button
+                onClick={() => { logout(); router.push('/admin/login'); }}
                 className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all"
               >
-                <LogOut className="w-4 h-4" /> ออกจากระบบ
+                <LogOut className="w-4 h-4" />
+                ออกจากระบบ
               </button>
             </div>
           </div>
@@ -399,320 +285,170 @@ export default function PatientGoalsPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                <Target className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">เป้าหมายทั้งหมด</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.total}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">สำเร็จ</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.completed}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                <Clock className="w-6 h-6 text-orange-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">กำลังดำเนินการ</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.active}</p>
-              </div>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                <Award className="w-6 h-6 text-purple-600" />
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">ความคืบหน้า</p>
-                <p className="text-2xl font-bold text-gray-800">{stats.progress}%</p>
-              </div>
-            </div>
-          </div>
+        {/* Action Buttons */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          <button
+            onClick={handleCreateDefaultGoals}
+            disabled={creatingGoals}
+            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all disabled:opacity-50"
+          >
+            <Plus className="w-4 h-4" />
+            {creatingGoals ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
+          </button>
+          {activeTab === 'active' && goals.length > 0 && (
+            <button
+              onClick={handleArchiveRound}
+              className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-all"
+            >
+              <History className="w-4 h-4" />
+              เก็บถาวรรอบนี้
+            </button>
+          )}
+          <button
+            onClick={() => router.push(`/admin/patients/${patientId}/care-pathway`)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all"
+          >
+            <Route className="w-4 h-4" />
+            เส้นทางสุขภาพ (Care Pathway)
+          </button>
         </div>
 
-        {/* GOALS TAB */}
-        {viewMode === 'goals' && (
-          <>
-            {/* Round Selector */}
-            <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200 mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Archive className="w-6 h-6 text-blue-600" /> เลือกรอบเป้าหมาย
-                </h2>
-                <p className="text-sm text-gray-500">ทั้งหมด {goalRounds} รอบ</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {Array.from({ length: goalRounds }, (_, i) => i + 1).map((round) => (
-                  <button
-                    key={round}
-                    onClick={() => handleRoundChange(round)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                      selectedRound === round ? 'bg-blue-500 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    รอบที่ {round}
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* Tabs */}
+        <div className="flex gap-4 mb-6 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('active')}
+            className={`px-4 py-2 font-medium border-b-2 transition-colors ${
+              activeTab === 'active' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            🎯 เป้าหมายปัจจุบัน (รอบที่ {selectedRound})
+          </button>
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`px-4 py-2 font-medium border-b-2 transition-colors ${
+              activeTab === 'history' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            📜 ประวัติเป้าหมาย
+          </button>
+        </div>
 
-            {/* Goals List */}
-            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-              <div className="p-6 border-b border-gray-200">
-                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                  <Target className="w-6 h-6 text-blue-600" /> เป้าหมายรอบที่ {selectedRound}
-                </h2>
-                {patient?.pam_level && (
-                  <p className="text-sm text-gray-500 mt-1">
-                    {patient.pam_level === 'L2' || patient.pam_level === 'L3' 
-                      ? '📋 กฎทอง 5 ข้อ - 5 วัน/สัปดาห์' 
-                      : patient.pam_level === 'L4'
-                        ? '🏆 แชมป์ 8 กิจกรรม - 5 วัน/สัปดาห์'
-                        : '⚠️ ระดับ L1 - ยังไม่สร้างเป้าหมาย'}
-                  </p>
-                )}
+        {/* Active Tab Content */}
+        {activeTab === 'active' && (
+          <div className="space-y-6">
+            {goals.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-lg p-12 border border-gray-200 text-center">
+                <Target className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                <h3 className="text-xl font-bold text-gray-800 mb-2">ยังไม่มีเป้าหมายในรอบนี้</h3>
+                <p className="text-gray-500 mb-6">กดปุ่ม "สร้างเป้าหมายเริ่มต้น" เพื่อกำหนดเป้าหมายตามระดับ PAM</p>
+                <button
+                  onClick={handleCreateDefaultGoals}
+                  disabled={creatingGoals}
+                  className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50"
+                >
+                  {creatingGoals ? 'กำลังสร้าง...' : 'สร้างเป้าหมายเริ่มต้น'}
+                </button>
               </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {goals.map((goal) => {
+                  const activityRecords = records.filter(r => r.activity_id === goal.activity_id);
+                  const completedCount = activityRecords.filter(r => r.is_completed).length;
+                  const totalCount = activityRecords.length;
+                  const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-              {groupedGoals.length === 0 ? (
-                <div className="text-center py-12">
-                  <Target className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500 mb-4">ยังไม่มีเป้าหมายในรอบนี้</p>
-                  {patient?.pam_level && patient.pam_level !== 'L1' && (
-                    <>
-                      <button
-                        onClick={handleManageGoals}
-                        className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-all mb-3"
-                      >
-                        ⚙️ ไปจัดการเป้าหมาย
-                      </button>
-                      <p className="text-xs text-gray-400">หรือสร้างเป้าหมายอัตโนมัติจากหน้านี้</p>
-                      <button
-                        onClick={handleCreateDefaultGoals}
-                        disabled={creatingGoals}
-                        className="mt-2 px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all disabled:opacity-50"
-                      >
-                        {creatingGoals ? 'กำลังสร้าง...' : 'สร้างเป้าหมายอัตโนมัติ'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="divide-y divide-gray-200">
-                  {groupedGoals.map(({ goal, completedCount, notCompletedCount, records: goalRecords, percentage }) => {
-                    const goalKey = goal.activity_id || goal.id;
-                    const isExpanded = expandedGoals.has(goalKey);
-                    return (
-                      <div key={goalKey} className="p-6">
-                        <div 
-                          className="flex items-center justify-between cursor-pointer hover:bg-gray-50 p-3 rounded-lg transition-colors"
-                          onClick={() => toggleGoalExpansion(goalKey)}
-                        >
-                          <div className="flex items-center gap-3 flex-1">
-                            <span className="text-3xl">{getGoalIcon(goal.goal_name)}</span>
-                            <div className="flex-1">
-                              <h3 className="text-lg font-bold text-gray-800">{goal.goal_name_th || goal.goal_name}</h3>
-                              <p className="text-sm text-gray-500">{goal.activities?.activity_name_th || goal.description_th || '-'}</p>
-                              {goal.target_days && (
-                                <p className="text-xs text-blue-600 mt-1 font-medium">📅 เป้าหมาย: {goal.target_days} วัน/สัปดาห์</p>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <div className="text-right">
-                              <div className="flex items-center gap-2 mb-1">
-                                <CheckCircle className="w-4 h-4 text-green-600" />
-                                <span className="text-sm font-bold text-green-600">{completedCount}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-red-600">{notCompletedCount}</span>
-                              </div>
-                            </div>
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                              percentage >= 80 ? 'bg-green-100' : percentage >= 50 ? 'bg-yellow-100' : 'bg-red-100'
-                            }`}>
-                              <span className={`text-sm font-bold ${
-                                percentage >= 80 ? 'text-green-600' : percentage >= 50 ? 'text-yellow-600' : 'text-red-600'
-                              }`}>{percentage}%</span>
-                            </div>
-                            {isExpanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
-                          </div>
+                  return (
+                    <div key={goal.id} className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            {goal.activities?.activity_name_th || goal.goal_name_th}
+                          </h3>
+                          <p className="text-sm text-gray-500 mt-1">{goal.activities?.description_th || goal.description_th}</p>
                         </div>
-
-                        {isExpanded && (
-                          <div className="mt-4 ml-12 space-y-4">
-                            {completedCount > 0 && (
-                              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <CheckCircle className="w-5 h-5 text-green-600" />
-                                  <h4 className="font-bold text-green-800">ทำได้ {completedCount} ครั้ง</h4>
-                                </div>
-                                <div className="space-y-2">
-                                  {goalRecords.filter(r => r.isCompleted).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((record, index) => (
-                                    <div key={index} className="flex items-center gap-3 text-sm">
-                                      <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-                                      <span className="text-green-800">{new Date(record.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                                      {record.notes && <span className="text-green-600 text-xs">({record.notes})</span>}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            {notCompletedCount > 0 && (
-                              <div className="bg-red-50 rounded-lg p-4 border border-red-200">
-                                <div className="flex items-center gap-2 mb-3">
-                                  <span className="w-5 h-5 text-red-600">❌</span>
-                                  <h4 className="font-bold text-red-800">ไม่ได้ {notCompletedCount} ครั้ง</h4>
-                                </div>
-                                <div className="space-y-2">
-                                  {goalRecords.filter(r => !r.isCompleted).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((record, index) => (
-                                    <div key={index} className="flex items-center gap-3 text-sm">
-                                      <span className="text-red-600">❌</span>
-                                      <span className="text-red-800">{new Date(record.date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                                      {record.notes && <span className="text-red-600 text-xs">({record.notes})</span>}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            {goalRecords.length === 0 && (
-                              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 text-center">
-                                <Clock className="w-8 h-8 mx-auto mb-2 text-gray-400" />
-                                <p className="text-gray-500">ยังไม่มีบันทึก</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        <div className="text-right">
+                          <span className="text-2xl font-bold text-blue-600">{percentage}%</span>
+                          <p className="text-xs text-gray-500">ความสำเร็จ</p>
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </>
-        )}
+                      
+                      <div className="mb-4">
+                        <div className="flex justify-between text-xs text-gray-600 mb-1">
+                          <span>เป้าหมาย: {goal.target_days} วัน/สัปดาห์</span>
+                          <span>ทำสำเร็จ: {completedCount} / {totalCount} ครั้ง</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-3">
+                          <div 
+                            className={`h-3 rounded-full transition-all ${
+                              percentage >= 80 ? 'bg-green-500' : percentage >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${percentage}%` }}
+                          ></div>
+                        </div>
+                      </div>
 
-        {/* WEEKLY TAB */}
-        {viewMode === 'weekly' && (
-          <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <TrendingUp className="w-6 h-6 text-blue-600" /> บันทึกประจำวัน (7 วันล่าสุด)
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">แสดงการบันทึกกิจกรรมแต่ละวันจากมือถือผู้ป่วย</p>
-            </div>
-            <div className="p-6">
-              <div className="grid grid-cols-7 gap-2 mb-6">
-                {weeklyData.map((day) => (
-                  <div key={day.date} className={`p-4 rounded-xl border-2 text-center ${
-                    day.completed >= day.total && day.total > 0 ? 'bg-green-50 border-green-500' :
-                    day.completed > 0 ? 'bg-blue-50 border-blue-500' : 'bg-gray-50 border-gray-200'
-                  }`}>
-                    <p className="text-xs text-gray-500 mb-1">{day.dayName}</p>
-                    <p className="text-lg font-bold text-gray-800">{day.dayNumber}</p>
-                    <div className="mt-2">
-                      {day.total > 0 ? (
-                        <>
-                          <p className="text-2xl font-bold text-green-600">{day.completed}</p>
-                          <p className="text-xs text-gray-500">/ {day.total} กิจกรรม</p>
-                        </>
-                      ) : (
-                        <p className="text-sm text-gray-400">ไม่มีข้อมูล</p>
-                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => router.push(`/admin/patients/${patientId}/records?activity_id=${goal.activity_id}`)}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-all text-sm font-medium"
+                        >
+                          <FileText className="w-4 h-4" />
+                          บันทึกกิจกรรม
+                        </button>
+                        <button
+                          onClick={() => router.push(`/admin/patients/${patientId}/records?activity_id=${goal.activity_id}&view=history`)}
+                          className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 transition-all text-sm font-medium"
+                        >
+                          <History className="w-4 h-4" />
+                          ดูประวัติ
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-              <div className="space-y-4">
-                <h3 className="font-bold text-gray-800 mb-4">📊 รายละเอียดกิจกรรมแต่ละวัน</h3>
-                {groupedGoals.map(({ goal }) => (
-                  <div key={goal.activity_id || goal.id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center gap-3 mb-3">
-                      <span className="text-2xl">{getGoalIcon(goal.goal_name)}</span>
-                      <h4 className="font-bold text-gray-800">{goal.goal_name_th || goal.goal_name}</h4>
-                    </div>
-                    <div className="grid grid-cols-7 gap-2">
-                      {weeklyData.map((day) => {
-                        const activityRecords = day.records.filter(r => r.activity_id === goal.activity_id);
-                        const isCompleted = activityRecords.some(r => r.is_completed);
-                        return (
-                          <div key={day.date} className={`p-2 rounded-lg text-center ${
-                            isCompleted ? 'bg-green-500 text-white' :
-                            activityRecords.length > 0 ? 'bg-yellow-500 text-white' : 'bg-gray-200 text-gray-400'
-                          }`}>
-                            {isCompleted ? <CheckCircle className="w-5 h-5 mx-auto" /> :
-                             activityRecords.length > 0 ? <Clock className="w-5 h-5 mx-auto" /> :
-                             <span className="text-xs">-</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
           </div>
         )}
 
-        {/* CALENDAR TAB */}
-        {viewMode === 'calendar' && (
+        {/* History Tab Content */}
+        {activeTab === 'history' && (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                <Calendar className="w-6 h-6 text-blue-600" /> ปฏิทินการบันทึก (30 วัน)
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">สีเขียวเข้ม = บันทึกครบ, สีอ่อน = บันทึกบางส่วน, สีเทา = ไม่ได้บันทึก</p>
+              <h2 className="text-xl font-bold text-gray-800">ประวัติรอบเป้าหมาย</h2>
             </div>
-            <div className="p-6">
-              <div className="grid grid-cols-7 gap-2 mb-6">
-                {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((day) => (
-                  <div key={day} className="text-center font-bold text-gray-600 py-2">{day}</div>
-                ))}
-                {calendarData.map((day) => (
-                  <div
-                    key={day.date}
-                    className={`aspect-square rounded-lg p-2 flex flex-col items-center justify-center ${day.color} transition-all hover:scale-110 cursor-pointer`}
-                    title={`${day.date}: ${day.completedCount}/${day.totalCount} กิจกรรม`}
-                  >
-                    <span className="text-xs font-bold text-gray-800">{day.dayNumber}</span>
-                    {day.completedCount > 0 && <span className="text-xs text-white mt-1">{day.completedCount}</span>}
-                  </div>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-green-50 rounded-xl p-4 border border-green-200">
-                  <p className="text-sm text-green-600 mb-1">วันที่บันทึกครบ</p>
-                  <p className="text-2xl font-bold text-green-700">{calendarData.filter(d => d.percentage >= 80).length} วัน</p>
-                </div>
-                <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
-                  <p className="text-sm text-blue-600 mb-1">วันที่บันทึกบางส่วน</p>
-                  <p className="text-2xl font-bold text-blue-700">{calendarData.filter(d => d.percentage >= 20 && d.percentage < 80).length} วัน</p>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
-                  <p className="text-sm text-gray-600 mb-1">วันที่ไม่ได้บันทึก</p>
-                  <p className="text-2xl font-bold text-gray-700">{calendarData.filter(d => d.percentage < 20).length} วัน</p>
-                </div>
-                <div className="bg-purple-50 rounded-xl p-4 border border-purple-200">
-                  <p className="text-sm text-purple-600 mb-1">ความสม่ำเสมอ</p>
-                  <p className="text-2xl font-bold text-purple-700">{Math.round((calendarData.filter(d => d.percentage >= 20).length / 30) * 100)}%</p>
-                </div>
-              </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">รอบที่</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">วันที่สร้าง</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">จำนวนเป้าหมาย</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">สถานะ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {Array.from({ length: Math.max(1, goalRounds - 1) }, (_, i) => i + 1).reverse().map((round) => (
+                    <tr key={round} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 text-sm font-medium text-gray-800">รอบที่ {round}</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">-</td>
+                      <td className="px-6 py-4 text-sm text-gray-600">-</td>
+                      <td className="px-6 py-4">
+                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700">
+                          เก็บถาวร
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {goalRounds <= 1 && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-12 text-center text-gray-500">
+                        ยังไม่มีประวัติรอบเป้าหมาย
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
