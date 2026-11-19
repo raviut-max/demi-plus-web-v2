@@ -1,10 +1,10 @@
 // app/admin/care-pathway-dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 18 พฤศจิกายน 2569
+// ✅ แก้ไขล่าสุด: 19 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ หมวดที่ 2 (Watchlist): เพิ่ม Pagination 20 คน/หน้า — ดูได้ครบทุกคน
-//    2. ✅ จำเลขหน้าล่าสุดใน sessionStorage — กด "ดูรายละเอียด" แล้วกลับมายังหน้าเดิม
-//    3. ✅ ปุ่ม "ดูรายละเอียด" ส่ง ?from=care-pathway-dashboard (หน้า Care Pathway จะได้กลับถูก)
-//    4. ✅ Badge จำนวน "ทั้งหมด X คน" นับตาม scope จริง (ทั้งหมด / ในการดูแลของฉัน)
+//    1. ✅ หมวดที่ 2 (Watchlist) แสดงทีละ 10 รายการ + Pagination ครบ
+//    2. ✅ ใช้ .range() แทน .limit() + count: 'exact' (1 query ได้ทั้งข้อมูล+ยอดรวม)
+//    3. ✅ แยก loadOverduePage() — เปลี่ยนหน้าไม่ reload ทั้งหน้า
+//    4. ✅ Reset หน้าเป็น 1 อัตโนมัติเมื่อเปลี่ยน Scope
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -66,7 +66,8 @@ interface UpcomingAppointment {
   days_until: number;
 }
 
-const OVERDUE_PAGE_SIZE = 20; // ✅ จำนวนต่อหน้าของ Watchlist
+// ✅ ค่าคงที่: จำนวนรายการต่อหน้าของ Watchlist
+const OVERDUE_PAGE_SIZE = 10;
 
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
@@ -74,20 +75,18 @@ export default function CarePathwayDashboardPage() {
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [accessibleHospitalIds, setAccessibleHospitalIds] = useState<string[]>([]);
-
-  // ✅ Watchlist + Pagination
   const [overduePatients, setOverduePatients] = useState<OverduePatient[]>([]);
-  const [overdueTotal, setOverdueTotal] = useState(0);
-  const [overduePage, setOverduePage] = useState(0);
-
-  // Upcoming appointments
   const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointment[]>([]);
   const [upcomingTotal, setUpcomingTotal] = useState(0);
   const [selectedDays, setSelectedDays] = useState<number>(3);
   const [scope, setScope] = useState<'all' | 'mine'>('all');
 
-  const overdueTotalPages = Math.ceil(overdueTotal / OVERDUE_PAGE_SIZE);
+  // ✅ State ใหม่: Pagination ของหมวดที่ 2
+  const [overduePage, setOverduePage] = useState(0);
+  const [overdueTotal, setOverdueTotal] = useState(0);
+  const [overdueLoading, setOverdueLoading] = useState(false);
+
+  const overdueTotalPages = Math.max(1, Math.ceil(overdueTotal / OVERDUE_PAGE_SIZE));
 
   useEffect(() => {
     const userData = checkSession();
@@ -99,17 +98,8 @@ export default function CarePathwayDashboardPage() {
     loadUserHospital(userData.id);
     const initialScope = ['doctor', 'helper', 'osm'].includes(userData.role) ? 'mine' : 'all';
     setScope(initialScope);
-    // ✅ กู้คืนเลขหน้า Watchlist ล่าสุด (กรณีกลับมาจากหน้ารายละเอียด)
-    const savedPage = parseInt(sessionStorage.getItem('cp_dash_overdue_page') || '0', 10);
-    if (!isNaN(savedPage) && savedPage > 0) setOverduePage(savedPage);
     loadData(userData);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
-
-  // ✅ จำเลขหน้าทุกครั้งที่มีการเปลี่ยน
-  useEffect(() => {
-    sessionStorage.setItem('cp_dash_overdue_page', String(overduePage));
-  }, [overduePage]);
 
   const loadUserHospital = async (userId: string) => {
     try {
@@ -126,17 +116,52 @@ export default function CarePathwayDashboardPage() {
   };
 
   // ============================================================
-  // โหลด Stats + Upcoming (Watchlist แยกไป loadOverdue)
+  // ✅ ฟังก์ชันใหม่: โหลด Watchlist แบบแบ่งหน้า (10 รายการ/หน้า)
   // ============================================================
+  const loadOverduePage = useCallback(async (
+    userData: any,
+    hospitalIds: string[],
+    isSuper: boolean,
+    page: number,
+    currentScope: 'all' | 'mine'
+  ) => {
+    setOverdueLoading(true);
+    try {
+      let query = supabase
+        .from('v_overdue_patients')
+        .select('*', { count: 'exact' })
+        .order('days_overdue', { ascending: false })
+        .range(page * OVERDUE_PAGE_SIZE, (page + 1) * OVERDUE_PAGE_SIZE - 1);
+
+      // กรองตาม scope เดียวกับตอนโหลดครั้งแรก
+      if (currentScope === 'mine') {
+        query = query.eq('coach_id', userData.id);
+      } else if (!isSuper && hospitalIds.length > 0) {
+        query = query.in('hospital_id', hospitalIds);
+      }
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+      setOverduePatients(data || []);
+      setOverdueTotal(count || 0);
+      console.log(`📋 [loadOverduePage] Page ${page + 1}: got ${data?.length}, total ${count}`);
+    } catch (error) {
+      console.error('❌ [loadOverduePage] Error:', error);
+    } finally {
+      setOverdueLoading(false);
+    }
+  }, []);
+
   const loadData = useCallback(async (userData: any) => {
     setLoading(true);
     try {
       const startTime = performance.now();
       const hospitalIds = await getAccessibleHospitalIds(userData.id);
-      setAccessibleHospitalIds(hospitalIds);
       const isSuper = isSuperAdmin(userData);
 
+      // ============================================================
       // 1. Stats View
+      // ============================================================
       const { data: statsData, error: statsError } = await supabase
         .from('v_care_pathway_stats')
         .select('*')
@@ -144,7 +169,14 @@ export default function CarePathwayDashboardPage() {
       if (statsError) throw statsError;
       setStats(statsData);
 
-      // 2. Upcoming Appointments
+      // ============================================================
+      // 2. ✅ Overdue Watchlist — โหลดหน้าแรกแบบ Pagination
+      // ============================================================
+      await loadOverduePage(userData, hospitalIds, isSuper, 0, scope);
+
+      // ============================================================
+      // 3. Upcoming Appointments (ใกล้ถึงวันนัด)
+      // ============================================================
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const untilDate = new Date(today);
@@ -188,113 +220,52 @@ export default function CarePathwayDashboardPage() {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, selectedDays]);
+  }, [scope, selectedDays, loadOverduePage]);
 
-  // ✅ โหลดใหม่เมื่อ scope / selectedDays เปลี่ยน (พร้อม reset หน้า)
+  // ✅ เมื่อเปลี่ยน scope หรือ selectedDays → reload data + reset หน้า watchlist เป็น 1
   useEffect(() => {
     if (user) {
+      setOverduePage(0);
       loadData(user);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, selectedDays, user]);
 
-  // ============================================================
-  // ✅ โหลด Watchlist แบบแบ่งหน้า (Count + Range)
-  // ============================================================
-  const loadOverdue = useCallback(async () => {
-    if (!user) return;
-    try {
-      const isSuper = isSuperAdmin(user);
-
-      // 1) นับจำนวนทั้งหมดตาม scope ปัจจุบัน
-      let countQuery = supabase
-        .from('v_overdue_patients')
-        .select('*', { count: 'exact', head: true });
-      if (scope === 'mine') {
-        countQuery = countQuery.eq('coach_id', user.id);
-      } else if (!isSuper && accessibleHospitalIds.length > 0) {
-        countQuery = countQuery.in('hospital_id', accessibleHospitalIds);
-      }
-      const { count, error: countError } = await countQuery;
-      if (countError) {
-        console.error('❌ [loadOverdue] Count Error:', countError);
-        return;
-      }
-      const total = count || 0;
-      setOverdueTotal(total);
-
-      // 2) ป้องกันหน้าเกิน (เช่น กลับมาหลังข้อมูลลดลง)
-      const totalPages = Math.ceil(total / OVERDUE_PAGE_SIZE);
-      if (totalPages === 0) {
-        setOverduePatients([]);
-        return;
-      }
-      if (overduePage >= totalPages) {
-        setOverduePage(0);
-        return;
-      }
-
-      // 3) ดึงเฉพาะช่วงของหน้านี้
-      const from = overduePage * OVERDUE_PAGE_SIZE;
-      let dataQuery = supabase
-        .from('v_overdue_patients')
-        .select('*')
-        .order('days_overdue', { ascending: false })
-        .range(from, from + OVERDUE_PAGE_SIZE - 1);
-      if (scope === 'mine') {
-        dataQuery = dataQuery.eq('coach_id', user.id);
-      } else if (!isSuper && accessibleHospitalIds.length > 0) {
-        dataQuery = dataQuery.in('hospital_id', accessibleHospitalIds);
-      }
-      const { data, error } = await dataQuery;
-      if (error) {
-        console.error('❌ [loadOverdue] Data Error:', error);
-        return;
-      }
-      setOverduePatients(data || []);
-      console.log(`📊 [loadOverdue] Page ${overduePage + 1}/${totalPages}, Total: ${total}`);
-    } catch (error) {
-      console.error('❌ [loadOverdue] Exception:', error);
-    }
-  }, [user, scope, overduePage, accessibleHospitalIds]);
-
+  // ✅ เมื่อเปลี่ยน "เลขหน้า" อย่างเดียว → โหลดเฉพาะตาราง watchlist (เร็ว, ไม่ reload ทั้งหน้า)
   useEffect(() => {
-    if (user && accessibleHospitalIds !== undefined) {
-      loadOverdue();
-    }
+    if (!user) return;
+    (async () => {
+      const hospitalIds = await getAccessibleHospitalIds(user.id);
+      const isSuper = isSuperAdmin(user);
+      await loadOverduePage(user, hospitalIds, isSuper, overduePage, scope);
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadOverdue]);
+  }, [overduePage]);
 
   const switchScope = (newScope: 'all' | 'mine') => {
-    if (newScope === scope) return;
     setScope(newScope);
-    setOverduePage(0); // ✅ เปลี่ยน scope แล้วกลับไปหน้า 1
   };
 
-  // ✅ ตัวช่วยสร้างเลขหน้า (แบบเดียวกับหน้าจัดการผู้ป่วย)
+  // ✅ ตัวช่วยสร้างเลขหน้าแบบมี ... (เช่น 1 ... 4 5 6 ... 453)
   const getOverduePageNumbers = () => {
     const pages: (number | string)[] = [];
     const maxVisible = 5;
-    const tp = overdueTotalPages;
-    if (tp <= maxVisible) {
-      for (let i = 0; i < tp; i++) pages.push(i);
+    if (overdueTotalPages <= maxVisible) {
+      for (let i = 0; i < overdueTotalPages; i++) pages.push(i);
+    } else if (overduePage < 3) {
+      for (let i = 0; i < maxVisible - 1; i++) pages.push(i);
+      pages.push('...');
+      pages.push(overdueTotalPages - 1);
+    } else if (overduePage > overdueTotalPages - 4) {
+      pages.push(0);
+      pages.push('...');
+      for (let i = overdueTotalPages - maxVisible + 1; i < overdueTotalPages; i++) pages.push(i);
     } else {
-      if (overduePage < 3) {
-        for (let i = 0; i < maxVisible - 1; i++) pages.push(i);
-        pages.push('...');
-        pages.push(tp - 1);
-      } else if (overduePage > tp - 4) {
-        pages.push(0);
-        pages.push('...');
-        for (let i = tp - maxVisible + 1; i < tp; i++) pages.push(i);
-      } else {
-        pages.push(0);
-        pages.push('...');
-        for (let i = overduePage - 1; i <= overduePage + 1; i++) pages.push(i);
-        pages.push('...');
-        pages.push(tp - 1);
-      }
+      pages.push(0);
+      pages.push('...');
+      for (let i = overduePage - 1; i <= overduePage + 1; i++) pages.push(i);
+      pages.push('...');
+      pages.push(overdueTotalPages - 1);
     }
     return pages;
   };
@@ -400,7 +371,7 @@ export default function CarePathwayDashboardPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {/* ผู้ป่วยใกล้ถึงวันนัด */}
+        {/* ===== ผู้ป่วยใกล้ถึงวันนัด ===== */}
         <div>
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
@@ -499,7 +470,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* หมวดที่ 1: สรุปตัวเลขภาพรวม */}
+        {/* ===== หมวดที่ 1: สรุปตัวเลขภาพรวม ===== */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Users className="w-5 h-5 text-blue-600" /> หมวดที่ 1: สรุปตัวเลขภาพรวม
@@ -533,7 +504,9 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* หมวดที่ 2: Watchlist — ✅ มี Pagination */}
+        {/* ============================================================ */}
+        {/* หมวดที่ 2: Watchlist — ✅ แสดงทีละ 10 รายการ + Pagination */}
+        {/* ============================================================ */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <AlertTriangle className="w-5 h-5 text-red-500" />
@@ -547,8 +520,14 @@ export default function CarePathwayDashboardPage() {
               </span>
             )}
           </h2>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            {overduePatients.length === 0 ? (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden relative">
+            {/* ✅ Loading overlay เมื่อเปลี่ยนหน้า */}
+            {overdueLoading && (
+              <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+              </div>
+            )}
+            {overduePatients.length === 0 && !overdueLoading ? (
               <div className="p-8 text-center text-gray-500">
                 <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-green-400" />
                 <p>ยอดเยี่ยม! ไม่มีผู้ป่วยที่เลยกำหนดการติดตาม</p>
@@ -595,7 +574,7 @@ export default function CarePathwayDashboardPage() {
                           </td>
                           <td className="px-6 py-3 text-center">
                             <button
-                              onClick={() => router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`)}
+                              onClick={() => router.push(`/admin/patients/${p.id}/care-pathway`)}
                               className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors"
                             >
                               <Eye className="w-3 h-3" /> ดูรายละเอียด
@@ -606,8 +585,7 @@ export default function CarePathwayDashboardPage() {
                     </tbody>
                   </table>
                 </div>
-
-                {/* ✅ Pagination Controls */}
+                {/* ✅ Pagination Controls ของหมวดที่ 2 */}
                 {overdueTotalPages > 1 && (
                   <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
                     <div className="text-sm text-gray-600">
@@ -672,7 +650,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* หมวดที่ 3: สถิติการทำซ้ำและเหตุผล */}
+        {/* ===== หมวดที่ 3: สถิติการทำซ้ำและเหตุผล ===== */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Repeat className="w-5 h-5 text-purple-600" /> หมวดที่ 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน)
