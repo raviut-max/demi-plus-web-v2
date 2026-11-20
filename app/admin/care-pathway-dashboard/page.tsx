@@ -1,10 +1,6 @@
 // app/admin/care-pathway-dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 20 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. ✅ ใช้ View v_overdue_patients + v_upcoming_appointments (เร็ว + ถูกต้อง)
-//    2. ✅ นับจำนวนจริงด้วย count: 'exact' (ไม่ถูก limit 1000)
-//    3. ✅ แบ่งหน้า 10 รายการ + Pagination Controls ครบ
-//    4. ✅ Badge "ทั้งหมด X คน" นับตาม scope จริง
+// ✅ แก้ปัญหานับจำนวนผิด (1000 → 4523)
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -24,8 +20,10 @@ import {
 } from 'lucide-react';
 
 // ============================================================
-// 🧩 Types
+// 🧰 Types
 // ============================================================
+type Filter = { column: string; value: any; type?: 'eq' | 'in' | 'gte' | 'lte' };
+
 interface WatchlistPatient {
   id: string;
   hospital_number: string;
@@ -60,6 +58,104 @@ interface UpcomingAppointment {
 // ✅ ค่าคงที่: จำนวนรายการต่อหน้า
 const PAGE_SIZE = 10;
 
+// ============================================================
+// 🧰 Helper: นับจำนวนจริง (ไม่ limit 1000)
+// ============================================================
+async function countExact(
+  table: string,
+  filters: Filter[]
+): Promise<number> {
+  let query = supabase.from(table).select('*', { count: 'exact', head: true });
+  filters.forEach((f) => {
+    if (f.type === 'in' && Array.isArray(f.value) && f.value.length > 0) {
+      query = query.in(f.column, f.value);
+    } else if (f.type === 'gte') {
+      query = query.gte(f.column, f.value);
+    } else if (f.type === 'lte') {
+      query = query.lte(f.column, f.value);
+    } else {
+      query = query.eq(f.column, f.value);
+    }
+  });
+  const { count, error } = await query;
+  if (error) {
+    console.error(`❌ [countExact] ${table}:`, error);
+    return 0;
+  }
+  return count || 0;
+}
+
+// ============================================================
+// 🧰 Helper: ดึงข้อมูลแบบแบ่ง chunk (แก้ in filter limit 1000)
+// ============================================================
+async function fetchInChunks(
+  table: string,
+  select: string,
+  inColumn: string,
+  inValues: string[],
+  chunkSize = 900,
+  extraFilters?: Filter[]
+): Promise<any[]> {
+  const out: any[] = [];
+  for (let i = 0; i < inValues.length; i += chunkSize) {
+    const chunk = inValues.slice(i, i + chunkSize);
+    let query = supabase.from(table).select(select).in(inColumn, chunk);
+    extraFilters?.forEach((f) => {
+      if (f.type === 'gte') query = query.gte(f.column, f.value);
+      else if (f.type === 'lte') query = query.lte(f.column, f.value);
+      else query = query.eq(f.column, f.value);
+    });
+    const { data, error } = await query;
+    if (error) {
+      console.error(`❌ [fetchInChunks] ${table}:`, error);
+      continue;
+    }
+    if (data) out.push(...data);
+  }
+  return out;
+}
+
+// ============================================================
+// 🧰 Helper: ดึงข้อมูลแบบ Pagination (สำหรับ Watchlist)
+// ============================================================
+async function fetchPage(
+  table: string,
+  select: string,
+  filters: Filter[],
+  page: number,
+  pageSize: number,
+  orderBy?: { column: string; ascending: boolean }
+): Promise<{ data: any[]; count: number }> {
+  let query = supabase.from(table).select('*', { count: 'exact' });
+  
+  filters.forEach((f) => {
+    if (f.type === 'in' && Array.isArray(f.value) && f.value.length > 0) {
+      query = query.in(f.column, f.value);
+    } else if (f.type === 'gte') {
+      query = query.gte(f.column, f.value);
+    } else if (f.type === 'lte') {
+      query = query.lte(f.column, f.value);
+    } else {
+      query = query.eq(f.column, f.value);
+    }
+  });
+
+  if (orderBy) {
+    query = query.order(orderBy.column, { ascending: orderBy.ascending });
+  }
+
+  const from = page * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, count, error } = await query;
+  if (error) {
+    console.error(`❌ [fetchPage] ${table}:`, error);
+    return { data: [], count: 0 };
+  }
+  return { data: data || [], count: count || 0 };
+}
+
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
@@ -80,9 +176,9 @@ export default function CarePathwayDashboardPage() {
     other_count: 0,
   });
 
-  // ✅ Watchlist + Pagination
+  // Watchlist + Pagination
   const [overduePatients, setOverduePatients] = useState<WatchlistPatient[]>([]);
-  const [overdueTotal, setOverdueTotal] = useState(0); // ✅ จำนวนจริงจาก DB
+  const [overdueTotal, setOverdueTotal] = useState(0);
   const [overduePage, setOverduePage] = useState(0);
   const overdueTotalPages = Math.max(1, Math.ceil(overdueTotal / PAGE_SIZE));
 
@@ -154,40 +250,71 @@ export default function CarePathwayDashboardPage() {
         const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
         const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
 
-        // ---------- 1) ดึงผู้ป่วยใน "ขอบเขตสิทธิ์" ----------
-        let patientQuery = supabase
-          .from('profiles')
-          .select('id, hospital_number, first_name, last_name, pam_level, hospital_id, coach_id')
-          .eq('is_active', true);
-
+        // ---------- 1) ✅ นับจำนวนผู้ป่วยทั้งหมด (ใช้ count: 'exact') ----------
+        const patientCountFilters: Filter[] = [{ column: 'is_active', value: true }];
+        if (!isSuper && hospitalIds.length > 0) {
+          patientCountFilters.push({ column: 'hospital_id', value: hospitalIds, type: 'in' });
+        }
         if (currentScope === 'mine') {
-          patientQuery = patientQuery.eq('coach_id', userData.id);
-        } else if (!isSuper && hospitalIds.length > 0) {
-          patientQuery = patientQuery.in('hospital_id', hospitalIds);
+          patientCountFilters.push({ column: 'coach_id', value: userData.id, type: 'eq' });
         }
 
-        const { data: patients, error: pErr } = await patientQuery;
-        if (pErr) throw pErr;
+        const totalPatients = await countExact('profiles', patientCountFilters);
+        console.log(`📊 [loadData] Total patients: ${totalPatients}`);
 
-        const totalPatients = patients?.length || 0;
-        const allPatientIds = (patients || []).map((p: any) => p.id);
+        // ---------- 2) ดึง patient IDs ทั้งหมด (สำหรับ in filter) ----------
+        // ✅ ใช้ fetchInChunks เพราะอาจมีมากกว่า 1000 IDs
+        let allPatientIds: string[] = [];
+        if (totalPatients > 0) {
+          // ดึง IDs แบบ pagination (เฉพาะ id column)
+          let from = 0;
+          const chunkSize = 1000;
+          while (true) {
+            let query = supabase
+              .from('profiles')
+              .select('id')
+              .range(from, from + chunkSize - 1);
+            
+            patientCountFilters.forEach((f) => {
+              if (f.type === 'in' && Array.isArray(f.value) && f.value.length > 0) {
+                query = query.in(f.column, f.value);
+              } else if (f.type === 'gte') {
+                query = query.gte(f.column, f.value);
+              } else if (f.type === 'lte') {
+                query = query.lte(f.column, f.value);
+              } else {
+                query = query.eq(f.column, f.value);
+              }
+            });
 
-        // ---------- 2) ดึง followups ----------
-        let allFollowups: any[] = [];
-        if (allPatientIds.length > 0) {
-          // แบ่ง chunk เพราะ in filter จำกัด 1000 items
-          const chunkSize = 900;
-          for (let i = 0; i < allPatientIds.length; i += chunkSize) {
-            const chunk = allPatientIds.slice(i, i + chunkSize);
-            const { data } = await supabase
-              .from('appointment_followups')
-              .select('user_id, followup_date, adaptation_summary')
-              .in('user_id', chunk);
-            if (data) allFollowups.push(...data);
+            const { data, error } = await query;
+            if (error) {
+              console.error('❌ [loadData] Error fetching patient IDs:', error);
+              break;
+            }
+            if (data) {
+              allPatientIds.push(...data.map((p: any) => p.id));
+            }
+            if (!data || data.length < chunkSize) break;
+            from += chunkSize;
+            if (from > 100000) break;
           }
         }
 
-        // ---------- 3) คำนวณ On-time / Overdue ----------
+        console.log(`📊 [loadData] Patient IDs fetched: ${allPatientIds.length}`);
+
+        // ---------- 3) ดึง followups ทั้งหมด (chunk) ----------
+        let allFollowups: any[] = [];
+        if (allPatientIds.length > 0) {
+          allFollowups = await fetchInChunks(
+            'appointment_followups',
+            'user_id, followup_date, adaptation_summary',
+            'user_id',
+            allPatientIds
+          );
+        }
+
+        // ---------- 4) คำนวณ On-time / Overdue ----------
         const latestFollowupMap: Record<string, string> = {};
         allFollowups.forEach((f: any) => {
           const cur = latestFollowupMap[f.user_id];
@@ -196,18 +323,129 @@ export default function CarePathwayDashboardPage() {
           }
         });
 
+        // ดึงข้อมูลผู้ป่วยสำหรับ Watchlist (เฉพาะคนที่ overdue)
+        const overduePatientIds: string[] = [];
         let onTime = 0;
         let overdue = 0;
-        (patients || []).forEach((p: any) => {
-          const lastDateStr = latestFollowupMap[p.id];
+
+        // ✅ วนลูปผ่าน allPatientIds (ซึ่งมีครบทุกคน)
+        for (const patientId of allPatientIds) {
+          const lastDateStr = latestFollowupMap[patientId];
           if (!lastDateStr) {
             overdue++;
+            overduePatientIds.push(patientId);
           } else {
             const diff = Math.floor((today.getTime() - new Date(lastDateStr).getTime()) / 86400000);
-            if (diff <= 30) onTime++;
-            else overdue++;
+            if (diff <= 30) {
+              onTime++;
+            } else {
+              overdue++;
+              overduePatientIds.push(patientId);
+            }
           }
-        });
+        }
+
+        console.log(`📊 [loadData] On-time: ${onTime}, Overdue: ${overdue}`);
+
+        // ---------- 5) ดึง Watchlist แบบ Pagination ----------
+        // สร้าง filter สำหรับ overdue patients
+        const overdueFilters: Filter[] = [
+          { column: 'is_active', value: true },
+        ];
+        
+        if (!isSuper && hospitalIds.length > 0) {
+          overdueFilters.push({ column: 'hospital_id', value: hospitalIds, type: 'in' });
+        }
+        if (currentScope === 'mine') {
+          overdueFilters.push({ column: 'coach_id', value: userData.id, type: 'eq' });
+        }
+
+        // ✅ ใช้ View v_overdue_patients (ถ้ามี) หรือคำนวณเอง
+        // ถ้า View มี → ใช้ View (เร็วมาก)
+        // ถ้า View ไม่มี → ใช้วิธีเดิม (ช้าแต่ถูกต้อง)
+        
+        let watchlistData: any[] = [];
+        let watchlistTotal = 0;
+
+        try {
+          // ลองใช้ View ก่อน
+          let viewQuery = supabase
+            .from('v_overdue_patients')
+            .select('*', { count: 'exact' })
+            .order('days_overdue', { ascending: false });
+
+          if (currentScope === 'mine') {
+            viewQuery = viewQuery.eq('coach_id', userData.id);
+          } else if (!isSuper && hospitalIds.length > 0) {
+            viewQuery = viewQuery.in('hospital_id', hospitalIds);
+          }
+
+          const from = page * PAGE_SIZE;
+          const to = from + PAGE_SIZE - 1;
+          viewQuery = viewQuery.range(from, to);
+
+          const { data, count, error } = await viewQuery;
+          if (!error) {
+            watchlistData = data || [];
+            watchlistTotal = count || 0;
+            console.log(`📊 [loadData] Watchlist from View: ${watchlistTotal} total, page ${page + 1}`);
+          } else {
+            throw error;
+          }
+        } catch (viewError) {
+          console.warn('⚠️ [loadData] View failed, using fallback:', viewError);
+          
+          // Fallback: คำนวณเองจาก allPatientIds
+          // ดึงข้อมูลผู้ป่วยที่ overdue (เฉพาะหน้านี้)
+          const overdueIdsForPage = overduePatientIds.slice(
+            page * PAGE_SIZE,
+            (page + 1) * PAGE_SIZE
+          );
+
+          if (overdueIdsForPage.length > 0) {
+            const { data } = await supabase
+              .from('profiles')
+              .select('id, hospital_number, first_name, last_name, pam_level, hospital_id, coach_id')
+              .in('id', overdueIdsForPage);
+
+            watchlistData = (data || []).map((p: any) => ({
+              ...p,
+              last_followup: latestFollowupMap[p.id] || null,
+              days_overdue: latestFollowupMap[p.id]
+                ? Math.floor((today.getTime() - new Date(latestFollowupMap[p.id]).getTime()) / 86400000)
+                : 999,
+            }));
+          }
+          watchlistTotal = overduePatientIds.length;
+        }
+
+        // ดึงชื่อโรงพยาบาลและโค้ช
+        const hospitalIdsOfWatchlist = [...new Set(watchlistData.map((p: any) => p.hospital_id).filter(Boolean))] as string[];
+        const coachIdsOfWatchlist = [...new Set(watchlistData.map((p: any) => p.coach_id).filter(Boolean))] as string[];
+
+        const [hospData, coachData] = await Promise.all([
+          hospitalIdsOfWatchlist.length > 0
+            ? supabase.from('hospitals').select('id, name').in('id', hospitalIdsOfWatchlist)
+            : Promise.resolve({ data: [] }),
+          coachIdsOfWatchlist.length > 0
+            ? supabase.from('doctors').select('user_id, full_name_th').in('user_id', coachIdsOfWatchlist)
+            : Promise.resolve({ data: [] }),
+        ]);
+
+        const hospitalNameMap: Record<string, string> = {};
+        (hospData.data || []).forEach((h: any) => (hospitalNameMap[h.id] = h.name));
+
+        const coachNameMap: Record<string, string> = {};
+        (coachData.data || []).forEach((c: any) => (coachNameMap[c.user_id] = c.full_name_th));
+
+        const watchlistWithNames: WatchlistPatient[] = watchlistData.map((p: any) => ({
+          ...p,
+          hospital_name: hospitalNameMap[p.hospital_id] || '-',
+          coach_name: coachNameMap[p.coach_id] || null,
+        }));
+
+        setOverduePatients(watchlistWithNames);
+        setOverdueTotal(watchlistTotal);
 
         setStats((s) => ({
           ...s,
@@ -216,73 +454,7 @@ export default function CarePathwayDashboardPage() {
           overdue_count: overdue,
         }));
 
-        // ---------- 4) ✅ Watchlist แบบ Pagination (ใช้ View) ----------
-        // นับจำนวนทั้งหมดก่อน
-        let overdueCountQuery = supabase
-          .from('v_overdue_patients')
-          .select('*', { count: 'exact', head: true });
-
-        if (currentScope === 'mine') {
-          overdueCountQuery = overdueCountQuery.eq('coach_id', userData.id);
-        } else if (!isSuper && hospitalIds.length > 0) {
-          overdueCountQuery = overdueCountQuery.in('hospital_id', hospitalIds);
-        }
-
-        const { count: overdueCount, error: countErr } = await overdueCountQuery;
-        if (countErr) throw countErr;
-
-        const totalOverdue = overdueCount || 0;
-        setOverdueTotal(totalOverdue);
-
-        // ป้องกันหน้าเกิน
-        const totalPages = Math.max(1, Math.ceil(totalOverdue / PAGE_SIZE));
-        if (page >= totalPages) {
-          setOverduePage(0);
-          page = 0;
-        }
-
-        // ดึงข้อมูลเฉพาะหน้านี้
-        const from = page * PAGE_SIZE;
-        let overdueDataQuery = supabase
-          .from('v_overdue_patients')
-          .select('*')
-          .order('days_overdue', { ascending: false })
-          .range(from, from + PAGE_SIZE - 1);
-
-        if (currentScope === 'mine') {
-          overdueDataQuery = overdueDataQuery.eq('coach_id', userData.id);
-        } else if (!isSuper && hospitalIds.length > 0) {
-          overdueDataQuery = overdueDataQuery.in('hospital_id', hospitalIds);
-        }
-
-        const { data: overdueData, error: overdueErr } = await overdueDataQuery;
-        if (overdueErr) throw overdueErr;
-
-        // ✅ ดึงชื่อโค้ช (ถ้ามี)
-        const coachIds = (overdueData || [])
-          .map((p: any) => p.coach_id)
-          .filter(Boolean);
-        let coachNameMap: Record<string, string> = {};
-        if (coachIds.length > 0) {
-          const { data: coaches } = await supabase
-            .from('doctors')
-            .select('user_id, full_name_th')
-            .in('user_id', coachIds);
-          coachNameMap = Object.fromEntries(
-            (coaches || []).map((c: any) => [c.user_id, c.full_name_th])
-          );
-        }
-
-        setOverduePatients(
-          (overdueData || []).map((p: any) => ({
-            ...p,
-            coach_name: coachNameMap[p.coach_id] || null,
-          }))
-        );
-
-        console.log(`📊 [loadData] Overdue: ${totalOverdue} คน, หน้า ${page + 1}/${totalPages}`);
-
-        // ---------- 5) เหตุผล 30 วัน ----------
+        // ---------- 6) เหตุผล 30 วัน ----------
         const reasons = { obstacles: 0, opportunities: 0, other: 0 };
         allFollowups.forEach((f: any) => {
           if (new Date(f.followup_date) >= thirtyDaysAgo) {
@@ -292,50 +464,48 @@ export default function CarePathwayDashboardPage() {
           }
         });
 
-        // ---------- 6) Records 30 วัน ----------
+        // ---------- 7) Records 30 วัน ----------
         let active = 0;
         let repeat = 0;
         if (allPatientIds.length > 0) {
-          const chunkSize = 900;
-          for (let i = 0; i < allPatientIds.length; i += chunkSize) {
-            const chunk = allPatientIds.slice(i, i + chunkSize);
-            const { data } = await supabase
-              .from('records')
-              .select('user_id')
-              .in('user_id', chunk)
-              .gte('record_date', thirtyDaysAgoStr);
-            const cnt: Record<string, number> = {};
-            (data || []).forEach((r: any) => (cnt[r.user_id] = (cnt[r.user_id] || 0) + 1));
-            active += Object.keys(cnt).length;
-            repeat += Object.values(cnt).filter((c) => c > 1).length;
-          }
+          const recentRecords = await fetchInChunks(
+            'records',
+            'user_id',
+            'user_id',
+            allPatientIds,
+            900,
+            [{ column: 'record_date', value: thirtyDaysAgoStr, type: 'gte' }]
+          );
+          const cnt: Record<string, number> = {};
+          recentRecords.forEach((r: any) => (cnt[r.user_id] = (cnt[r.user_id] || 0) + 1));
+          active = Object.keys(cnt).length;
+          repeat = Object.values(cnt).filter((c) => c > 1).length;
         }
 
-        // ---------- 7) PAM เปลี่ยน ----------
+        // ---------- 8) PAM เปลี่ยน ----------
         let pamInc = 0;
         let pamDec = 0;
         if (allPatientIds.length > 0) {
-          const chunkSize = 900;
-          for (let i = 0; i < allPatientIds.length; i += chunkSize) {
-            const chunk = allPatientIds.slice(i, i + chunkSize);
-            const { data } = await supabase
-              .from('screenings')
-              .select('user_id, screening_date, pam_total_score')
-              .in('user_id', chunk)
-              .gte('screening_date', startOfMonthStr);
-            const byUser: Record<string, any[]> = {};
-            (data || []).forEach((s: any) => {
-              if (!byUser[s.user_id]) byUser[s.user_id] = [];
-              byUser[s.user_id].push(s);
-            });
-            Object.values(byUser).forEach((screens) => {
-              if (screens.length >= 2) {
-                screens.sort((a, b) => new Date(b.screening_date).getTime() - new Date(a.screening_date).getTime());
-                if ((screens[0].pam_total_score ?? 0) > (screens[1].pam_total_score ?? 0)) pamInc++;
-                else if ((screens[0].pam_total_score ?? 0) < (screens[1].pam_total_score ?? 0)) pamDec++;
-              }
-            });
-          }
+          const recentScreens = await fetchInChunks(
+            'screenings',
+            'user_id, screening_date, pam_total_score',
+            'user_id',
+            allPatientIds,
+            900,
+            [{ column: 'screening_date', value: startOfMonthStr, type: 'gte' }]
+          );
+          const byUser: Record<string, any[]> = {};
+          recentScreens.forEach((s: any) => {
+            if (!byUser[s.user_id]) byUser[s.user_id] = [];
+            byUser[s.user_id].push(s);
+          });
+          Object.values(byUser).forEach((screens) => {
+            if (screens.length >= 2) {
+              screens.sort((a, b) => new Date(b.screening_date).getTime() - new Date(a.screening_date).getTime());
+              if ((screens[0].pam_total_score ?? 0) > (screens[1].pam_total_score ?? 0)) pamInc++;
+              else if ((screens[0].pam_total_score ?? 0) < (screens[1].pam_total_score ?? 0)) pamDec++;
+            }
+          });
         }
 
         setStats((s) => ({
@@ -349,7 +519,7 @@ export default function CarePathwayDashboardPage() {
           other_count: reasons.other,
         }));
 
-        // ---------- 8) Upcoming ----------
+        // ---------- 9) Upcoming ----------
         const untilDate = new Date(today);
         untilDate.setDate(today.getDate() + days);
         const todayStr = today.toISOString().split('T')[0];
@@ -385,7 +555,15 @@ export default function CarePathwayDashboardPage() {
         setUpcomingAppointments((upData || []) as UpcomingAppointment[]);
         setUpcomingTotal(upCount || 0);
 
-        console.log(`✅ [loadData] เสร็จใน ${(performance.now() - t0).toFixed(0)}ms`);
+        console.log(`✅ [loadData] เสร็จใน ${(performance.now() - t0).toFixed(0)}ms`, {
+          totalPatients,
+          onTime,
+          overdue,
+          pamInc,
+          pamDec,
+          upcoming: upCount,
+          watchlistTotal,
+        });
       } catch (error) {
         console.error('❌ [CarePathwayDashboard] Error:', error);
       } finally {
@@ -395,14 +573,13 @@ export default function CarePathwayDashboardPage() {
     []
   );
 
-  // โหลดเมื่อ user/scope/days/page เปลี่ยน
   useEffect(() => {
     if (user) loadData(user, scope, selectedDays, overduePage);
   }, [user, scope, selectedDays, overduePage, loadData]);
 
   const switchScope = (s: 'all' | 'mine') => {
     setScope(s);
-    setOverduePage(0); // รีเซ็ตหน้าเมื่อเปลี่ยน scope
+    setOverduePage(0);
   };
 
   // ✅ ตัวช่วยสร้างเลขหน้า
@@ -442,7 +619,7 @@ export default function CarePathwayDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
-      {/* ================= Header ================= */}
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -456,7 +633,6 @@ export default function CarePathwayDashboardPage() {
             </div>
 
             <div className="flex items-center gap-4 flex-wrap">
-              {/* Toggle Scope */}
               <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm font-medium bg-white">
                 <button
                   onClick={() => switchScope('all')}
@@ -472,7 +648,6 @@ export default function CarePathwayDashboardPage() {
                 </button>
               </div>
 
-              {/* User Card */}
               <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
                 <div className="flex items-center gap-2 mb-2">
                   <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -521,7 +696,7 @@ export default function CarePathwayDashboardPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {/* ================= ใกล้ถึงวันนัด ================= */}
+        {/* ใกล้ถึงวันนัด */}
         <div>
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 flex-wrap">
@@ -612,7 +787,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 1 ================= */}
+        {/* หมวดที่ 1 */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <Users className="w-5 h-5 text-blue-600" /> หมวดที่ 1: สรุปตัวเลขภาพรวม
@@ -652,7 +827,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 2: Watchlist + Pagination ================= */}
+        {/* หมวดที่ 2: Watchlist + Pagination */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <AlertTriangle className="w-5 h-5 text-red-500" />
@@ -723,8 +898,6 @@ export default function CarePathwayDashboardPage() {
                     </tbody>
                   </table>
                 </div>
-
-                {/* ✅ Pagination Controls */}
                 {overdueTotalPages > 1 && (
                   <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
                     <div className="text-sm text-gray-600">
@@ -789,7 +962,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 3 ================= */}
+        {/* หมวดที่ 3 */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Repeat className="w-5 h-5 text-purple-600" /> หมวดที่ 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน)
