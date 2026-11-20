@@ -1,1054 +1,619 @@
-// app/admin/care-pathway-dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 20 พฤศจิกายน 2569
-// ✅ แก้ปัญหานับจำนวนผิด (1000 → 4523)
+// app/admin/patients/[id]/care-pathway/page.tsx
+// ✅ แก้ไขล่าสุด: 19 พฤศจิกายน 2569
+// ✅ การปรับปรุงความเร็ว:
+//    1. ✅ ใช้ select เฉพาะฟิลด์ที่จำเป็น (ไม่ดึง * ทั้งหมด)
+//    2. ✅ เพิ่ม limit ให้ชัดเจน
+//    3. ✅ ใช้ Promise.all แบบ parallel (โหลดพร้อมกัน)
+//    4. ✅ เพิ่ม error handling ที่ดีขึ้น
 'use client';
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback, Suspense } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
+import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
-  checkSession,
-  getAccessibleHospitalIds,
-  isSuperAdmin,
-  getUserHospitalInfo,
-  logout,
-} from '@/lib/supabase/queries';
-import {
-  Users, CalendarCheck, CalendarX, TrendingUp, TrendingDown,
-  AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye,
-  UserCheck, Hospital, Building2, LogOut, Calendar, Clock,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  ArrowLeft, Route, UserCheck, Sparkles, Target, Loader2, Eye, Edit, Plus,
+  Users, Building2, AlertCircle, FileText, Clock, CheckCircle2, History, Activity
 } from 'lucide-react';
 
-// ============================================================
-// 🧰 Types
-// ============================================================
-type Filter = { column: string; value: any; type?: 'eq' | 'in' | 'gte' | 'lte' };
+const formatThaiDate = (d: string | null | undefined) => {
+  if (!d) return '-';
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return '-';
+  const m = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+  return `${date.getDate()} ${m[date.getMonth()]} ${date.getFullYear() + 543}`;
+};
 
-interface WatchlistPatient {
+type StageStatus = 'done' | 'active' | 'pending';
+
+interface PathEvent {
+  key: string;
+  date: string | null;
+  title: string;
+  detail: string;
+}
+
+interface CareStage {
   id: string;
-  hospital_number: string;
-  first_name: string;
-  last_name: string;
-  pam_level: string;
-  hospital_id: string;
-  hospital_name: string;
-  coach_id: string | null;
-  coach_name: string | null;
-  last_followup: string | null;
-  days_overdue: number;
+  no: number;
+  title: string;
+  description: string;
+  icon: any;
+  status: StageStatus;
+  events: PathEvent[];
+  actionLabel: string;
+  actionUrl: (pid: string) => string;
+  historyLabel: string;
+  historyUrl: (pid: string) => string;
 }
 
-interface UpcomingAppointment {
-  appointment_id: string;
-  patient_id: string;
-  appointment_date: string;
-  appointment_type: string;
-  status: string;
-  hospital_number: string;
-  first_name: string;
-  last_name: string;
-  pam_level: string;
-  hospital_id: string;
-  hospital_name: string;
-  coach_id: string | null;
-  coach_name: string | null;
-  days_until: number;
-}
+const STAGE_META = [
+  {
+    id: 'self', no: 1, title: 'รู้จักตัวเอง',
+    description: 'ทำแบบประเมิน PAM / PROMS — แจ้งจำนวนครั้งที่ทำแล้ว และเพิ่มรอบใหม่ได้',
+    icon: UserCheck,
+    actionLabel: '➕ เพิ่มรอบทำแบบประเมิน',
+    actionUrl: (p: string) => `/admin/screening?patient_id=${p}`,
+    historyLabel: '📋 ดูประวัติการประเมิน',
+    historyUrl: (p: string) => `/admin/patients/${p}/screening-history`,
+  },
+  {
+    id: 'dream', no: 2, title: 'ความฝันของฉัน',
+    description: 'ชี้ไปที่การทำความฝัน — เลือกการ์ดความฝัน บันทึก และดูย้อนหลังได้',
+    icon: Sparkles,
+    actionLabel: '➕ เลือกความฝันใหม่',
+    actionUrl: (p: string) => `/admin/patients/${p}/dream`,
+    historyLabel: '📋 ดูความฝันของฉัน',
+    historyUrl: (p: string) => `/admin/patients/${p}/dream`,
+  },
+  {
+    id: 'oneday', no: 3, title: 'ชีวิต 1 วันของฉัน',
+    description: 'สรุปกิจวัตรรายวันที่ผู้ป่วยบันทึก แยกตามระดับ PAM Level (L2/L3 หรือ L4)',
+    icon: Activity,
+    actionLabel: '➕ ดูสรุปชีวิต 1 วัน',
+    actionUrl: (p: string) => `/admin/patients/${p}/oneday?from=care-pathway`,
+    historyLabel: '📋 ดูย้อนหลัง',
+    historyUrl: (p: string) => `/admin/patients/${p}/oneday?from=care-pathway`,
+  },
+  {
+    id: 'goals', no: 4, title: 'เป้าหมายและแผนสุขภาพ',
+    description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
+    icon: Target,
+    actionLabel: '➕ จัดการเป้าหมาย',
+    actionUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
+    historyLabel: '📋 ดูประวัติเป้าหมาย',
+    historyUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
+  },
+  {
+    id: 'trial', no: 5, title: 'ทดลองทำ',
+    description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
+    icon: History,
+    actionLabel: '➕ ดูบันทึกกิจกรรม',
+    actionUrl: (p: string) => `/admin/patients/${p}/goals`,
+    historyLabel: '📋 ดูประวัติการทำ',
+    historyUrl: (p: string) => `/admin/patients/${p}/goals`,
+  },
+  {
+    id: 'follow', no: 6, title: 'ติดตามต่อเนื่อง',
+    description: 'การตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติ',
+    icon: FileText,
+    actionLabel: '➕ บันทึกการติดตามผล',
+    actionUrl: (p: string) => `/admin/appointments/followup/new?patient_id=${p}`,
+    historyLabel: '📋 ดูประวัติการติดตามผล',
+    historyUrl: (p: string) => `/admin/patients/${p}/followup-history?from=care-pathway`,
+  },
+];
 
-// ✅ ค่าคงที่: จำนวนรายการต่อหน้า
-const PAGE_SIZE = 10;
+const STATUS_UI: Record<StageStatus, { label: string; badge: string; circle: string; card: string }> = {
+  done:    { label: 'เสร็จสิ้น',       badge: 'bg-green-100 text-green-700',   circle: 'bg-green-500 text-white',   card: 'bg-green-50/60 border-green-200' },
+  active:  { label: 'กำลังดำเนินการ',  badge: 'bg-blue-100 text-blue-700',     circle: 'bg-blue-500 text-white',    card: 'bg-blue-50/60 border-blue-300' },
+  pending: { label: 'รอเริ่ม',         badge: 'bg-gray-100 text-gray-500',     circle: 'bg-gray-200 text-gray-500', card: 'bg-white border-gray-200' },
+};
 
-// ============================================================
-// 🧰 Helper: นับจำนวนจริง (ไม่ limit 1000)
-// ============================================================
-async function countExact(
-  table: string,
-  filters: Filter[]
-): Promise<number> {
-  let query = supabase.from(table).select('*', { count: 'exact', head: true });
-  filters.forEach((f) => {
-    if (f.type === 'in' && Array.isArray(f.value) && f.value.length > 0) {
-      query = query.in(f.column, f.value);
-    } else if (f.type === 'gte') {
-      query = query.gte(f.column, f.value);
-    } else if (f.type === 'lte') {
-      query = query.lte(f.column, f.value);
-    } else {
-      query = query.eq(f.column, f.value);
-    }
-  });
-  const { count, error } = await query;
-  if (error) {
-    console.error(`❌ [countExact] ${table}:`, error);
-    return 0;
-  }
-  return count || 0;
-}
+function buildStages(screenings: any[], dreams: any[], goals: any[], records: any[], followups: any[]): CareStage[] {
+  const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
+  const eventsByStage: Record<string, PathEvent[]> = {
+    self: screenings.map((s, i) => ({
+      key: `scr-${s.id ?? i}`,
+      date: s.screening_date,
+      title: `แบบประเมินครั้งที่ ${i + 1}`,
+      detail: `PAM: ${s.pam_total_score ?? '-'} | Level: ${s.pam_level_result || '-'} | Zone: ${s.proms_zone || '-'}`,
+    })),
+    dream: dreams.map((d, i) => ({
+      key: `drm-${d.id ?? i}`,
+      date: d.selected_date,
+      title: d.status === 'active' ? `ความฝันปัจจุบัน: "${d.dream_text}"` : `ความฝันเดิม: "${d.dream_text}"`,
+      detail: [
+        d.intention ? `🎯 ${d.intention}` : '',
+        d.confidence != null ? `ความมั่นใจ ${d.confidence}/10` : '',
+        d.method === 'paper' ? `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป` : '🅰️ ออนไลน์',
+      ].filter(Boolean).join(' | ') || '-',
+    })),
+    oneday: uniqueDays > 0 ? [{
+      key: 'oneday-summary',
+      date: records[0]?.record_date || null,
+      title: `มีการบันทึกกิจกรรมแล้ว ${uniqueDays} วัน`,
+      detail: 'กดปุ่มด้านล่างเพื่อดูรายละเอียดแยกตามหมวดหมู่และวันที่',
+    }] : [],
+    goals: (() => {
+      const roundsMap = new Map<number, any[]>();
+      goals.forEach(g => {
+        const round = g.round_number || 1;
+        if (!roundsMap.has(round)) roundsMap.set(round, []);
+        roundsMap.get(round)!.push(g);
+      });
+      return Array.from(roundsMap.entries())
+        .sort(([a], [b]) => b - a)
+        .map(([round, goalsList]) => ({
+          key: `goal-round-${round}`,
+          date: goalsList[0]?.created_at,
+          title: `รอบที่ ${round} — ${goalsList.length} กิจกรรม`,
+          detail: [
+            goalsList[0]?.primary_goal_note ? `📝 ${goalsList[0].primary_goal_note}` : '',
+            goalsList[0]?.weekly_goal_note ? `📋 ${goalsList[0].weekly_goal_note}` : '',
+            `กิจกรรม: ${goalsList.map(g => g.goal_name_th).join(', ')}`,
+          ].filter(Boolean).join(' | ') || '-',
+        }));
+    })(),
+    trial: (() => {
+      const byDate = new Map<string, any[]>();
+      records.forEach(r => {
+        const d = (r.record_date || '').slice(0, 10);
+        if (!d) return;
+        if (!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d)!.push(r);
+      });
+      return Array.from(byDate.entries())
+        .sort(([a], [b]) => b.localeCompare(a))
+        .slice(0, 14)
+        .map(([date, list]) => {
+          const done = list.filter(r => r.is_completed);
+          const notDone = list.filter(r => !r.is_completed);
+          const nameOf = (r: any) => r.activities?.activity_name_th || r.goal_name_th || r.goal_name || '-';
+          const notes = list.map(r => r.notes).filter(Boolean).join(' / ');
+          return {
+            key: `rec-${date}`,
+            date,
+            title: `ทำกิจกรรม ${done.length}/${list.length} รายการ`,
+            detail: [
+              done.length > 0 ? `✓ ${done.map(nameOf).join(', ')}` : '',
+              notDone.length > 0 ? `✗ ${notDone.map(nameOf).join(', ')}` : '',
+              notes ? `📝 ${notes}` : '',
+            ].filter(Boolean).join('  |  ') || '-',
+          };
+        });
+    })(),
+    follow: followups.map((f, i, arr) => {
+      const no = arr.length - i;
+      const bp = (f.blood_pressure_sys && f.blood_pressure_dia) ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : null;
+      return {
+        key: `fu-${f.id ?? i}`,
+        date: f.followup_date,
+        title: `ติดตามผลครั้งที่ ${no}`,
+        detail: [
+          f.weight != null ? `⚖️ ${f.weight} กก.` : '',
+          f.waist_circumference != null ? `รอบเอว ${f.waist_circumference} ซม.` : '',
+          bp ? `🩸 BP ${bp}` : '',
+          f.blood_sugar_dtx != null ? `🍬 น้ำตาล ${f.blood_sugar_dtx}` : '',
+          f.confidence_score != null ? `💪 มั่นใจ ${f.confidence_score}/10` : '',
+        ].filter(Boolean).join(' | ') || '-',
+      };
+    }),
+  };
 
-// ============================================================
-// 🧰 Helper: ดึงข้อมูลแบบแบ่ง chunk (แก้ in filter limit 1000)
-// ============================================================
-async function fetchInChunks(
-  table: string,
-  select: string,
-  inColumn: string,
-  inValues: string[],
-  chunkSize = 900,
-  extraFilters?: Filter[]
-): Promise<any[]> {
-  const out: any[] = [];
-  for (let i = 0; i < inValues.length; i += chunkSize) {
-    const chunk = inValues.slice(i, i + chunkSize);
-    let query = supabase.from(table).select(select).in(inColumn, chunk);
-    extraFilters?.forEach((f) => {
-      if (f.type === 'gte') query = query.gte(f.column, f.value);
-      else if (f.type === 'lte') query = query.lte(f.column, f.value);
-      else query = query.eq(f.column, f.value);
-    });
-    const { data, error } = await query;
-    if (error) {
-      console.error(`❌ [fetchInChunks] ${table}:`, error);
-      continue;
-    }
-    if (data) out.push(...data);
-  }
-  return out;
-}
-
-// ============================================================
-// 🧰 Helper: ดึงข้อมูลแบบ Pagination (สำหรับ Watchlist)
-// ============================================================
-async function fetchPage(
-  table: string,
-  select: string,
-  filters: Filter[],
-  page: number,
-  pageSize: number,
-  orderBy?: { column: string; ascending: boolean }
-): Promise<{ data: any[]; count: number }> {
-  let query = supabase.from(table).select('*', { count: 'exact' });
+  const doneFlags = [
+    screenings.length > 0,
+    dreams.some(d => d.status === 'active'),
+    uniqueDays > 0,
+    goals.length > 0,
+    records.length > 0,
+    followups.length > 0,
+  ];
+  const firstIncomplete = doneFlags.indexOf(false);
   
-  filters.forEach((f) => {
-    if (f.type === 'in' && Array.isArray(f.value) && f.value.length > 0) {
-      query = query.in(f.column, f.value);
-    } else if (f.type === 'gte') {
-      query = query.gte(f.column, f.value);
-    } else if (f.type === 'lte') {
-      query = query.lte(f.column, f.value);
-    } else {
-      query = query.eq(f.column, f.value);
-    }
+  return STAGE_META.map((m, i) => {
+    const status: StageStatus = doneFlags[i] ? 'done' : (i === firstIncomplete ? 'active' : 'pending');
+    return { ...m, status, events: eventsByStage[m.id] || [] };
   });
-
-  if (orderBy) {
-    query = query.order(orderBy.column, { ascending: orderBy.ascending });
-  }
-
-  const from = page * pageSize;
-  const to = from + pageSize - 1;
-  query = query.range(from, to);
-
-  const { data, count, error } = await query;
-  if (error) {
-    console.error(`❌ [fetchPage] ${table}:`, error);
-    return { data: [], count: 0 };
-  }
-  return { data: data || [], count: count || 0 };
 }
 
-export default function CarePathwayDashboardPage() {
+function CarePathwayContent() {
   const router = useRouter();
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const patientId = params.id as string;
+
+  const fromParam = searchParams.get('from');
+  const [fromSource, setFromSource] = useState<string>('patients');
+
+  useEffect(() => {
+    if (fromParam) {
+      sessionStorage.setItem('care_pathway_from', fromParam);
+      setFromSource(fromParam);
+    } else {
+      const saved = sessionStorage.getItem('care_pathway_from');
+      setFromSource(saved || 'patients');
+    }
+  }, [fromParam]);
+
+  const handleBack = () => {
+    if (fromSource === 'care-pathway-dashboard') {
+      router.push('/admin/care-pathway-dashboard');
+    } else {
+      router.push('/admin/patients');
+    }
+  };
+
   const [user, setUser] = useState<any>(null);
-  const [userHospital, setUserHospital] = useState<any>(null);
+  const [patient, setPatient] = useState<any>(null);
+  const [stages, setStages] = useState<CareStage[]>([]);
+  const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
+  const [errorDetail, setErrorDetail] = useState('');
+  const [expanded, setExpanded] = useState<string[]>([]);
 
-  // Stats
-  const [stats, setStats] = useState({
-    total_patients: 0,
-    on_time_count: 0,
-    overdue_count: 0,
-    pam_increased: 0,
-    pam_decreased: 0,
-    active_recorders: 0,
-    repeat_recorders: 0,
-    obstacles_count: 0,
-    opportunities_count: 0,
-    other_count: 0,
-  });
-
-  // Watchlist + Pagination
-  const [overduePatients, setOverduePatients] = useState<WatchlistPatient[]>([]);
-  const [overdueTotal, setOverdueTotal] = useState(0);
-  const [overduePage, setOverduePage] = useState(0);
-  const overdueTotalPages = Math.max(1, Math.ceil(overdueTotal / PAGE_SIZE));
-
-  // Upcoming
-  const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointment[]>([]);
-  const [upcomingTotal, setUpcomingTotal] = useState(0);
-  const [selectedDays, setSelectedDays] = useState<number>(3);
-
-  // Scope
-  const [scope, setScope] = useState<'all' | 'mine'>('all');
-
-  // ============================================================
-  // 🔐 Session + Role
-  // ============================================================
   useEffect(() => {
     const userData = checkSession();
-    if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
+    if (!userData) { router.push('/admin/login'); return; }
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
-      router.push('/admin/login');
-      return;
+      alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
     }
     setUser(userData);
-    loadUserHospital(userData.id);
-    const initialScope = ['doctor', 'helper', 'osm'].includes(userData.role) ? 'mine' : 'all';
-    setScope(initialScope);
   }, [router]);
 
-  const loadUserHospital = async (userId: string) => {
+  const load = useCallback(async () => {
+    if (!user || !patientId) return;
+    setLoading(true);
+    const t0 = performance.now();
+    
     try {
-      const info = await getUserHospitalInfo(userId);
-      setUserHospital(info);
-    } catch (e) {
-      console.error('❌ [loadUserHospital]', e);
-    }
-  };
-
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
-  };
-
-  // ============================================================
-  // 📊 โหลดข้อมูลทั้งหมด
-  // ============================================================
-  const loadData = useCallback(
-    async (userData: any, currentScope: 'all' | 'mine', days: number, page: number) => {
-      setLoading(true);
-      const t0 = performance.now();
-      try {
-        const hospitalIds = await getAccessibleHospitalIds(userData.id);
-        const isSuper = isSuperAdmin(userData);
-
-        console.log('📊 [loadData] ขอบเขตสิทธิ์:', {
-          isSuper,
-          hospitalCount: hospitalIds.length,
-          scope: currentScope,
-          page,
-        });
-
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const thirtyDaysAgo = new Date(today);
-        thirtyDaysAgo.setDate(today.getDate() - 30);
-        const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-        const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
-        const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
-
-        // ---------- 1) ✅ นับจำนวนผู้ป่วยทั้งหมด (ใช้ count: 'exact') ----------
-        const patientCountFilters: Filter[] = [{ column: 'is_active', value: true }];
-        if (!isSuper && hospitalIds.length > 0) {
-          patientCountFilters.push({ column: 'hospital_id', value: hospitalIds, type: 'in' });
-        }
-        if (currentScope === 'mine') {
-          patientCountFilters.push({ column: 'coach_id', value: userData.id, type: 'eq' });
-        }
-
-        const totalPatients = await countExact('profiles', patientCountFilters);
-        console.log(`📊 [loadData] Total patients: ${totalPatients}`);
-
-        // ---------- 2) ดึง patient IDs ทั้งหมด (สำหรับ in filter) ----------
-        // ✅ ใช้ fetchInChunks เพราะอาจมีมากกว่า 1000 IDs
-        let allPatientIds: string[] = [];
-        if (totalPatients > 0) {
-          // ดึง IDs แบบ pagination (เฉพาะ id column)
-          let from = 0;
-          const chunkSize = 1000;
-          while (true) {
-            let query = supabase
-              .from('profiles')
-              .select('id')
-              .range(from, from + chunkSize - 1);
-            
-            patientCountFilters.forEach((f) => {
-              if (f.type === 'in' && Array.isArray(f.value) && f.value.length > 0) {
-                query = query.in(f.column, f.value);
-              } else if (f.type === 'gte') {
-                query = query.gte(f.column, f.value);
-              } else if (f.type === 'lte') {
-                query = query.lte(f.column, f.value);
-              } else {
-                query = query.eq(f.column, f.value);
-              }
-            });
-
-            const { data, error } = await query;
-            if (error) {
-              console.error('❌ [loadData] Error fetching patient IDs:', error);
-              break;
-            }
-            if (data) {
-              allPatientIds.push(...data.map((p: any) => p.id));
-            }
-            if (!data || data.length < chunkSize) break;
-            from += chunkSize;
-            if (from > 100000) break;
-          }
-        }
-
-        console.log(`📊 [loadData] Patient IDs fetched: ${allPatientIds.length}`);
-
-        // ---------- 3) ดึง followups ทั้งหมด (chunk) ----------
-        let allFollowups: any[] = [];
-        if (allPatientIds.length > 0) {
-          allFollowups = await fetchInChunks(
-            'appointment_followups',
-            'user_id, followup_date, adaptation_summary',
-            'user_id',
-            allPatientIds
-          );
-        }
-
-        // ---------- 4) คำนวณ On-time / Overdue ----------
-        const latestFollowupMap: Record<string, string> = {};
-        allFollowups.forEach((f: any) => {
-          const cur = latestFollowupMap[f.user_id];
-          if (!cur || new Date(f.followup_date) > new Date(cur)) {
-            latestFollowupMap[f.user_id] = f.followup_date;
-          }
-        });
-
-        // ดึงข้อมูลผู้ป่วยสำหรับ Watchlist (เฉพาะคนที่ overdue)
-        const overduePatientIds: string[] = [];
-        let onTime = 0;
-        let overdue = 0;
-
-        // ✅ วนลูปผ่าน allPatientIds (ซึ่งมีครบทุกคน)
-        for (const patientId of allPatientIds) {
-          const lastDateStr = latestFollowupMap[patientId];
-          if (!lastDateStr) {
-            overdue++;
-            overduePatientIds.push(patientId);
-          } else {
-            const diff = Math.floor((today.getTime() - new Date(lastDateStr).getTime()) / 86400000);
-            if (diff <= 30) {
-              onTime++;
-            } else {
-              overdue++;
-              overduePatientIds.push(patientId);
-            }
-          }
-        }
-
-        console.log(`📊 [loadData] On-time: ${onTime}, Overdue: ${overdue}`);
-
-        // ---------- 5) ดึง Watchlist แบบ Pagination ----------
-        // สร้าง filter สำหรับ overdue patients
-        const overdueFilters: Filter[] = [
-          { column: 'is_active', value: true },
-        ];
-        
-        if (!isSuper && hospitalIds.length > 0) {
-          overdueFilters.push({ column: 'hospital_id', value: hospitalIds, type: 'in' });
-        }
-        if (currentScope === 'mine') {
-          overdueFilters.push({ column: 'coach_id', value: userData.id, type: 'eq' });
-        }
-
-        // ✅ ใช้ View v_overdue_patients (ถ้ามี) หรือคำนวณเอง
-        // ถ้า View มี → ใช้ View (เร็วมาก)
-        // ถ้า View ไม่มี → ใช้วิธีเดิม (ช้าแต่ถูกต้อง)
-        
-        let watchlistData: any[] = [];
-        let watchlistTotal = 0;
-
-        try {
-          // ลองใช้ View ก่อน
-          let viewQuery = supabase
-            .from('v_overdue_patients')
-            .select('*', { count: 'exact' })
-            .order('days_overdue', { ascending: false });
-
-          if (currentScope === 'mine') {
-            viewQuery = viewQuery.eq('coach_id', userData.id);
-          } else if (!isSuper && hospitalIds.length > 0) {
-            viewQuery = viewQuery.in('hospital_id', hospitalIds);
-          }
-
-          const from = page * PAGE_SIZE;
-          const to = from + PAGE_SIZE - 1;
-          viewQuery = viewQuery.range(from, to);
-
-          const { data, count, error } = await viewQuery;
-          if (!error) {
-            watchlistData = data || [];
-            watchlistTotal = count || 0;
-            console.log(`📊 [loadData] Watchlist from View: ${watchlistTotal} total, page ${page + 1}`);
-          } else {
-            throw error;
-          }
-        } catch (viewError) {
-          console.warn('⚠️ [loadData] View failed, using fallback:', viewError);
-          
-          // Fallback: คำนวณเองจาก allPatientIds
-          // ดึงข้อมูลผู้ป่วยที่ overdue (เฉพาะหน้านี้)
-          const overdueIdsForPage = overduePatientIds.slice(
-            page * PAGE_SIZE,
-            (page + 1) * PAGE_SIZE
-          );
-
-          if (overdueIdsForPage.length > 0) {
-            const { data } = await supabase
-              .from('profiles')
-              .select('id, hospital_number, first_name, last_name, pam_level, hospital_id, coach_id')
-              .in('id', overdueIdsForPage);
-
-            watchlistData = (data || []).map((p: any) => ({
-              ...p,
-              last_followup: latestFollowupMap[p.id] || null,
-              days_overdue: latestFollowupMap[p.id]
-                ? Math.floor((today.getTime() - new Date(latestFollowupMap[p.id]).getTime()) / 86400000)
-                : 999,
-            }));
-          }
-          watchlistTotal = overduePatientIds.length;
-        }
-
-        // ดึงชื่อโรงพยาบาลและโค้ช
-        const hospitalIdsOfWatchlist = [...new Set(watchlistData.map((p: any) => p.hospital_id).filter(Boolean))] as string[];
-        const coachIdsOfWatchlist = [...new Set(watchlistData.map((p: any) => p.coach_id).filter(Boolean))] as string[];
-
-        const [hospData, coachData] = await Promise.all([
-          hospitalIdsOfWatchlist.length > 0
-            ? supabase.from('hospitals').select('id, name').in('id', hospitalIdsOfWatchlist)
-            : Promise.resolve({ data: [] }),
-          coachIdsOfWatchlist.length > 0
-            ? supabase.from('doctors').select('user_id, full_name_th').in('user_id', coachIdsOfWatchlist)
-            : Promise.resolve({ data: [] }),
-        ]);
-
-        const hospitalNameMap: Record<string, string> = {};
-        (hospData.data || []).forEach((h: any) => (hospitalNameMap[h.id] = h.name));
-
-        const coachNameMap: Record<string, string> = {};
-        (coachData.data || []).forEach((c: any) => (coachNameMap[c.user_id] = c.full_name_th));
-
-        const watchlistWithNames: WatchlistPatient[] = watchlistData.map((p: any) => ({
-          ...p,
-          hospital_name: hospitalNameMap[p.hospital_id] || '-',
-          coach_name: coachNameMap[p.coach_id] || null,
-        }));
-
-        setOverduePatients(watchlistWithNames);
-        setOverdueTotal(watchlistTotal);
-
-        setStats((s) => ({
-          ...s,
-          total_patients: totalPatients,
-          on_time_count: onTime,
-          overdue_count: overdue,
-        }));
-
-        // ---------- 6) เหตุผล 30 วัน ----------
-        const reasons = { obstacles: 0, opportunities: 0, other: 0 };
-        allFollowups.forEach((f: any) => {
-          if (new Date(f.followup_date) >= thirtyDaysAgo) {
-            if (f.adaptation_summary === 'obstacles') reasons.obstacles++;
-            else if (f.adaptation_summary === 'opportunities') reasons.opportunities++;
-            else if (f.adaptation_summary === 'other') reasons.other++;
-          }
-        });
-
-        // ---------- 7) Records 30 วัน ----------
-        let active = 0;
-        let repeat = 0;
-        if (allPatientIds.length > 0) {
-          const recentRecords = await fetchInChunks(
-            'records',
-            'user_id',
-            'user_id',
-            allPatientIds,
-            900,
-            [{ column: 'record_date', value: thirtyDaysAgoStr, type: 'gte' }]
-          );
-          const cnt: Record<string, number> = {};
-          recentRecords.forEach((r: any) => (cnt[r.user_id] = (cnt[r.user_id] || 0) + 1));
-          active = Object.keys(cnt).length;
-          repeat = Object.values(cnt).filter((c) => c > 1).length;
-        }
-
-        // ---------- 8) PAM เปลี่ยน ----------
-        let pamInc = 0;
-        let pamDec = 0;
-        if (allPatientIds.length > 0) {
-          const recentScreens = await fetchInChunks(
-            'screenings',
-            'user_id, screening_date, pam_total_score',
-            'user_id',
-            allPatientIds,
-            900,
-            [{ column: 'screening_date', value: startOfMonthStr, type: 'gte' }]
-          );
-          const byUser: Record<string, any[]> = {};
-          recentScreens.forEach((s: any) => {
-            if (!byUser[s.user_id]) byUser[s.user_id] = [];
-            byUser[s.user_id].push(s);
-          });
-          Object.values(byUser).forEach((screens) => {
-            if (screens.length >= 2) {
-              screens.sort((a, b) => new Date(b.screening_date).getTime() - new Date(a.screening_date).getTime());
-              if ((screens[0].pam_total_score ?? 0) > (screens[1].pam_total_score ?? 0)) pamInc++;
-              else if ((screens[0].pam_total_score ?? 0) < (screens[1].pam_total_score ?? 0)) pamDec++;
-            }
-          });
-        }
-
-        setStats((s) => ({
-          ...s,
-          pam_increased: pamInc,
-          pam_decreased: pamDec,
-          active_recorders: active,
-          repeat_recorders: repeat,
-          obstacles_count: reasons.obstacles,
-          opportunities_count: reasons.opportunities,
-          other_count: reasons.other,
-        }));
-
-        // ---------- 9) Upcoming ----------
-        const untilDate = new Date(today);
-        untilDate.setDate(today.getDate() + days);
-        const todayStr = today.toISOString().split('T')[0];
-        const untilStr = untilDate.toISOString().split('T')[0];
-
-        let upcomingQ = supabase
-          .from('v_upcoming_appointments')
-          .select('*')
-          .gte('appointment_date', todayStr)
-          .lte('appointment_date', untilStr)
-          .order('appointment_date', { ascending: true })
-          .limit(50);
-
-        let upcomingCountQ = supabase
-          .from('v_upcoming_appointments')
-          .select('*', { count: 'planned', head: true })
-          .gte('appointment_date', todayStr)
-          .lte('appointment_date', untilStr);
-
-        if (currentScope === 'mine') {
-          upcomingQ = upcomingQ.eq('coach_id', userData.id);
-          upcomingCountQ = upcomingCountQ.eq('coach_id', userData.id);
-        } else if (!isSuper && hospitalIds.length > 0) {
-          upcomingQ = upcomingQ.in('hospital_id', hospitalIds);
-          upcomingCountQ = upcomingCountQ.in('hospital_id', hospitalIds);
-        }
-
-        const [{ data: upData, error: upErr }, { count: upCount }] = await Promise.all([
-          upcomingQ,
-          upcomingCountQ,
-        ]);
-        if (upErr) throw upErr;
-        setUpcomingAppointments((upData || []) as UpcomingAppointment[]);
-        setUpcomingTotal(upCount || 0);
-
-        console.log(`✅ [loadData] เสร็จใน ${(performance.now() - t0).toFixed(0)}ms`, {
-          totalPatients,
-          onTime,
-          overdue,
-          pamInc,
-          pamDec,
-          upcoming: upCount,
-          watchlistTotal,
-        });
-      } catch (error) {
-        console.error('❌ [CarePathwayDashboard] Error:', error);
-      } finally {
-        setLoading(false);
+      // ✅ ดึงข้อมูลผู้ป่วย (เฉพาะฟิลด์ที่จำเป็น)
+      const { data: prof, error: e1 } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, hospital_number, pam_level, zone, age, bmi, hospital_id, coach_id')
+        .eq('id', patientId)
+        .maybeSingle();
+      
+      if (e1) throw new Error('profiles: ' + e1.message);
+      if (!prof) { 
+        setErrorDetail(`ไม่พบผู้ป่วย id: ${patientId}`); 
+        setErrorState('notfound'); 
+        return; 
       }
-    },
-    []
-  );
+      
+      if (!isSuperAdmin(user)) {
+        const ids = await getAccessibleHospitalIds(user.id);
+        if (prof.hospital_id && !ids.includes(prof.hospital_id)) { 
+          setErrorState('denied'); 
+          return; 
+        }
+      }
 
-  useEffect(() => {
-    if (user) loadData(user, scope, selectedDays, overduePage);
-  }, [user, scope, selectedDays, overduePage, loadData]);
+      // ✅ โหลดข้อมูลทั้งหมดแบบ parallel (พร้อมกัน)
+      const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes, recRes, fuRes] = await Promise.all([
+        prof.hospital_id
+          ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+        supabase.from('users').select('id_card').eq('id', patientId).maybeSingle(),
+        prof.coach_id
+          ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null } as any),
+        // ✅ screenings: ดึงเฉพาะฟิลด์ที่จำเป็น + limit
+        supabase.from('screenings')
+          .select('id, screening_date, pam_total_score, pam_level_result, proms_zone')
+          .eq('user_id', patientId)
+          .order('screening_date', { ascending: true })
+          .limit(50),
+        // ✅ dreams: ดึงเฉพาะฟิลด์ที่จำเป็น
+        supabase.from('patient_dreams')
+          .select('id, selected_date, status, dream_text, intention, confidence, method, image_urls')
+          .eq('user_id', patientId)
+          .order('created_at', { ascending: false })
+          .limit(20),
+        // ✅ goals: ดึงเฉพาะฟิลด์ที่จำเป็น
+        supabase.from('goals')
+          .select('id, round_number, created_at, goal_name_th, primary_goal_note, weekly_goal_note')
+          .eq('user_id', patientId)
+          .eq('goal_type', 'weekly_activity')
+          .in('status', ['active', 'archived'])
+          .order('round_number', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(100),
+        // ✅ records: ดึงเฉพาะฟิลด์ที่จำเป็น + limit
+        supabase.from('records')
+          .select('id, record_date, is_completed, notes, activity_id, activities(activity_code, activity_name_th)')
+          .eq('user_id', patientId)
+          .order('record_date', { ascending: false })
+          .limit(120),
+        // ✅ followups: ดึงเฉพาะฟิลด์ที่จำเป็น + limit
+        supabase.from('appointment_followups')
+          .select('id, followup_date, weight, waist_circumference, blood_pressure_sys, blood_pressure_dia, blood_sugar_dtx, confidence_score')
+          .eq('user_id', patientId)
+          .order('followup_date', { ascending: false })
+          .limit(30),
+      ]);
 
-  const switchScope = (s: 'all' | 'mine') => {
-    setScope(s);
-    setOverduePage(0);
-  };
+      if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
+      if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
+      if (recRes.error) console.warn('[CarePathway] records:', recRes.error.message);
+      if (fuRes.error) console.warn('[CarePathway] appointment_followups:', fuRes.error.message);
 
-  // ✅ ตัวช่วยสร้างเลขหน้า
-  const getOverduePageNumbers = () => {
-    const pages: (number | string)[] = [];
-    const maxVisible = 5;
-    if (overdueTotalPages <= maxVisible) {
-      for (let i = 0; i < overdueTotalPages; i++) pages.push(i);
-    } else if (overduePage < 3) {
-      for (let i = 0; i < maxVisible - 1; i++) pages.push(i);
-      pages.push('...');
-      pages.push(overdueTotalPages - 1);
-    } else if (overduePage > overdueTotalPages - 4) {
-      pages.push(0);
-      pages.push('...');
-      for (let i = overdueTotalPages - maxVisible + 1; i < overdueTotalPages; i++) pages.push(i);
-    } else {
-      pages.push(0);
-      pages.push('...');
-      for (let i = overduePage - 1; i <= overduePage + 1; i++) pages.push(i);
-      pages.push('...');
-      pages.push(overdueTotalPages - 1);
+      setRecords(recRes.data || []);
+      const p = {
+        ...prof,
+        hospitals: hospRes.data || null,
+        users: uRes.data || null,
+        coach_name: coachRes.data?.full_name_th || '-',
+      };
+      setPatient(p);
+      
+      const built = buildStages(
+        scrRes.data || [], 
+        drmRes.data || [], 
+        goalsRes.data || [], 
+        recRes.data || [], 
+        fuRes.data || []
+      );
+      setStages(built);
+      setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
+      setErrorState('none');
+      setErrorDetail('');
+      
+      const t1 = performance.now();
+      console.log(`✅ [CarePathway] Loaded in ${(t1 - t0).toFixed(0)}ms`);
+    } catch (e: any) {
+      console.error('❌ [CarePathway]', e);
+      setErrorDetail(e?.message || String(e));
+      setErrorState('notfound');
+    } finally {
+      setLoading(false);
     }
-    return pages;
-  };
+  }, [user, patientId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggle = (id: string) =>
+    setExpanded(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
+  const trialStats = (() => {
+    const total = records.length;
+    const done = records.filter(r => r.is_completed).length;
+    const days = uniqueDays;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { total, done, days, pct };
+  })();
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-600">กำลังโหลดข้อมูลภาพรวม...</p>
+          <p className="text-gray-600">กำลังโหลดเส้นทางดูแลสุขภาพ...</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 pb-12">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
-            <ArrowRight className="w-4 h-4 rotate-180" /> กลับ Dashboard
-          </button>
-
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-800">📊 ภาพรวม Care Pathway Dashboard</h1>
-              <p className="text-sm text-gray-500">สรุปผลการดูแลผู้ป่วยตามเส้นทางสุขภาพ (ข้อมูลย้อนหลัง 30 วัน)</p>
+  if (errorState !== 'none' || !patient) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center max-w-lg">
+          <AlertCircle className="w-16 h-16 mx-auto mb-4 text-red-300" />
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            {errorState === 'denied' ? 'ไม่มีสิทธิ์เข้าถึงข้อมูลผู้ป่วยนี้' : 'ไม่พบข้อมูลผู้ป่วย'}
+          </h2>
+          {errorDetail && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
+              <p className="text-xs font-semibold text-red-600 mb-1">รายละเอียดข้อผิดพลาด:</p>
+              <p className="text-xs text-red-700 font-mono break-all">{errorDetail}</p>
             </div>
+          )}
+          <div className="flex gap-2 justify-center">
+            <button onClick={() => load()} className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700">ลองใหม่</button>
+            <button onClick={handleBack} className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">กลับ</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-            <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm font-medium bg-white">
-                <button
-                  onClick={() => switchScope('all')}
-                  className={`px-4 py-2 transition-colors ${scope === 'all' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
-                  🏥 ทั้งหมด
-                </button>
-                <button
-                  onClick={() => switchScope('mine')}
-                  className={`px-4 py-2 transition-colors ${scope === 'mine' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
-                  👤 ในการดูแลของฉัน
-                </button>
+  const doneCount = stages.filter(s => s.status === 'done').length;
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-5xl mx-auto px-4 py-6">
+          <button onClick={handleBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
+            <ArrowLeft className="w-4 h-4" />
+            {fromSource === 'care-pathway-dashboard' ? 'กลับภาพรวม Care Pathway' : 'กลับหน้าผู้ป่วย'}
+          </button>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                <Route className="w-5 h-5 text-indigo-600" />
               </div>
-
-              <div className="text-right bg-gradient-to-l from-blue-50 to-indigo-50 px-4 py-3 rounded-xl border border-blue-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <UserCheck className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
-                    <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                          user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
-                    </p>
-                  </div>
-                </div>
-                {userHospital ? (
-                  <div className="border-t border-blue-200 pt-2 mt-2">
-                    <div className="flex items-center gap-1 mb-1">
-                      <Hospital className="w-3 h-3 text-blue-600" />
-                      <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {userHospital.type === 'main' ? (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
-                      ) : (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">🏥 ลูกข่าย</span>
-                      )}
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                          <Building2 className="w-3 h-3" />
-                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
-                )}
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800">เส้นทางสุขภาพผู้ป่วย (Care Pathway)</h1>
+                <p className="text-sm text-gray-500">แต่ละขั้นชี้ไปทำกิจกรรมของตัวเอง — ทำซ้ำได้</p>
               </div>
+            </div>
+            <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-semibold">
+              สำเร็จ {doneCount}/{stages.length} ขั้นตอน
+            </span>
+          </div>
+        </div>
+      </div>
 
-              <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg">
-                <LogOut className="w-4 h-4" /> ออกจากระบบ
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
+        {/* Patient Card */}
+        <div className="bg-white rounded-xl shadow-lg p-6 border">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <h2 className="text-xl font-bold text-gray-800">{patient.first_name} {patient.last_name}</h2>
+              <div className="flex flex-wrap gap-2 mt-2 text-xs">
+                <span className="px-2 py-1 bg-gray-100 rounded-full">HN: {patient.hospital_number || '-'}</span>
+                <span className="px-2 py-1 bg-gray-100 rounded-full font-mono">ID: {patient.users?.id_card || '-'}</span>
+                <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded-full">PAM: {patient.pam_level || 'L0'}</span>
+                <span className={`px-2 py-1 rounded-full ${
+                  patient.zone === 'Red Zone' ? 'bg-red-100 text-red-700' :
+                  patient.zone === 'Yellow Zone' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-green-100 text-green-700'
+                }`}>
+                  {patient.zone || 'Green Zone'}
+                </span>
+                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full">โค้ช: {patient.coach_name}</span>
+              </div>
+              <div className="flex flex-wrap gap-4 mt-3 text-sm text-gray-600">
+                <span className="flex items-center gap-1">
+                  <Building2 className="w-4 h-4 text-blue-500" />
+                  {patient.hospitals?.name || '-'}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Users className="w-4 h-4" />
+                  อายุ {patient.age || '-'} ปี | BMI {patient.bmi || '-'}
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => router.push(`/admin/patients/${patient.id}`)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg" title="ดูรายละเอียด">
+                <Eye className="w-5 h-5" />
+              </button>
+              <button onClick={() => router.push(`/admin/patients/${patient.id}/edit`)} className="p-2 text-green-600 hover:bg-green-50 rounded-lg" title="แก้ไข">
+                <Edit className="w-5 h-5" />
               </button>
             </div>
           </div>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {/* ใกล้ถึงวันนัด */}
+        {/* Stages */}
         <div>
-          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 flex-wrap">
-              <Calendar className="w-5 h-5 text-cyan-600" />
-              ผู้ป่วยใกล้ถึงวันนัด
-              <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-sm font-bold">{upcomingTotal} คน</span>
-              {scope === 'mine' && (
-                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
-              )}
-            </h2>
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">แสดงผู้ป่วยที่นัดภายใน:</label>
-              <select
-                value={selectedDays}
-                onChange={(e) => setSelectedDays(Number(e.target.value))}
-                className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-cyan-500"
-              >
-                <option value={1}>1 วัน</option>
-                <option value={2}>2 วัน</option>
-                <option value={3}>3 วัน</option>
-                <option value={4}>4 วัน</option>
-                <option value={5}>5 วัน</option>
-              </select>
-            </div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            {upcomingAppointments.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">
-                <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                <p>ไม่มีผู้ป่วยที่นัดหมายใน {selectedDays} วันนี้</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="px-6 py-3 text-left font-semibold text-gray-700">HN</th>
-                      <th className="px-6 py-3 text-left font-semibold text-gray-700">ชื่อ-นามสกุล</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">PAM</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">โรงพยาบาล</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">โค้ช</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">วันนัด</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">เหลือ</th>
-                      <th className="px-6 py-3 text-center font-semibold text-gray-700">จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {upcomingAppointments.map((a) => (
-                      <tr key={a.appointment_id} className="hover:bg-cyan-50/50 transition-colors">
-                        <td className="px-6 py-3 font-mono text-gray-600">{a.hospital_number}</td>
-                        <td className="px-6 py-3 font-medium text-gray-800">{a.first_name} {a.last_name}</td>
-                        <td className="px-6 py-3 text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                            a.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
-                              a.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
-                                a.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
-                                  'bg-red-100 text-red-700'
-                          }`}>{a.pam_level || 'L0'}</span>
-                        </td>
-                        <td className="px-6 py-3 text-center text-gray-600">{a.hospital_name}</td>
-                        <td className="px-6 py-3 text-center text-gray-600">{a.coach_name || '—'}</td>
-                        <td className="px-6 py-3 text-center">
-                          <span className="px-2 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-medium">
-                            {new Date(a.appointment_date).toLocaleDateString('th-TH')}
+          <h3 className="text-lg font-bold text-gray-800 mb-1">ขั้นตอนการดูแลสุขภาพ (Care Pathway)</h3>
+          <p className="text-sm text-gray-500 mb-4">แต่ละขั้นมีปุ่มไปทำกิจกรรมของตัวเอง + ดูย้อนหลังได้</p>
+          <div className="space-y-3">
+            {stages.map((stage) => {
+              const ui = STATUS_UI[stage.status];
+              const Icon = stage.icon;
+              const isOpen = expanded.includes(stage.id);
+              return (
+                <div key={stage.id} className={`rounded-xl border shadow-sm ${ui.card}`}>
+                  <button onClick={() => toggle(stage.id)} className="w-full flex items-center gap-4 p-4 text-left">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold shrink-0 ${ui.circle}`}>
+                      {stage.status === 'done' ? <CheckCircle2 className="w-5 h-5" /> : stage.no}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Icon className="w-4 h-4 text-gray-600 shrink-0" />
+                        <span className="font-semibold text-gray-800">{stage.no}. {stage.title}</span>
+                        {stage.events.length > 0 && (
+                          <span className="px-2 py-0.5 bg-white border border-gray-200 rounded-full text-[11px] text-gray-600">
+                            {stage.id === 'self' ? `ทำแบบประเมินแล้ว ${stage.events.length} ครั้ง` :
+                             stage.id === 'dream' ? `บันทึกความฝัน ${stage.events.length} ครั้ง` :
+                             stage.id === 'oneday' ? `บันทึกแล้ว ${uniqueDays} วัน` :
+                             stage.id === 'goals' ? `${stage.events.length} รอบเป้าหมาย` :
+                             stage.id === 'trial' ? `บันทึกแล้ว ${stage.events.length} วัน` :
+                             stage.id === 'follow' ? `ตามผลแล้ว ${stage.events.length} ครั้ง` :
+                             `${stage.events.length} รายการ`}
                           </span>
-                        </td>
-                        <td className="px-6 py-3 text-center">
-                          <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                            a.days_until <= 1 ? 'bg-red-100 text-red-700' :
-                              a.days_until <= 3 ? 'bg-orange-100 text-orange-700' :
-                                'bg-cyan-100 text-cyan-700'
-                          }`}>{a.days_until === 0 ? 'วันนี้!' : `${a.days_until} วัน`}</span>
-                        </td>
-                        <td className="px-6 py-3 text-center">
-                          <button
-                            onClick={() => router.push(`/admin/appointments/followup/new?patient_id=${a.patient_id}&appointment_id=${a.appointment_id}`)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 transition-colors"
-                          >
-                            <Clock className="w-3 h-3" /> ติดตาม
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* หมวดที่ 1 */}
-        <div>
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
-            <Users className="w-5 h-5 text-blue-600" /> หมวดที่ 1: สรุปตัวเลขภาพรวม
-            {scope === 'mine' && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
-            )}
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center"><Users className="w-6 h-6 text-blue-600" /></div>
-              <div><p className="text-sm text-gray-500">ผู้ป่วยในระบบ</p><p className="text-2xl font-bold text-gray-800">{stats.total_patients.toLocaleString()}</p></div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-4">
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center"><CalendarCheck className="w-6 h-6 text-green-600" /></div>
-              <div><p className="text-sm text-gray-500">มาตามนัด (≤30 วัน)</p><p className="text-2xl font-bold text-green-600">{stats.on_time_count.toLocaleString()}</p></div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-4">
-              <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center"><CalendarX className="w-6 h-6 text-red-600" /></div>
-              <div><p className="text-sm text-gray-500">เลยกำหนด (&gt;30 วัน)</p><p className="text-2xl font-bold text-red-600">{stats.overdue_count.toLocaleString()}</p></div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-4">
-              <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center"><TrendingUp className="w-6 h-6 text-emerald-600" /></div>
-              <div><p className="text-sm text-gray-500">PAM เพิ่มขึ้น (เดือนนี้)</p><p className="text-2xl font-bold text-emerald-600">{stats.pam_increased.toLocaleString()}</p></div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-4">
-              <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center"><TrendingDown className="w-6 h-6 text-rose-600" /></div>
-              <div><p className="text-sm text-gray-500">PAM ลดลง (เดือนนี้)</p><p className="text-2xl font-bold text-rose-600">{stats.pam_decreased.toLocaleString()}</p></div>
-            </div>
-          </div>
-          <div className="mt-3 text-xs text-gray-500 flex items-center gap-2">
-            <span>ตรวจสอบยอดรวม:</span>
-            <span className={`font-bold ${stats.on_time_count + stats.overdue_count === stats.total_patients ? 'text-green-600' : 'text-amber-600'}`}>
-              {stats.on_time_count + stats.overdue_count === stats.total_patients
-                ? `✅ ${stats.on_time_count} + ${stats.overdue_count} = ${stats.total_patients} ครบถ้วน`
-                : `⚠️ ${stats.on_time_count} + ${stats.overdue_count} ≠ ${stats.total_patients}`}
-            </span>
-          </div>
-        </div>
-
-        {/* หมวดที่ 2: Watchlist + Pagination */}
-        <div>
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
-            <AlertTriangle className="w-5 h-5 text-red-500" />
-            หมวดที่ 2: ผู้ป่วยที่ต้องให้ความสนใจ (เลยกำหนด &gt;30 วัน)
-            <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-bold">
-              ทั้งหมด {overdueTotal.toLocaleString()} คน
-            </span>
-            {scope === 'mine' && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
-            )}
-          </h2>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            {overduePatients.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">
-                <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-green-400" />
-                <p>ยอดเยี่ยม! ไม่มีผู้ป่วยที่เลยกำหนดการติดตาม</p>
-              </div>
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 border-b">
-                      <tr>
-                        <th className="px-6 py-3 text-left font-semibold text-gray-700">HN</th>
-                        <th className="px-6 py-3 text-left font-semibold text-gray-700">ชื่อ-นามสกุล</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">PAM Level</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">โรงพยาบาล</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">โค้ชผู้ดูแล</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">ติดตามล่าสุด</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">เลยกำหนด</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">จัดการ</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {overduePatients.map((p) => (
-                        <tr key={p.id} className="hover:bg-red-50/50 transition-colors">
-                          <td className="px-6 py-3 font-mono text-gray-600">{p.hospital_number}</td>
-                          <td className="px-6 py-3 font-medium text-gray-800">{p.first_name} {p.last_name}</td>
-                          <td className="px-6 py-3 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              p.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
-                                p.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
-                                  p.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
-                                    'bg-red-100 text-red-700'
-                            }`}>{p.pam_level || 'L0'}</span>
-                          </td>
-                          <td className="px-6 py-3 text-center text-gray-600">{p.hospital_name || '-'}</td>
-                          <td className="px-6 py-3 text-center text-gray-600">{p.coach_name || '—'}</td>
-                          <td className="px-6 py-3 text-center text-gray-600">
-                            {p.last_followup ? new Date(p.last_followup).toLocaleDateString('th-TH') : 'ไม่เคย'}
-                          </td>
-                          <td className="px-6 py-3 text-center">
-                            <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">
-                              <CalendarX className="w-3 h-3" />
-                              {p.days_overdue === 999 ? 'ไม่เคยติดตาม' : `${p.days_overdue} วัน`}
-                            </span>
-                          </td>
-                          <td className="px-6 py-3 text-center">
-                            <button
-                              onClick={() => router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors"
-                            >
-                              <Eye className="w-3 h-3" /> ดูรายละเอียด
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {overdueTotalPages > 1 && (
-                  <div className="px-6 py-4 border-t bg-gray-50 flex items-center justify-between flex-wrap gap-4">
-                    <div className="text-sm text-gray-600">
-                      แสดง {overduePage * PAGE_SIZE + 1} - {Math.min((overduePage + 1) * PAGE_SIZE, overdueTotal)} จาก {overdueTotal.toLocaleString()} คน
-                      <span className="text-gray-400 ml-2">(หน้า {overduePage + 1} / {overdueTotalPages})</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setOverduePage(0)}
-                        disabled={overduePage === 0}
-                        className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="หน้าแรก"
-                      >
-                        <ChevronsLeft className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setOverduePage(p => Math.max(0, p - 1))}
-                        disabled={overduePage === 0}
-                        className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-1"
-                      >
-                        <ChevronLeft className="w-4 h-4" /> ก่อนหน้า
-                      </button>
-                      <div className="flex gap-1">
-                        {getOverduePageNumbers().map((pageNum, idx) => {
-                          if (pageNum === '...') {
-                            return <span key={`ellipsis-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
-                          }
-                          const p = pageNum as number;
-                          return (
-                            <button
-                              key={p}
-                              onClick={() => setOverduePage(p)}
-                              className={`px-3 py-2 rounded-lg text-sm font-medium ${
-                                overduePage === p ? 'bg-blue-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              {p + 1}
-                            </button>
-                          );
-                        })}
+                        )}
                       </div>
-                      <button
-                        onClick={() => setOverduePage(p => Math.min(overdueTotalPages - 1, p + 1))}
-                        disabled={overduePage >= overdueTotalPages - 1}
-                        className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-1"
-                      >
-                        ถัดไป <ChevronRight className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setOverduePage(overdueTotalPages - 1)}
-                        disabled={overduePage >= overdueTotalPages - 1}
-                        className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        title="หน้าสุดท้าย"
-                      >
-                        <ChevronsRight className="w-4 h-4" />
-                      </button>
+                      <p className="text-sm text-gray-500 truncate">{stage.description}</p>
                     </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* หมวดที่ 3 */}
-        <div>
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-            <Repeat className="w-5 h-5 text-purple-600" /> หมวดที่ 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน)
-          </h2>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="text-md font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-blue-500" /> สถิติการบันทึกกิจกรรมซ้ำ
-              </h3>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <div>
-                    <p className="text-sm text-blue-800 font-medium">ผู้ป่วยที่บันทึกกิจกรรม</p>
-                    <p className="text-xs text-blue-600">มีอย่างน้อย 1 ครั้งในเดือนนี้</p>
-                  </div>
-                  <p className="text-3xl font-bold text-blue-700">{stats.active_recorders.toLocaleString()}</p>
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold shrink-0 ${ui.badge}`}>
+                      {ui.label}
+                    </span>
+                    <span className="text-gray-400 text-sm shrink-0">{isOpen ? '▾' : '▸'}</span>
+                  </button>
+                  
+                  {isOpen && (
+                    <div className="px-4 pb-4 pl-16">
+                      {stage.id === 'trial' && trialStats.total > 0 && (
+                        <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <div className="bg-white border rounded-lg p-2 text-center">
+                            <p className="text-[10px] text-gray-500">บันทึกทั้งหมด</p>
+                            <p className="text-lg font-bold text-gray-800">{trialStats.total}</p>
+                          </div>
+                          <div className="bg-white border rounded-lg p-2 text-center">
+                            <p className="text-[10px] text-gray-500">ทำได้</p>
+                            <p className="text-lg font-bold text-green-600">{trialStats.done}</p>
+                          </div>
+                          <div className="bg-white border rounded-lg p-2 text-center">
+                            <p className="text-[10px] text-gray-500">วันที่บันทึก</p>
+                            <p className="text-lg font-bold text-blue-600">{trialStats.days} วัน</p>
+                          </div>
+                          <div className="bg-white border rounded-lg p-2 text-center">
+                            <p className="text-[10px] text-gray-500">อัตราสำเร็จ</p>
+                            <p className={`text-lg font-bold ${trialStats.pct >= 70 ? 'text-green-600' : trialStats.pct >= 40 ? 'text-yellow-600' : 'text-red-600'}`}>
+                              {trialStats.pct}%
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {stage.events.length === 0 ? (
+                        <p className="text-sm text-gray-400 italic mb-3">
+                          {stage.id === 'trial' || stage.id === 'oneday'
+                            ? '— ยังไม่มีบันทึกกิจกรรมรายวัน (ผู้ป่วยยังไม่ได้ทำจากมือถือ) —'
+                            : stage.id === 'follow'
+                              ? '— ยังไม่มีประวัติการตามผล —'
+                              : '— ยังไม่มีบันทึกในขั้นนี้ —'}
+                        </p>
+                      ) : (
+                        <div className="space-y-2 mb-3">
+                          {stage.events.map((ev) => (
+                            <div key={ev.key} className="bg-white rounded-lg border p-3">
+                              <p className="text-sm font-medium text-gray-800">{ev.title}</p>
+                              <p className="text-xs text-gray-500">{ev.detail}</p>
+                              <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {formatThaiDate(ev.date)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      
+                      <div className="flex gap-2 flex-wrap">
+                        <button
+                          onClick={() => router.push(stage.actionUrl(patientId))}
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm"
+                        >
+                          <Plus className="w-4 h-4" />
+                          {stage.actionLabel}
+                        </button>
+                        <button
+                          onClick={() => router.push(stage.historyUrl(patientId))}
+                          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm"
+                        >
+                          <FileText className="w-4 h-4" />
+                          {stage.historyLabel}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
-                  <div>
-                    <p className="text-sm text-purple-800 font-medium">ผู้ป่วยที่บันทึกซ้ำ</p>
-                    <p className="text-xs text-purple-600">มีความสม่ำเสมอ (&gt;1 ครั้ง)</p>
-                  </div>
-                  <p className="text-3xl font-bold text-purple-700">{stats.repeat_recorders.toLocaleString()}</p>
-                </div>
-                {stats.active_recorders > 0 && (
-                  <div className="mt-2">
-                    <div className="flex justify-between text-xs text-gray-600 mb-1">
-                      <span>อัตราความสม่ำเสมอ</span>
-                      <span>{Math.round((stats.repeat_recorders / stats.active_recorders) * 100)}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2.5">
-                      <div
-                        className="bg-purple-500 h-2.5 rounded-full transition-all"
-                        style={{ width: `${(stats.repeat_recorders / stats.active_recorders) * 100}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <h3 className="text-md font-bold text-gray-800 mb-4 flex items-center gap-2">
-                <HelpCircle className="w-4 h-4 text-orange-500" /> สรุปเหตุผลจากการติดตาม
-              </h3>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-200">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                      <AlertTriangle className="w-4 h-4 text-red-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-red-800">พบอุปสรรค / ความกังวล</p>
-                      <p className="text-xs text-red-600">adaptation_summary = 'obstacles'</p>
-                    </div>
-                  </div>
-                  <span className="text-xl font-bold text-red-700">{stats.obstacles_count.toLocaleString()}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                      <TrendingUp className="w-4 h-4 text-green-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-green-800">พบโอกาส / ความก้าวหน้า</p>
-                      <p className="text-xs text-green-600">adaptation_summary = 'opportunities'</p>
-                    </div>
-                  </div>
-                  <span className="text-xl font-bold text-green-700">{stats.opportunities_count.toLocaleString()}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                      <HelpCircle className="w-4 h-4 text-gray-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">อื่นๆ</p>
-                      <p className="text-xs text-gray-600">adaptation_summary = 'other'</p>
-                    </div>
-                  </div>
-                  <span className="text-xl font-bold text-gray-700">{stats.other_count.toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
+              );
+            })}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ✅ Wrapper: useSearchParams ต้องอยู่ใน Suspense (กัน error ตอน build)
+export default function CarePathwayPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
+          <p className="text-gray-600">กำลังโหลด...</p>
+        </div>
+      </div>
+    }>
+      <CarePathwayContent />
+    </Suspense>
   );
 }
