@@ -1,18 +1,17 @@
 // app/admin/patients/[id]/dream/page.tsx
-// ✅ v4: ความฝันของฉัน — แก้ไขล่าสุด: 21 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. แสดง "รูปถ่ายความฝัน" ในการ์ดปัจจุบัน + ประวัติ (คลิกขยายได้)
-//    2. ถ้า public URL เปิดไม่ได้ → ระบบขอ Signed URL อัตโนมัติ (fallback)
-//    3. Badge ระบุชัด 📷 แบบกระดาษ / 🅰️ ออนไลน์
-//    4. เตือนเมื่อบันทึกแบบกระดาษแต่ไม่มีรูปแนบ
+// ✅ v4: แยกโหมด "ดูประวัติ" vs "ทำความฝันใหม่" ชัดเจน
+//    - ค่าเริ่มต้น: แสดงประวัติความฝัน + รูปภาพครบ
+//    - มีปุ่ม "เลือกความฝันใหม่" ในหน้าประวัติ
+//    - หาก URL มี ?mode=new หรือมากดปุ่ม → แสดงฟอร์มกรอก
+//    - บันทึกรสำเร็จ → กลับไปหน้าประวัติอัตโนมัติ
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { checkSession, isSuperAdmin, getAccessibleHospitalIds } from '@/lib/supabase/queries';
 import {
   ArrowLeft, Sparkles, Loader2, CheckCircle2, AlertCircle, Camera,
-  PenLine, RefreshCw, Eye, X, Image as ImageIcon, ImageOff, ZoomIn
+  PenLine, RefreshCw, Eye, X, Image as ImageIcon, ZoomIn, History, Plus
 } from 'lucide-react';
 
 // ---------- Helpers ----------
@@ -38,7 +37,7 @@ const compressImage = (file: File, maxDim = 1400, quality = 0.75): Promise<File>
       ctx?.drawImage(img, 0, 0, w, h);
       canvas.toBlob((blob) => {
         URL.revokeObjectURL(url);
-        if (blob) resolve(new File([blob], file.name.replace(/.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+        if (blob) resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
         else resolve(file);
       }, 'image/jpeg', quality);
     };
@@ -46,53 +45,6 @@ const compressImage = (file: File, maxDim = 1400, quality = 0.75): Promise<File>
     img.src = url;
   });
 };
-
-// ✅ ใหม่: แปลง public URL → path ใน bucket (สำหรับขอ signed URL สำรอง)
-const pathFromUrl = (url: string): string | null => {
-  try {
-    const u = new URL(url);
-    const marker = '/dream-images/';
-    const i = u.pathname.indexOf(marker);
-    if (i === -1) return null;
-    return decodeURIComponent(u.pathname.slice(i + marker.length));
-  } catch {
-    return null;
-  }
-};
-
-// ✅ ใหม่: คอมโพเนนต์แสดงรูปความฝัน (มี signed-URL fallback + placeholder)
-function DreamImage({ src, alt, className, onClick }: {
-  src: string; alt: string; className?: string; onClick?: () => void;
-}) {
-  const [current, setCurrent] = useState(src);
-  const [failed, setFailed] = useState(false);
-  const [tried, setTried] = useState(false);
-
-  useEffect(() => { setCurrent(src); setFailed(false); setTried(false); }, [src]);
-
-  const handleError = async () => {
-    if (!tried) {
-      setTried(true);
-      const path = pathFromUrl(src);
-      if (path) {
-        const { data } = await supabase.storage
-          .from('dream-images').createSignedUrl(path, 3600);
-        if (data?.signedUrl) { setCurrent(data.signedUrl); return; }
-      }
-    }
-    setFailed(true);
-  };
-
-  if (failed) {
-    return (
-      <div className={`${className || ''} bg-gray-100 flex flex-col items-center justify-center text-gray-400 border rounded-lg`}>
-        <ImageOff className="w-6 h-6" />
-        <span className="text-[10px] mt-1">รูปไม่แสดง</span>
-      </div>
-    );
-  }
-  return <img src={current} alt={alt} className={className} onError={handleError} loading="lazy" onClick={onClick} />;
-}
 
 // ---------- การ์ดความฝัน 6 ใบ ----------
 const DREAM_CARDS = [
@@ -114,32 +66,35 @@ interface Dream {
 export default function DreamPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const patientId = params.id as string;
+
+  // ✅ ตรวจสอบ mode จาก URL
+  const urlMode = searchParams.get('mode');
+  const [viewMode, setViewMode] = useState<'history' | 'create'>(urlMode === 'new' ? 'create' : 'history');
+
   const [user, setUser] = useState<any>(null);
   const [patient, setPatient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [errorState, setErrorState] = useState<'none' | 'notfound' | 'denied'>('none');
   const [errorDetail, setErrorDetail] = useState('');
 
-  // wizard
-  const [step, setStep] = useState<0 | 1>(0);
+  // ฟอร์ม
   const [method, setMethod] = useState<'online' | 'paper'>('online');
   const [selected, setSelected] = useState<string[]>([]);
   const [customDream, setCustomDream] = useState('');
   const [intention, setIntention] = useState('');
   const [reason, setReason] = useState('');
   const [confidence, setConfidence] = useState(5);
-
-  // รูป
   const [pendingFiles, setPendingFiles] = useState<{ file: File; preview: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // history
+  // ประวัติ
   const [activeDream, setActiveDream] = useState<Dream | null>(null);
   const [historyDreams, setHistoryDreams] = useState<Dream[]>([]);
 
-  // ✅ ใหม่: Lightbox ดูรูปขนาดใหญ่
+  // Lightbox
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   useEffect(() => {
@@ -178,7 +133,27 @@ export default function DreamPage() {
       setLoading(false);
     }
   }, [user, patientId]);
+
   useEffect(() => { load(); }, [load]);
+
+  // ✅ สลับไปโหมดสร้างความฝัน
+  const goCreate = () => {
+    setViewMode('create');
+    // reset form
+    setSelected([]); setCustomDream(''); setIntention(''); setReason('');
+    setConfidence(5); setMethod('online');
+    pendingFiles.forEach(p => URL.revokeObjectURL(p.preview));
+    setPendingFiles([]);
+  };
+
+  // ✅ กลับไปโหมดดูประวัติ
+  const goHistory = () => {
+    setViewMode('history');
+    pendingFiles.forEach(p => URL.revokeObjectURL(p.preview));
+    setPendingFiles([]);
+    // ลบ ?mode=new ออกจาก URL
+    router.replace(`/admin/patients/${patientId}/dream`);
+  };
 
   const addImages = (files: FileList | null) => {
     if (!files) return;
@@ -186,6 +161,7 @@ export default function DreamPage() {
     if (valid.length + pendingFiles.length > 6) { alert('แนบรูปได้สูงสุด 6 ใบ'); return; }
     setPendingFiles(prev => [...prev, ...valid.map(f => ({ file: f, preview: URL.createObjectURL(f) }))]);
   };
+
   const removeImage = (idx: number) => {
     setPendingFiles(prev => {
       URL.revokeObjectURL(prev[idx].preview);
@@ -220,6 +196,7 @@ export default function DreamPage() {
     if (customDream.trim()) fromCards.push(customDream.trim());
     return fromCards;
   };
+
   const canProceed = () => {
     if (method === 'online') return selectedTexts().length > 0;
     return pendingFiles.length > 0 || selectedTexts().length > 0;
@@ -259,22 +236,19 @@ export default function DreamPage() {
       if (error) throw error;
       pendingFiles.forEach(p => URL.revokeObjectURL(p.preview));
       setPendingFiles([]);
-      setStep(1);
+      alert('✅ บันทึกความฝันสำเร็จ!');
       await load();
+      goHistory(); // ✅ กลับไปหน้าประวัติอัตโนมัติ
     } catch (e: any) {
-      alert('❌ บันทึกไม่สำเร็จ: ' + (e?.message || '') + '\n💡 รัน SQL (ตาราง + bucket + policy) ครบแล้วหรือยัง?');
+      alert('❌ บันทึกไม่สำเร็จ: ' + (e?.message || ''));
     } finally {
       setSaving(false);
     }
   };
 
-  const resetWizard = () => {
-    setStep(0); setSelected([]); setCustomDream(''); setIntention('');
-    setReason(''); setConfidence(5); setMethod('online');
-    pendingFiles.forEach(p => URL.revokeObjectURL(p.preview));
-    setPendingFiles([]);
-  };
-
+  // ============================================================
+  // 🖥️ Render
+  // ============================================================
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -282,6 +256,7 @@ export default function DreamPage() {
       </div>
     );
   }
+
   if (errorState !== 'none' || !patient) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -315,9 +290,15 @@ export default function DreamPage() {
                 <p className="text-xs text-gray-500">{patient.first_name} {patient.last_name} | HN: {patient.hospital_number || '-'}</p>
               </div>
             </div>
-            {activeDream && step === 0 && (
-              <button onClick={resetWizard} className="flex items-center gap-1 px-3 py-1.5 bg-white border border-purple-300 text-purple-700 rounded-lg text-xs hover:bg-purple-50">
-                <RefreshCw className="w-3 h-3" /> เลือกความฝันใหม่
+            {/* ✅ ปุ่มสลับโหมด (แสดงเฉพาะในหน้าประวัติ) */}
+            {viewMode === 'history' && (
+              <button onClick={goCreate} className="flex items-center gap-1 px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs hover:bg-purple-600 shadow-sm">
+                <Plus className="w-3 h-3" /> เลือกความฝันใหม่
+              </button>
+            )}
+            {viewMode === 'create' && (
+              <button onClick={goHistory} className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-300 text-gray-700 rounded-lg text-xs hover:bg-gray-50">
+                <X className="w-3 h-3" /> ยกเลิก / ดูประวัติ
               </button>
             )}
           </div>
@@ -325,8 +306,120 @@ export default function DreamPage() {
       </div>
 
       <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-        {/* ===== จอ 0: เลือกการ์ด + กรอกข้อมูล ===== */}
-        {step === 0 && (
+
+        {/* ============================================================ */}
+        {/* ✅ โหมดที่ 1: ดูประวัติความฝัน (ค่าเริ่มต้น) */}
+        {/* ============================================================ */}
+        {viewMode === 'history' && (
+          <>
+            {/* ความฝันปัจจุบัน */}
+            <div className="bg-white rounded-2xl shadow-lg p-6 border">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                  <Eye className="w-5 h-5 text-purple-600" /> ความฝันปัจจุบัน
+                </h2>
+                {activeDream && (
+                  <button onClick={goCreate} className="flex items-center gap-1 px-3 py-1.5 bg-purple-500 text-white rounded-lg text-xs hover:bg-purple-600">
+                    <RefreshCw className="w-3 h-3" /> เลือกความฝันใหม่
+                  </button>
+                )}
+              </div>
+
+              {activeDream ? (
+                <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                    <span className="px-2 py-0.5 bg-purple-600 text-white rounded-full text-xs font-bold">✨ ปัจจุบัน</span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${activeDream.method === 'paper' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                      {activeDream.method === 'paper' ? '📷 แบบกระดาษ' : '🅰️ ออนไลน์'}
+                    </span>
+                    <span className="text-xs text-gray-500">{formatThaiDate(activeDream.selected_date)}</span>
+                  </div>
+                  <p className="text-lg font-bold text-gray-800 mb-2">"{activeDream.dream_text}"</p>
+                  {activeDream.intention && <p className="text-sm text-gray-700">🎯 {activeDream.intention}</p>}
+                  {activeDream.reason && <p className="text-sm text-gray-600 mt-1">💬 {activeDream.reason}</p>}
+                  {activeDream.confidence != null && <p className="text-sm text-purple-700 mt-1">ความมั่นใจ {activeDream.confidence}/10</p>}
+
+                  {/* ✅ แสดงรูปภาพทั้งหมดแบบ grid */}
+                  {activeDream.image_urls?.length > 0 ? (
+                    <div className="mt-3">
+                      <p className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
+                        <Camera className="w-3.5 h-3.5" /> รูปประกอบ {activeDream.image_urls.length} ใบ — แตะเพื่อดูขนาดใหญ่
+                      </p>
+                      <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                        {activeDream.image_urls.map((u, i) => (
+                          <div key={i} className="relative group">
+                            <img src={u} alt={`ใบ ${i + 1}`}
+                              className="w-full h-28 object-cover rounded-lg border cursor-pointer hover:opacity-90 transition"
+                              onClick={() => setLightbox(u)} />
+                            <span className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/50 text-white rounded text-[10px] flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                              <ZoomIn className="w-3 h-3" />
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : activeDream.method === 'paper' ? (
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-xs text-amber-800">บันทึกแบบกระดาษ แต่<strong>ไม่มีรูปแนบ</strong> — กด "เลือกความฝันใหม่" เพื่อแนบรูปอีกครั้ง</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="text-center py-6 bg-gray-50 rounded-xl border border-dashed">
+                  <Sparkles className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                  <p className="text-gray-500 text-sm mb-3">ยังไม่มีบันทึกความฝัน</p>
+                  <button onClick={goCreate} className="px-6 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600">
+                    เริ่มเลือกความฝันครั้งแรก
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* ประวัติความฝันเก่า */}
+            {historyDreams.length > 0 && (
+              <div className="bg-white rounded-2xl shadow-lg p-6 border">
+                <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                  <History className="w-5 h-5 text-gray-600" /> ประวัติความฝัน ({historyDreams.length})
+                </h2>
+                <div className="space-y-3">
+                  {historyDreams.map(d => (
+                    <div key={d.id} className="bg-gray-50 border rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <span className="px-2 py-0.5 bg-gray-200 text-gray-600 rounded-full text-[10px] font-bold shrink-0 mt-0.5">เดิม</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-800">"{d.dream_text}"</p>
+                          {d.intention && <p className="text-xs text-gray-600 mt-1">🎯 {d.intention}</p>}
+                          <p className="text-xs text-gray-400 mt-1">
+                            {formatThaiDate(d.selected_date)} · {d.method === 'paper' ? '📷 แบบกระดาษ' : '🅰️ ออนไลน์'}
+                            {d.confidence != null ? ` · ความมั่นใจ ${d.confidence}/10` : ''}
+                            {d.image_urls?.length ? ` · ${d.image_urls.length} รูป` : ''}
+                          </p>
+                        </div>
+                        {/* ✅ thumbnail รูปแรก + badge จำนวนรูปที่เหลือ */}
+                        {d.image_urls?.length > 0 && (
+                          <button onClick={() => setLightbox(d.image_urls[0])} className="relative shrink-0">
+                            <img src={d.image_urls[0]} alt="" className="w-14 h-14 object-cover rounded border cursor-pointer hover:opacity-80" />
+                            {d.image_urls.length > 1 && (
+                              <span className="absolute -bottom-1 -right-1 px-1.5 py-0.5 bg-purple-600 text-white rounded text-[9px] font-bold">
+                                +{d.image_urls.length - 1}
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ============================================================ */}
+        {/* ✅ โหมดที่ 2: ฟอร์มเลือกความฝันใหม่ */}
+        {/* ============================================================ */}
+        {viewMode === 'create' && (
           <>
             {/* วิธีบันทึก */}
             <div className="bg-white rounded-2xl shadow-lg p-6 border">
@@ -434,121 +527,9 @@ export default function DreamPage() {
             </button>
           </>
         )}
-
-        {/* ===== จอ 1: สำเร็จ ===== */}
-        {step === 1 && (
-          <div className="bg-white rounded-2xl shadow-lg p-8 text-center border">
-            <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center">
-              <CheckCircle2 className="w-10 h-10 text-green-600" />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">บันทึกความฝันสำเร็จ! 🎉</h2>
-            <p className="text-gray-600 mb-6">ความฝันของ {patient.first_name} ถูกเก็บไว้ในเส้นทางสุขภาพแล้ว</p>
-            <div className="flex gap-3">
-              <button onClick={() => router.push(`/admin/patients/${patientId}/care-pathway`)} className="flex-1 py-3 bg-purple-500 text-white font-bold rounded-xl hover:bg-purple-600">กลับ Care Pathway</button>
-              <button onClick={resetWizard} className="px-6 py-3 bg-white border border-purple-300 text-purple-700 rounded-xl hover:bg-purple-50">เลือกใหม่</button>
-            </div>
-          </div>
-        )}
-
-        {/* ===== ความฝันของฉัน (ดูได้ตลอด) ===== */}
-        {step === 0 && (
-          <div className="bg-white rounded-2xl shadow-lg p-6 border">
-            <h2 className="text-lg font-bold text-gray-800 mb-1 flex items-center gap-2">
-              <Eye className="w-5 h-5 text-purple-600" /> ความฝันของฉัน
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">ความฝันปัจจุบัน + ประวัติ (เลือกใหม่ได้เสมอ)</p>
-
-            {activeDream ? (
-              <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-xl p-5 mb-4">
-                <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 bg-purple-600 text-white rounded-full text-xs font-bold">ปัจจุบัน</span>
-                    {/* ✅ Badge ระบุวิธีบันทึกชัดเจน */}
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                      activeDream.method === 'paper' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
-                    }`}>
-                      {activeDream.method === 'paper' ? '📷 แบบกระดาษ' : '🅰️ ออนไลน์'}
-                    </span>
-                  </div>
-                  <span className="text-xs text-gray-500">{formatThaiDate(activeDream.selected_date)}</span>
-                </div>
-                <p className="text-lg font-bold text-gray-800 mb-2">"{activeDream.dream_text}"</p>
-                {activeDream.intention && <p className="text-sm text-gray-700">🎯 {activeDream.intention}</p>}
-                {activeDream.reason && <p className="text-sm text-gray-600 mt-1">💬 {activeDream.reason}</p>}
-                {activeDream.confidence != null && <p className="text-sm text-purple-700 mt-1">ความมั่นใจ {activeDream.confidence}/10</p>}
-
-                {/* ✅ ใหม่: แสดงรูปถ่ายความฝัน */}
-                {activeDream.method === 'paper' && (activeDream.image_urls?.length || 0) === 0 ? (
-                  <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <p className="text-xs text-amber-800">
-                      บันทึกแบบกระดาษ แต่<strong>ไม่มีรูปแนบ</strong> (อัปโหลดไม่สำเร็จ) — กด "เลือกความฝันใหม่" เพื่อแนบรูปอีกครั้ง
-                    </p>
-                  </div>
-                ) : (activeDream.image_urls?.length || 0) > 0 ? (
-                  <div className="mt-3">
-                    <p className="text-xs font-semibold text-purple-700 mb-2 flex items-center gap-1">
-                      <Camera className="w-3.5 h-3.5" /> รูปถ่ายความฝัน {activeDream.image_urls.length} ใบ — แตะเพื่อดูขนาดใหญ่
-                    </p>
-                    <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                      {activeDream.image_urls.map((u, i) => (
-                        <div key={i} className="relative">
-                          <DreamImage src={u} alt={`ใบ ${i + 1}`}
-                            className="w-full h-28 object-cover rounded-lg border cursor-pointer hover:opacity-90"
-                            onClick={() => setLightbox(u)} />
-                          <span className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/50 text-white rounded text-[10px] flex items-center gap-1">
-                            <ZoomIn className="w-3 h-3" />
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="text-center py-6 bg-gray-50 rounded-xl border border-dashed mb-4">
-                <p className="text-gray-500 text-sm">ยังไม่มีความฝัน — กรอกข้อมูลด้านบนแล้วกดบันทึก</p>
-              </div>
-            )}
-
-            {/* ✅ ใหม่: ประวัติ + thumbnail รูป */}
-            {historyDreams.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">ประวัติความฝัน ({historyDreams.length})</p>
-                <div className="space-y-2">
-                  {historyDreams.map(d => (
-                    <div key={d.id} className="bg-gray-50 border rounded-lg p-3">
-                      <div className="flex items-start gap-3">
-                        <span className="px-2 py-0.5 bg-gray-200 text-gray-600 rounded-full text-[10px] font-bold shrink-0 mt-0.5">เดิม</span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-gray-700">"{d.dream_text}"</p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {formatThaiDate(d.selected_date)} · {d.method === 'paper' ? '📷 แบบกระดาษ' : '🅰️ ออนไลน์'}
-                            {d.image_urls?.length ? ` · ${d.image_urls.length} รูป` : ''}
-                          </p>
-                        </div>
-                        {d.image_urls?.length > 0 && (
-                          <button onClick={() => setLightbox(d.image_urls[0])} className="relative shrink-0">
-                            <DreamImage src={d.image_urls[0]} alt="thumb"
-                              className="w-12 h-12 object-cover rounded border cursor-pointer hover:opacity-80" />
-                            {d.image_urls.length > 1 && (
-                              <span className="absolute -bottom-1 -right-1 px-1 py-0.5 bg-purple-600 text-white rounded text-[9px] font-bold">
-                                +{d.image_urls.length - 1}
-                              </span>
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* ✅ ใหม่: Lightbox ดูรูปขนาดใหญ่ */}
+      {/* ✅ Lightbox ดูรูปขนาดใหญ่ */}
       {lightbox && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
           <button className="absolute top-4 right-4 p-2 bg-white/20 text-white rounded-full hover:bg-white/30" onClick={() => setLightbox(null)}>
