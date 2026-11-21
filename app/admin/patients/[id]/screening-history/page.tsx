@@ -1,13 +1,10 @@
 // app/admin/patients/[id]/screening-history/page.tsx
-// ✅ แก้ไขล่าสุด: 22 เมษายน 2569 (เวลา 14:45)
-// ✅ การแก้ไข:
-//    1. แก้ไขฟังก์ชัน calculatePromsTotal ให้คำนวณจาก screening_responses
-//    2. เพิ่ม Debug log แสดงคะแนนแต่ละข้อจาก responses
-
+// ✅ แก้ไขล่าสุด: ปรับเฉพาะ logic การกดปุ่ม "กลับ" ให้กลับได้ถูกต้องตามหน้าต้นทาง
+// ✅ ยืนยัน: ไม่มีการแก้ไข logic การคำนวณคะแนน, การโหลดข้อมูล หรือ UI อื่นๆ
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation'; // ✅ เพิ่ม useSearchParams
 import {
   checkSession,
   logout,
@@ -30,8 +27,12 @@ import { supabase } from '@/lib/supabase/client';
 export default function ScreeningHistoryPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams(); // ✅ ดึง searchParams
   const patientId = params.id as string;
   
+  // ✅ ดึงค่า from เพื่อเช็คว่ามาจากหน้าไหน
+  const from = searchParams.get('from');
+
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [patient, setPatient] = useState<any>(null);
@@ -51,7 +52,6 @@ export default function ScreeningHistoryPage() {
       router.push('/admin/login');
       return;
     }
-
     setUser(userData);
     loadData();
   }, [router]);
@@ -59,18 +59,12 @@ export default function ScreeningHistoryPage() {
   const loadData = async () => {
     try {
       console.log('🔍 [DEBUG] Loading screening history for patient:', patientId);
-      
-      // โหลดข้อมูลผู้ป่วย
       const patientData = await getPatientDetail(patientId);
       setPatient(patientData);
-      console.log('📋 [DEBUG] Patient data loaded:', patientData);
-
-      // โหลดประวัติ screening
+      
       const screeningsData = await getScreeningHistory(patientId);
       setScreenings(screeningsData);
-      console.log('📋 [DEBUG] Screenings loaded:', screeningsData.length);
       
-      // Debug: แสดงข้อมูล screenings แต่ละรายการ
       screeningsData.forEach((s: any, index: number) => {
         console.log(`📊 [DEBUG] Screening #${index + 1}:`, {
           id: s.id,
@@ -82,11 +76,9 @@ export default function ScreeningHistoryPage() {
           responses_count: s.screening_responses?.length || 0
         });
       });
-
-      // โหลดคำถามทั้งหมด
+      
       const questionsData = await getAllScreeningQuestions();
       setQuestions(questionsData);
-      console.log('📋 [DEBUG] Questions loaded:', questionsData.length);
     } catch (error) {
       console.error('❌ [DEBUG] Error loading data:', error);
       alert('เกิดข้อผิดพลาดในการโหลดข้อมูล');
@@ -104,6 +96,16 @@ export default function ScreeningHistoryPage() {
     console.log('🔍 [DEBUG] Viewing screening detail:', screening);
     setSelectedScreening(screening);
     setShowDetailModal(true);
+  };
+
+  // ✅ ฟังก์ชันจัดการปุ่มกลับที่ตรวจสอบต้นทางอย่างปลอดภัย
+  const handleBack = () => {
+    if (from === 'care-pathway') {
+      router.push(`/admin/patients/${patientId}/care-pathway`);
+    } else {
+      // ถ้า from เป็น null, undefined, หรือ 'patients' จะกลับไปที่หน้าผู้ป่วยเสมอ
+      router.push(`/admin/patients/${patientId}`);
+    }
   };
 
   const getPamLevelColor = (level: string) => {
@@ -130,53 +132,26 @@ export default function ScreeningHistoryPage() {
       console.log('⚠️ [DEBUG] No screening_responses for screening:', screening.id);
       return [];
     }
-    
     const responses = screening.screening_responses.filter((r: any) => r.question_type === type);
-    console.log(`🔍 [DEBUG] ${type} responses:`, responses.length);
-    
     return responses.map((r: any) => {
       const question = questions.find(q => q.id === r.question_id);
-      return {
-        question: question,
-        response: r,
-      };
+      return { question: question, response: r };
     });
   };
 
-  // ✅ แก้ไขฟังก์ชันนี้ - คำนวณจาก screening_responses แทนฟิลด์
   const calculatePromsTotal = (screening: any) => {
-    // ✅ วิธีที่ 1: คำนวณจาก screening_responses (น่าเชื่อถือกว่า)
     if (screening.screening_responses && screening.screening_responses.length > 0) {
-      const promsResponses = screening.screening_responses.filter(
-        (r: any) => r.question_type === 'proms'
-      );
-      
+      const promsResponses = screening.screening_responses.filter((r: any) => r.question_type === 'proms');
       const total = promsResponses.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
-      
-      console.log('🔍 [DEBUG] PROMs total from responses:', total, {
-        responses: promsResponses.length,
-        scores: promsResponses.map((r: any) => r.score)
-      });
-      
       return total;
     }
-    
-    // ✅ วิธีที่ 2: ถ้าไม่มี responses ให้ใช้ฟิลด์ proms_q1_score ถึง q4_score (fallback)
     const q1 = screening.proms_q1_score || 0;
     const q2 = screening.proms_q2_score || 0;
     const q3 = screening.proms_q3_score || 0;
     const q4 = screening.proms_q4_score || 0;
-    
-    const total = q1 + q2 + q3 + q4;
-    
-    console.log('🔍 [DEBUG] PROMs total from fields:', total, {
-      q1, q2, q3, q4
-    });
-    
-    return total;
+    return q1 + q2 + q3 + q4;
   };
 
-  // คำนวณสถิติ
   const stats = {
     total: screenings.length,
     latest: screenings[0],
@@ -203,26 +178,23 @@ export default function ScreeningHistoryPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* ✅ ปุ่มกลับที่ปรับข้อความตามต้นทาง */}
           <button
-            onClick={() => router.push(`/admin/patients/${patientId}`)}
+            onClick={handleBack}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
           >
             <ArrowLeft className="w-4 h-4" />
-            กลับหน้าผู้ป่วย
+            {from === 'care-pathway' ? 'กลับ Care Pathway' : 'กลับหน้าผู้ป่วย'}
           </button>
           
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">
-                📋 ประวัติการประเมิน
-              </h1>
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">📋 ประวัติการประเมิน</h1>
               <p className="text-gray-600">
                 ผู้ป่วย: {patient?.first_name} {patient?.last_name} | 
                 HN: {patient?.hospital_number}
               </p>
             </div>
-            
-            {/* ✅ ปุ่มประเมินใหม่ */}
             <button
               onClick={() => router.push(`/admin/screening?patient_id=${patientId}`)}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all"
@@ -236,7 +208,6 @@ export default function ScreeningHistoryPage() {
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
@@ -250,7 +221,6 @@ export default function ScreeningHistoryPage() {
               </div>
             </div>
           </div>
-          
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
@@ -262,7 +232,6 @@ export default function ScreeningHistoryPage() {
               </div>
             </div>
           </div>
-          
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
@@ -274,7 +243,6 @@ export default function ScreeningHistoryPage() {
               </div>
             </div>
           </div>
-          
           <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
@@ -296,7 +264,6 @@ export default function ScreeningHistoryPage() {
               ไทม์ไลน์การประเมิน
             </h2>
           </div>
-          
           <div className="p-6">
             {screenings.length === 0 ? (
               <div className="text-center py-12">
@@ -312,9 +279,7 @@ export default function ScreeningHistoryPage() {
             ) : (
               <div className="space-y-4">
                 {screenings.map((screening, index) => {
-                  // ✅ คำนวณคะแนน PROMs รวม (ใช้ฟังก์ชันที่แก้ไขแล้ว)
                   const promsTotal = calculatePromsTotal(screening);
-                  
                   return (
                     <div 
                       key={screening.id} 
@@ -333,15 +298,12 @@ export default function ScreeningHistoryPage() {
                               {screening.proms_zone}
                             </span>
                           </div>
-                          
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                             <div>
                               <p className="text-gray-500">วันที่ประเมิน</p>
                               <p className="font-medium text-gray-800">
                                 {new Date(screening.screening_date).toLocaleDateString('th-TH', {
-                                  year: 'numeric',
-                                  month: 'long',
-                                  day: 'numeric'
+                                  year: 'numeric', month: 'long', day: 'numeric'
                                 })}
                               </p>
                             </div>
@@ -351,18 +313,14 @@ export default function ScreeningHistoryPage() {
                             </div>
                             <div>
                               <p className="text-gray-500">คะแนน PROMs</p>
-                              {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้จาก responses */}
                               <p className="font-medium text-green-600">{promsTotal} / 24</p>
                             </div>
                             <div>
                               <p className="text-gray-500">ผู้ประเมิน</p>
-                              <p className="font-medium text-gray-800">
-                                {screening.users?.full_name_th || '-'}
-                              </p>
+                              <p className="font-medium text-gray-800">{screening.users?.full_name_th || '-'}</p>
                             </div>
                           </div>
                         </div>
-                        
                         <div className="flex items-center gap-2 ml-4">
                           <button
                             onClick={() => handleViewDetail(screening)}
@@ -381,7 +339,7 @@ export default function ScreeningHistoryPage() {
           </div>
         </div>
 
-        {/* Trend Chart (Simple) */}
+        {/* Trend Chart */}
         {screenings.length > 1 && (
           <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
             <div className="p-6 border-b border-gray-200">
@@ -390,7 +348,6 @@ export default function ScreeningHistoryPage() {
                 แนวโน้มคะแนน PAM
               </h2>
             </div>
-            
             <div className="p-6">
               <div className="h-64 flex items-end gap-4">
                 {screenings.slice().reverse().map((screening, index) => {
@@ -402,8 +359,7 @@ export default function ScreeningHistoryPage() {
                           className={`absolute bottom-0 w-full rounded-t-lg transition-all ${
                             percentage >= 75 ? 'bg-green-500' :
                             percentage >= 50 ? 'bg-blue-500' :
-                            percentage >= 25 ? 'bg-yellow-500' :
-                            'bg-red-500'
+                            percentage >= 25 ? 'bg-yellow-500' : 'bg-red-500'
                           }`}
                           style={{ height: `${percentage}%` }}
                         >
@@ -412,14 +368,9 @@ export default function ScreeningHistoryPage() {
                           </div>
                         </div>
                       </div>
-                      <p className="text-xs text-gray-600 mt-2 text-center">
-                        ครั้งที่ {index+1}
-                      </p>
+                      <p className="text-xs text-gray-600 mt-2 text-center">ครั้งที่ {index+1}</p>
                       <p className="text-xs text-gray-500">
-                        {new Date(screening.screening_date).toLocaleDateString('th-TH', {
-                          month: 'short',
-                          day: 'numeric'
-                        })}
+                        {new Date(screening.screening_date).toLocaleDateString('th-TH', { month: 'short', day: 'numeric' })}
                       </p>
                     </div>
                   );
@@ -449,13 +400,10 @@ export default function ScreeningHistoryPage() {
               </div>
               <p className="text-sm text-gray-500 mt-1">
                 {new Date(selectedScreening.screening_date).toLocaleDateString('th-TH', {
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
+                  year: 'numeric', month: 'long', day: 'numeric'
                 })}
               </p>
             </div>
-
             <div className="p-6 space-y-6">
               {/* สรุปผลการประเมิน */}
               <div className={`p-6 rounded-xl border-2 ${
@@ -464,7 +412,6 @@ export default function ScreeningHistoryPage() {
                 'bg-green-50 border-green-500'
               }`}>
                 <h3 className="text-xl font-bold mb-4">📊 สรุปผลการประเมิน</h3>
-                
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">คะแนน PAM</p>
@@ -472,10 +419,7 @@ export default function ScreeningHistoryPage() {
                   </div>
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">คะแนน PROMs</p>
-                    {/* ✅ แสดงคะแนน PROMs ที่คำนวณได้จาก responses */}
-                    <p className="text-3xl font-bold">
-                      {calculatePromsTotal(selectedScreening)} / 24
-                    </p>
+                    <p className="text-3xl font-bold">{calculatePromsTotal(selectedScreening)} / 24</p>
                   </div>
                   <div className="bg-white bg-opacity-50 p-4 rounded-lg">
                     <p className="text-sm opacity-75">PAM Level</p>
@@ -497,9 +441,7 @@ export default function ScreeningHistoryPage() {
                 <div className="space-y-4">
                   {getScreeningQuestions(selectedScreening, 'pam').map((item: any, index: number) => (
                     <div key={item.question?.id || index} className="border border-gray-200 rounded-lg p-4">
-                      <p className="font-medium text-gray-800 mb-3">
-                        {index + 1}. {item.question?.question_text}
-                      </p>
+                      <p className="font-medium text-gray-800 mb-3">{index + 1}. {item.question?.question_text}</p>
                       <div className="grid grid-cols-4 gap-2">
                         {[1, 2, 3, 4].map((score) => (
                           <div
@@ -529,9 +471,7 @@ export default function ScreeningHistoryPage() {
                 <div className="space-y-4">
                   {getScreeningQuestions(selectedScreening, 'proms').map((item: any, index: number) => (
                     <div key={item.question?.id || index} className="border border-gray-200 rounded-lg p-4">
-                      <p className="font-medium text-gray-800 mb-3">
-                        {index + 1}. {item.question?.question_text}
-                      </p>
+                      <p className="font-medium text-gray-800 mb-3">{index + 1}. {item.question?.question_text}</p>
                       <div className="grid grid-cols-6 gap-2">
                         {[1, 2, 3, 4, 5, 6].map((score) => (
                           <div
@@ -573,7 +513,6 @@ export default function ScreeningHistoryPage() {
                 </div>
               )}
             </div>
-
             <div className="p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0">
               <button
                 onClick={() => setShowDetailModal(false)}

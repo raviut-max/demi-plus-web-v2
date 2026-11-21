@@ -1,5 +1,5 @@
 // app/admin/patients/[id]/care-pathway/page.tsx
-// ✅ แก้ไขล่าสุด: ตรวจสอบให้ลิงก์ไปยัง Goals แนบ ?from=care-pathway ไปอย่างถูกต้อง
+// ✅ แก้ไขล่าสุด: เพิ่ม ?from=care-pathway ในลิงก์ไปหน้า screening-history
 'use client';
 import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -47,55 +47,55 @@ const STAGE_META = [
     description: 'ทำแบบประเมิน PAM / PROMS — แจ้งจำนวนครั้งที่ทำแล้ว และเพิ่มรอบใหม่ได้',
     icon: UserCheck,
     actionLabel:  '➕ เพิ่มรอบทำแบบประเมิน',
-    actionUrl: (p: string) => `/admin/screening?patient_id=${p}`,
+    actionUrl: (p: string) =>  `/admin/screening?patient_id=${p}` ,
     historyLabel: '📋 ดูประวัติการประเมิน',
-    historyUrl: (p: string) => `/admin/patients/${p}/screening-history`,
+    // ✅ แก้ไขตรงนี้: เพิ่ม ?from=care-pathway
+    historyUrl: (p: string) =>  `/admin/patients/${p}/screening-history?from=care-pathway` ,
   },
   {
     id: 'dream', no: 2, title: 'ความฝันของฉัน',
     description: 'ชี้ไปที่การทำความฝัน — เลือกการ์ดความฝัน บันทึก และดูย้อนหลังได้',
     icon: Sparkles,
-    actionLabel: '➕ เลือกความฝันใหม่',
-    actionUrl: (p: string) => `/admin/patients/${p}/dream`,
+    actionLabel: '➕ เลือกความฝันใหม่ ',
+    actionUrl: (p: string) =>  `/admin/patients/${p}/dream` ,
     historyLabel: '📋 ดูความฝันของฉัน',
-    historyUrl: (p: string) => `/admin/patients/${p}/dream`,
+    historyUrl: (p: string) =>  `/admin/patients/${p}/dream` ,
   },
   {
     id: 'oneday', no: 3, title: 'ชีวิต 1 วันของฉัน',
     description: 'สรุปกิจวัตรรายวันที่ผู้ป่วยบันทึก แยกตามระดับ PAM Level (L2/L3 หรือ L4)',
     icon: Activity,
     actionLabel: '➕ ดูสรุปชีวิต 1 วัน',
-    actionUrl: (p: string) => `/admin/patients/${p}/oneday?from=care-pathway`,
+    actionUrl: (p: string) =>  `/admin/patients/${p}/oneday?from=care-pathway` ,
     historyLabel: '📋 ดูย้อนหลัง',
-    historyUrl: (p: string) => `/admin/patients/${p}/oneday?from=care-pathway`,
+    historyUrl: (p: string) =>  `/admin/patients/${p}/oneday?from=care-pathway` ,
   },
   {
     id: 'goals', no: 4, title: 'เป้าหมายและแผนสุขภาพ',
     description: 'ตั้งเป้าหมายสุขภาพและแผนการปฏิบัติ — บันทึกเป็นรอบและดูประวัติได้',
     icon: Target,
     actionLabel: '➕ จัดการเป้าหมาย',
-    // ✅ แนบ ?from=care-pathway เพื่อให้หน้า Goals กลับมาถูกที่
-    actionUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
+    actionUrl: (p: string) =>  `/admin/patients/${p}/goals?from=care-pathway` ,
     historyLabel: '📋 ดูประวัติเป้าหมาย',
-    historyUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
+    historyUrl: (p: string) =>  `/admin/patients/${p}/goals?from=care-pathway` ,
   },
   {
     id: 'trial', no: 5, title: 'ทดลองทำ',
     description: 'ประวัติการทำตามเป้าหมาย — บันทึกกิจกรรมรายวัน (ทำได้/ไม่ได้ + หมายเหตุ)',
     icon: History,
-    actionLabel: '➕ ดูบันทึกกิจกรรม',
-    actionUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
+    actionLabel: '➕ ดูบันทึกกิจกรรม' ,
+    actionUrl: (p: string) =>  `/admin/patients/${p}/goals` ,
     historyLabel: '📋 ดูประวัติการทำ',
-    historyUrl: (p: string) => `/admin/patients/${p}/goals?from=care-pathway`,
+    historyUrl: (p: string) =>  `/admin/patients/${p}/goals` ,
   },
   {
     id: 'follow', no: 6, title: 'ติดตามต่อเนื่อง',
     description: 'การตามผลต่อเนื่อง — บันทึกน้ำหนัก ความดัน น้ำตาล ความมั่นใจ และแผนปฏิบัติ',
     icon: FileText,
     actionLabel: '➕ บันทึกการติดตามผล',
-    actionUrl: (p: string) => `/admin/appointments/followup/new?patient_id=${p}`,
+    actionUrl: (p: string) =>  `/admin/appointments/followup/new?patient_id=${p}` ,
     historyLabel: '📋 ดูประวัติการติดตามผล',
-    historyUrl: (p: string) => `/admin/patients/${p}/followup-history?from=care-pathway`,
+    historyUrl: (p: string) =>  `/admin/patients/${p}/followup-history?from=care-pathway` ,
   },
 ];
 
@@ -109,25 +109,25 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
   const uniqueDays = new Set(records.map(r => (r.record_date || '').slice(0, 10)).filter(Boolean)).size;
   const eventsByStage: Record<string, PathEvent[]> = {
     self: screenings.map((s, i) => ({
-      key: `scr-${s.id ?? i}`,
+      key:  `scr-${s.id ?? i}` ,
       date: s.screening_date,
-      title: `แบบประเมินครั้งที่ ${i + 1}`,
-      detail: `PAM: ${s.pam_total_score ?? '-'} | Level: ${s.pam_level_result || '-'} | Zone: ${s.proms_zone || '-'}`,
+      title:  `แบบประเมินครั้งที่ ${i + 1}` ,
+      detail:  `PAM: ${s.pam_total_score ?? '-'} | Level: ${s.pam_level_result || '-'} | Zone: ${s.proms_zone || '-'}` ,
     })),
     dream: dreams.map((d, i) => ({
-      key: `drm-${d.id ?? i}`,
+      key:  `drm-${d.id ?? i}` ,
       date: d.selected_date,
-      title: d.status === 'active' ? `ความฝันปัจจุบัน: "${d.dream_text}"` : `ความฝันเดิม: "${d.dream_text}"`,
+      title: d.status === 'active' ?  `ความฝันปัจจุบัน: "${d.dream_text}"`  :  `ความฝันเดิม: "${d.dream_text}"` ,
       detail: [
-        d.intention ? `🎯 ${d.intention}` : '',
-        d.confidence != null ? `ความมั่นใจ ${d.confidence}/10` : '',
-        d.method === 'paper' ? `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป` : '🅰️ ออนไลน์',
+        d.intention ?  `🎯 ${d.intention}`  : '',
+        d.confidence != null ?  `ความมั่นใจ ${d.confidence}/10`  : '',
+        d.method === 'paper' ?  `📷 แบบกระดาษ ${d.image_urls?.length || 0} รูป`  : '🅰️ ออนไลน์',
       ].filter(Boolean).join(' | ') || '-',
     })),
-    oneday: uniqueDays > 0 ? [{
+    oneday: uniqueDays  > 0 ? [{
       key: 'oneday-summary',
       date: records[0]?.record_date || null,
-      title: `มีการบันทึกกิจกรรมแล้ว ${uniqueDays} วัน`,
+      title:  `มีการบันทึกกิจกรรมแล้ว ${uniqueDays} วัน` ,
       detail: 'กดปุ่มด้านล่างเพื่อดูรายละเอียดแยกตามหมวดหมู่และวันที่',
     }] : [],
     goals: (() => {
@@ -138,15 +138,15 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
         roundsMap.get(round)!.push(g);
       });
       return Array.from(roundsMap.entries())
-        .sort(([a], [b]) => b - a)
+        .sort(([a], [b ]) => b - a)
         .map(([round, goalsList]) => ({
-          key: `goal-round-${round}`,
+          key:  `goal-round-${round}` ,
           date: goalsList[0]?.created_at,
-          title: `รอบที่ ${round} — ${goalsList.length} กิจกรรม`,
+          title:  `รอบที่ ${round} — ${goalsList.length} กิจกรรม` ,
           detail: [
-            goalsList[0]?.primary_goal_note ? `📝 ${goalsList[0].primary_goal_note}` : '',
-            goalsList[0]?.weekly_goal_note ? `📋 ${goalsList[0].weekly_goal_note}` : '',
-            `กิจกรรม: ${goalsList.map(g => g.goal_name_th).join(', ')}`,
+            goalsList[0]?.primary_goal_note ?  `📝 ${goalsList[0].primary_goal_note}`  : '',
+            goalsList[0]?.weekly_goal_note ?  `📋 ${goalsList[0].weekly_goal_note}`  : '',
+             `กิจกรรม: ${goalsList.map(g => g.goal_name_th).join(', ')}` ,
           ].filter(Boolean).join(' | ') || '-',
         }));
     })(),
@@ -159,7 +159,7 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
         byDate.get(d)!.push(r);
       });
       return Array.from(byDate.entries())
-        .sort(([a], [b]) => b.localeCompare(a))
+        .sort(([a],  [b]) => b.localeCompare(a))
         .slice(0, 14)
         .map(([date, list]) => {
           const done = list.filter(r => r.is_completed);
@@ -167,35 +167,34 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
           const nameOf = (r: any) => r.activities?.activity_name_th || r.goal_name_th || r.goal_name || '-';
           const notes = list.map(r => r.notes).filter(Boolean).join(' / ');
           return {
-            key: `rec-${date}`,
+            key:  `rec-${date}` ,
             date,
-            title: `ทำกิจกรรม ${done.length}/${list.length} รายการ`,
+            title:  `ทำกิจกรรม ${done.length}/${list.length} รายการ` ,
             detail: [
-              done.length > 0 ? `✓ ${done.map(nameOf).join(', ')}` : '',
-              notDone.length > 0 ? `✗ ${notDone.map(nameOf).join(', ')}` : '',
-              notes ? `📝 ${notes}` : '',
+              done.length  > 0 ?  `✓ ${done.map(nameOf).join(', ')}`  : '',
+              notDone.length  > 0 ?  `✗ ${notDone.map(nameOf).join(', ')}`  : '',
+              notes ?  `📝 ${notes}`  : '',
             ].filter(Boolean).join('  |  ') || '-',
           };
         });
     })(),
     follow: followups.map((f, i, arr) => {
       const no = arr.length - i;
-      const bp = (f.blood_pressure_sys && f.blood_pressure_dia) ? `${f.blood_pressure_sys}/${f.blood_pressure_dia}` : null;
+      const bp = (f.blood_pressure_sys  && f.blood_pressure_dia) ?  `${f.blood_pressure_sys}/${f.blood_pressure_dia}`  : null;
       return {
-        key: `fu-${f.id ?? i}`,
+        key:  `fu-${f.id ?? i}` ,
         date: f.followup_date,
-        title: `ติดตามผลครั้งที่ ${no}`,
+        title:  `ติดตามผลครั้งที่ ${no}` ,
         detail: [
-          f.weight != null ? `⚖️ ${f.weight} กก.` : '',
-          f.waist_circumference != null ? `รอบเอว ${f.waist_circumference} ซม.` : '',
-          bp ? `🩸 BP ${bp}` : '',
-          f.blood_sugar_dtx != null ? `🍬 น้ำตาล ${f.blood_sugar_dtx}` : '',
-          f.confidence_score != null ? `💪 มั่นใจ ${f.confidence_score}/10` : '',
+          f.weight != null ?  `⚖️ ${f.weight} กก.`  : '',
+          f.waist_circumference != null ?  `รอบเอว ${f.waist_circumference} ซม.`  : '',
+          bp ?  `🩸 BP ${bp}`  : '',
+          f.blood_sugar_dtx != null ?  `🍬 น้ำตาล ${f.blood_sugar_dtx}`  : '',
+          f.confidence_score != null ?  `💪 มั่นใจ ${f.confidence_score}/10`  : '',
         ].filter(Boolean).join(' | ') || '-',
       };
     }),
   };
-
   const doneFlags = [
     screenings.length > 0,
     dreams.some(d => d.status === 'active'),
@@ -205,7 +204,6 @@ function buildStages(screenings: any[], dreams: any[], goals: any[], records: an
     followups.length > 0,
   ];
   const firstIncomplete = doneFlags.indexOf(false);
-  
   return STAGE_META.map((m, i) => {
     const status: StageStatus = doneFlags[i] ? 'done' : (i === firstIncomplete ? 'active' : 'pending');
     return { ...m, status, events: eventsByStage[m.id] || [] };
@@ -217,7 +215,6 @@ function CarePathwayContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const patientId = params.id as string;
-
   const fromParam = searchParams.get('from');
   const [fromSource, setFromSource] = useState<string>('patients');
 
@@ -260,17 +257,26 @@ function CarePathwayContent() {
   const load = useCallback(async () => {
     if (!user || !patientId) return;
     setLoading(true);
+    const t0 = performance.now();
     try {
       const { data: prof, error: e1 } = await supabase
-        .from('profiles').select('*').eq('id', patientId).maybeSingle();
+        .from('profiles')
+        .select('id, first_name, last_name, hospital_number, pam_level, zone, age, bmi, hospital_id, coach_id')
+        .eq('id', patientId)
+        .maybeSingle();
       if (e1) throw new Error('profiles: ' + e1.message);
-      if (!prof) { setErrorDetail(`ไม่พบผู้ป่วย id: ${patientId}`); setErrorState('notfound'); return; }
-      
+      if (!prof) { 
+        setErrorDetail(`ไม่พบผู้ป่วย id: ${patientId}`); 
+        setErrorState('notfound'); 
+        return; 
+      }
       if (!isSuperAdmin(user)) {
         const ids = await getAccessibleHospitalIds(user.id);
-        if (prof.hospital_id && !ids.includes(prof.hospital_id)) { setErrorState('denied'); return; }
+        if (prof.hospital_id && !ids.includes(prof.hospital_id)) { 
+          setErrorState('denied'); 
+          return; 
+        }
       }
-
       const [hospRes, uRes, coachRes, scrRes, drmRes, goalsRes, recRes, fuRes] = await Promise.all([
         prof.hospital_id
           ? supabase.from('hospitals').select('id, name, type').eq('id', prof.hospital_id).maybeSingle()
@@ -279,29 +285,39 @@ function CarePathwayContent() {
         prof.coach_id
           ? supabase.from('doctors').select('full_name_th').eq('user_id', prof.coach_id).maybeSingle()
           : Promise.resolve({ data: null, error: null } as any),
-        supabase.from('screenings').select('*').eq('user_id', patientId).order('screening_date', { ascending: true }),
-        supabase.from('patient_dreams').select('*').eq('user_id', patientId).order('created_at', { ascending: false }),
+        supabase.from('screenings')
+          .select('id, screening_date, pam_total_score, pam_level_result, proms_zone')
+          .eq('user_id', patientId)
+          .order('screening_date', { ascending: true })
+          .limit(50),
+        supabase.from('patient_dreams')
+          .select('id, selected_date, status, dream_text, intention, confidence, method, image_urls')
+          .eq('user_id', patientId)
+          .order('created_at', { ascending: false })
+          .limit(20),
         supabase.from('goals')
-          .select('*').eq('user_id', patientId).eq('goal_type', 'weekly_activity')
+          .select('id, round_number, created_at, goal_name_th, primary_goal_note, weekly_goal_note')
+          .eq('user_id', patientId)
+          .eq('goal_type', 'weekly_activity')
           .in('status', ['active', 'archived'])
-          .order('round_number', { ascending: false }).order('created_at', { ascending: false }),
+          .order('round_number', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(100),
         supabase.from('records')
-          .select(`*, activities ( activity_code, activity_name_th )`)
+          .select('id, record_date, is_completed, notes, activity_id, activities(activity_code, activity_name_th)')
           .eq('user_id', patientId)
           .order('record_date', { ascending: false })
           .limit(120),
         supabase.from('appointment_followups')
-          .select('*')
+          .select('id, followup_date, weight, waist_circumference, blood_pressure_sys, blood_pressure_dia, blood_sugar_dtx, confidence_score')
           .eq('user_id', patientId)
           .order('followup_date', { ascending: false })
           .limit(30),
       ]);
-
       if (drmRes.error) console.warn('[CarePathway] patient_dreams:', drmRes.error.message);
       if (goalsRes.error) console.warn('[CarePathway] goals:', goalsRes.error.message);
       if (recRes.error) console.warn('[CarePathway] records:', recRes.error.message);
       if (fuRes.error) console.warn('[CarePathway] appointment_followups:', fuRes.error.message);
-
       setRecords(recRes.data || []);
       const p = {
         ...prof,
@@ -310,12 +326,13 @@ function CarePathwayContent() {
         coach_name: coachRes.data?.full_name_th || '-',
       };
       setPatient(p);
-      
       const built = buildStages(scrRes.data || [], drmRes.data || [], goalsRes.data || [], recRes.data || [], fuRes.data || []);
       setStages(built);
       setExpanded(built.filter(s => s.status !== 'pending').map(s => s.id));
       setErrorState('none');
       setErrorDetail('');
+      const t1 = performance.now();
+      console.log(`✅ [CarePathway] Loaded in ${(t1 - t0).toFixed(0)}ms`);
     } catch (e: any) {
       console.error('❌ [CarePathway]', e);
       setErrorDetail(e?.message || String(e));
@@ -358,7 +375,7 @@ function CarePathwayContent() {
           <h2 className="text-2xl font-bold text-gray-800 mb-2">
             {errorState === 'denied' ? 'ไม่มีสิทธิ์เข้าถึงข้อมูลผู้ป่วยนี้' : 'ไม่พบข้อมูลผู้ป่วย'}
           </h2>
-          {errorDetail && (
+          {errorDetail  && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-left">
               <p className="text-xs font-semibold text-red-600 mb-1">รายละเอียดข้อผิดพลาด:</p>
               <p className="text-xs text-red-700 font-mono break-all">{errorDetail}</p>
@@ -377,7 +394,6 @@ function CarePathwayContent() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-5xl mx-auto px-4 py-6">
           <button onClick={handleBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-3">
@@ -400,9 +416,7 @@ function CarePathwayContent() {
           </div>
         </div>
       </div>
-
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        {/* Patient Card */}
         <div className="bg-white rounded-xl shadow-lg p-6 border">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="flex-1 min-w-0">
@@ -441,8 +455,6 @@ function CarePathwayContent() {
             </div>
           </div>
         </div>
-
-        {/* Stages */}
         <div>
           <h3 className="text-lg font-bold text-gray-800 mb-1">ขั้นตอนการดูแลสุขภาพ (Care Pathway)</h3>
           <p className="text-sm text-gray-500 mb-4">แต่ละขั้นมีปุ่มไปทำกิจกรรมของตัวเอง + ดูย้อนหลังได้</p>
@@ -480,7 +492,6 @@ function CarePathwayContent() {
                     </span>
                     <span className="text-gray-400 text-sm shrink-0">{isOpen ? '▾' : '▸'}</span>
                   </button>
-                  
                   {isOpen && (
                     <div className="px-4 pb-4 pl-16">
                       {stage.id === 'trial' && trialStats.total > 0 && (
@@ -505,7 +516,6 @@ function CarePathwayContent() {
                           </div>
                         </div>
                       )}
-                      
                       {stage.events.length === 0 ? (
                         <p className="text-sm text-gray-400 italic mb-3">
                           {stage.id === 'trial' || stage.id === 'oneday'
@@ -528,7 +538,6 @@ function CarePathwayContent() {
                           ))}
                         </div>
                       )}
-                      
                       <div className="flex gap-2 flex-wrap">
                         <button
                           onClick={() => router.push(stage.actionUrl(patientId))}
@@ -557,7 +566,6 @@ function CarePathwayContent() {
   );
 }
 
-// ✅ Wrapper: useSearchParams ต้องอยู่ใน Suspense (กัน error ตอน build)
 export default function CarePathwayPage() {
   return (
     <Suspense fallback={
