@@ -1,13 +1,5 @@
 // app/admin/appointments/new/page.tsx
-// ✅ แก้ไขล่าสุด: 22 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. ✅ รับ ?patient_id=... → เลือกผู้ป่วยอัตโนมัติทันที (ไม่ต้องค้นหา/ป้อนอีก)
-//    2. ✅ แสดงการ์ดผู้ป่วยแบบ Lock (สีเขียว) + ปุ่ม "เปลี่ยนผู้ป่วย" ถ้าต้องการแก้
-//    3. ✅ Fallback: ถ้าผู้ป่วยไม่อยู่ใน list เครือข่าย → ดึงจากตาราง profiles ตรง ๆ
-//    4. ✅ คงการจัดการ ?from=care-pathway-dashboard (ปุ่มกลับ + redirect) ตามเดิม
-//    5. ✅ ใหม่: เลือก "โค้ชผู้ดูแล" ให้อัตโนมัติตาม coach_id ของผู้ป่วย (การ์ดเขียว + ล็อก)
-//    6. ✅ ใหม่: ปุ่ม "เปลี่ยนผู้ดูแล" ปลดล็อกเพื่อค้นหา/เลือกโค้ชคนอื่นได้
-//    7. ✅ ใหม่: ถ้าเลือกผู้ป่วยจาก dropdown เอง → ระบบก็เลือกโค้ชให้ด้วยอัตโนมัติ
+// ✅ แก้ไขล่าสุด: เพิ่มการอ่าน coach_id จาก URL และเลือกแพทย์/เจ้าหน้าที่อัตโนมัติ
 'use client';
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -18,12 +10,12 @@ import {
   getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  getPatientsByHospitalNetwork,
+  getPatientsByHospitalNetwork
 } from '@/lib/supabase/queries';
 import { supabase } from '@/lib/supabase/client';
 import {
   CalendarPlus, AlertCircle, Loader2, ArrowLeft, User, Stethoscope, LogOut,
-  CheckCircle, XCircle, Search, Users, Clock, FileText, Hospital, IdCard,
+  CheckCircle, XCircle, Search, Users, Clock, FileText, Hospital, IdCard
 } from 'lucide-react';
 
 // =====================================================
@@ -39,7 +31,7 @@ interface UserHospital {
 }
 interface Coach {
   id: string; user_id: string; full_name_th: string; specialization_th?: string; is_active: boolean;
-  users?: { hospital_id?: string; role?: string; hospitals?: { id?: string; name?: string; code?: string; type?: 'main' | 'sub' } };
+  users?: { hospital_id?: string; role?: string; hospitals?: { id?: string; name?: string; code?: string; type?: 'main' | 'sub'; } };
 }
 interface Patient {
   id: string;
@@ -51,6 +43,7 @@ interface Patient {
   hospital_id?: string;
   hospital_name?: string;
   hospital_code?: string;
+  coach_id?: string; // ✅ เพิ่ม coach_id
 }
 
 // =====================================================
@@ -59,16 +52,15 @@ interface Patient {
 function NewAppointmentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
+  
   // ✅ จุดที่ 1: ตรวจสอบว่ามาจากหน้าไหน เพื่อกำหนด URL กลับที่ถูกต้อง
   const fromParam = searchParams.get('from');
-  const backUrl =
-    fromParam === 'care-pathway-dashboard'
-      ? '/admin/care-pathway-dashboard'
-      : '/admin/appointments/view';
-
-  // ✅ จุดที่ 2: ดึง patient_id จาก URL เพื่อเลือกผู้ป่วยอัตโนมัติ
+  const backUrl = fromParam === 'care-pathway-dashboard'
+    ? '/admin/care-pathway-dashboard'
+    : '/admin/appointments/view';
+  
   const urlPatientId = searchParams.get('patient_id') || '';
+  const urlCoachId = searchParams.get('coach_id') || ''; // ✅ เพิ่มการรับ coach_id จาก URL
 
   // Refs สำหรับจัดการ Click Outside Dropdown
   const patientDropdownRef = useRef<HTMLDivElement>(null);
@@ -95,22 +87,15 @@ function NewAppointmentContent() {
   const [staffSearchTerm, setStaffSearchTerm] = useState('');
   const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
 
-  // ✅ จุดที่ 3: สถานะผู้ป่วยที่ถูกเลือกอัตโนมัติ + ล็อกไว้
-  const [lockedPatient, setLockedPatient] = useState<Patient | null>(null);
-  // ✅ จุดที่ 4 (ใหม่): สถานะโค้ชที่ถูกเลือกอัตโนมัติ + ล็อกไว้
-  const [lockedCoach, setLockedCoach] = useState<Coach | null>(null);
-  // ✅ จุดที่ 5 (ใหม่): แจ้งเตือนกรณีผู้ป่วยยังไม่มีโค้ช
-  const [coachMissingWarning, setCoachMissingWarning] = useState(false);
-
-  const dataLoadedRef = useRef(false);
-  const autoAppliedRef = useRef(false);
-
   // Form State
   const [formData, setFormData] = useState({
     patient_id: '', staff_id: '', appointment_type: 'follow_up',
     appointment_date: '', appointment_time: '', duration_minutes: 30,
     location: 'clinic', notes: '',
   });
+
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const autoAppliedRef = useRef(false);
 
   // =====================================================
   // 📥 AUTH & DATA LOADING
@@ -136,83 +121,6 @@ function NewAppointmentContent() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // =====================================================
-  // ✅ (ใหม่) AUTO-FILL โค้ชตาม coach_id ของผู้ป่วย
-  // =====================================================
-  const autoFillCoachForPatient = async (patientId: string) => {
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('coach_id')
-        .eq('id', patientId)
-        .maybeSingle();
-
-      const coachId = data?.coach_id;
-      if (!coachId) {
-        // ผู้ป่วยยังไม่ได้มอบหมายโค้ช → เปิดให้เลือกเอง + เตือน
-        setLockedCoach(null);
-        setCoachMissingWarning(true);
-        console.warn('⚠️ [autoFillCoach] ผู้ป่วยรายนี้ยังไม่ได้มอบหมายโค้ช');
-        return;
-      }
-
-      const found = coaches.find((c) => c.user_id === coachId);
-      if (found) {
-        setCoachMissingWarning(false);
-        setFormData((prev) => ({ ...prev, staff_id: found.user_id }));
-        setStaffSearchTerm(`${found.full_name_th}${found.specialization_th ? ` (${found.specialization_th})` : ''}`);
-        setLockedCoach(found);
-        console.log('✅ [autoFillCoach] โค้ชถูกเลือกอัตโนมัติ:', found.full_name_th);
-      } else {
-        // โค้ชไม่อยู่ใน list (อาจ inactive / คนละเครือข่าย) → เปิดให้เลือกเอง
-        setLockedCoach(null);
-        setCoachMissingWarning(true);
-        console.warn('⚠️ [autoFillCoach] ไม่พบโค้ชในรายชื่อที่แสดง — ต้องเลือกเอง');
-      }
-    } catch (e) {
-      console.error('❌ [autoFillCoach] Error:', e);
-    }
-  };
-
-  // =====================================================
-  // ✅ จุดที่ 6: AUTO-SELECT ผู้ป่วยจาก URL
-  // =====================================================
-  const applyAutoPatient = (p: Patient) => {
-    autoAppliedRef.current = true;
-    setFormData((prev) => ({ ...prev, patient_id: p.id }));
-    setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
-    setLockedPatient(p);
-    console.log('✅ [autoSelect] ผู้ป่วยถูกเลือกอัตโนมัติ:', p.id, p.first_name, p.last_name);
-    // ✅ เลือกโค้ชให้อัตโนมัติด้วย
-    autoFillCoachForPatient(p.id);
-  };
-
-  useEffect(() => {
-    if (!urlPatientId || !dataLoadedRef.current || autoAppliedRef.current) return;
-
-    // 1) หาใน list เครือข่ายที่โหลดมา
-    const found = patients.find((p) => p.id === urlPatientId);
-    if (found) {
-      applyAutoPatient(found);
-      return;
-    }
-
-    // 2) Fallback: ไม่เจอใน list → ดึงจาก profiles ตรง ๆ
-    supabase
-      .from('profiles')
-      .select('id, first_name, last_name, hospital_number')
-      .eq('id', urlPatientId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          applyAutoPatient(data as Patient);
-        } else {
-          console.warn('⚠️ [autoSelect] ไม่พบผู้ป่วย id:', urlPatientId, '— ต้องเลือกเอง');
-        }
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlPatientId, patients]);
-
   const loadUserHospital = async (userId: string) => {
     try { setUserHospital(await getUserHospitalInfo(userId)); } catch (e) { console.error(e); }
   };
@@ -226,18 +134,22 @@ function NewAppointmentContent() {
       let rootId: string | null = null;
       if (uHospital) {
         rootId = uHospital.type === 'main' ? uHospital.id : uHospital.parent_id;
-        if (rootId) networkHospitals = allHospitals.filter((h) => h.id === rootId || h.parent_id === rootId);
+        if (rootId) networkHospitals = allHospitals.filter(h => h.id === rootId || h.parent_id === rootId);
         else networkHospitals = [uHospital as Hospital];
       } else { networkHospitals = allHospitals; }
       setHospitals(networkHospitals);
-      const networkIds = networkHospitals.map((h) => h.id);
-      await Promise.all([loadCoaches(networkIds), loadPatients(networkIds)]);
-    } catch (err) {
-      console.error('❌ Network Data Error:', err);
-      setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย');
-    } finally {
-      dataLoadedRef.current = true; // ✅ แจ้งว่าโหลดเสร็จ → ปล่อยให้ auto-select ทำงาน
-      setLoading(false);
+      const networkIds = networkHospitals.map(h => h.id);
+      
+      await Promise.all([
+        loadCoaches(networkIds),
+        loadPatients(networkIds)
+      ]);
+    } catch (err) { 
+      console.error('❌ Network Data Error:', err); 
+      setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย'); 
+    } finally { 
+      setDataLoaded(true); // ✅ แจ้งว่าโหลดเสร็จแล้ว
+      setLoading(false); 
     }
   };
 
@@ -263,14 +175,14 @@ function NewAppointmentContent() {
   // =====================================================
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (validationErrors[name]) setValidationErrors((prev) => ({ ...prev, [name]: '' }));
+    setFormData(prev => ({ ...prev, [name]: value }));
+    if (validationErrors[name]) setValidationErrors(prev => ({ ...prev, [name]: '' }));
   };
 
   const filteredPatients = useMemo(() => {
     if (!patientSearchTerm.trim()) return patients.slice(0, 50);
     const term = patientSearchTerm.toLowerCase();
-    return patients.filter((p) =>
+    return patients.filter(p =>
       `${p.first_name} ${p.last_name}`.toLowerCase().includes(term) ||
       p.hospital_number.toLowerCase().includes(term) ||
       (p.id_card && p.id_card.includes(term))
@@ -280,7 +192,7 @@ function NewAppointmentContent() {
   const filteredStaff = useMemo(() => {
     if (!staffSearchTerm.trim()) return coaches.slice(0, 50);
     const term = staffSearchTerm.toLowerCase();
-    return coaches.filter((c) =>
+    return coaches.filter(c =>
       c.full_name_th.toLowerCase().includes(term) ||
       (c.specialization_th && c.specialization_th.toLowerCase().includes(term))
     ).slice(0, 50);
@@ -308,7 +220,7 @@ function NewAppointmentContent() {
         appointment_type: formData.appointment_type, appointment_datetime: dateTimeStr,
         duration_minutes: parseInt(formData.duration_minutes.toString()),
         location: formData.location, notes: formData.notes || undefined,
-        created_by: user?.id, status: 'scheduled',
+        created_by: user?.id, status: 'scheduled'
       });
       if (result.success) {
         router.push(backUrl);
@@ -319,20 +231,50 @@ function NewAppointmentContent() {
     finally { setLoading(false); }
   };
 
-  // ✅ ปลดล็อก "เปลี่ยนผู้ป่วย" → ล้างโค้ชอัตโนมัติเดิมออกด้วย (จะเลือกใหม่เมื่อเจอผู้ป่วยใหม่)
-  const handleUnlockPatient = () => {
-    setLockedPatient(null);
-    setLockedCoach(null);
-    setCoachMissingWarning(false);
-    setFormData((prev) => ({ ...prev, patient_id: '', staff_id: '' }));
-    setPatientSearchTerm('');
-    setStaffSearchTerm('');
+  // =====================================================
+  // ✅ AUTO SELECT LOGIC
+  // =====================================================
+  const applyAutoSelect = (p: any) => {
+    autoAppliedRef.current = true;
+    setFormData((prev) => ({ ...prev, patient_id: p.id }));
+    setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
+    console.log('✅ [autoSelect] ผู้ป่วยถูกเลือกอัตโนมัติ:', p.id, p.first_name, p.last_name);
+
+    // ✅ ถ้ามี coach_id ใน URL หรือในข้อมูลผู้ป่วย และโหลดข้อมูลเครือข่ายเสร็จแล้ว ให้เลือกแพทย์/เจ้าหน้าที่อัตโนมัติ
+    const targetCoachId = p.coach_id || urlCoachId;
+    if (targetCoachId && dataLoaded) {
+      const coach = coaches.find(c => c.user_id === targetCoachId);
+      if (coach) {
+        setFormData(prev => ({ ...prev, staff_id: coach.user_id }));
+        setStaffSearchTerm(`${coach.full_name_th} ${coach.specialization_th ? `(${coach.specialization_th})` : ''}`);
+        console.log('✅ [autoSelect] แพทย์/เจ้าหน้าที่ถูกเลือกอัตโนมัติ:', coach.user_id, coach.full_name_th);
+      }
+    }
   };
 
-  // ✅ ปลดล็อก "เปลี่ยนผู้ดูแล" → คงค่า staff_id เดิมไว้ เลือกใหม่ทับได้
-  const handleUnlockCoach = () => {
-    setLockedCoach(null);
-  };
+  useEffect(() => {
+    if (!urlPatientId || !dataLoaded || autoAppliedRef.current) return;
+    
+    const found = patients.find((p) => p.id === urlPatientId);
+    if (found) {
+      applyAutoSelect(found);
+      return;
+    }
+    
+    // Fallback: ไม่เจอใน list → ดึงจาก profiles ตรง ๆ
+    supabase
+      .from('profiles')
+      .select('id, first_name, last_name, hospital_number, coach_id')
+      .eq('id', urlPatientId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          applyAutoSelect(data);
+        } else {
+          console.warn('⚠️ [autoSelect] ไม่พบผู้ป่วย id:', urlPatientId, '— ต้องเลือกเอง');
+        }
+      });
+  }, [urlPatientId, dataLoaded, patients, coaches]);
 
   // =====================================================
   // 🎨 RENDER
@@ -389,16 +331,6 @@ function NewAppointmentContent() {
           <ul className="list-disc list-inside space-y-1">
             <li>ผู้ป่วยที่แสดง: {patients.length} คน (จากเครือข่ายของคุณ)</li>
             <li>แพทย์/เจ้าหน้าที่ที่แสดง: {coaches.length} คน (จากเครือข่ายของคุณ)</li>
-            {urlPatientId && lockedPatient && lockedCoach && (
-              <li className="text-green-700 font-medium list-none flex items-center gap-1">
-                <CheckCircle className="w-4 h-4" /> ระบบเลือกผู้ป่วย <strong>และโค้ชผู้ดูแล</strong> ให้อัตโนมัติแล้ว — กำหนดวัน/เวลา แล้วกดยืนยันได้เลย
-              </li>
-            )}
-            {urlPatientId && lockedPatient && !lockedCoach && coachMissingWarning && (
-              <li className="text-amber-700 font-medium list-none flex items-center gap-1">
-                <AlertCircle className="w-4 h-4" /> ผู้ป่วยรายนี้ยังไม่ได้มอบหมายโค้ช (หรือโค้ชไม่อยู่ในระบบ) — กรุณาเลือกผู้ดูแลเอง
-              </li>
-            )}
           </ul>
         </div>
       </div>
@@ -412,218 +344,124 @@ function NewAppointmentContent() {
           </div>
         )}
 
-        {/* SECTION 1: ผู้ป่วย — ✅ แสดงอัตโนมัติถ้ามี patient_id ใน URL */}
+        {/* SECTION 1: เลือกผู้ป่วย */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
             ผู้ป่วย <span className="text-red-500">*</span>
-            {lockedPatient && (
-              <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">เลือกอัตโนมัติจากลิงก์ ✓</span>
-            )}
           </h2>
-
-          {lockedPatient ? (
-            /* ✅ การ์ดผู้ป่วยแบบล็อก — ไม่ต้องเลือก/ป้อนใหม่ */
-            <div className="border-2 border-green-300 bg-green-50/60 rounded-xl p-5">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
-                    <Users className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-green-600 mb-1 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" /> ผู้ป่วยที่ต้องการนัดหมาย
-                    </p>
-                    <p className="text-lg font-bold text-gray-800">
-                      {lockedPatient.first_name} {lockedPatient.last_name}
-                    </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
-                      <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200 font-mono">
-                        HN: {lockedPatient.hospital_number}
-                      </span>
-                      {lockedPatient.id_card && (
-                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {lockedPatient.id_card}
-                        </span>
-                      )}
-                      {lockedPatient.hospital_name && (
-                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {lockedPatient.hospital_name}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {/* กรณีจำเป็น — ต้องการเปลี่ยนเป็นผู้ป่วยคนอื่น */}
-                <button
-                  type="button"
-                  onClick={handleUnlockPatient}
-                  className="px-3 py-1.5 text-xs border border-green-300 bg-white text-green-700 rounded-lg hover:bg-green-100 transition-colors"
-                  title="หากต้องการเปลี่ยนเป็นผู้ป่วยรายอื่น"
-                >
-                  เปลี่ยนผู้ป่วย
-                </button>
-              </div>
+          <div ref={patientDropdownRef} className="relative">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text" 
+                placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
+                value={patientSearchTerm}
+                onChange={(e) => {
+                  setPatientSearchTerm(e.target.value); 
+                  setIsPatientDropdownOpen(true);
+                  if (formData.patient_id) { 
+                    setFormData(p => ({...p, patient_id: ''})); 
+                    setPatientSearchTerm(''); 
+                  }
+                }}
+                onFocus={() => setIsPatientDropdownOpen(true)}
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${validationErrors.patient_id ? 'border-red-500' : 'border-gray-300'}`}
+              />
             </div>
-          ) : (
-            /* ❓ ไม่มี patient_id ใน URL → ให้ค้นหา/เลือกเอง (วิธีเดิม) */
-            <div ref={patientDropdownRef} className="relative">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
-                  value={patientSearchTerm}
-                  onChange={(e) => {
-                    setPatientSearchTerm(e.target.value);
-                    setIsPatientDropdownOpen(true);
-                    if (formData.patient_id) {
-                      setFormData((p) => ({ ...p, patient_id: '' }));
-                      setPatientSearchTerm('');
-                    }
-                  }}
-                  onFocus={() => setIsPatientDropdownOpen(true)}
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${validationErrors.patient_id ? 'border-red-500' : 'border-gray-300'}`}
-                />
-              </div>
-              {isPatientDropdownOpen && (
-                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
-                  {filteredPatients.length > 0 ? (
-                    filteredPatients.map((p) => (
-                      <div
-                        key={p.id}
-                        onClick={() => {
-                          setFormData((prev) => ({ ...prev, patient_id: p.id }));
-                          setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
-                          setIsPatientDropdownOpen(false);
-                          // ✅ เลือกโค้ชให้อัตโนมัติตาม coach_id ของผู้ป่วยที่เลือก
-                          autoFillCoachForPatient(p.id);
-                        }}
-                        className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
-                      >
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="font-bold text-gray-800 text-base">{p.first_name} {p.last_name}</span>
-                            <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-medium">HN: {p.hospital_number}</span>
-                          </div>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
-                          <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                            <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {p.id_card || '-'}
-                          </span>
-                          <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                            <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {p.hospital_name || 'ไม่ระบุ'}
-                          </span>
+            {isPatientDropdownOpen && (
+              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
+                {filteredPatients.length > 0 ? (
+                  filteredPatients.map((p) => (
+                    <div 
+                      key={p.id} 
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, patient_id: p.id }));
+                        setPatientSearchTerm(`${p.first_name} ${p.last_name} (${p.hospital_number})`);
+                        setIsPatientDropdownOpen(false);
+                      }} 
+                      className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="font-bold text-gray-800 text-base">{p.first_name} {p.last_name}</span>
+                          <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-medium">HN: {p.hospital_number}</span>
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
-                  )}
-                </div>
-              )}
-              {validationErrors.patient_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.patient_id}</p>}
-              <p className="text-xs text-gray-400 mt-2">* ค้นหาได้จาก: ชื่อ-สกุล, เลข HN, หรือเลขบัตรประชาชน</p>
-            </div>
-          )}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+                        <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                          <IdCard className="w-3 h-3 text-gray-400" /> 
+                          บัตร: {p.id_card || '-'}
+                        </span>
+                        <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                          <Hospital className="w-3 h-3 text-gray-400" /> 
+                          รพ.: {p.hospital_name || 'ไม่ระบุ'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
+                )}
+              </div>
+            )}
+            {validationErrors.patient_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.patient_id}</p>}
+            <p className="text-xs text-gray-400 mt-2">* ค้นหาได้จาก: ชื่อ-สกุล, เลข HN, หรือเลขบัตรประชาชน</p>
+          </div>
         </div>
 
-        {/* SECTION 2: แพทย์/เจ้าหน้าที่ — ✅ เลือกอัตโนมัติจากโค้ชของผู้ป่วย */}
+        {/* SECTION 2: เลือกแพทย์/เจ้าหน้าที่ */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">2</span>
             แพทย์/เจ้าหน้าที่ <span className="text-red-500">*</span>
-            {lockedCoach && (
-              <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">เลือกอัตโนมัติจากโค้ชผู้ป่วย ✓</span>
-            )}
-            {coachMissingWarning && !lockedCoach && (
-              <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold">⚠️ กรุณาเลือกผู้ดูแลเอง</span>
-            )}
           </h2>
-
-          {lockedCoach ? (
-            /* ✅ การ์ดโค้ชแบบล็อก — ระบบเลือกให้อัตโนมัติ */
-            <div className="border-2 border-green-300 bg-green-50/60 rounded-xl p-5">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
-                    <Stethoscope className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-green-600 mb-1 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" /> โค้ชผู้ดูแลของผู้ป่วย (เลือกอัตโนมัติ)
-                    </p>
-                    <p className="text-lg font-bold text-gray-800">{lockedCoach.full_name_th}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
-                      <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                        <User className="w-3 h-3 text-gray-400" /> ความเชี่ยวชาญ: {lockedCoach.specialization_th || 'ไม่ระบุ'}
-                      </span>
-                      <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                        <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {lockedCoach.users?.hospitals?.name || 'ไม่ระบุ'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                {/* ✅ ปุ่มเปลี่ยนผู้ดูแล — ปลดล็อกแล้วค้นหาเลือกใหม่ได้ */}
-                <button
-                  type="button"
-                  onClick={handleUnlockCoach}
-                  className="px-3 py-1.5 text-xs border border-green-300 bg-white text-green-700 rounded-lg hover:bg-green-100 transition-colors"
-                  title="หากต้องการเปลี่ยนผู้ดูแลเป็นท่านอื่น"
-                >
-                  เปลี่ยนผู้ดูแล
-                </button>
-              </div>
+          <div ref={staffDropdownRef} className="relative">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text" 
+                placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหา..."
+                value={staffSearchTerm}
+                onChange={(e) => {
+                  setStaffSearchTerm(e.target.value); 
+                  setIsStaffDropdownOpen(true);
+                  if (formData.staff_id) { 
+                    setFormData(p => ({...p, staff_id: ''})); 
+                    setStaffSearchTerm(''); 
+                  }
+                }}
+                onFocus={() => setIsStaffDropdownOpen(true)}
+                className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${validationErrors.staff_id ? 'border-red-500' : 'border-gray-300'}`}
+              />
             </div>
-          ) : (
-            /* ❓ ยังไม่ได้ล็อก → ค้นหา/เลือกเอง (วิธีเดิม) */
-            <div ref={staffDropdownRef} className="relative">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหาโค้ช..."
-                  value={staffSearchTerm}
-                  onChange={(e) => {
-                    setStaffSearchTerm(e.target.value);
-                    setIsStaffDropdownOpen(true);
-                    if (formData.staff_id) {
-                      setFormData((p) => ({ ...p, staff_id: '' }));
-                      setStaffSearchTerm('');
-                    }
-                  }}
-                  onFocus={() => setIsStaffDropdownOpen(true)}
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${validationErrors.staff_id ? 'border-red-500' : 'border-gray-300'}`}
-                />
-              </div>
-              {isStaffDropdownOpen && (
-                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
-                  {filteredStaff.length > 0 ? (
-                    filteredStaff.map((c) => (
-                      <div
-                        key={c.user_id}
-                        onClick={() => {
-                          setFormData((prev) => ({ ...prev, staff_id: c.user_id }));
-                          setStaffSearchTerm(`${c.full_name_th}${c.specialization_th ? ` (${c.specialization_th})` : ''}`);
-                          setIsStaffDropdownOpen(false);
-                        }}
-                        className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
-                      >
-                        <div className="font-medium text-gray-800">{c.full_name_th}</div>
-                        <div className="text-xs text-gray-500 mt-1 flex justify-between">
-                          <span>{c.specialization_th || 'ไม่ระบุความเชี่ยวชาญ'}</span>
-                          <span className="bg-gray-100 px-2 py-0.5 rounded">{c.users?.hospitals?.name || 'ไม่ระบุรพ.'}</span>
-                        </div>
+            {isStaffDropdownOpen && (
+              <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
+                {filteredStaff.length > 0 ? (
+                  filteredStaff.map((c) => (
+                    <div 
+                      key={c.user_id} 
+                      onClick={() => {
+                        setFormData(prev => ({ ...prev, staff_id: c.user_id }));
+                        setStaffSearchTerm(`${c.full_name_th} ${c.specialization_th ? `(${c.specialization_th})` : ''}`);
+                        setIsStaffDropdownOpen(false);
+                      }} 
+                      className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors"
+                    >
+                      <div className="font-medium text-gray-800">{c.full_name_th}</div>
+                      <div className="text-xs text-gray-500 mt-1 flex justify-between">
+                        <span>{c.specialization_th || 'ไม่ระบุความเชี่ยวชาญ'}</span>
+                        <span className="bg-gray-100 px-2 py-0.5 rounded">{c.users?.hospitals?.name || 'ไม่ระบุรพ.'}</span>
                       </div>
-                    ))
-                  ) : (
-                    <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
-                  )}
-                </div>
-              )}
-              {validationErrors.staff_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.staff_id}</p>}
-            </div>
-          )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
+                )}
+              </div>
+            )}
+            {validationErrors.staff_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.staff_id}</p>}
+          </div>
         </div>
 
         {/* SECTION 3: รายละเอียดนัดหมาย */}
