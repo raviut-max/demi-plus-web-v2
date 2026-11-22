@@ -1,11 +1,11 @@
 // app/admin/care-pathway-dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 22 พฤศจิกายน 2569
 // ✅ การแก้ไข:
-//    1. ✅ ใช้ Database Views → เร็วขึ้น 10-20 เท่า (จาก 20 วิ → 1-2 วิ)
-//    2. ✅ Pagination จริงด้วย .range() → กดเปลี่ยนหน้าแล้วข้อมูลเปลี่ยน
-//    3. ✅ เพิ่มคอลัมน์ "วันนัดถัดไป" ใน Watchlist
-//    4. ✅ เอาตารางรายชื่อผู้ป่วยในหมวดที่ 1 ออก
-//    5. ✅ เปลี่ยนปุ่มเป็น "ดูรายละเอียด"
+//    1. ✅ โหลดครั้งแรกเร็วขึ้นมาก — ใช้ View เท่านั้น ไม่ดึงผู้ป่วย/followups ทั้งหมดเข้า client
+//    2. ✅ "ใกล้ถึงวันนัด" — Pagination 10 คน/หน้า (server-side range) กดเปลี่ยนหน้าแล้วรายชื่อเปลี่ยนจริง
+//    3. ✅ หมวดที่ 1 — แสดงเฉพาะตัวเลข (ลบตารางรายชื่อผู้ป่วยออก) นับตาม scope จริง
+//    4. ✅ หมวดที่ 2 Watchlist — Pagination 10 คน/หน้า + ปุ่ม "ดูรายละเอียด" และ "สร้างนัดหมายใหม่"
+//    5. ✅ ปุ่มสร้างนัดหมายใหม่แนบ ?from=care-pathway-dashboard (กลับถูกหน้า)
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -21,7 +21,7 @@ import {
   Users, CalendarCheck, CalendarX, TrendingUp, TrendingDown,
   AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye,
   UserCheck, Hospital, Building2, LogOut, Calendar, Clock,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CalendarPlus,
 } from 'lucide-react';
 
 // ============================================================
@@ -39,9 +39,8 @@ interface WatchlistPatient {
   coach_name: string | null;
   last_followup: string | null;
   days_overdue: number;
-  next_appointment: string | null; // ✅ ใหม่
+  next_appointment: string | null;
 }
-
 interface UpcomingAppointment {
   appointment_id: string;
   patient_id: string;
@@ -59,14 +58,30 @@ interface UpcomingAppointment {
   days_until: number;
 }
 
-// ✅ ค่าคงที่
 const PAGE_SIZE = 10;
+
+// ============================================================
+// 🧰 Helper: ใส่ filter ตาม scope (mine / hospital)
+// ============================================================
+function applyScope(
+  query: any,
+  userData: any,
+  currentScope: 'all' | 'mine',
+  hIds: string[],
+  isSuper: boolean
+) {
+  if (currentScope === 'mine') return query.eq('coach_id', userData.id);
+  if (!isSuper && hIds.length > 0) return query.in('hospital_id', hIds);
+  return query;
+}
 
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // โหลดครั้งแรกทั้งหน้า
+  const [overdueLoading, setOverdueLoading] = useState(false); // เปลี่ยนหน้า watchlist
+  const [upcomingLoading, setUpcomingLoading] = useState(false); // เปลี่ยนหน้า upcoming
 
   const [stats, setStats] = useState({
     total_patients: 0,
@@ -81,35 +96,33 @@ export default function CarePathwayDashboardPage() {
     other_count: 0,
   });
 
-  // Watchlist + Pagination
+  // Watchlist + Pagination (server-side)
   const [overduePatients, setOverduePatients] = useState<WatchlistPatient[]>([]);
   const [overdueTotal, setOverdueTotal] = useState(0);
   const [overduePage, setOverduePage] = useState(0);
   const overdueTotalPages = Math.max(1, Math.ceil(overdueTotal / PAGE_SIZE));
 
-  // Upcoming + Pagination
+  // Upcoming + Pagination (server-side)
   const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointment[]>([]);
   const [upcomingTotal, setUpcomingTotal] = useState(0);
   const [upcomingPage, setUpcomingPage] = useState(0);
   const upcomingTotalPages = Math.max(1, Math.ceil(upcomingTotal / PAGE_SIZE));
-  const [selectedDays, setSelectedDays] = useState<number>(3);
 
-  // Scope
+  const [selectedDays, setSelectedDays] = useState<number>(3);
   const [scope, setScope] = useState<'all' | 'mine'>('all');
+
+  // cached ขอบเขตสิทธิ์ (ใช้ตอนกดเปลี่ยนหน้า)
+  const [hospitalIds, setHospitalIds] = useState<string[]>([]);
+  const [isSuper, setIsSuper] = useState(false);
 
   // ============================================================
   // 🔐 Session
   // ============================================================
   useEffect(() => {
     const userData = checkSession();
-    if (!userData) {
-      router.push('/admin/login');
-      return;
-    }
+    if (!userData) { router.push('/admin/login'); return; }
     if (!['admin', 'doctor', 'helper', 'osm'].includes(userData.role)) {
-      alert('ไม่มีสิทธิ์เข้าถึง');
-      router.push('/admin/login');
-      return;
+      alert('ไม่มีสิทธิ์เข้าถึง'); router.push('/admin/login'); return;
     }
     setUser(userData);
     loadUserHospital(userData.id);
@@ -125,181 +138,194 @@ export default function CarePathwayDashboardPage() {
       console.error('❌ [loadUserHospital]', e);
     }
   };
-
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
-  };
+  const handleLogout = () => { logout(); router.push('/admin/login'); };
 
   // ============================================================
-  // 📊 โหลดข้อมูลทั้งหมด (ใช้ View → เร็วมาก!)
+  // 📊 Stats (หมวด 1 + 3) — เร็ว: View 1 แถว + count 2 queries
   // ============================================================
-  const loadData = useCallback(
-    async (userData: any, currentScope: 'all' | 'mine', days: number, overduePageNum: number, upcomingPageNum: number) => {
-      setLoading(true);
-      const t0 = performance.now();
-      try {
-        const hospitalIds = await getAccessibleHospitalIds(userData.id);
-        const isSuper = isSuperAdmin(userData);
+  const loadStatsAndCounts = useCallback(async (
+    userData: any, currentScope: 'all' | 'mine', hIds: string[], superFlag: boolean
+  ) => {
+    const [statsRes, totalRes, overdueRes] = await Promise.all([
+      supabase.from('v_care_pathway_stats').select('*').single(),
+      applyScope(
+        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true),
+        userData, currentScope, hIds, superFlag
+      ),
+      applyScope(
+        supabase.from('v_overdue_patients').select('*', { count: 'exact', head: true }),
+        userData, currentScope, hIds, superFlag
+      ),
+    ]);
+    const total = totalRes.count || 0;
+    const overdue = overdueRes.count || 0;
+    const v = statsRes.data || {};
+    setStats({
+      total_patients: total,
+      on_time_count: Math.max(0, total - overdue),
+      overdue_count: overdue,
+      pam_increased: v.pam_increased || 0,
+      pam_decreased: v.pam_decreased || 0,
+      active_recorders: v.active_recorders || 0,
+      repeat_recorders: v.repeat_recorders || 0,
+      obstacles_count: v.obstacles_count || 0,
+      opportunities_count: v.opportunities_count || 0,
+      other_count: v.other_count || 0,
+    });
+  }, []);
 
-        console.log('📊 [loadData] ขอบเขตสิทธิ์:', {
-          isSuper,
-          hospitalCount: hospitalIds.length,
-          scope: currentScope,
+  // ============================================================
+  // 📋 Watchlist — server-side pagination (ดึงเฉพาะ 10 แถวของหน้านี้)
+  // ============================================================
+  const loadOverduePage = useCallback(async (
+    userData: any, currentScope: 'all' | 'mine', hIds: string[], superFlag: boolean, page: number
+  ) => {
+    setOverdueLoading(true);
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const todayStr = today.toISOString().split('T')[0];
+
+      const [countRes, dataRes] = await Promise.all([
+        applyScope(
+          supabase.from('v_overdue_patients').select('*', { count: 'exact', head: true }),
+          userData, currentScope, hIds, superFlag
+        ),
+        applyScope(
+          supabase
+            .from('v_overdue_patients')
+            .select('*')
+            .order('days_overdue', { ascending: false })
+            .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
+          userData, currentScope, hIds, superFlag
+        ),
+      ]);
+      if (dataRes.error) throw dataRes.error;
+      const rows = dataRes.data || [];
+
+      // ชื่อโค้ช (เฉพาะของหน้านี้ ≤10 คน)
+      const coachIds = [...new Set(rows.map((p: any) => p.coach_id).filter(Boolean))] as string[];
+      let coachNameMap: Record<string, string> = {};
+      if (coachIds.length > 0) {
+        const { data: coaches } = await supabase
+          .from('doctors').select('user_id, full_name_th').in('user_id', coachIds);
+        coachNameMap = Object.fromEntries((coaches || []).map((c: any) => [c.user_id, c.full_name_th]));
+      }
+
+      // วันนัดถัดไป (เฉพาะของหน้านี้)
+      const patientIds = rows.map((p: any) => p.id);
+      let nextMap: Record<string, string> = {};
+      if (patientIds.length > 0) {
+        const { data: appts } = await supabase
+          .from('appointments')
+          .select('user_id, appointment_date')
+          .in('user_id', patientIds)
+          .eq('status', 'scheduled')
+          .gte('appointment_date', todayStr)
+          .order('appointment_date', { ascending: true });
+        (appts || []).forEach((a: any) => {
+          if (!nextMap[a.user_id]) nextMap[a.user_id] = a.appointment_date;
         });
+      }
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const untilDate = new Date(today);
-        untilDate.setDate(today.getDate() + days);
-        const todayStr = today.toISOString().split('T')[0];
-        const untilStr = untilDate.toISOString().split('T')[0];
+      setOverduePatients(rows.map((p: any) => ({
+        ...p,
+        coach_name: coachNameMap[p.coach_id] || null,
+        next_appointment: nextMap[p.id] || null,
+      })));
+      setOverdueTotal(countRes.count || 0);
+      setOverduePage(page);
+    } catch (e) {
+      console.error('❌ [loadOverduePage]', e);
+    } finally {
+      setOverdueLoading(false);
+    }
+  }, []);
 
-        // ---------- 1) ✅ Stats จาก View (1 query, เร็วมาก!) ----------
-        const { data: statsData, error: statsError } = await supabase
-          .from('v_care_pathway_stats')
-          .select('*')
-          .single();
+  // ============================================================
+  // 📅 Upcoming — server-side pagination
+  // ============================================================
+  const loadUpcomingPage = useCallback(async (
+    userData: any, currentScope: 'all' | 'mine', hIds: string[], superFlag: boolean,
+    page: number, days: number
+  ) => {
+    setUpcomingLoading(true);
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const until = new Date(today);
+      until.setDate(today.getDate() + days);
+      const todayStr = today.toISOString().split('T')[0];
+      const untilStr = until.toISOString().split('T')[0];
 
-        if (statsError) {
-          console.error('❌ [loadData] Stats View Error:', statsError);
-          throw statsError;
-        }
-
-        setStats({
-          total_patients: statsData.total_patients || 0,
-          on_time_count: statsData.on_time_count || 0,
-          overdue_count: statsData.overdue_count || 0,
-          pam_increased: statsData.pam_increased || 0,
-          pam_decreased: statsData.pam_decreased || 0,
-          active_recorders: statsData.active_recorders || 0,
-          repeat_recorders: statsData.repeat_recorders || 0,
-          obstacles_count: statsData.obstacles_count || 0,
-          opportunities_count: statsData.opportunities_count || 0,
-          other_count: statsData.other_count || 0,
-        });
-
-        // ---------- 2) ✅ Watchlist จาก View + Pagination ----------
-        let overdueCountQ = supabase
-          .from('v_overdue_patients')
-          .select('*', { count: 'exact', head: true });
-
-        let overdueDataQ = supabase
-          .from('v_overdue_patients')
-          .select('*')
-          .order('days_overdue', { ascending: false })
-          .range(overduePageNum * PAGE_SIZE, (overduePageNum + 1) * PAGE_SIZE - 1);
-
-        if (currentScope === 'mine') {
-          overdueCountQ = overdueCountQ.eq('coach_id', userData.id);
-          overdueDataQ = overdueDataQ.eq('coach_id', userData.id);
-        } else if (!isSuper && hospitalIds.length > 0) {
-          overdueCountQ = overdueCountQ.in('hospital_id', hospitalIds);
-          overdueDataQ = overdueDataQ.in('hospital_id', hospitalIds);
-        }
-
-        const [{ count: overdueCount }, { data: overdueData }] = await Promise.all([
-          overdueCountQ,
-          overdueDataQ,
-        ]);
-
-        setOverdueTotal(overdueCount || 0);
-
-        // ✅ ดึงวันนัดถัดไปสำหรับผู้ป่วยในหน้านี้
-        const patientIds = (overdueData || []).map((p: any) => p.id);
-        let nextAppointments: Record<string, string> = {};
-        if (patientIds.length > 0) {
-          const { data: appts } = await supabase
-            .from('appointments')
-            .select('user_id, appointment_date')
-            .in('user_id', patientIds)
-            .eq('status', 'scheduled')
+      const [countRes, dataRes] = await Promise.all([
+        applyScope(
+          supabase
+            .from('v_upcoming_appointments')
+            .select('*', { count: 'exact', head: true })
             .gte('appointment_date', todayStr)
-            .order('appointment_date', { ascending: true });
+            .lte('appointment_date', untilStr),
+          userData, currentScope, hIds, superFlag
+        ),
+        applyScope(
+          supabase
+            .from('v_upcoming_appointments')
+            .select('*')
+            .gte('appointment_date', todayStr)
+            .lte('appointment_date', untilStr)
+            .order('days_until', { ascending: true })
+            .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1),
+          userData, currentScope, hIds, superFlag
+        ),
+      ]);
+      if (dataRes.error) throw dataRes.error;
+      setUpcomingAppointments((dataRes.data || []) as UpcomingAppointment[]);
+      setUpcomingTotal(countRes.count || 0);
+      setUpcomingPage(page);
+    } catch (e) {
+      console.error('❌ [loadUpcomingPage]', e);
+    } finally {
+      setUpcomingLoading(false);
+    }
+  }, []);
 
-          (appts || []).forEach((a: any) => {
-            if (!nextAppointments[a.user_id]) {
-              nextAppointments[a.user_id] = a.appointment_date;
-            }
-          });
-        }
-
-        // ✅ ดึงชื่อโค้ช
-        const coachIds = (overdueData || [])
-          .map((p: any) => p.coach_id)
-          .filter(Boolean);
-        let coachNameMap: Record<string, string> = {};
-        if (coachIds.length > 0) {
-          const { data: coaches } = await supabase
-            .from('doctors')
-            .select('user_id, full_name_th')
-            .in('user_id', coachIds);
-          coachNameMap = Object.fromEntries(
-            (coaches || []).map((c: any) => [c.user_id, c.full_name_th])
-          );
-        }
-
-        setOverduePatients(
-          (overdueData || []).map((p: any) => ({
-            ...p,
-            coach_name: coachNameMap[p.coach_id] || null,
-            next_appointment: nextAppointments[p.id] || null,
-          }))
-        );
-
-        // ---------- 3) ✅ Upcoming จาก View + Pagination ----------
-        let upcomingCountQ = supabase
-          .from('v_upcoming_appointments')
-          .select('*', { count: 'exact', head: true })
-          .gte('appointment_date', todayStr)
-          .lte('appointment_date', untilStr);
-
-        let upcomingDataQ = supabase
-          .from('v_upcoming_appointments')
-          .select('*')
-          .gte('appointment_date', todayStr)
-          .lte('appointment_date', untilStr)
-          .order('days_until', { ascending: true })
-          .range(upcomingPageNum * PAGE_SIZE, (upcomingPageNum + 1) * PAGE_SIZE - 1);
-
-        if (currentScope === 'mine') {
-          upcomingCountQ = upcomingCountQ.eq('coach_id', userData.id);
-          upcomingDataQ = upcomingDataQ.eq('coach_id', userData.id);
-        } else if (!isSuper && hospitalIds.length > 0) {
-          upcomingCountQ = upcomingCountQ.in('hospital_id', hospitalIds);
-          upcomingDataQ = upcomingDataQ.in('hospital_id', hospitalIds);
-        }
-
-        const [{ count: upcomingCount }, { data: upcomingData }] = await Promise.all([
-          upcomingCountQ,
-          upcomingDataQ,
+  // ============================================================
+  // 🔄 โหลดเมื่อเข้าหน้า / เปลี่ยน scope / เปลี่ยนจำนวนวัน
+  // ============================================================
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      setLoading(true);
+      try {
+        const hIds = await getAccessibleHospitalIds(user.id);
+        const s = isSuperAdmin(user);
+        setHospitalIds(hIds);
+        setIsSuper(s);
+        await loadStatsAndCounts(user, scope, hIds, s);
+        await Promise.all([
+          loadOverduePage(user, scope, hIds, s, 0),
+          loadUpcomingPage(user, scope, hIds, s, 0, selectedDays),
         ]);
-
-        setUpcomingTotal(upcomingCount || 0);
-        setUpcomingAppointments((upcomingData || []) as UpcomingAppointment[]);
-
-        const t1 = performance.now();
-        console.log(`✅ [loadData] เสร็จใน ${(t1 - t0).toFixed(0)}ms`);
-      } catch (error) {
-        console.error('❌ [CarePathwayDashboard] Error:', error);
+      } catch (e) {
+        console.error('❌ [CarePathwayDashboard]', e);
       } finally {
         setLoading(false);
       }
-    },
-    []
-  );
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, scope, selectedDays]);
 
-  // ✅ โหลดเมื่อ user/scope/days/page เปลี่ยน
-  useEffect(() => {
-    if (user) {
-      loadData(user, scope, selectedDays, overduePage, upcomingPage);
-    }
-  }, [user, scope, selectedDays, overduePage, upcomingPage, loadData]);
-
+  // ✅ กดเปลี่ยนหน้า → โหลดเฉพาะตารางนั้น (ไม่ reload ทั้งหน้า = เร็วมาก)
+  const changeOverduePage = (p: number) => {
+    if (!user || p < 0 || p >= overdueTotalPages || p === overduePage) return;
+    loadOverduePage(user, scope, hospitalIds, isSuper, p);
+  };
+  const changeUpcomingPage = (p: number) => {
+    if (!user || p < 0 || p >= upcomingTotalPages || p === upcomingPage) return;
+    loadUpcomingPage(user, scope, hospitalIds, isSuper, p, selectedDays);
+  };
   const switchScope = (s: 'all' | 'mine') => {
-    setScope(s);
-    setOverduePage(0);
-    setUpcomingPage(0);
+    if (s !== scope) setScope(s); // effect จะ reset หน้าเป็น 1 ให้เอง
   };
 
   // ✅ Helper: สร้างเลขหน้า
@@ -339,7 +365,7 @@ export default function CarePathwayDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
-      {/* Header */}
+      {/* ================= Header ================= */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
           <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
@@ -352,16 +378,10 @@ export default function CarePathwayDashboardPage() {
             </div>
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm font-medium bg-white">
-                <button
-                  onClick={() => switchScope('all')}
-                  className={`px-4 py-2 transition-colors ${scope === 'all' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
+                <button onClick={() => switchScope('all')} className={`px-4 py-2 transition-colors ${scope === 'all' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>
                   🏥 ทั้งหมด
                 </button>
-                <button
-                  onClick={() => switchScope('mine')}
-                  className={`px-4 py-2 transition-colors ${scope === 'mine' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
+                <button onClick={() => switchScope('mine')} className={`px-4 py-2 transition-colors ${scope === 'mine' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>
                   👤 ในการดูแลของฉัน
                 </button>
               </div>
@@ -412,7 +432,7 @@ export default function CarePathwayDashboardPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {/* ================= ใกล้ถึงวันนัด — ✅ Pagination จริง ================= */}
+        {/* ================= ใกล้ถึงวันนัด — Pagination 10/หน้า ================= */}
         <div>
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 flex-wrap">
@@ -438,8 +458,13 @@ export default function CarePathwayDashboardPage() {
               </select>
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            {upcomingAppointments.length === 0 ? (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden relative">
+            {upcomingLoading && (
+              <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
+              </div>
+            )}
+            {upcomingAppointments.length === 0 && !upcomingLoading ? (
               <div className="p-8 text-center text-gray-500">
                 <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                 <p>ไม่มีผู้ป่วยที่นัดหมายใน {selectedDays} วันนี้</p>
@@ -507,17 +532,17 @@ export default function CarePathwayDashboardPage() {
                       <span className="text-gray-400 ml-2">(หน้า {upcomingPage + 1} / {upcomingTotalPages})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setUpcomingPage(0)} disabled={upcomingPage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setUpcomingPage(p => Math.max(0, p - 1))} disabled={upcomingPage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
+                      <button onClick={() => changeUpcomingPage(0)} disabled={upcomingPage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
+                      <button onClick={() => changeUpcomingPage(upcomingPage - 1)} disabled={upcomingPage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
                       <div className="flex gap-1">
                         {getPageNumbers(upcomingTotalPages, upcomingPage).map((pageNum, idx) => {
-                          if (pageNum === '...') return <span key={`e-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
+                          if (pageNum === '...') return <span key={`u-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
                           const p = pageNum as number;
-                          return <button key={p} onClick={() => setUpcomingPage(p)} className={`px-3 py-2 rounded-lg text-sm font-medium ${upcomingPage === p ? 'bg-cyan-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}>{p + 1}</button>;
+                          return <button key={p} onClick={() => changeUpcomingPage(p)} className={`px-3 py-2 rounded-lg text-sm font-medium ${upcomingPage === p ? 'bg-cyan-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}>{p + 1}</button>;
                         })}
                       </div>
-                      <button onClick={() => setUpcomingPage(p => Math.min(upcomingTotalPages - 1, p + 1))} disabled={upcomingPage >= upcomingTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
-                      <button onClick={() => setUpcomingPage(upcomingTotalPages - 1)} disabled={upcomingPage >= upcomingTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
+                      <button onClick={() => changeUpcomingPage(upcomingPage + 1)} disabled={upcomingPage >= upcomingTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
+                      <button onClick={() => changeUpcomingPage(upcomingTotalPages - 1)} disabled={upcomingPage >= upcomingTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
                     </div>
                   </div>
                 )}
@@ -526,7 +551,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 1 — ✅ เอาตารางรายชื่อออก ================= */}
+        {/* ================= หมวดที่ 1: ตัวเลขเท่านั้น ================= */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <Users className="w-5 h-5 text-blue-600" /> หมวดที่ 1: สรุปตัวเลขภาพรวม
@@ -566,7 +591,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 2: Watchlist + Pagination + วันนัด ================= */}
+        {/* ================= หมวดที่ 2: Watchlist — Pagination + 2 ปุ่มจัดการ ================= */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <AlertTriangle className="w-5 h-5 text-red-500" />
@@ -578,8 +603,13 @@ export default function CarePathwayDashboardPage() {
               <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
             )}
           </h2>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-            {overduePatients.length === 0 ? (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden relative">
+            {overdueLoading && (
+              <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+              </div>
+            )}
+            {overduePatients.length === 0 && !overdueLoading ? (
               <div className="p-8 text-center text-gray-500">
                 <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-green-400" />
                 <p>ยอดเยี่ยม! ไม่มีผู้ป่วยที่เลยกำหนดการติดตาม</p>
@@ -635,12 +665,20 @@ export default function CarePathwayDashboardPage() {
                             </span>
                           </td>
                           <td className="px-6 py-3 text-center">
-                            <button
-                              onClick={() => router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors"
-                            >
-                              <Eye className="w-3 h-3" /> ดูรายละเอียด
-                            </button>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                onClick={() => router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors"
+                              >
+                                <Eye className="w-3 h-3" /> ดูรายละเอียด
+                              </button>
+                              <button
+                                onClick={() => router.push(`/admin/appointments/new?patient_id=${p.id}&from=care-pathway-dashboard`)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs hover:bg-emerald-600 transition-colors"
+                              >
+                                <CalendarPlus className="w-3 h-3" /> สร้างนัดหมายใหม่
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -654,17 +692,17 @@ export default function CarePathwayDashboardPage() {
                       <span className="text-gray-400 ml-2">(หน้า {overduePage + 1} / {overdueTotalPages})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setOverduePage(0)} disabled={overduePage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setOverduePage(p => Math.max(0, p - 1))} disabled={overduePage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
+                      <button onClick={() => changeOverduePage(0)} disabled={overduePage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
+                      <button onClick={() => changeOverduePage(overduePage - 1)} disabled={overduePage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
                       <div className="flex gap-1">
                         {getPageNumbers(overdueTotalPages, overduePage).map((pageNum, idx) => {
-                          if (pageNum === '...') return <span key={`e-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
+                          if (pageNum === '...') return <span key={`o-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
                           const p = pageNum as number;
-                          return <button key={p} onClick={() => setOverduePage(p)} className={`px-3 py-2 rounded-lg text-sm font-medium ${overduePage === p ? 'bg-red-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}>{p + 1}</button>;
+                          return <button key={p} onClick={() => changeOverduePage(p)} className={`px-3 py-2 rounded-lg text-sm font-medium ${overduePage === p ? 'bg-red-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}>{p + 1}</button>;
                         })}
                       </div>
-                      <button onClick={() => setOverduePage(p => Math.min(overdueTotalPages - 1, p + 1))} disabled={overduePage >= overdueTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
-                      <button onClick={() => setOverduePage(overdueTotalPages - 1)} disabled={overduePage >= overdueTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
+                      <button onClick={() => changeOverduePage(overduePage + 1)} disabled={overduePage >= overdueTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
+                      <button onClick={() => changeOverduePage(overdueTotalPages - 1)} disabled={overduePage >= overdueTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
                     </div>
                   </div>
                 )}
@@ -705,10 +743,7 @@ export default function CarePathwayDashboardPage() {
                       <span>{Math.round((stats.repeat_recorders / stats.active_recorders) * 100)}%</span>
                     </div>
                     <div className="w-full bg-gray-200 rounded-full h-2.5">
-                      <div
-                        className="bg-purple-500 h-2.5 rounded-full transition-all"
-                        style={{ width: `${(stats.repeat_recorders / stats.active_recorders) * 100}%` }}
-                      ></div>
+                      <div className="bg-purple-500 h-2.5 rounded-full transition-all" style={{ width: `${(stats.repeat_recorders / stats.active_recorders) * 100}%` }}></div>
                     </div>
                   </div>
                 )}
