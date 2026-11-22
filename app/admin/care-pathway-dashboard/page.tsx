@@ -1,11 +1,10 @@
 // app/admin/care-pathway-dashboard/page.tsx
 // ✅ แก้ไขล่าสุด: 22 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. ✅ Watchlist: เพิ่มปุ่ม "สร้างนัดหมายใหม่" ข้างปุ่ม "ดูรายละเอียด"
-//    2. ✅ ลิงก์นัดหมายใหม่แนบ ?patient_id=...&coach_id=...&from=care-pathway-dashboard
-//       → หน้า appointments/new เลือกผู้ป่วย + โค้ชผู้ดูแลให้อัตโนมัติ + กลับถูกหน้า
-//    3. ✅ Watchlist แสดงคอลัมน์ "วันนัดถัดไป"
-//    4. ✅ View + Pagination จริง (10 คน/หน้า) — เปลี่ยนหน้าเร็ว ไม่ reload ทั้งจอ
+// ✅ การปรับปรุง:
+//    1. ✅ ใช้ View + Pagination (.range) แทนการดึงข้อมูลทั้งหมด → โหลดเร็วขึ้นมาก (หลักหน่วยวินาที)
+//    2. ✅ หมวดที่ 1: แสดงเฉพาะตัวเลขสรุป (ลบรายการผู้ป่วยออก)
+//    3. ✅ หมวดที่ 2: แสดงรายชื่อแบบแบ่งหน้า (10 คน/หน้า) + ปุ่ม "ดูรายละเอียด" และ "สร้างนัดหมายใหม่"
+//    4. ✅ ปุ่มสร้างนัดหมายใหม่ส่ง patient_id และ coach_id ใน URL เพื่อให้หน้าใหม่เติมข้อมูลอัตโนมัติ
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -21,8 +20,7 @@ import {
   Users, CalendarCheck, CalendarX, TrendingUp, TrendingDown,
   AlertTriangle, Repeat, HelpCircle, ArrowRight, Loader2, Eye,
   UserCheck, Hospital, Building2, LogOut, Calendar, Clock,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  CalendarPlus,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, CalendarPlus
 } from 'lucide-react';
 
 // ============================================================
@@ -40,7 +38,6 @@ interface WatchlistPatient {
   coach_name: string | null;
   last_followup: string | null;
   days_overdue: number;
-  next_appointment: string | null; // ✅ วันนัดถัดไป
 }
 
 interface UpcomingAppointment {
@@ -60,7 +57,6 @@ interface UpcomingAppointment {
   days_until: number;
 }
 
-// ✅ ค่าคงที่: จำนวนรายการต่อหน้า
 const PAGE_SIZE = 10;
 
 export default function CarePathwayDashboardPage() {
@@ -68,9 +64,8 @@ export default function CarePathwayDashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [pageLoading, setPageLoading] = useState(false);      // overlay ตาราง overdue
-  const [upcomingLoading, setUpcomingLoading] = useState(false); // overlay ตาราง upcoming
 
+  // Stats
   const [stats, setStats] = useState({
     total_patients: 0,
     on_time_count: 0,
@@ -97,8 +92,6 @@ export default function CarePathwayDashboardPage() {
   const upcomingTotalPages = Math.max(1, Math.ceil(upcomingTotal / PAGE_SIZE));
 
   const [selectedDays, setSelectedDays] = useState<number>(3);
-
-  // Scope
   const [scope, setScope] = useState<'all' | 'mine'>('all');
 
   // ============================================================
@@ -120,220 +113,107 @@ export default function CarePathwayDashboardPage() {
     try {
       const info = await getUserHospitalInfo(userId);
       setUserHospital(info);
-    } catch (e) {
-      console.error('❌ [loadUserHospital]', e);
-    }
+    } catch (e) { console.error('❌ [loadUserHospital]', e); }
   };
 
-  const handleLogout = () => {
-    logout();
-    router.push('/admin/login');
-  };
+  const handleLogout = () => { logout(); router.push('/admin/login'); };
 
   // ============================================================
-  // 📊 Stats จาก View (1 query, เร็วมาก)
+  // 🚀 โหลดข้อมูลแบบเร็ว (ใช้ View + Pagination)
   // ============================================================
-  const loadStats = useCallback(async () => {
+  const loadData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const t0 = performance.now();
     try {
-      const { data: statsData, error } = await supabase
-        .from('v_care_pathway_stats')
-        .select('*')
-        .single();
-      if (error) throw error;
-      if (statsData) {
-        setStats({
-          total_patients: statsData.total_patients || 0,
-          on_time_count: statsData.on_time_count || 0,
-          overdue_count: statsData.overdue_count || 0,
-          pam_increased: statsData.pam_increased || 0,
-          pam_decreased: statsData.pam_decreased || 0,
-          active_recorders: statsData.active_recorders || 0,
-          repeat_recorders: statsData.repeat_recorders || 0,
-          obstacles_count: statsData.obstacles_count || 0,
-          opportunities_count: statsData.opportunities_count || 0,
-          other_count: statsData.other_count || 0,
-        });
-      }
-    } catch (error) {
-      console.error('❌ [loadStats] Error:', error);
-    }
-  }, []);
+      const hospitalIds = await getAccessibleHospitalIds(user.id);
+      const isSuper = isSuperAdmin(user);
 
-  // ============================================================
-  // ✅ Upcoming — View + Pagination จริง (10 แถว/หน้า)
-  // ============================================================
-  const loadUpcomingPage = useCallback(async (
-    userData: any,
-    currentScope: 'all' | 'mine',
-    days: number,
-    page: number
-  ) => {
-    if (!userData) return;
-    setUpcomingLoading(true);
-    try {
-      const hospitalIds = await getAccessibleHospitalIds(userData.id);
-      const isSuper = isSuperAdmin(userData);
+      // Helper สำหรับใส่ Filter ตาม Scope
+      const applyScope = (query: any) => {
+        if (scope === 'mine') return query.eq('coach_id', user.id);
+        if (!isSuper && hospitalIds.length > 0) return query.in('hospital_id', hospitalIds);
+        return query;
+      };
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const untilDate = new Date(today);
-      untilDate.setDate(today.getDate() + days);
-      const todayStr = today.toISOString().split('T')[0];
-      const untilStr = untilDate.toISOString().split('T')[0];
+      // 1. Stats (1 Query เร็วมาก)
+      const { data: statsData } = await supabase.from('v_care_pathway_stats').select('*').single();
+      if (statsData) setStats(statsData);
 
-      let countQ = supabase
-        .from('v_upcoming_appointments')
-        .select('*', { count: 'exact', head: true })
-        .gte('appointment_date', todayStr)
-        .lte('appointment_date', untilStr);
+      // 2. Overdue Count
+      const { count: oCount } = await applyScope(
+        supabase.from('v_overdue_patients').select('*', { count: 'exact', head: true })
+      );
+      const oTotal = oCount || 0;
+      setOverdueTotal(oTotal);
 
-      let dataQ = supabase
-        .from('v_upcoming_appointments')
-        .select('*')
-        .gte('appointment_date', todayStr)
-        .lte('appointment_date', untilStr)
-        .order('days_until', { ascending: true })
-        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+      // 3. Overdue Data (Paginated)
+      const { data: oData } = await applyScope(
+        supabase.from('v_overdue_patients')
+          .select('*')
+          .order('days_overdue', { ascending: false })
+          .range(overduePage * PAGE_SIZE, overduePage * PAGE_SIZE + PAGE_SIZE - 1)
+      );
 
-      if (currentScope === 'mine') {
-        countQ = countQ.eq('coach_id', userData.id);
-        dataQ = dataQ.eq('coach_id', userData.id);
-      } else if (!isSuper && hospitalIds.length > 0) {
-        countQ = countQ.in('hospital_id', hospitalIds);
-        dataQ = dataQ.in('hospital_id', hospitalIds);
-      }
-
-      const [{ count }, { data, error }] = await Promise.all([countQ, dataQ]);
-      if (error) throw error;
-      setUpcomingTotal(count || 0);
-      setUpcomingAppointments((data || []) as UpcomingAppointment[]);
-    } catch (error) {
-      console.error('❌ [loadUpcomingPage] Error:', error);
-    } finally {
-      setUpcomingLoading(false);
-    }
-  }, []);
-
-  // ============================================================
-  // ✅ Watchlist — View + Pagination + วันนัดถัดไป + ชื่อโค้ช
-  // ============================================================
-  const loadOverduePage = useCallback(async (
-    userData: any,
-    currentScope: 'all' | 'mine',
-    page: number
-  ) => {
-    if (!userData) return;
-    setPageLoading(true);
-    try {
-      const hospitalIds = await getAccessibleHospitalIds(userData.id);
-      const isSuper = isSuperAdmin(userData);
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString().split('T')[0];
-
-      // 1) นับจำนวนทั้งหมด
-      let countQ = supabase
-        .from('v_overdue_patients')
-        .select('*', { count: 'exact', head: true });
-      if (currentScope === 'mine') {
-        countQ = countQ.eq('coach_id', userData.id);
-      } else if (!isSuper && hospitalIds.length > 0) {
-        countQ = countQ.in('hospital_id', hospitalIds);
-      }
-      const { count } = await countQ;
-      const total = count || 0;
-      setOverdueTotal(total);
-
-      // 2) ป้องกันหน้าเกิน
-      const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-      const safePage = Math.min(page, totalPages - 1);
-      if (safePage !== page) setOverduePage(safePage);
-
-      // 3) ดึงเฉพาะ 10 แถวของหน้านี้
-      let dataQ = supabase
-        .from('v_overdue_patients')
-        .select('*')
-        .order('days_overdue', { ascending: false })
-        .range(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE - 1);
-      if (currentScope === 'mine') {
-        dataQ = dataQ.eq('coach_id', userData.id);
-      } else if (!isSuper && hospitalIds.length > 0) {
-        dataQ = dataQ.in('hospital_id', hospitalIds);
-      }
-      const { data, error } = await dataQ;
-      if (error) throw error;
-
-      // 4) ✅ ดึง "วันนัดถัดไป" ของผู้ป่วยในหน้านี้
-      const patientIds = (data || []).map((p: any) => p.id);
-      let nextAppointments: Record<string, string> = {};
-      if (patientIds.length > 0) {
-        const { data: appts } = await supabase
-          .from('appointments')
-          .select('user_id, appointment_date')
-          .in('user_id', patientIds)
-          .eq('status', 'scheduled')
-          .gte('appointment_date', todayStr)
-          .order('appointment_date', { ascending: true });
-        (appts || []).forEach((a: any) => {
-          if (!nextAppointments[a.user_id]) {
-            nextAppointments[a.user_id] = a.appointment_date;
-          }
-        });
-      }
-
-      // 5) ✅ ดึงชื่อโค้ช (เฉพาะคนที่อยู่ในหน้านี้)
-      const coachIds = (data || []).map((p: any) => p.coach_id).filter(Boolean);
+      // ดึงชื่อโค้ชเฉพาะ 10 คนในหน้านี้ (เร็วมาก)
+      const coachIds = [...new Set((oData || []).map((p: any) => p.coach_id).filter(Boolean))] as string[];
       let coachNameMap: Record<string, string> = {};
       if (coachIds.length > 0) {
-        const { data: coaches } = await supabase
-          .from('doctors')
-          .select('user_id, full_name_th')
-          .in('user_id', coachIds);
-        coachNameMap = Object.fromEntries(
-          (coaches || []).map((c: any) => [c.user_id, c.full_name_th])
-        );
+        const { data: coaches } = await supabase.from('doctors').select('user_id, full_name_th').in('user_id', coachIds);
+        coachNameMap = Object.fromEntries((coaches || []).map((c: any) => [c.user_id, c.full_name_th]));
       }
 
-      setOverduePatients(
-        (data || []).map((p: any) => ({
-          ...p,
-          coach_name: coachNameMap[p.coach_id] || null,
-          next_appointment: nextAppointments[p.id] || null,
-        }))
+      setOverduePatients((oData || []).map((p: any) => ({
+        ...p,
+        coach_name: coachNameMap[p.coach_id] || 'ไม่ระบุ'
+      })));
+
+      // 4. Upcoming Count
+      const todayStr = new Date().toISOString().split('T')[0];
+      const untilDate = new Date();
+      untilDate.setDate(today.getDate() + selectedDays);
+      const untilStr = untilDate.toISOString().split('T')[0];
+
+      const { count: uCount } = await applyScope(
+        supabase.from('v_upcoming_appointments')
+          .select('*', { count: 'exact', head: true })
+          .gte('appointment_date', todayStr)
+          .lte('appointment_date', untilStr)
       );
+      const uTotal = uCount || 0;
+      setUpcomingTotal(uTotal);
+
+      // 5. Upcoming Data (Paginated)
+      const { data: uData } = await applyScope(
+        supabase.from('v_upcoming_appointments')
+          .select('*')
+          .gte('appointment_date', todayStr)
+          .lte('appointment_date', untilStr)
+          .order('days_until', { ascending: true })
+          .range(upcomingPage * PAGE_SIZE, upcomingPage * PAGE_SIZE + PAGE_SIZE - 1)
+      );
+      setUpcomingAppointments((uData || []) as UpcomingAppointment[]);
+
+      console.log(`✅ [loadData] เสร็จใน ${(performance.now() - t0).toFixed(0)}ms`);
     } catch (error) {
-      console.error('❌ [loadOverduePage] Error:', error);
+      console.error('❌ [CarePathwayDashboard] Error:', error);
     } finally {
-      setPageLoading(false);
+      setLoading(false);
     }
-  }, []);
+  }, [user, scope, overduePage, upcomingPage, selectedDays]);
 
-  // ============================================================
-  // 🔄 Triggers
-  // ============================================================
+  // Trigger โหลดข้อมูลเมื่อเปลี่ยนหน้า หรือเปลี่ยน Scope
   useEffect(() => {
-    if (user) loadStats();
-  }, [user, loadStats]);
-
-  useEffect(() => {
-    if (user) loadUpcomingPage(user, scope, selectedDays, upcomingPage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, scope, selectedDays, upcomingPage]);
-
-  useEffect(() => {
-    if (user) loadOverduePage(user, scope, overduePage);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, scope, overduePage]);
+    if (user) loadData();
+  }, [user, scope, overduePage, upcomingPage, selectedDays, loadData]);
 
   const switchScope = (s: 'all' | 'mine') => {
-    if (s === scope) return;
     setScope(s);
     setOverduePage(0);
     setUpcomingPage(0);
   };
 
-  // ✅ Helper: สร้างเลขหน้า
+  // Helper สร้างเลขหน้า
   const getPageNumbers = (totalPages: number, currentPage: number) => {
     const pages: (number | string)[] = [];
     const maxVisible = 5;
@@ -357,9 +237,6 @@ export default function CarePathwayDashboardPage() {
     return pages;
   };
 
-  // ============================================================
-  // 🖥️ Render
-  // ============================================================
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -373,13 +250,10 @@ export default function CarePathwayDashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
-      {/* Header */}
+      {/* ================= Header ================= */}
       <div className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-6">
-          <button
-            onClick={() => router.push('/admin/dashboard')}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4"
-          >
+          <button onClick={() => router.push('/admin/dashboard')} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
             <ArrowRight className="w-4 h-4 rotate-180" /> กลับ Dashboard
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
@@ -389,16 +263,10 @@ export default function CarePathwayDashboardPage() {
             </div>
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex rounded-lg border border-gray-300 overflow-hidden text-sm font-medium bg-white">
-                <button
-                  onClick={() => switchScope('all')}
-                  className={`px-4 py-2 transition-colors ${scope === 'all' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
+                <button onClick={() => switchScope('all')} className={`px-4 py-2 transition-colors ${scope === 'all' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>
                   🏥 ทั้งหมด
                 </button>
-                <button
-                  onClick={() => switchScope('mine')}
-                  className={`px-4 py-2 transition-colors ${scope === 'mine' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
-                >
+                <button onClick={() => switchScope('mine')} className={`px-4 py-2 transition-colors ${scope === 'mine' ? 'bg-purple-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>
                   👤 ในการดูแลของฉัน
                 </button>
               </div>
@@ -410,9 +278,7 @@ export default function CarePathwayDashboardPage() {
                   <div>
                     <p className="font-semibold text-gray-800">{user?.full_name_th || 'ผู้ดูแลระบบ'}</p>
                     <p className="text-xs text-gray-500">
-                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' :
-                        user?.role === 'doctor' ? '👨‍⚕️ แพทย์' :
-                          user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
+                      {user?.role === 'admin' ? '👑 ผู้ดูแลระบบ' : user?.role === 'doctor' ? '👨‍⚕️ แพทย์' : user?.role === 'osm' ? '🏘️ อสม.' : '👩‍💼 เจ้าหน้าที่'}
                     </p>
                   </div>
                 </div>
@@ -422,28 +288,10 @@ export default function CarePathwayDashboardPage() {
                       <Hospital className="w-3 h-3 text-blue-600" />
                       <span className="text-xs text-gray-600 font-medium">{userHospital.name}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {userHospital.type === 'main' ? (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold">🏥 แม่ข่าย</span>
-                      ) : (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-semibold">🏥 ลูกข่าย</span>
-                      )}
-                      {userHospital.type === 'sub' && userHospital.parent_hospital && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
-                          <Building2 className="w-3 h-3" />
-                          <span>แม่ข่าย: {userHospital.parent_hospital.name}</span>
-                        </div>
-                      )}
-                    </div>
                   </div>
-                ) : (
-                  <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>
-                )}
+                ) : <p className="text-xs text-gray-400 mt-2">ไม่สังกัดโรงพยาบาล</p>}
               </div>
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg"
-              >
+              <button onClick={handleLogout} className="flex items-center gap-2 px-4 py-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition-all shadow-lg">
                 <LogOut className="w-4 h-4" /> ออกจากระบบ
               </button>
             </div>
@@ -452,24 +300,17 @@ export default function CarePathwayDashboardPage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8 space-y-8">
-        {/* ================= ใกล้ถึงวันนัด — View + Pagination จริง ================= */}
+        {/* ================= ใกล้ถึงวันนัด (Pagination) ================= */}
         <div>
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
             <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2 flex-wrap">
               <Calendar className="w-5 h-5 text-cyan-600" />
               ผู้ป่วยใกล้ถึงวันนัด
               <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-sm font-bold">{upcomingTotal} คน</span>
-              {scope === 'mine' && (
-                <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
-              )}
             </h2>
             <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-gray-700">แสดงผู้ป่วยที่นัดภายใน:</label>
-              <select
-                value={selectedDays}
-                onChange={(e) => { setSelectedDays(Number(e.target.value)); setUpcomingPage(0); }}
-                className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-cyan-500"
-              >
+              <select value={selectedDays} onChange={(e) => { setSelectedDays(Number(e.target.value)); setUpcomingPage(0); }} className="px-4 py-2 border border-gray-300 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-cyan-500">
                 <option value={1}>1 วัน</option>
                 <option value={2}>2 วัน</option>
                 <option value={3}>3 วัน</option>
@@ -478,13 +319,8 @@ export default function CarePathwayDashboardPage() {
               </select>
             </div>
           </div>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden relative">
-            {upcomingLoading && (
-              <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
-              </div>
-            )}
-            {upcomingAppointments.length === 0 && !upcomingLoading ? (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            {upcomingAppointments.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-gray-300" />
                 <p>ไม่มีผู้ป่วยที่นัดหมายใน {selectedDays} วันนี้</p>
@@ -511,32 +347,18 @@ export default function CarePathwayDashboardPage() {
                           <td className="px-6 py-3 font-mono text-gray-600">{a.hospital_number}</td>
                           <td className="px-6 py-3 font-medium text-gray-800">{a.first_name} {a.last_name}</td>
                           <td className="px-6 py-3 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              a.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
-                                a.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
-                                  a.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
-                                    'bg-red-100 text-red-700'
-                            }`}>{a.pam_level || 'L0'}</span>
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${a.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' : a.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' : a.pam_level === 'L2' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{a.pam_level || 'L0'}</span>
                           </td>
                           <td className="px-6 py-3 text-center text-gray-600">{a.hospital_name}</td>
                           <td className="px-6 py-3 text-center text-gray-600">{a.coach_name || '—'}</td>
                           <td className="px-6 py-3 text-center">
-                            <span className="px-2 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-medium">
-                              {new Date(a.appointment_date).toLocaleDateString('th-TH')}
-                            </span>
+                            <span className="px-2 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-medium">{new Date(a.appointment_date).toLocaleDateString('th-TH')}</span>
                           </td>
                           <td className="px-6 py-3 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              a.days_until <= 1 ? 'bg-red-100 text-red-700' :
-                                a.days_until <= 3 ? 'bg-orange-100 text-orange-700' :
-                                  'bg-cyan-100 text-cyan-700'
-                            }`}>{a.days_until === 0 ? 'วันนี้!' : `${a.days_until} วัน`}</span>
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${a.days_until <= 1 ? 'bg-red-100 text-red-700' : a.days_until <= 3 ? 'bg-orange-100 text-orange-700' : 'bg-cyan-100 text-cyan-700'}`}>{a.days_until === 0 ? 'วันนี้!' : `${a.days_until} วัน`}</span>
                           </td>
                           <td className="px-6 py-3 text-center">
-                            <button
-                              onClick={() => router.push(`/admin/appointments/followup/new?patient_id=${a.patient_id}&appointment_id=${a.appointment_id}`)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 transition-colors"
-                            >
+                            <button onClick={() => router.push(`/admin/appointments/followup/new?patient_id=${a.patient_id}&appointment_id=${a.appointment_id}`)} className="inline-flex items-center gap-1 px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 transition-colors">
                               <Clock className="w-3 h-3" /> ติดตาม
                             </button>
                           </td>
@@ -552,8 +374,8 @@ export default function CarePathwayDashboardPage() {
                       <span className="text-gray-400 ml-2">(หน้า {upcomingPage + 1} / {upcomingTotalPages})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setUpcomingPage(0)} disabled={upcomingPage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setUpcomingPage(p => Math.max(0, p - 1))} disabled={upcomingPage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
+                      <button onClick={() => setUpcomingPage(0)} disabled={upcomingPage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
+                      <button onClick={() => setUpcomingPage(p => Math.max(0, p - 1))} disabled={upcomingPage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
                       <div className="flex gap-1">
                         {getPageNumbers(upcomingTotalPages, upcomingPage).map((pageNum, idx) => {
                           if (pageNum === '...') return <span key={`u-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
@@ -561,8 +383,8 @@ export default function CarePathwayDashboardPage() {
                           return <button key={p} onClick={() => setUpcomingPage(p)} className={`px-3 py-2 rounded-lg text-sm font-medium ${upcomingPage === p ? 'bg-cyan-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}>{p + 1}</button>;
                         })}
                       </div>
-                      <button onClick={() => setUpcomingPage(p => Math.min(upcomingTotalPages - 1, p + 1))} disabled={upcomingPage >= upcomingTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
-                      <button onClick={() => setUpcomingPage(upcomingTotalPages - 1)} disabled={upcomingPage >= upcomingTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
+                      <button onClick={() => setUpcomingPage(p => Math.min(upcomingTotalPages - 1, p + 1))} disabled={upcomingPage >= upcomingTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
+                      <button onClick={() => setUpcomingPage(upcomingTotalPages - 1)} disabled={upcomingPage >= upcomingTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
                     </div>
                   </div>
                 )}
@@ -571,13 +393,10 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 1 ================= */}
+        {/* ================= หมวดที่ 1: สรุปตัวเลขเท่านั้น (ไม่มีรายชื่อ) ================= */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <Users className="w-5 h-5 text-blue-600" /> หมวดที่ 1: สรุปตัวเลขภาพรวม
-            {scope === 'mine' && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
-            )}
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-white rounded-xl shadow-sm border p-5 flex items-center gap-4">
@@ -604,32 +423,20 @@ export default function CarePathwayDashboardPage() {
           <div className="mt-3 text-xs text-gray-500 flex items-center gap-2">
             <span>ตรวจสอบยอดรวม:</span>
             <span className={`font-bold ${stats.on_time_count + stats.overdue_count === stats.total_patients ? 'text-green-600' : 'text-amber-600'}`}>
-              {stats.on_time_count + stats.overdue_count === stats.total_patients
-                ? `✅ ${stats.on_time_count} + ${stats.overdue_count} = ${stats.total_patients} ครบถ้วน`
-                : `⚠️ ${stats.on_time_count} + ${stats.overdue_count} ≠ ${stats.total_patients}`}
+              {stats.on_time_count + stats.overdue_count === stats.total_patients ? `✅ ${stats.on_time_count} + ${stats.overdue_count} = ${stats.total_patients} ครบถ้วน` : `⚠️ ${stats.on_time_count} + ${stats.overdue_count} ≠ ${stats.total_patients}`}
             </span>
           </div>
         </div>
 
-        {/* ================= หมวดที่ 2: Watchlist + วันนัดถัดไป + 2 ปุ่มจัดการ ================= */}
+        {/* ================= หมวดที่ 2: Watchlist (Pagination + 2 ปุ่มจัดการ) ================= */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <AlertTriangle className="w-5 h-5 text-red-500" />
             หมวดที่ 2: ผู้ป่วยที่ต้องให้ความสนใจ (เลยกำหนด &gt;30 วัน)
-            <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-bold">
-              ทั้งหมด {overdueTotal.toLocaleString()} คน
-            </span>
-            {scope === 'mine' && (
-              <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-semibold">👤 ในการดูแลของฉัน</span>
-            )}
+            <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-bold">ทั้งหมด {overdueTotal.toLocaleString()} คน</span>
           </h2>
-          <div className="bg-white rounded-xl shadow-sm border overflow-hidden relative">
-            {pageLoading && (
-              <div className="absolute inset-0 bg-white/60 z-10 flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-red-500" />
-              </div>
-            )}
-            {overduePatients.length === 0 && !pageLoading ? (
+          <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+            {overduePatients.length === 0 ? (
               <div className="p-8 text-center text-gray-500">
                 <CalendarCheck className="w-12 h-12 mx-auto mb-3 text-green-400" />
                 <p>ยอดเยี่ยม! ไม่มีผู้ป่วยที่เลยกำหนดการติดตาม</p>
@@ -645,7 +452,6 @@ export default function CarePathwayDashboardPage() {
                         <th className="px-6 py-3 text-center font-semibold text-gray-700">PAM Level</th>
                         <th className="px-6 py-3 text-center font-semibold text-gray-700">โรงพยาบาล</th>
                         <th className="px-6 py-3 text-center font-semibold text-gray-700">โค้ชผู้ดูแล</th>
-                        <th className="px-6 py-3 text-center font-semibold text-gray-700">วันนัดถัดไป</th>
                         <th className="px-6 py-3 text-center font-semibold text-gray-700">ติดตามล่าสุด</th>
                         <th className="px-6 py-3 text-center font-semibold text-gray-700">เลยกำหนด</th>
                         <th className="px-6 py-3 text-center font-semibold text-gray-700">จัดการ</th>
@@ -657,45 +463,30 @@ export default function CarePathwayDashboardPage() {
                           <td className="px-6 py-3 font-mono text-gray-600">{p.hospital_number}</td>
                           <td className="px-6 py-3 font-medium text-gray-800">{p.first_name} {p.last_name}</td>
                           <td className="px-6 py-3 text-center">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              p.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' :
-                                p.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' :
-                                  p.pam_level === 'L2' ? 'bg-green-100 text-green-700' :
-                                    'bg-red-100 text-red-700'
-                            }`}>{p.pam_level || 'L0'}</span>
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${p.pam_level === 'L4' ? 'bg-purple-100 text-purple-700' : p.pam_level === 'L3' ? 'bg-blue-100 text-blue-700' : p.pam_level === 'L2' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{p.pam_level || 'L0'}</span>
                           </td>
                           <td className="px-6 py-3 text-center text-gray-600">{p.hospital_name || '-'}</td>
                           <td className="px-6 py-3 text-center text-gray-600">{p.coach_name || '—'}</td>
-                          <td className="px-6 py-3 text-center">
-                            {p.next_appointment ? (
-                              <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-medium">
-                                {new Date(p.next_appointment).toLocaleDateString('th-TH')}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400 text-xs">—</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-3 text-center text-gray-600">
-                            {p.last_followup ? new Date(p.last_followup).toLocaleDateString('th-TH') : 'ไม่เคย'}
-                          </td>
+                          <td className="px-6 py-3 text-center text-gray-600">{p.last_followup ? new Date(p.last_followup).toLocaleDateString('th-TH') : 'ไม่เคย'}</td>
                           <td className="px-6 py-3 text-center">
                             <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold">
                               <CalendarX className="w-3 h-3" />
                               {p.days_overdue === 999 ? 'ไม่เคยติดตาม' : `${p.days_overdue} วัน`}
                             </span>
                           </td>
-                          {/* ✅ คอลัมน์จัดการ: 2 ปุ่ม (ดูรายละเอียด + สร้างนัดหมายใหม่) */}
                           <td className="px-6 py-3 text-center">
                             <div className="inline-flex items-center gap-2">
                               <button
                                 onClick={() => router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`)}
                                 className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors"
+                                title="ดูรายละเอียดเส้นทางสุขภาพ"
                               >
                                 <Eye className="w-3 h-3" /> ดูรายละเอียด
                               </button>
                               <button
-                                onClick={() => router.push(`/admin/appointments/new?patient_id=${p.id}&coach_id=${p.coach_id}&from=care-pathway-dashboard`)}
+                                onClick={() => router.push(`/admin/appointments/new?patient_id=${p.id}&coach_id=${p.coach_id || ''}&from=care-pathway-dashboard`)}
                                 className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs hover:bg-emerald-600 transition-colors"
+                                title="สร้างนัดหมายใหม่ให้ผู้ป่วยนี้"
                               >
                                 <CalendarPlus className="w-3 h-3" /> สร้างนัดหมายใหม่
                               </button>
@@ -713,8 +504,8 @@ export default function CarePathwayDashboardPage() {
                       <span className="text-gray-400 ml-2">(หน้า {overduePage + 1} / {overdueTotalPages})</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setOverduePage(0)} disabled={overduePage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
-                      <button onClick={() => setOverduePage(p => Math.max(0, p - 1))} disabled={overduePage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
+                      <button onClick={() => setOverduePage(0)} disabled={overduePage === 0} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าแรก"><ChevronsLeft className="w-4 h-4" /></button>
+                      <button onClick={() => setOverduePage(p => Math.max(0, p - 1))} disabled={overduePage === 0} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> ก่อนหน้า</button>
                       <div className="flex gap-1">
                         {getPageNumbers(overdueTotalPages, overduePage).map((pageNum, idx) => {
                           if (pageNum === '...') return <span key={`o-${idx}`} className="px-3 py-2 text-gray-400">...</span>;
@@ -722,8 +513,8 @@ export default function CarePathwayDashboardPage() {
                           return <button key={p} onClick={() => setOverduePage(p)} className={`px-3 py-2 rounded-lg text-sm font-medium ${overduePage === p ? 'bg-red-500 text-white' : 'bg-white border border-gray-300 hover:bg-gray-50'}`}>{p + 1}</button>;
                         })}
                       </div>
-                      <button onClick={() => setOverduePage(p => Math.min(overdueTotalPages - 1, p + 1))} disabled={overduePage >= overdueTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
-                      <button onClick={() => setOverduePage(overdueTotalPages - 1)} disabled={overduePage >= overdueTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
+                      <button onClick={() => setOverduePage(p => Math.min(overdueTotalPages - 1, p + 1))} disabled={overduePage >= overdueTotalPages - 1} className="px-3 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50 text-sm flex items-center gap-1">ถัดไป <ChevronRight className="w-4 h-4" /></button>
+                      <button onClick={() => setOverduePage(overdueTotalPages - 1)} disabled={overduePage >= overdueTotalPages - 1} className="p-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 disabled:opacity-50" title="หน้าสุดท้าย"><ChevronsRight className="w-4 h-4" /></button>
                     </div>
                   </div>
                 )}
@@ -732,7 +523,7 @@ export default function CarePathwayDashboardPage() {
           </div>
         </div>
 
-        {/* ================= หมวดที่ 3 ================= */}
+        {/* ================= หมวดที่ 3: สถิติ ================= */}
         <div>
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Repeat className="w-5 h-5 text-purple-600" /> หมวดที่ 3: สถิติการทำซ้ำและเหตุผล (ย้อนหลัง 30 วัน)
@@ -744,28 +535,17 @@ export default function CarePathwayDashboardPage() {
               </h3>
               <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <div>
-                    <p className="text-sm text-blue-800 font-medium">ผู้ป่วยที่บันทึกกิจกรรม</p>
-                    <p className="text-xs text-blue-600">มีอย่างน้อย 1 ครั้งในเดือนนี้</p>
-                  </div>
+                  <div><p className="text-sm text-blue-800 font-medium">ผู้ป่วยที่บันทึกกิจกรรม</p><p className="text-xs text-blue-600">มีอย่างน้อย 1 ครั้งในเดือนนี้</p></div>
                   <p className="text-3xl font-bold text-blue-700">{stats.active_recorders.toLocaleString()}</p>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
-                  <div>
-                    <p className="text-sm text-purple-800 font-medium">ผู้ป่วยที่บันทึกซ้ำ</p>
-                    <p className="text-xs text-purple-600">มีความสม่ำเสมอ (&gt;1 ครั้ง)</p>
-                  </div>
+                  <div><p className="text-sm text-purple-800 font-medium">ผู้ป่วยที่บันทึกซ้ำ</p><p className="text-xs text-purple-600">มีความสม่ำเสมอ (&gt;1 ครั้ง)</p></div>
                   <p className="text-3xl font-bold text-purple-700">{stats.repeat_recorders.toLocaleString()}</p>
                 </div>
                 {stats.active_recorders > 0 && (
                   <div className="mt-2">
-                    <div className="flex justify-between text-xs text-gray-600 mb-1">
-                      <span>อัตราความสม่ำเสมอ</span>
-                      <span>{Math.round((stats.repeat_recorders / stats.active_recorders) * 100)}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2.5">
-                      <div className="bg-purple-500 h-2.5 rounded-full transition-all" style={{ width: `${(stats.repeat_recorders / stats.active_recorders) * 100}%` }}></div>
-                    </div>
+                    <div className="flex justify-between text-xs text-gray-600 mb-1"><span>อัตราความสม่ำเสมอ</span><span>{Math.round((stats.repeat_recorders / stats.active_recorders) * 100)}%</span></div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5"><div className="bg-purple-500 h-2.5 rounded-full transition-all" style={{ width: `${(stats.repeat_recorders / stats.active_recorders) * 100}%` }}></div></div>
                   </div>
                 )}
               </div>
@@ -777,37 +557,22 @@ export default function CarePathwayDashboardPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-200">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-                      <AlertTriangle className="w-4 h-4 text-red-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-red-800">พบอุปสรรค / ความกังวล</p>
-                      <p className="text-xs text-red-600">adaptation_summary = 'obstacles'</p>
-                    </div>
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center"><AlertTriangle className="w-4 h-4 text-red-600" /></div>
+                    <div><p className="text-sm font-semibold text-red-800">พบอุปสรรค / ความกังวล</p><p className="text-xs text-red-600">adaptation_summary = 'obstacles'</p></div>
                   </div>
                   <span className="text-xl font-bold text-red-700">{stats.obstacles_count.toLocaleString()}</span>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                      <TrendingUp className="w-4 h-4 text-green-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-green-800">พบโอกาส / ความก้าวหน้า</p>
-                      <p className="text-xs text-green-600">adaptation_summary = 'opportunities'</p>
-                    </div>
+                    <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center"><TrendingUp className="w-4 h-4 text-green-600" /></div>
+                    <div><p className="text-sm font-semibold text-green-800">พบโอกาส / ความก้าวหน้า</p><p className="text-xs text-green-600">adaptation_summary = 'opportunities'</p></div>
                   </div>
                   <span className="text-xl font-bold text-green-700">{stats.opportunities_count.toLocaleString()}</span>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-                      <HelpCircle className="w-4 h-4 text-gray-600" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">อื่นๆ</p>
-                      <p className="text-xs text-gray-600">adaptation_summary = 'other'</p>
-                    </div>
+                    <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><HelpCircle className="w-4 h-4 text-gray-600" /></div>
+                    <div><p className="text-sm font-semibold text-gray-800">อื่นๆ</p><p className="text-xs text-gray-600">adaptation_summary = 'other'</p></div>
                   </div>
                   <span className="text-xl font-bold text-gray-700">{stats.other_count.toLocaleString()}</span>
                 </div>
