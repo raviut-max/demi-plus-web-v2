@@ -1,52 +1,42 @@
 // app/admin/appointments/new/page.tsx
-// ✅ แก้ไขล่าสุด: เอาส่วน Debug Panel ออกจากหน้าจอ (Clean UI)
+// ✅ v9 — 23 พ.ย. 2569: ล็อกผู้ป่วย+ผู้ดูแลอัตโนมัติจาก URL, dropdown ผู้ดูแลตามเครือข่าย รพ.ผู้ป่วย,
+//          กลับหน้าที่เรียกตาม ?from=, ไม่มี Debug Panel
 'use client';
-import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import {
   checkSession,
   logout,
   createAppointment,
-  getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  getPatientsByHospitalNetwork,
 } from '@/lib/supabase/queries';
 import {
   CalendarPlus, AlertCircle, Loader2, ArrowLeft, User, Stethoscope, LogOut,
-  CheckCircle, XCircle, Search, Users, Clock, FileText, Hospital, IdCard, Building2,
+  CheckCircle, XCircle, Search, Users, Clock, FileText, Hospital, IdCard,
+  Building2, RefreshCw,
 } from 'lucide-react';
 
 // =====================================================
 // 📋 Interfaces
 // =====================================================
 interface Hospital {
-  id: string;
-  name: string;
-  code: string;
-  type: 'main' | 'sub';
-  parent_id: string | null;
-  parent_hospital?: { id: string; name: string; code: string };
+  id: string; name: string; code?: string;
+  type?: 'main' | 'sub'; parent_id?: string | null;
 }
 interface UserHospital {
-  id: string;
-  name: string;
-  code: string;
-  type: 'main' | 'sub';
-  parent_id: string | null;
-  parent_hospital?: { id: string; name: string; code: string };
+  id: string; name: string; code?: string;
+  type?: 'main' | 'sub'; parent_id?: string | null;
+  parent_hospital?: { id: string; name: string; code?: string };
 }
 interface Coach {
-  id: string;
   user_id: string;
   full_name_th: string;
   specialization_th?: string;
-  is_active: boolean;
   hospital_id?: string;
   hospital_name?: string;
   hospital_type?: 'main' | 'sub';
-  users?: any;
 }
 interface Patient {
   id: string;
@@ -55,209 +45,235 @@ interface Patient {
   hospital_number: string;
   id_card?: string;
   phone?: string;
-  birth_date?: string;
   hospital_id?: string;
+  coach_id?: string | null;
   hospital_name?: string;
   hospital_code?: string;
   hospital_type?: 'main' | 'sub';
-  parent_id?: string | null;
   parent_hospital?: Hospital;
-  coach_id?: string | null;
 }
 
 // =====================================================
-// 🧩 Main Content Component
+// 🧰 SELECT CHAINS (fallback กัน 400 — ไม่มี id_card, ไม่มี embed ใน profiles)
+// =====================================================
+const PATIENT_SELECTS = [
+  'id, first_name, last_name, hospital_number, hospital_id, coach_id',
+  'id, first_name, last_name, hospital_number, hospital_id',
+  'id, first_name, last_name, hospital_number',
+];
+const HOSPITAL_SELECTS = ['id, name, code, type, parent_id', 'id, name, type, parent_id', 'id, name'];
+// embed ที่ appointments/view พิสูจน์แล้วว่าใช้ได้ผล → fallback ของ STEP 4
+const COACH_EMBED_SELECTS = [
+  'id, user_id, full_name_th, specialization_th, is_active, users!doctors_user_id_fkey (hospital_id, hospitals (id, name, type))',
+  'id, user_id, full_name_th, is_active, users!doctors_user_id_fkey (hospital_id, hospitals (id, name))',
+];
+
+function normalizeCoach(d: any): Coach {
+  const u = Array.isArray(d.users) ? d.users[0] : d.users;
+  const h = Array.isArray(u?.hospitals) ? u.hospitals[0] : u?.hospitals;
+  return {
+    user_id: d.user_id,
+    full_name_th: d.full_name_th || '-',
+    specialization_th: d.specialization_th,
+    hospital_id: u?.hospital_id,
+    hospital_name: h?.name,
+    hospital_type: h?.type,
+  };
+}
+
+// =====================================================
+// 🧰 STEP 1: fetchPatientById — fallback chain
+// =====================================================
+async function fetchPatientById(id: string): Promise<Patient | null> {
+  for (const sel of PATIENT_SELECTS) {
+    const { data, error } = await supabase
+      .from('profiles').select(sel).eq('id', id).maybeSingle();
+    if (error) { console.warn(`⚠️ [STEP1] "${sel}" fail → ${error.message}`); continue; }
+    if (data) return data as Patient;
+    console.warn(`⚠️ [STEP1] schema OK แต่ไม่พบแถว id=${id} (RLS/ไม่พบ)`);
+    return null;
+  }
+  console.error('❌ [STEP1] ทุก select chain ล้มเหลว');
+  return null;
+}
+
+// =====================================================
+// 🧰 STEP 2 helpers: enrich ด้วย query แยกตาราง
+// =====================================================
+async function fetchHospitalById(id: string): Promise<Hospital | null> {
+  if (!id) return null;
+  for (const sel of HOSPITAL_SELECTS) {
+    const { data, error } = await supabase
+      .from('hospitals').select(sel).eq('id', id).maybeSingle();
+    if (!error && data) return data as Hospital;
+  }
+  return null;
+}
+
+async function fetchUserExtras(userId: string): Promise<{ id_card?: string; phone?: string }> {
+  for (const sel of ['id_card, phone', 'id_card', 'phone']) {
+    const { data, error } = await supabase
+      .from('users').select(sel).eq('id', userId).maybeSingle();
+    if (!error && data) return data as any;
+  }
+  return {}; // non-fatal
+}
+
+// =====================================================
+// 🧰 STEP 3: computePatientNetwork — ใช้ cache allHospitals
+// =====================================================
+function computePatientNetwork(
+  patient: Patient,
+  allHospitals: Hospital[]
+): { ids: string[]; label: string } {
+  if (!patient.hospital_id) return { ids: [], label: '-' };
+  const h = allHospitals.find((x) => x.id === patient.hospital_id);
+  if (!h) return { ids: [patient.hospital_id], label: patient.hospital_name || '-' };
+
+  const rootId = h.type === 'main' ? h.id : h.parent_id || h.id;
+  const net = allHospitals.filter((x) => x.id === rootId || x.parent_id === rootId);
+  const main = net.find((x) => x.id === rootId);
+  const label = main ? `${main.name}${net.length > 1 ? ` (+${net.length - 1} ลูกข่าย)` : ''}` : h.name || '-';
+  return { ids: net.map((x) => x.id), label };
+}
+
+// =====================================================
+// 🧰 STEP 4: fetchCoachNetworkList — 3-step query (primary) + embed (fallback)
+// =====================================================
+async function fetchCoachNetworkList(scopeIds: string[]): Promise<Coach[]> {
+  if (!scopeIds.length) return [];
+
+  // ---- 3-step: doctors → users → hospitals ----
+  const { data: docs, error: e1 } = await supabase
+    .from('doctors')
+    .select('id, user_id, full_name_th, specialization_th, is_active')
+    .eq('is_active', true)
+    .limit(5000);
+  if (!e1 && docs && docs.length > 0) {
+    const userIds = docs.map((d: any) => d.user_id).filter(Boolean);
+    const uMap: Record<string, string> = {};
+    for (let i = 0; i < userIds.length; i += 900) {
+      const { data: us } = await supabase
+        .from('users').select('id, hospital_id').in('id', userIds.slice(i, i + 900));
+      (us || []).forEach((u: any) => { if (u.hospital_id) uMap[u.id] = u.hospital_id; });
+    }
+    const inScope = docs.filter((d: any) => scopeIds.includes(uMap[d.user_id] || ''));
+    if (inScope.length > 0) {
+      const hIds = [...new Set(inScope.map((d: any) => uMap[d.user_id]).filter(Boolean))] as string[];
+      const hMap: Record<string, Hospital> = {};
+      for (let i = 0; i < hIds.length; i += 900) {
+        const { data: hs } = await supabase
+          .from('hospitals').select('id, name, type').in('id', hIds.slice(i, i + 900));
+        (hs || []).forEach((h: any) => (hMap[h.id] = h));
+      }
+      return inScope
+        .map((d: any) => ({
+          user_id: d.user_id,
+          full_name_th: d.full_name_th || '-',
+          specialization_th: d.specialization_th,
+          hospital_id: uMap[d.user_id],
+          hospital_name: hMap[uMap[d.user_id]]?.name,
+          hospital_type: hMap[uMap[d.user_id]]?.type,
+        }))
+        .sort((a, b) => (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th'));
+    }
+  }
+
+  // ---- fallback: embed query (พิสูจน์แล้วว่าใช้ได้ผลใน appointments/view) ----
+  for (const sel of COACH_EMBED_SELECTS) {
+    const { data, error } = await supabase
+      .from('doctors').select(sel).eq('is_active', true)
+      .in('users.hospital_id', scopeIds).limit(2000);
+    if (!error && data && data.length > 0) {
+      return (data as any[])
+        .map(normalizeCoach)
+        .sort((a, b) => (a.full_name_th || '').localeCompare(b.full_name_th || '', 'th'));
+    }
+  }
+  return [];
+}
+
+// =====================================================
+// 🧰 STEP 5: fetchCoachByAnyId — fallback (user_id แล้ว id)
+// =====================================================
+async function fetchCoachByAnyId(id: string): Promise<Coach | null> {
+  if (!id) return null;
+  for (const col of ['user_id', 'id']) {
+    for (const sel of COACH_EMBED_SELECTS) {
+      const { data } = await supabase
+        .from('doctors').select(sel).eq(col, id).maybeSingle();
+      if (data?.user_id) return normalizeCoach(data);
+    }
+    const { data } = await supabase
+      .from('doctors').select('user_id, full_name_th, specialization_th')
+      .eq(col, id).maybeSingle();
+    if (data?.user_id) {
+      const { data: u } = await supabase.from('users').select('hospital_id').eq('id', data.user_id).maybeSingle();
+      const h = u?.hospital_id ? await fetchHospitalById(u.hospital_id) : null;
+      return {
+        user_id: data.user_id, full_name_th: data.full_name_th || '-',
+        specialization_th: data.specialization_th, hospital_id: u?.hospital_id || undefined,
+        hospital_name: h?.name, hospital_type: h?.type,
+      };
+    }
+  }
+  return null;
+}
+
+// =====================================================
+// 🧩 Main Content
 // =====================================================
 function NewAppointmentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromParam = searchParams.get('from');
-  const backUrl = fromParam === 'care-pathway-dashboard' ? '/admin/care-pathway-dashboard' : '/admin/appointments/view';
+
+  // ---- URL params ----
+  const urlFrom = searchParams.get('from') || '';
   const urlPatientId = searchParams.get('patient_id') || '';
   const urlCoachId = searchParams.get('coach_id') || '';
 
-  const patientDropdownRef = useRef<HTMLDivElement>(null);
+  // ✅ Navigation: กลับหน้าที่เรียก
+  const backUrl = useMemo(() => {
+    if (urlFrom === 'care-pathway-dashboard') return '/admin/care-pathway-dashboard';
+    if (urlFrom === 'appointments-view') return '/admin/appointments/view';
+    if (urlFrom === 'patient-detail' && urlPatientId) return `/admin/patients/${urlPatientId}`;
+    return '/admin/appointments/view';
+  }, [urlFrom, urlPatientId]);
+
   const staffDropdownRef = useRef<HTMLDivElement>(null);
 
+  // ---- States ----
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
   const [allHospitals, setAllHospitals] = useState<Hospital[]>([]);
-  const [networkHospitals, setNetworkHospitals] = useState<Hospital[]>([]);
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [coaches, setCoaches] = useState<Coach[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [coachLoading, setCoachLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
-  const [error, setError] = useState('');
-  const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
-
-  const [patientSearchTerm, setPatientSearchTerm] = useState('');
-  const [isPatientDropdownOpen, setIsPatientDropdownOpen] = useState(false);
-  const [staffSearchTerm, setStaffSearchTerm] = useState('');
-  const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
 
   const [lockedPatient, setLockedPatient] = useState<Patient | null>(null);
   const [lockedCoach, setLockedCoach] = useState<Coach | null>(null);
+  const [networkCoaches, setNetworkCoaches] = useState<Coach[]>([]);
+  const [scopeLabel, setScopeLabel] = useState('');
   const [coachMissingWarning, setCoachMissingWarning] = useState(false);
 
+  const [loading, setLoading] = useState(true);
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState('');
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+
+  const [staffSearchTerm, setStaffSearchTerm] = useState('');
+  const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
+
   const [formData, setFormData] = useState({
-    patient_id: '',
-    staff_id: '',
-    appointment_type: 'follow_up',
-    appointment_date: '',
-    appointment_time: '',
-    duration_minutes: 30,
-    location: 'clinic',
-    notes: '',
+    patient_id: '', staff_id: '', appointment_type: 'follow_up',
+    appointment_date: '', appointment_time: '', duration_minutes: 30,
+    location: 'clinic', notes: '',
   });
 
   const autoAppliedRef = useRef(false);
 
-  const normalizeCoach = (d: any): Coach => ({
-    id: d.user_id ?? d.id,
-    user_id: d.user_id,
-    full_name_th: d.full_name_th,
-    specialization_th: d.specialization_th,
-    is_active: d.is_active ?? true,
-    hospital_id: d.users?.hospital_id,
-    hospital_name: d.users?.hospitals?.name,
-    hospital_type: d.users?.hospitals?.type,
-    users: d.users,
-  });
-
-  const coachDisplayText = (c: Coach) => `${c.full_name_th}${c.specialization_th ? ` (${c.specialization_th})` : ''}`;
-
-  const enrichPatient = (p: Patient): Patient => {
-    const h = allHospitals.find((x) => x.id === p.hospital_id);
-    const parent = h?.parent_id ? allHospitals.find((x) => x.id === h.parent_id) : undefined;
-    return {
-      ...p,
-      hospital_name: p.hospital_name || h?.name,
-      hospital_code: p.hospital_code || h?.code,
-      hospital_type: p.hospital_type || h?.type,
-      parent_id: p.parent_id ?? h?.parent_id,
-      parent_hospital: p.parent_hospital || parent,
-    };
-  };
-
-  const getPatientNetwork = (patient: Patient): Hospital[] => {
-    if (patient.hospital_id) {
-      const h = allHospitals.find((x) => x.id === patient.hospital_id);
-      if (h) {
-        const rootId = h.type === 'main' ? h.id : h.parent_id || h.id;
-        return allHospitals.filter((x) => x.id === rootId || x.parent_id === rootId);
-      }
-    }
-    return networkHospitals;
-  };
-
-  const fetchCoachesForHospitals = async (ids: string[]): Promise<Coach[]> => {
-    try {
-      const { data, error } = await supabase
-        .from('doctors')
-        .select(`user_id, full_name_th, specialization_th, is_active, users!inner ( hospital_id, role, hospitals ( id, name, code, type ) )`)
-        .eq('is_active', true)
-        .in('users.hospital_id', ids)
-        .order('full_name_th');
-      if (error) throw error;
-      return (data || []).map(normalizeCoach);
-    } catch (e) {
-      console.error('❌ [fetchCoachesForHospitals]', e);
-      return [];
-    }
-  };
-
-  const loadCoaches = async (ids: string[]) => {
-    try {
-      if (typeof getCoachesWithHospitals === 'function') {
-        const data = await getCoachesWithHospitals(ids);
-        setCoaches((data || []).map(normalizeCoach));
-      } else {
-        setCoaches(await fetchCoachesForHospitals(ids));
-      }
-    } catch (e) {
-      console.error('❌ [loadCoaches]', e);
-      setCoaches(await fetchCoachesForHospitals(ids));
-    }
-  };
-
-  const loadPatients = async (ids: string[]) => {
-    try {
-      if (typeof getPatientsByHospitalNetwork !== 'function') return;
-      const data = await getPatientsByHospitalNetwork(ids);
-      setPatients(data || []);
-    } catch (e) {
-      console.error('❌ [loadPatients]', e);
-    }
-  };
-
-  const applyAutoPatient = (p: Patient, preferredCoachId?: string) => {
-    const enriched = enrichPatient(p);
-    setFormData((prev) => ({ ...prev, patient_id: enriched.id, staff_id: '' }));
-    setPatientSearchTerm(`${enriched.first_name} ${enriched.last_name} (${enriched.hospital_number})`);
-    setLockedPatient(enriched);
-    setLockedCoach(null);
-    setCoachMissingWarning(false);
-    const scope = getPatientNetwork(enriched);
-    void loadCoachScopeAndAutoFill(enriched, scope, preferredCoachId);
-  };
-
-  const loadCoachScopeAndAutoFill = async (patient: Patient, scope: Hospital[], preferredCoachId?: string) => {
-    setCoachLoading(true);
-    try {
-      const scopeIds = scope.map((h) => h.id);
-      let list: Coach[] = [];
-      if (typeof getCoachesWithHospitals === 'function') {
-        try {
-          const data = await getCoachesWithHospitals(scopeIds);
-          list = (data || []).map(normalizeCoach);
-        } catch (e) {
-          list = await fetchCoachesForHospitals(scopeIds);
-        }
-      } else {
-        list = await fetchCoachesForHospitals(scopeIds);
-      }
-      setCoaches(list);
-
-      let coachId = preferredCoachId || patient.coach_id || '';
-      if (!coachId) {
-        const { data } = await supabase.from('profiles').select('coach_id').eq('id', patient.id).maybeSingle();
-        coachId = data?.coach_id || '';
-      }
-      if (!coachId) {
-        setCoachMissingWarning(true);
-        return;
-      }
-
-      let found = list.find((c) => c.user_id === coachId);
-      if (!found) {
-        const { data } = await supabase
-          .from('doctors')
-          .select(`user_id, full_name_th, specialization_th, is_active, users ( hospital_id, role, hospitals ( id, name, code, type ) )`)
-          .eq('user_id', coachId)
-          .maybeSingle();
-        if (data) {
-          found = normalizeCoach(data);
-          setCoaches((prev) => (prev.some((c) => c.user_id === coachId) ? prev : [found, ...prev]));
-        }
-      }
-
-      if (found) {
-        setFormData((prev) => ({ ...prev, staff_id: found!.user_id }));
-        setStaffSearchTerm(coachDisplayText(found));
-        setLockedCoach(found);
-        setCoachMissingWarning(false);
-      } else {
-        setCoachMissingWarning(true);
-      }
-    } catch (e) {
-      console.error('❌ [loadCoachScopeAndAutoFill]', e);
-      setCoachMissingWarning(true);
-    } finally {
-      setCoachLoading(false);
-    }
-  };
-
+  // =====================================================
+  // 📥 AUTH + โหลด cache รพ.
+  // =====================================================
   useEffect(() => {
     const userData = checkSession();
     if (!userData) { router.push('/admin/login'); return; }
@@ -268,115 +284,159 @@ function NewAppointmentContent() {
     (async () => {
       try {
         setLoading(true);
-        const [uHospital, allH] = await Promise.all([
+        const [uH, allH] = await Promise.all([
           getUserHospitalInfo(userData.id),
-          getHospitalsWithHierarchy(),
+          getHospitalsWithHierarchy().catch(() => []),
         ]);
-        setUserHospital(uHospital);
-        setAllHospitals(allH);
-
-        let netHospitals: Hospital[] = [];
-        if (uHospital) {
-          const rootId = uHospital.type === 'main' ? uHospital.id : uHospital.parent_id || uHospital.id;
-          netHospitals = allH.filter((h) => h.id === rootId || h.parent_id === rootId);
-        } else {
-          netHospitals = allH;
-        }
-        setNetworkHospitals(netHospitals);
-        const ids = netHospitals.map((h) => h.id);
-        await Promise.all([loadCoaches(ids), loadPatients(ids)]);
-      } catch (err) {
-        console.error('❌ [initNetwork]', err);
-        setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-      } finally {
-        setLoading(false);
-      }
+        setUserHospital(uH);
+        setAllHospitals(allH || []);
+      } catch (e) { console.error('❌ [init]', e); }
+      finally { setLoading(false); }
     })();
   }, [router]);
 
+  // click outside
   useEffect(() => {
-    if (!urlPatientId || loading || autoAppliedRef.current) return;
-    autoAppliedRef.current = true;
-    (async () => {
-      const inList = patients.find((p) => p.id === urlPatientId);
-      if (inList) {
-        applyAutoPatient(inList, urlCoachId || undefined);
-        return;
-      }
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, hospital_number, id_card, phone, birth_date, hospital_id, coach_id')
-        .eq('id', urlPatientId)
-        .maybeSingle();
-      if (data) {
-        applyAutoPatient(data as Patient, urlCoachId || undefined);
-      } else {
-        setError('ไม่พบข้อมูลผู้ป่วยที่ระบุ — กรุณาเลือกผู้ป่วยใหม่');
-        autoAppliedRef.current = false;
-      }
-    })();
-  }, [urlPatientId, loading, patients]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (patientDropdownRef.current && !patientDropdownRef.current.contains(event.target as Node)) setIsPatientDropdownOpen(false);
-      if (staffDropdownRef.current && !staffDropdownRef.current.contains(event.target as Node)) setIsStaffDropdownOpen(false);
+    const fn = (ev: MouseEvent) => {
+      if (staffDropdownRef.current && !staffDropdownRef.current.contains(ev.target as Node))
+        setIsStaffDropdownOpen(false);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('mousedown', fn);
+    return () => document.removeEventListener('mousedown', fn);
   }, []);
 
+  // =====================================================
+  // ✅ AUTO-SELECT: STEP1→2→3→4→5
+  // =====================================================
+  const runAutoSelect = useCallback(async () => {
+    if (!urlPatientId) { setError('ไม่พบ ?patient_id ใน URL — กรุณาเข้าจากลิงก์ที่ถูกต้อง'); return; }
+    setAutoLoading(true); setError('');
+    try {
+      // STEP 1
+      const p = await fetchPatientById(urlPatientId);
+      if (!p) { setError(`ไม่พบข้อมูลผู้ป่วย (id: ${urlPatientId})`); return; }
+
+      // STEP 2
+      const h = await fetchHospitalById(p.hospital_id || '');
+      const parent = h?.parent_id ? await fetchHospitalById(h.parent_id) : undefined;
+      const extras = await fetchUserExtras(p.id);
+      const enriched: Patient = {
+        ...p, ...extras,
+        hospital_name: h?.name, hospital_code: h?.code, hospital_type: h?.type,
+        parent_hospital: parent,
+      };
+      setLockedPatient(enriched);
+      setFormData((prev) => ({ ...prev, patient_id: enriched.id }));
+
+      // STEP 3
+      const { ids, label } = computePatientNetwork(enriched, allHospitals);
+      setScopeLabel(label);
+
+      // STEP 4
+      const list = await fetchCoachNetworkList(ids);
+      setNetworkCoaches(list);
+
+      // STEP 5 — urlCoachId > profiles.coach_id
+      const targetCoachId = urlCoachId || enriched.coach_id || '';
+      if (targetCoachId) {
+        let found = list.find((c) => c.user_id === targetCoachId) || null;
+        if (!found) found = await fetchCoachByAnyId(targetCoachId);
+        if (found) {
+          if (!list.some((c) => c.user_id === found!.user_id))
+            setNetworkCoaches((prev) => [found!, ...prev]);
+          setLockedCoach(found);
+          setFormData((prev) => ({ ...prev, staff_id: found!.user_id }));
+          setStaffSearchTerm(`${found.full_name_th}${found.specialization_th ? ` (${found.specialization_th})` : ''}`);
+          setCoachMissingWarning(false);
+        } else {
+          setCoachMissingWarning(true);
+        }
+      } else {
+        setCoachMissingWarning(true);
+      }
+    } catch (e: any) {
+      console.error('❌ [autoSelect]', e);
+      setError(e?.message || 'เกิดข้อผิดพลาดในการโหลดข้อมูล');
+    } finally {
+      setAutoLoading(false);
+    }
+  }, [urlPatientId, urlCoachId, allHospitals]);
+
+  useEffect(() => {
+    if (loading || !urlPatientId || autoAppliedRef.current) return;
+    autoAppliedRef.current = true;
+    void runAutoSelect();
+  }, [loading, urlPatientId, runAutoSelect]);
+
+  // =====================================================
+  // ⚙️ HANDLERS
+  // =====================================================
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
     if (validationErrors[name]) setValidationErrors((prev) => ({ ...prev, [name]: '' }));
   };
 
-  const filteredPatients = useMemo(() => {
-    if (!patientSearchTerm.trim()) return patients.slice(0, 50);
-    const term = patientSearchTerm.toLowerCase();
-    return patients.filter((p) =>
-      `${p.first_name} ${p.last_name}`.toLowerCase().includes(term) ||
-      p.hospital_number.toLowerCase().includes(term) ||
-      (p.id_card && p.id_card.includes(term))
-    ).slice(0, 50);
-  }, [patients, patientSearchTerm]);
+  const filteredCoaches = useMemo(() => {
+    const term = staffSearchTerm.trim().toLowerCase();
+    if (!term) return networkCoaches.slice(0, 100);
+    return networkCoaches.filter((c) => {
+      const name = (c.full_name_th || '').toLowerCase();
+      const spec = (c.specialization_th || '').toLowerCase();
+      const hosp = (c.hospital_name || '').toLowerCase();
+      return name.includes(term) || spec.includes(term) || hosp.includes(term);
+    }).slice(0, 100);
+  }, [networkCoaches, staffSearchTerm]);
 
-  const filteredStaff = useMemo(() => {
-    if (!staffSearchTerm.trim()) return coaches.slice(0, 50);
-    const term = staffSearchTerm.toLowerCase();
-    return coaches.filter((c) =>
-      c.full_name_th.toLowerCase().includes(term) ||
-      (c.specialization_th && c.specialization_th.toLowerCase().includes(term))
-    ).slice(0, 50);
-  }, [coaches, staffSearchTerm]);
+  const handleOpenCoachDropdown = () => {
+    setIsStaffDropdownOpen(true);
+    if (lockedPatient && networkCoaches.length === 0) {
+      setAutoLoading(true);
+      const { ids, label } = computePatientNetwork(lockedPatient, allHospitals);
+      setScopeLabel(label);
+      fetchCoachNetworkList(ids).then((list) => {
+        setNetworkCoaches(list);
+        setAutoLoading(false);
+      });
+    }
+  };
+
+  const handleSelectCoach = (c: Coach) => {
+    setLockedCoach(c);
+    setCoachMissingWarning(false);
+    setFormData((prev) => ({ ...prev, staff_id: c.user_id }));
+    setStaffSearchTerm(`${c.full_name_th}${c.specialization_th ? ` (${c.specialization_th})` : ''}`);
+    setIsStaffDropdownOpen(false);
+  };
+
+  const handleUnlockCoach = () => {
+    setLockedCoach(null);
+    setFormData((prev) => ({ ...prev, staff_id: '' }));
+    setStaffSearchTerm('');
+    handleOpenCoachDropdown();
+  };
 
   const validateForm = (): boolean => {
-    const errors: { [key: string]: string } = {};
+    const errors: Record<string, string> = {};
     if (!formData.patient_id) errors.patient_id = 'กรุณาเลือกผู้ป่วย';
     if (!formData.staff_id) errors.staff_id = 'กรุณาเลือกแพทย์/เจ้าหน้าที่';
     if (!formData.appointment_date) errors.appointment_date = 'กรุณาเลือกวันที่';
     if (!formData.appointment_time) errors.appointment_time = 'กรุณาเลือกเวลา';
     setValidationErrors(errors);
-    if (Object.keys(errors).length > 0) {
-      setError(Object.values(errors)[0]);
-      return false;
-    }
+    if (Object.keys(errors).length > 0) { setError(Object.values(errors)[0]); return false; }
     return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+    e.preventDefault(); setError('');
     if (!validateForm()) return;
-    setLoading(true);
+    setSubmitting(true);
     try {
-      const dateTimeStr = `${formData.appointment_date}T${formData.appointment_time}:00`;
       const result = await createAppointment({
         patient_id: formData.patient_id,
         staff_id: formData.staff_id,
         appointment_type: formData.appointment_type,
-        appointment_datetime: dateTimeStr,
+        appointment_datetime: `${formData.appointment_date}T${formData.appointment_time}:00`,
         duration_minutes: parseInt(formData.duration_minutes.toString()),
         location: formData.location,
         notes: formData.notes || undefined,
@@ -384,50 +444,18 @@ function NewAppointmentContent() {
         status: 'scheduled',
       });
       if (result.success) {
-        router.push(backUrl);
-      } else {
-        setError(result.error || 'เกิดข้อผิดพลาด');
-      }
-    } catch (err: any) {
-      setError(err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด');
-    } finally {
-      setLoading(false);
-    }
+        setSuccess(true);
+        setTimeout(() => router.push(backUrl), 800);
+      } else setError(result.error || 'เกิดข้อผิดพลาด');
+    } catch (err: any) { setError(err.message || 'เกิดข้อผิดพลาดที่ไม่คาดคิด'); }
+    finally { setSubmitting(false); }
   };
 
-  const handleUnlockPatient = () => {
-    setLockedPatient(null);
-    setLockedCoach(null);
-    setCoachMissingWarning(false);
-    setFormData((prev) => ({ ...prev, patient_id: '', staff_id: '' }));
-    setPatientSearchTerm('');
-    setStaffSearchTerm('');
-    autoAppliedRef.current = false;
-    void loadCoaches(networkHospitals.map((h) => h.id));
-  };
+  const typeBadge = (t?: 'main' | 'sub') => t === 'main' ? ' (แม่ข่าย)' : t === 'sub' ? ' (ลูกข่าย)' : '';
 
-  const handleUnlockCoach = () => {
-    setLockedCoach(null);
-  };
-
-  const networkScopeLabel = (): string => {
-    if (!lockedPatient) return '-';
-    const net = getPatientNetwork(lockedPatient);
-    const main = net.find((h) => h.id === (lockedPatient.hospital_type === 'main' ? lockedPatient.hospital_id : lockedPatient.parent_id) || h.type === 'main');
-    return main ? main.name : lockedPatient.hospital_name || '-';
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
-          <p className="text-gray-600">กำลังโหลด...</p>
-        </div>
-      </div>
-    );
-  }
-
+  // =====================================================
+  // 🎨 RENDER
+  // =====================================================
   if (success) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -440,12 +468,24 @@ function NewAppointmentContent() {
     );
   }
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
+          <p className="text-gray-600">กำลังโหลด...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 pb-12">
+      {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="max-w-5xl mx-auto px-4 py-6">
           <button onClick={() => router.push(backUrl)} className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-4">
-            <ArrowLeft className="w-4 h-4" /> กลับ
+            <ArrowLeft className="w-4 h-4" /> กลับ ({urlFrom || 'default'})
           </button>
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
@@ -470,186 +510,143 @@ function NewAppointmentContent() {
         </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 space-y-6 pt-6">
+      <form onSubmit={handleSubmit} className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
             <p className="text-red-700">{error}</p>
-            <button type="button" onClick={() => setError('')} className="ml-auto text-red-600">
-              <XCircle className="w-5 h-5" />
-            </button>
+            <button type="button" onClick={() => setError('')} className="ml-auto text-red-600"><XCircle className="w-5 h-5" /></button>
+          </div>
+        )}
+        {autoLoading && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3 text-blue-700 text-sm">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            กำลังโหลดข้อมูลผู้ป่วยและรายชื่อผู้ดูแล...
           </div>
         )}
 
-        {/* SECTION 1: ผู้ป่วย */}
+        {/* ===== SECTION 1: ผู้ป่วย (ล็อกอัตโนมัติ) ===== */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
-          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <span className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-sm font-bold">1</span>
             ผู้ป่วย <span className="text-red-500">*</span>
-            {lockedPatient && <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">เลือกอัตโนมัติ ✓</span>}
+            {lockedPatient && <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">เลือกอัตโนมัติจากลิงก์ ✓</span>}
           </h2>
           {lockedPatient ? (
             <div className="border-2 border-green-300 bg-green-50/60 rounded-xl p-5">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
-                    <Users className="w-6 h-6 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-green-600 mb-1 flex items-center gap-1">
-                      <CheckCircle className="w-3.5 h-3.5" /> ผู้ป่วยที่ต้องการนัดหมาย
-                    </p>
-                    <p className="text-lg font-bold text-gray-800">{lockedPatient.first_name} {lockedPatient.last_name}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
-                      <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200 font-mono">HN: {lockedPatient.hospital_number}</span>
-                      {lockedPatient.id_card && (
-                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {lockedPatient.id_card}
-                        </span>
-                      )}
-                      {lockedPatient.hospital_name && (
-                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {lockedPatient.hospital_name}
-                          {lockedPatient.parent_hospital ? <span className="text-gray-400"> (แม่ข่าย: {lockedPatient.parent_hospital.name})</span> : null}
-                        </span>
-                      )}
-                    </div>
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
+                  <Users className="w-6 h-6 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-green-600 mb-1 flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5" /> ผู้ป่วยที่ต้องการนัดหมาย
+                  </p>
+                  <p className="text-lg font-bold text-gray-800">{lockedPatient.first_name} {lockedPatient.last_name}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
+                    <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200 font-mono">HN: {lockedPatient.hospital_number}</span>
+                    {lockedPatient.id_card && (
+                      <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
+                        <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {lockedPatient.id_card}
+                      </span>
+                    )}
+                    {lockedPatient.hospital_name && (
+                      <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
+                        <Hospital className="w-3 h-3 text-gray-400" />
+                        รพ.: {lockedPatient.hospital_name}{typeBadge(lockedPatient.hospital_type)}
+                        {lockedPatient.parent_hospital && <span className="text-gray-400"> → แม่ข่าย: {lockedPatient.parent_hospital.name}</span>}
+                      </span>
+                    )}
                   </div>
                 </div>
-                <button type="button" onClick={handleUnlockPatient} className="px-3 py-1.5 text-xs border border-green-300 bg-white text-green-700 rounded-lg hover:bg-green-100 transition-colors" title="หากต้องการเปลี่ยนเป็นผู้ป่วยรายอื่น">
-                  เปลี่ยนผู้ป่วย
-                </button>
               </div>
             </div>
           ) : (
-            <div ref={patientDropdownRef} className="relative">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="พิมพ์ชื่อ, HN หรือ เลขบัตรประชาชน เพื่อค้นหา..."
-                  value={patientSearchTerm}
-                  onChange={(e) => {
-                    setPatientSearchTerm(e.target.value);
-                    setIsPatientDropdownOpen(true);
-                    if (formData.patient_id) {
-                      setFormData((p) => ({ ...p, patient_id: '' }));
-                      setPatientSearchTerm('');
-                    }
-                  }}
-                  onFocus={() => setIsPatientDropdownOpen(true)}
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${validationErrors.patient_id ? 'border-red-500' : 'border-gray-300'}`}
-                />
-              </div>
-              {isPatientDropdownOpen && (
-                <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
-                  {filteredPatients.length > 0 ? (
-                    filteredPatients.map((p) => (
-                      <div key={p.id} onClick={() => { setIsPatientDropdownOpen(false); applyAutoPatient(p); }} className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="font-bold text-gray-800 text-base">{p.first_name} {p.last_name}</span>
-                            <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-medium">HN: {p.hospital_number}</span>
-                          </div>
-                        </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
-                          <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200"><IdCard className="w-3 h-3 text-gray-400" /> บัตร: {p.id_card || '-'}</span>
-                          <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200"><Hospital className="w-3 h-3 text-gray-400" /> รพ.: {p.hospital_name || 'ไม่ระบุ'}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
-                  )}
-                </div>
-              )}
-              {validationErrors.patient_id && <p className="text-xs text-red-600 mt-1">💡 {validationErrors.patient_id}</p>}
-              <p className="text-xs text-gray-400 mt-2">* ค้นหาได้จาก: ชื่อ-สกุล, เลข HN, หรือเลขบัตรประชาชน</p>
+            <div className="text-center py-6 text-gray-500">
+              <p className="mb-3">ไม่พบข้อมูลผู้ป่วย</p>
+              <button type="button" onClick={() => { autoAppliedRef.current = false; void runAutoSelect(); }}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 flex items-center gap-1 mx-auto">
+                <RefreshCw className="w-4 h-4" /> ลองใหม่อีกครั้ง
+              </button>
             </div>
           )}
         </div>
 
-        {/* SECTION 2: แพทย์/เจ้าหน้าที่ */}
+        {/* ===== SECTION 2: ผู้ดูแล ===== */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">2</span>
             แพทย์/เจ้าหน้าที่ <span className="text-red-500">*</span>
             {lockedCoach && <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">เลือกอัตโนมัติ ✓</span>}
-            {coachMissingWarning && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold">กรุณาเลือกผู้ดูแลเอง</span>}
+            {coachMissingWarning && !lockedCoach && <span className="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full text-xs font-semibold">กรุณาเลือกผู้ดูแล</span>}
           </h2>
+
           {lockedCoach ? (
-            <div className="border-2 border-green-300 bg-green-50/60 rounded-xl p-5">
+            <div className="border-2 border-purple-300 bg-purple-50/60 rounded-xl p-5">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center shrink-0">
-                    <Stethoscope className="w-6 h-6 text-green-600" />
+                  <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center shrink-0">
+                    <Stethoscope className="w-6 h-6 text-purple-600" />
                   </div>
                   <div>
-                    <p className="text-xs font-semibold text-green-600 mb-1 flex items-center gap-1">
+                    <p className="text-xs font-semibold text-purple-600 mb-1 flex items-center gap-1">
                       <CheckCircle className="w-3.5 h-3.5" /> ผู้ดูแล / แพทย์ของนัดหมายนี้
                     </p>
                     <p className="text-lg font-bold text-gray-800">{lockedCoach.full_name_th}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600">
                       {lockedCoach.specialization_th && (
-                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">ความเชี่ยวชาญ: {lockedCoach.specialization_th}</span>
+                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-purple-200">
+                          <User className="w-3 h-3 text-gray-400" /> ความเชี่ยวชาญ: {lockedCoach.specialization_th}
+                        </span>
                       )}
                       {lockedCoach.hospital_name && (
-                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {lockedCoach.hospital_name}
-                          {lockedCoach.hospital_type === 'main' ? ' (แม่ข่าย)' : lockedCoach.hospital_type === 'sub' ? ' (ลูกข่าย)' : ''}
+                        <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-purple-200">
+                          <Hospital className="w-3 h-3 text-gray-400" /> สังกัด: {lockedCoach.hospital_name}{typeBadge(lockedCoach.hospital_type)}
                         </span>
                       )}
                     </div>
                   </div>
                 </div>
-                <button type="button" onClick={handleUnlockCoach} className="px-3 py-1.5 text-xs border border-green-300 bg-white text-green-700 rounded-lg hover:bg-green-100 transition-colors" title="หากต้องการเปลี่ยนผู้ดูแลเป็นท่านอื่น">
-                  เปลี่ยนผู้ดูแล
+                <button type="button" onClick={handleUnlockCoach}
+                  className="px-3 py-1.5 text-xs border border-purple-300 bg-white text-purple-700 rounded-lg hover:bg-purple-100 transition-colors flex items-center gap-1"
+                  title="เลือกผู้ดูแลท่านอื่นในเครือข่ายโรงพยาบาลของผู้ป่วย">
+                  <RefreshCw className="w-3 h-3" /> เปลี่ยนผู้ดูแล
                 </button>
               </div>
-            </div>
-          ) : coachLoading ? (
-            <div className="flex items-center gap-2 text-gray-600">
-              <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
-              กำลังเลือกผู้ดูแลให้อัตโนมัติ...
             </div>
           ) : (
             <div ref={staffDropdownRef} className="relative">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="พิมพ์ชื่อ หรือ ความเชี่ยวชาญ เพื่อค้นหา..."
+                <input type="text" placeholder="พิมพ์ชื่อ, ความเชี่ยวชาญ หรือชื่อ รพ. เพื่อค้นหา..."
                   value={staffSearchTerm}
-                  onChange={(e) => {
-                    setStaffSearchTerm(e.target.value);
-                    setIsStaffDropdownOpen(true);
-                    if (formData.staff_id) {
-                      setFormData((p) => ({ ...p, staff_id: '' }));
-                      setStaffSearchTerm('');
-                    }
-                  }}
-                  onFocus={() => setIsStaffDropdownOpen(true)}
-                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${validationErrors.staff_id ? 'border-red-500' : 'border-gray-300'}`}
-                />
+                  onChange={(e) => { setStaffSearchTerm(e.target.value); setIsStaffDropdownOpen(true); }}
+                  onFocus={handleOpenCoachDropdown}
+                  className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-purple-500 outline-none ${validationErrors.staff_id ? 'border-red-500' : 'border-gray-300'}`} />
               </div>
               {isStaffDropdownOpen && (
                 <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-80 overflow-y-auto">
-                  <div className="px-4 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-800 font-medium flex items-center gap-2 sticky top-0">
-                    <Hospital className="w-3 h-3" />
-                    {lockedPatient ? `แสดงเฉพาะผู้ดูแลในเครือข่ายโรงพยาบาลของผู้ป่วย (${networkScopeLabel()})` : 'เลือกผู้ป่วยก่อน ระบบจะกรองผู้ดูแลตามเครือข่ายของผู้ป่วยให้อัตโนมัติ'}
+                  <div className="px-4 py-2 bg-purple-50 border-b border-purple-100 text-xs text-purple-800 font-medium flex items-center gap-2 sticky top-0">
+                    <Building2 className="w-3 h-3" />
+                    ขอบเขต: เครือข่าย รพ.ผู้ป่วย — <strong>{scopeLabel}</strong> ({networkCoaches.length} คน)
                   </div>
-                  {filteredStaff.length > 0 ? (
-                    filteredStaff.map((c) => (
-                      <div key={c.user_id} onClick={() => { setFormData((prev) => ({ ...prev, staff_id: c.user_id })); setStaffSearchTerm(coachDisplayText(c)); setLockedCoach(c); setCoachMissingWarning(false); setIsStaffDropdownOpen(false); }} className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
+                  {filteredCoaches.length > 0 ? (
+                    filteredCoaches.map((c) => (
+                      <div key={c.user_id} onClick={() => handleSelectCoach(c)}
+                        className="px-4 py-3 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors">
                         <div className="font-medium text-gray-800">{c.full_name_th}</div>
-                        <div className="text-xs text-gray-500 mt-1 flex justify-between">
+                        <div className="text-xs text-gray-500 mt-1 flex justify-between flex-wrap gap-2">
                           <span>{c.specialization_th || 'ไม่ระบุความเชี่ยวชาญ'}</span>
-                          <span className="bg-gray-100 px-2 py-0.5 rounded">{c.hospital_name || 'ไม่ระบุ รพ.'}</span>
+                          <span className="bg-gray-100 px-2 py-0.5 rounded flex items-center gap-1">
+                            <Hospital className="w-3 h-3" /> สังกัด: {c.hospital_name || 'ไม่ระบุ รพ.'}{typeBadge(c.hospital_type)}
+                          </span>
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div className="p-4 text-center text-gray-500">ไม่พบข้อมูลที่ค้นหา</div>
+                    <div className="p-4 text-center text-gray-500">
+                      {networkCoaches.length === 0 ? `ไม่พบบุคลากรในเครือข่าย ${scopeLabel}` : 'ไม่พบข้อมูลที่ค้นหา'}
+                    </div>
                   )}
                 </div>
               )}
@@ -658,7 +655,7 @@ function NewAppointmentContent() {
           )}
         </div>
 
-        {/* SECTION 3: รายละเอียดนัดหมาย */}
+        {/* ===== SECTION 3: รายละเอียด ===== */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 text-sm font-bold">3</span>
@@ -668,19 +665,15 @@ function NewAppointmentContent() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทนัดหมาย *</label>
               <select name="appointment_type" value={formData.appointment_type} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none">
-                <option value="follow_up">ติดตามผล</option>
-                <option value="consultation">ปรึกษาแพทย์</option>
-                <option value="checkup">ตรวจสุขภาพ</option>
-                <option value="lab">เจาะเลือด/แลป</option>
+                <option value="follow_up">ติดตามผล</option><option value="consultation">ปรึกษาแพทย์</option>
+                <option value="checkup">ตรวจสุขภาพ</option><option value="lab">เจาะเลือด/แลป</option>
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">สถานที่</label>
               <select name="location" value={formData.location} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none">
-                <option value="clinic">คลินิก</option>
-                <option value="ward">หอผู้ป่วย</option>
-                <option value="online">ออนไลน์ (Telemed)</option>
-                <option value="home_visit">เยี่ยมบ้าน</option>
+                <option value="clinic">คลินิก</option><option value="ward">หอผู้ป่วย</option>
+                <option value="online">ออนไลน์ (Telemed)</option><option value="home_visit">เยี่ยมบ้าน</option>
               </select>
             </div>
           </div>
@@ -695,10 +688,8 @@ function NewAppointmentContent() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1"><Clock className="w-3 h-3 inline mr-1" /> ระยะเวลา (นาที)</label>
               <select name="duration_minutes" value={formData.duration_minutes} onChange={handleChange} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none">
-                <option value="15">15 นาที</option>
-                <option value="30">30 นาที</option>
-                <option value="45">45 นาที</option>
-                <option value="60">1 ชั่วโมง</option>
+                <option value="15">15 นาที</option><option value="30">30 นาที</option>
+                <option value="45">45 นาที</option><option value="60">1 ชั่วโมง</option>
               </select>
             </div>
           </div>
@@ -708,10 +699,10 @@ function NewAppointmentContent() {
           </div>
         </div>
 
-        {/* ปุ่มส่งฟอร์ม */}
+        {/* Buttons */}
         <div className="flex gap-4 pt-4 pb-8">
-          <button type="submit" disabled={loading} className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-bold py-4 rounded-xl hover:from-blue-700 hover:to-cyan-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg">
-            {loading ? <><Loader2 className="w-5 h-5 animate-spin" /> กำลังบันทึก...</> : <><CheckCircle className="w-5 h-5" /> ยืนยันการสร้างนัดหมาย</>}
+          <button type="submit" disabled={submitting || !lockedPatient} className="flex-1 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-bold py-4 rounded-xl hover:from-blue-700 hover:to-cyan-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg">
+            {submitting ? <><Loader2 className="w-5 h-5 animate-spin" /> กำลังบันทึก...</> : <><CheckCircle className="w-5 h-5" /> ยืนยันการสร้างนัดหมาย</>}
           </button>
           <button type="button" onClick={() => router.push(backUrl)} className="px-8 py-4 bg-gray-500 text-white font-bold rounded-xl hover:bg-gray-600 transition-all">ยกเลิก</button>
         </div>
