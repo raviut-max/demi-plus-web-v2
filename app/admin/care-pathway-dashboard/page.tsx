@@ -1,7 +1,14 @@
 // app/admin/care-pathway-dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 23 พฤศจิกายน 2569 — แก้ syntax error ทั้งหมด
+// ✅ แก้ไขล่าสุด: 23 พฤศจิกายน 2569
+// ✅ การแก้ไข (เฉพาะส่วนไป-กลับ):
+//    1. ก่อนกด "ดูรายละเอียด" / "สร้างนัดหมายใหม่" / "ติดตาม" → saveNavState()
+//       จำ { overduePage, upcomingPage, scope, selectedDays } ลง sessionStorage
+//    2. ตอน mount → อ่านค่าจำไว้ → โหลด Watchlist/Upcoming ที่ "หน้าเดิม" ที่เปิดอยู่
+//       พร้อม restore scope (ทั้งหมด/ในการดูแลของฉัน) และจำนวนวัน (1-5 วัน) ด้วย
+//    3. ถ้าข้อมูลลดลงจน page เกินขอบเขต → clamp กลับหน้า 1 อัตโนมัติ
+//    4. ค่าอื่น ๆ ทั้งหมดคงเดิม 100%
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import {
@@ -31,8 +38,35 @@ interface UpcomingAppointment {
   hospital_id: string; hospital_name: string;
   coach_id: string | null; coach_name: string | null; days_until: number;
 }
-
 const PAGE_SIZE = 10;
+
+// ============================================================
+// ✅ NEW: จำตำแหน่งหน้าก่อนออก → คืนค่าตอนกลับ
+// ============================================================
+const NAV_KEY = 'care-pathway-dashboard-nav';
+interface NavState {
+  overduePage: number;
+  upcomingPage: number;
+  scope: 'all' | 'mine';
+  days: number;
+}
+function readNavState(): NavState | null {
+  try {
+    const raw = sessionStorage.getItem(NAV_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(NAV_KEY); // ใช้ครั้งเดียว แล้วล้าง (กันค้าง)
+    const s = JSON.parse(raw);
+    if (typeof s?.overduePage !== 'number' || typeof s?.upcomingPage !== 'number') return null;
+    return {
+      overduePage: Math.max(0, s.overduePage),
+      upcomingPage: Math.max(0, s.upcomingPage),
+      scope: s.scope === 'mine' ? 'mine' : 'all',
+      days: [1, 2, 3, 4, 5].includes(s.days) ? s.days : 3,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function applyScope(query: any, userData: any, currentScope: 'all' | 'mine', hIds: string[], isSuper: boolean) {
   if (currentScope === 'mine') return query.eq('coach_id', userData.id);
@@ -42,6 +76,11 @@ function applyScope(query: any, userData: any, currentScope: 'all' | 'mine', hId
 
 export default function CarePathwayDashboardPage() {
   const router = useRouter();
+
+  // ✅ NEW: อ่านค่าที่จำไว้ "ครั้งเดียวตอน mount" (useState initializer รันรอบเดียว)
+  const [savedNav] = useState<NavState | null>(() => readNavState());
+  const navConsumedRef = useRef(false);
+
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -55,16 +94,25 @@ export default function CarePathwayDashboardPage() {
   });
   const [overduePatients, setOverduePatients] = useState<WatchlistPatient[]>([]);
   const [overdueTotal, setOverdueTotal] = useState(0);
-  const [overduePage, setOverduePage] = useState(0);
+  const [overduePage, setOverduePage] = useState(savedNav?.overduePage ?? 0);
   const overdueTotalPages = Math.max(1, Math.ceil(overdueTotal / PAGE_SIZE));
   const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointment[]>([]);
   const [upcomingTotal, setUpcomingTotal] = useState(0);
-  const [upcomingPage, setUpcomingPage] = useState(0);
+  const [upcomingPage, setUpcomingPage] = useState(savedNav?.upcomingPage ?? 0);
   const upcomingTotalPages = Math.max(1, Math.ceil(upcomingTotal / PAGE_SIZE));
-  const [selectedDays, setSelectedDays] = useState<number>(3);
-  const [scope, setScope] = useState<'all' | 'mine'>('all');
+  const [selectedDays, setSelectedDays] = useState<number>(savedNav?.days ?? 3);
+  const [scope, setScope] = useState<'all' | 'mine'>(savedNav?.scope ?? 'all');
   const [hospitalIds, setHospitalIds] = useState<string[]>([]);
   const [isSuper, setIsSuper] = useState(false);
+
+  // ✅ NEW: จำ state ปัจจุบันก่อนออกหน้า (เรียกจากปุ่มดูรายละเอียด/สร้างนัดหมาย/ติดตาม)
+  const saveNavState = () => {
+    try {
+      sessionStorage.setItem(NAV_KEY, JSON.stringify({
+        overduePage, upcomingPage, scope, days: selectedDays,
+      }));
+    } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     const userData = checkSession();
@@ -74,21 +122,24 @@ export default function CarePathwayDashboardPage() {
     }
     setUser(userData);
     loadUserHospital(userData.id);
-    const initialScope = ['doctor', 'helper', 'osm'].includes(userData.role) ? 'mine' : 'all';
-    setScope(initialScope);
+    // ✅ FIX: ถ้ามีค่าที่จำไว้ (กลับมา) → ใช้ scope เดิม ไม่ต้อง override เป็น default
+    if (!savedNav) {
+      const initialScope = ['doctor', 'helper', 'osm'].includes(userData.role) ? 'mine' : 'all';
+      setScope(initialScope);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const loadUserHospital = async (userId: string) => {
     try { const info = await getUserHospitalInfo(userId); setUserHospital(info); }
     catch (e) { console.error('❌ [loadUserHospital]', e); }
   };
-
   const handleLogout = () => { logout(); router.push('/admin/login'); };
 
   const loadStatsAndCounts = useCallback(async (userData: any, currentScope: 'all' | 'mine', hIds: string[], superFlag: boolean) => {
     const [statsRes, totalRes, overdueRes] = await Promise.all([
-      supabase.from('v_care_pathway_stats').select('*').single(),
-      applyScope(supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_active', true), userData, currentScope, hIds, superFlag),
+      supabase.from('v_care_pathway_stats').select('').single(),
+      applyScope(supabase.from('profiles').select('', { count: 'exact', head: true }).eq('is_active', true), userData, currentScope, hIds, superFlag),
       applyScope(supabase.from('v_overdue_patients').select('*', { count: 'exact', head: true }), userData, currentScope, hIds, superFlag),
     ]);
     const total = totalRes.count || 0;
@@ -112,7 +163,19 @@ export default function CarePathwayDashboardPage() {
         applyScope(supabase.from('v_overdue_patients').select('*').order('days_overdue', { ascending: false }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1), userData, currentScope, hIds, superFlag),
       ]);
       if (dataRes.error) throw dataRes.error;
-      const rows = dataRes.data || [];
+      let rows = dataRes.data || [];
+      let safePage = page;
+
+      // ✅ NEW: clamp — ถ้า page ที่จำไว้เกินขอบเขต (ข้อมูลลดลง) → กลับหน้า 1
+      if (rows.length === 0 && page > 0 && (countRes.count || 0) > 0) {
+        const retry = await applyScope(
+          supabase.from('v_overdue_patients').select('*').order('days_overdue', { ascending: false }).range(0, PAGE_SIZE - 1),
+          userData, currentScope, hIds, superFlag
+        );
+        rows = retry.data || [];
+        safePage = 0;
+      }
+
       const coachIds = [...new Set(rows.map((p: any) => p.coach_id).filter(Boolean))] as string[];
       let coachNameMap: Record<string, string> = {};
       if (coachIds.length > 0) {
@@ -127,7 +190,7 @@ export default function CarePathwayDashboardPage() {
       }
       setOverduePatients(rows.map((p: any) => ({ ...p, coach_name: coachNameMap[p.coach_id] || null, next_appointment: nextMap[p.id] || null })));
       setOverdueTotal(countRes.count || 0);
-      setOverduePage(page);
+      setOverduePage(safePage);
     } catch (e) { console.error('❌ [loadOverduePage]', e); }
     finally { setOverdueLoading(false); }
   }, []);
@@ -144,9 +207,22 @@ export default function CarePathwayDashboardPage() {
         applyScope(supabase.from('v_upcoming_appointments').select('*').gte('appointment_date', todayStr).lte('appointment_date', untilStr).order('days_until', { ascending: true }).range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1), userData, currentScope, hIds, superFlag),
       ]);
       if (dataRes.error) throw dataRes.error;
-      setUpcomingAppointments((dataRes.data || []) as UpcomingAppointment[]);
+      let rows = (dataRes.data || []) as UpcomingAppointment[];
+      let safePage = page;
+
+      // ✅ NEW: clamp เช่นเดียวกับ watchlist
+      if (rows.length === 0 && page > 0 && (countRes.count || 0) > 0) {
+        const retry = await applyScope(
+          supabase.from('v_upcoming_appointments').select('*').gte('appointment_date', todayStr).lte('appointment_date', untilStr).order('days_until', { ascending: true }).range(0, PAGE_SIZE - 1),
+          userData, currentScope, hIds, superFlag
+        );
+        rows = (retry.data || []) as UpcomingAppointment[];
+        safePage = 0;
+      }
+
+      setUpcomingAppointments(rows);
       setUpcomingTotal(countRes.count || 0);
-      setUpcomingPage(page);
+      setUpcomingPage(safePage);
     } catch (e) { console.error('❌ [loadUpcomingPage]', e); }
     finally { setUpcomingLoading(false); }
   }, []);
@@ -161,10 +237,20 @@ export default function CarePathwayDashboardPage() {
         setHospitalIds(hIds);
         setIsSuper(s);
         await loadStatsAndCounts(user, scope, hIds, s);
-        await Promise.all([loadOverduePage(user, scope, hIds, s, 0), loadUpcomingPage(user, scope, hIds, s, 0, selectedDays)]);
+
+        // ✅ NEW: โหลด "หน้าเดิมที่จำไว้" แทนหน้า 0 (ใช้ครั้งเดียว)
+        const startOverdue = !navConsumedRef.current ? (savedNav?.overduePage ?? 0) : 0;
+        const startUpcoming = !navConsumedRef.current ? (savedNav?.upcomingPage ?? 0) : 0;
+        navConsumedRef.current = true;
+
+        await Promise.all([
+          loadOverduePage(user, scope, hIds, s, startOverdue),
+          loadUpcomingPage(user, scope, hIds, s, startUpcoming, selectedDays),
+        ]);
       } catch (e) { console.error('❌ [CarePathwayDashboard]', e); }
       finally { setLoading(false); }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, scope, selectedDays]);
 
   const changeOverduePage = (p: number) => {
@@ -301,7 +387,8 @@ export default function CarePathwayDashboardPage() {
                           <td className="px-6 py-3 text-center"><span className="px-2 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-medium">{new Date(a.appointment_date).toLocaleDateString('th-TH')}</span></td>
                           <td className="px-6 py-3 text-center"><span className={`px-2 py-1 rounded-full text-xs font-bold ${a.days_until <= 1 ? 'bg-red-100 text-red-700' : a.days_until <= 3 ? 'bg-orange-100 text-orange-700' : 'bg-cyan-100 text-cyan-700'}`}>{a.days_until === 0 ? 'วันนี้!' : `${a.days_until} วัน`}</span></td>
                           <td className="px-6 py-3 text-center">
-                            <button onClick={() => router.push(`/admin/appointments/followup/new?patient_id=${a.patient_id}&appointment_id=${a.appointment_id}`)} className="inline-flex items-center gap-1 px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 transition-colors">
+                            {/* ✅ FIX: saveNavState() ก่อนออก */}
+                            <button onClick={() => { saveNavState(); router.push(`/admin/appointments/followup/new?patient_id=${a.patient_id}&appointment_id=${a.appointment_id}`); }} className="inline-flex items-center gap-1 px-3 py-1.5 bg-cyan-500 text-white rounded-lg text-xs hover:bg-cyan-600 transition-colors">
                               <Clock className="w-3 h-3" /> ติดตาม
                             </button>
                           </td>
@@ -421,10 +508,11 @@ export default function CarePathwayDashboardPage() {
                           </td>
                           <td className="px-6 py-3 text-center">
                             <div className="inline-flex items-center gap-2">
-                              <button onClick={() => router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`)} className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors">
+                              {/* ✅ FIX: saveNavState() ก่อนออกทั้ง 2 ปุ่ม */}
+                              <button onClick={() => { saveNavState(); router.push(`/admin/patients/${p.id}/care-pathway?from=care-pathway-dashboard`); }} className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white rounded-lg text-xs hover:bg-blue-600 transition-colors">
                                 <Eye className="w-3 h-3" /> ดูรายละเอียด
                               </button>
-                              <button onClick={() => router.push(`/admin/appointments/new?patient_id=${p.id}&coach_id=${p.coach_id || ''}&from=care-pathway-dashboard`)} className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs hover:bg-emerald-600 transition-colors">
+                              <button onClick={() => { saveNavState(); router.push(`/admin/appointments/new?patient_id=${p.id}&coach_id=${p.coach_id || ''}&from=care-pathway-dashboard`); }} className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-500 text-white rounded-lg text-xs hover:bg-emerald-600 transition-colors">
                                 <CalendarPlus className="w-3 h-3" /> สร้างนัดหมายใหม่
                               </button>
                             </div>
