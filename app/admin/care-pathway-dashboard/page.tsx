@@ -1,5 +1,5 @@
 // app/admin/care-pathway-dashboard/page.tsx
-// ✅ แก้ไขล่าสุด: 23 พฤศจิกายน 2569 — แก้ syntax error (space แทรก)
+// ✅ แก้ไขล่าสุด: 23 พฤศจิกายน 2569 — แก้ syntax error ทั้งหมด
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -47,24 +47,20 @@ export default function CarePathwayDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [overdueLoading, setOverdueLoading] = useState(false);
   const [upcomingLoading, setUpcomingLoading] = useState(false);
-
   const [stats, setStats] = useState({
     total_patients: 0, on_time_count: 0, overdue_count: 0,
     pam_increased: 0, pam_decreased: 0,
     active_recorders: 0, repeat_recorders: 0,
     obstacles_count: 0, opportunities_count: 0, other_count: 0,
   });
-
   const [overduePatients, setOverduePatients] = useState<WatchlistPatient[]>([]);
   const [overdueTotal, setOverdueTotal] = useState(0);
   const [overduePage, setOverduePage] = useState(0);
   const overdueTotalPages = Math.max(1, Math.ceil(overdueTotal / PAGE_SIZE));
-
   const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointment[]>([]);
   const [upcomingTotal, setUpcomingTotal] = useState(0);
   const [upcomingPage, setUpcomingPage] = useState(0);
   const upcomingTotalPages = Math.max(1, Math.ceil(upcomingTotal / PAGE_SIZE));
-
   const [selectedDays, setSelectedDays] = useState<number>(3);
   const [scope, setScope] = useState<'all' | 'mine'>('all');
   const [hospitalIds, setHospitalIds] = useState<string[]>([]);
