@@ -1,11 +1,13 @@
 // app/admin/appointments/new/page.tsx
-// ✅ แก้ไขล่าสุด: 23 พฤศจิกายน 2569
-// ✅ การแก้ไข:
-//    1. รับ ?patient_id + ?coach_id จาก URL แล้ว "ขึ้นชื่อทั้งผู้ป่วยและผู้ดูแลอัตโนมัติทุกครั้ง"
-//    2. fallback: ถ้าไม่พบในลิสต์ → query profiles / doctors ตรง ๆ (ไม่พึ่ง limit 1,000 อีก)
-//    3. dropdown ผู้ดูแลแสดงเฉพาะ "เครือข่ายโรงพยาบาลของผู้ป่วย" (แม่ข่าย+ลูกข่ายของ รพ.ผู้ป่วย)
-//    4. ลบแถบ "ข้อมูลเครือข่าย" ออกตามต้องการ
-//    5. คงระบบล็อกการ์ดเขียว + ปุ่มเปลี่ยนผู้ป่วย / เปลี่ยนผู้ดูแล + กลับถูกหน้าตาม ?from
+// ✅ แก้ไขล่าสุด: 23 พฤศจิกายน 2569 (v2 — แก้ HTTP 400 จาก fallback query)
+// ✅ สาเหตุที่แก้ (จาก console จริง):
+//    1. list ผู้ป่วยถูกตัด 1,000 แถว → ผู้ป่วยที่ส่งมาใน URL หาไม่เจอ
+//       → query ด้วย id ตรง ๆ เป็นด่านแรกเสมอ + ดึง list แบบ pagination loop
+//    2. fallback select ฟิลด์ที่ไม่มีในตาราง (id_card/birth_date) → Supabase ตอบ 400
+//       → ใช้ "Field-Set Fallback" ลองทีละชุดจนผ่าน
+//    3. query coaches embedded users.hospitals พัง 400 → ผู้ดูแลไม่ขึ้น
+//       → Field-Set Fallback + query doctors ด้วย user_id ตรง ๆ
+//    4. dropdown ผู้ดูแล = เครือข่ายแม่ข่าย+ลูกข่ายของ "รพ.ผู้ป่วย" เท่านั้น
 'use client';
 import { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -14,10 +16,8 @@ import {
   checkSession,
   logout,
   createAppointment,
-  getCoachesWithHospitals,
   getHospitalsWithHierarchy,
   getUserHospitalInfo,
-  getPatientsByHospitalNetwork,
 } from '@/lib/supabase/queries';
 import {
   CalendarPlus,
@@ -65,7 +65,6 @@ interface Coach {
   hospital_id?: string;
   hospital_name?: string;
   hospital_type?: 'main' | 'sub';
-  users?: any;
 }
 interface Patient {
   id: string;
@@ -74,7 +73,6 @@ interface Patient {
   hospital_number: string;
   id_card?: string;
   phone?: string;
-  birth_date?: string;
   hospital_id?: string;
   hospital_name?: string;
   hospital_code?: string;
@@ -82,6 +80,113 @@ interface Patient {
   parent_id?: string | null;
   parent_hospital?: Hospital;
   coach_id?: string | null;
+}
+
+// =====================================================
+// 🧰 Field-Set Fallback (หัวใจของการแก้ 400)
+//    ถ้า select ชุดแรก fail (ฟิลด์ไม่มีจริง) → ถอยไปชุดที่ปลอดภัยขึ้น
+// =====================================================
+const PATIENT_SELECTS = [
+  'id, first_name, last_name, hospital_number, id_card, phone, hospital_id, coach_id',
+  'id, first_name, last_name, hospital_number, hospital_id, coach_id',
+  'id, first_name, last_name, hospital_number',
+];
+const COACH_SELECTS = [
+  'user_id, full_name_th, specialization_th, is_active, users!inner(hospital_id, role, hospitals(id, name, code, type))',
+  'user_id, full_name_th, is_active, users!inner(hospital_id, hospitals(id, name))',
+  'user_id, full_name_th',
+];
+
+function normalizeCoach(d: any): Coach {
+  const u = Array.isArray(d.users) ? d.users[0] : d.users;
+  const h = Array.isArray(u?.hospitals) ? u.hospitals[0] : u?.hospitals;
+  return {
+    id: d.user_id ?? d.id,
+    user_id: d.user_id,
+    full_name_th: d.full_name_th,
+    specialization_th: d.specialization_th,
+    is_active: d.is_active ?? true,
+    hospital_id: u?.hospital_id,
+    hospital_name: h?.name,
+    hospital_type: h?.type,
+  };
+}
+
+/** query ผู้ป่วย 1 คนด้วย id — ไม่พึ่ง list 1,000 คน */
+async function fetchPatientById(id: string): Promise<Patient | null> {
+  for (const sel of PATIENT_SELECTS) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(sel)
+      .eq('id', id)
+      .maybeSingle();
+    if (!error && data) return data as Patient;
+    console.warn('[fetchPatientById] ชุดฟิลด์ fail:', sel, '→', error?.message);
+  }
+  return null;
+}
+
+/** query ผู้ป่วยตาม list รพ. แบบ pagination loop (ไม่ถูกตัด 1,000) */
+async function fetchPatientsByHospitals(ids: string[]): Promise<Patient[]> {
+  if (ids.length === 0) return [];
+  let out: Patient[] = [];
+  for (const sel of PATIENT_SELECTS) {
+    out = [];
+    let ok = true;
+    let from = 0;
+    const size = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select(sel)
+        .eq('is_active', true)
+        .in('hospital_id', ids)
+        .order('hospital_number', { ascending: true })
+        .range(from, from + size - 1);
+      if (error) {
+        ok = false;
+        console.warn('[fetchPatientsByHospitals] ชุดฟิลด์ fail:', sel, '→', error.message);
+        break;
+      }
+      out.push(...((data || []) as Patient[]));
+      if (!data || data.length < size) break;
+      from += size;
+      if (from > 50000) break;
+    }
+    if (ok) return out;
+  }
+  return out;
+}
+
+/** query ผู้ดูแลตาม list รพ. (เครือข่ายผู้ป่วย) */
+async function fetchCoachesByHospitals(ids: string[]): Promise<Coach[]> {
+  if (ids.length === 0) return [];
+  for (const sel of COACH_SELECTS) {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select(sel)
+      .eq('is_active', true)
+      .in('users.hospital_id', ids)
+      .order('full_name_th', { ascending: true })
+      .limit(2000);
+    if (!error && data) return (data as any[]).map(normalizeCoach);
+    console.warn('[fetchCoachesByHospitals] ชุดฟิลด์ fail:', sel, '→', error?.message);
+  }
+  return [];
+}
+
+/** query ผู้ดูแล 1 คนด้วย user_id ตรง ๆ (ด่านสุดท้าย) */
+async function fetchCoachById(userId: string): Promise<Coach | null> {
+  for (const sel of COACH_SELECTS) {
+    const { data, error } = await supabase
+      .from('doctors')
+      .select(sel)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (!error && data) return normalizeCoach(data);
+    console.warn('[fetchCoachById] ชุดฟิลด์ fail:', sel, '→', error?.message);
+  }
+  return null;
 }
 
 // =====================================================
@@ -99,39 +204,32 @@ function NewAppointmentContent() {
   const urlPatientId = searchParams.get('patient_id') || '';
   const urlCoachId = searchParams.get('coach_id') || '';
 
-  // Refs สำหรับ click outside
   const patientDropdownRef = useRef<HTMLDivElement>(null);
   const staffDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Auth & user
   const [user, setUser] = useState<any>(null);
   const [userHospital, setUserHospital] = useState<UserHospital | null>(null);
 
-  // Data
-  const [allHospitals, setAllHospitals] = useState<Hospital[]>([]); // cache ทั้งระบบ
-  const [networkHospitals, setNetworkHospitals] = useState<Hospital[]>([]); // ของผู้ใช้ล็อกอิน
+  const [allHospitals, setAllHospitals] = useState<Hospital[]>([]);
+  const [networkHospitals, setNetworkHospitals] = useState<Hospital[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [coaches, setCoaches] = useState<Coach[]>([]); // ← dropdown ผู้ดูแล (จะกลายเป็นเครือข่ายผู้ป่วยทันทีเมื่อมีผู้ป่วย)
+  const [coaches, setCoaches] = useState<Coach[]>([]);
 
-  // UI
   const [loading, setLoading] = useState(true);
   const [coachLoading, setCoachLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
   const [validationErrors, setValidationErrors] = useState<{ [key: string]: string }>({});
 
-  // Search / dropdown states
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
   const [isPatientDropdownOpen, setIsPatientDropdownOpen] = useState(false);
   const [staffSearchTerm, setStaffSearchTerm] = useState('');
   const [isStaffDropdownOpen, setIsStaffDropdownOpen] = useState(false);
 
-  // Locked cards (auto-applied)
   const [lockedPatient, setLockedPatient] = useState<Patient | null>(null);
   const [lockedCoach, setLockedCoach] = useState<Coach | null>(null);
   const [coachMissingWarning, setCoachMissingWarning] = useState(false);
 
-  // Form
   const [formData, setFormData] = useState({
     patient_id: '',
     staff_id: '',
@@ -142,30 +240,12 @@ function NewAppointmentContent() {
     location: 'clinic',
     notes: '',
   });
-
   const autoAppliedRef = useRef(false);
-
-  // =====================================================
-  // 🧰 Helper: normalize coach (รองรับทั้ง nested และ flat)
-  // =====================================================
-  const normalizeCoach = (d: any): Coach => ({
-    id: d.user_id ?? d.id,
-    user_id: d.user_id,
-    full_name_th: d.full_name_th,
-    specialization_th: d.specialization_th,
-    is_active: d.is_active ?? true,
-    hospital_id: d.users?.hospital_id,
-    hospital_name: d.users?.hospitals?.name,
-    hospital_type: d.users?.hospitals?.type,
-    users: d.users,
-  });
 
   const coachDisplayText = (c: Coach) =>
     `${c.full_name_th}${c.specialization_th ? ` (${c.specialization_th})` : ''}`;
 
-  // =====================================================
-  // 🧰 Helper: เติมชื่อ รพ. + แม่ข่าย ให้ผู้ป่วยจาก cache รพ.
-  // =====================================================
+  // เติมชื่อ รพ. + แม่ข่ายจาก cache
   const enrichPatient = (p: Patient): Patient => {
     const h = allHospitals.find((x) => x.id === p.hospital_id);
     const parent = h?.parent_id ? allHospitals.find((x) => x.id === h.parent_id) : undefined;
@@ -179,9 +259,7 @@ function NewAppointmentContent() {
     };
   };
 
-  // =====================================================
-  // 🧰 Helper: เครือข่าย รพ.ของ "ผู้ป่วย" (แม่ข่าย + ลูกข่าย)
-  // =====================================================
+  // เครือข่าย รพ.ของ "ผู้ป่วย" (แม่ข่าย + ลูกข่าย)
   const getPatientNetwork = (patient: Patient): Hospital[] => {
     if (patient.hospital_id) {
       const h = allHospitals.find((x) => x.id === patient.hospital_id);
@@ -190,60 +268,11 @@ function NewAppointmentContent() {
         return allHospitals.filter((x) => x.id === rootId || x.parent_id === rootId);
       }
     }
-    return networkHospitals; // fallback: เครือข่ายของผู้ใช้ล็อกอิน
+    return networkHospitals;
   };
 
   // =====================================================
-  // 👥 Helper: query ผู้ดูแลตาม list รพ.
-  // =====================================================
-  const fetchCoachesForHospitals = async (ids: string[]): Promise<Coach[]> => {
-    try {
-      const { data, error } = await supabase
-        .from('doctors')
-        .select(
-          `user_id, full_name_th, specialization_th, is_active,
-           users!inner (
-             hospital_id, role,
-             hospitals ( id, name, code, type )
-           )`
-        )
-        .eq('is_active', true)
-        .in('users.hospital_id', ids)
-        .order('full_name_th');
-      if (error) throw error;
-      return (data || []).map(normalizeCoach);
-    } catch (e) {
-      console.error('❌ [fetchCoachesForHospitals]', e);
-      return [];
-    }
-  };
-
-  const loadCoaches = async (ids: string[]) => {
-    try {
-      if (typeof getCoachesWithHospitals === 'function') {
-        const data = await getCoachesWithHospitals(ids);
-        setCoaches((data || []).map(normalizeCoach));
-      } else {
-        setCoaches(await fetchCoachesForHospitals(ids));
-      }
-    } catch (e) {
-      console.error('❌ [loadCoaches]', e);
-      setCoaches(await fetchCoachesForHospitals(ids));
-    }
-  };
-
-  const loadPatients = async (ids: string[]) => {
-    try {
-      if (typeof getPatientsByHospitalNetwork !== 'function') return;
-      const data = await getPatientsByHospitalNetwork(ids);
-      setPatients(data || []);
-    } catch (e) {
-      console.error('❌ [loadPatients]', e);
-    }
-  };
-
-  // =====================================================
-  // ✅ AUTO: เลือกผู้ป่วย (ล็อกการ์ดเขียว) + โหลดผู้ดูแล
+  // ✅ AUTO: ล็อกผู้ป่วย + โหลดผู้ดูแลตามเครือข่ายผู้ป่วย
   // =====================================================
   const applyAutoPatient = (p: Patient, preferredCoachId?: string) => {
     const enriched = enrichPatient(p);
@@ -252,15 +281,11 @@ function NewAppointmentContent() {
     setLockedPatient(enriched);
     setLockedCoach(null);
     setCoachMissingWarning(false);
-    // โหลดผู้ดูแลเฉพาะเครือข่ายของผู้ป่วย + เลือกอัตโนมัติ
     const scope = getPatientNetwork(enriched);
     void loadCoachScopeAndAutoFill(enriched, scope, preferredCoachId);
     console.log('✅ [auto] ผู้ป่วย:', enriched.id, enriched.first_name, enriched.last_name);
   };
 
-  // =====================================================
-  // ✅ AUTO: ขอบเขตผู้ดูแล = เครือข่ายผู้ป่วย + เลือก coach ให้อัตโนมัติ
-  // =====================================================
   const loadCoachScopeAndAutoFill = async (
     patient: Patient,
     scope: Hospital[],
@@ -269,20 +294,10 @@ function NewAppointmentContent() {
     setCoachLoading(true);
     try {
       const scopeIds = scope.map((h) => h.id);
-      let list: Coach[] = [];
-      if (typeof getCoachesWithHospitals === 'function') {
-        try {
-          const data = await getCoachesWithHospitals(scopeIds);
-          list = (data || []).map(normalizeCoach);
-        } catch (e) {
-          list = await fetchCoachesForHospitals(scopeIds);
-        }
-      } else {
-        list = await fetchCoachesForHospitals(scopeIds);
-      }
+      const list = await fetchCoachesByHospitals(scopeIds);
       setCoaches(list);
 
-      // หา coach ที่ต้องการ: URL > ผู้ป่วยมี coach_id > query profiles
+      // ลำดับความสำคัญ: URL > coach_id จากผู้ป่วย > query profiles
       let coachId = preferredCoachId || patient.coach_id || '';
       if (!coachId) {
         const { data } = await supabase
@@ -297,23 +312,12 @@ function NewAppointmentContent() {
         return;
       }
 
-      // หาใน list เครือข่ายผู้ป่วยก่อน → fallback query doctors ตรง ๆ
-      let found = list.find((c) => c.user_id === coachId);
-      if (!found) {
-        const { data } = await supabase
-          .from('doctors')
-          .select(
-            `user_id, full_name_th, specialization_th, is_active,
-             users ( hospital_id, role, hospitals ( id, name, code, type ) )`
-          )
-          .eq('user_id', coachId)
-          .maybeSingle();
-        if (data) {
-          found = normalizeCoach(data);
-          setCoaches((prev) => (prev.some((c) => c.user_id === coachId) ? prev : [found, ...prev]));
-        }
-      }
+      // หาใน list เครือข่ายผู้ป่วย → ไม่พบก็ query doctors ตรง ๆ
+      let found = list.find((c) => c.user_id === coachId) || null;
+      if (!found) found = await fetchCoachById(coachId);
+
       if (found) {
+        if (!list.some((c) => c.user_id === coachId)) setCoaches((prev) => [found!, ...prev]);
         setFormData((prev) => ({ ...prev, staff_id: found!.user_id }));
         setStaffSearchTerm(coachDisplayText(found));
         setLockedCoach(found);
@@ -321,8 +325,9 @@ function NewAppointmentContent() {
         console.log('✅ [auto] ผู้ดูแล:', found.user_id, found.full_name_th);
       } else {
         setCoachMissingWarning(true);
+        setError(`ไม่พบข้อมูลผู้ดูแล (coach_id: ${coachId}) ในตาราง doctors — กรุณาเลือกผู้ดูแลเอง`);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('❌ [loadCoachScopeAndAutoFill]', e);
       setCoachMissingWarning(true);
     } finally {
@@ -331,7 +336,7 @@ function NewAppointmentContent() {
   };
 
   // =====================================================
-  // 📥 AUTH + โหลดข้อมูลเริ่มต้น
+  // 📥 AUTH + โหลดข้อมูลเครือข่ายเริ่มต้น
   // =====================================================
   useEffect(() => {
     const userData = checkSession();
@@ -355,7 +360,6 @@ function NewAppointmentContent() {
         setUserHospital(uHospital);
         setAllHospitals(allH);
 
-        // เครือข่ายของผู้ใช้ล็อกอิน (ใช้ fallback กรณีไม่มีผู้ป่วย)
         let netHospitals: Hospital[] = [];
         if (uHospital) {
           const rootId = uHospital.type === 'main' ? uHospital.id : uHospital.parent_id || uHospital.id;
@@ -366,10 +370,15 @@ function NewAppointmentContent() {
         setNetworkHospitals(netHospitals);
 
         const ids = netHospitals.map((h) => h.id);
-        await Promise.all([loadCoaches(ids), loadPatients(ids)]);
+        const [pats, coachList] = await Promise.all([
+          fetchPatientsByHospitals(ids),
+          fetchCoachesByHospitals(ids),
+        ]);
+        setPatients(pats);
+        setCoaches(coachList);
       } catch (err) {
         console.error('❌ [initNetwork]', err);
-        setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+        setError('เกิดข้อผิดพลาดในการโหลดข้อมูลเครือข่าย');
       } finally {
         setLoading(false);
       }
@@ -377,36 +386,27 @@ function NewAppointmentContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
-  // ✅ เมื่อข้อมูลพร้อม → ดึงผู้ป่วยจาก URL มาล็อกการ์ด (ใช้ fallback profiles เสมอ)
+  // =====================================================
+  // ✅ AUTO-SELECT ผู้ป่วยจาก URL — query ตรง ๆ ไม่พึ่ง list
+  // =====================================================
   useEffect(() => {
     if (!urlPatientId || loading || autoAppliedRef.current) return;
     autoAppliedRef.current = true;
     (async () => {
-      // 1) หาจากลิสต์ก่อน
-      const inList = patients.find((p) => p.id === urlPatientId);
-      if (inList) {
-        applyAutoPatient(inList, urlCoachId || undefined);
-        return;
-      }
-      // 2) fallback: query profiles ตรง ๆ (ไม่พึ่งลิสต์ 1,000 คน)
-      const { data } = await supabase
-        .from('profiles')
-        .select(
-          'id, first_name, last_name, hospital_number, id_card, phone, birth_date, hospital_id, coach_id'
-        )
-        .eq('id', urlPatientId)
-        .maybeSingle();
-      if (data) {
-        applyAutoPatient(data as Patient, urlCoachId || undefined);
+      const p = await fetchPatientById(urlPatientId);
+      if (p) {
+        applyAutoPatient(p, urlCoachId || undefined);
       } else {
-        setError('ไม่พบข้อมูลผู้ป่วยที่ระบุ — กรุณาเลือกผู้ป่วยใหม่');
-        autoAppliedRef.current = false;
+        autoAppliedRef.current = false; // ให้ retry ได้
+        setError(
+          `ไม่พบผู้ป่วย id: ${urlPatientId} — ตรวจสอบว่า id ถูกต้องและผู้ป่วยมีอยู่จริงในระบบ`
+        );
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlPatientId, loading, patients]);
+  }, [urlPatientId, loading]);
 
-  // Click outside dropdowns
+  // Click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (patientDropdownRef.current && !patientDropdownRef.current.contains(event.target as Node))
@@ -498,7 +498,6 @@ function NewAppointmentContent() {
     }
   };
 
-  // เปลี่ยนผู้ป่วย → ล้างผู้ดูแล แล้วกลับไปค้นหาใหม่
   const handleUnlockPatient = () => {
     setLockedPatient(null);
     setLockedCoach(null);
@@ -507,12 +506,18 @@ function NewAppointmentContent() {
     setPatientSearchTerm('');
     setStaffSearchTerm('');
     autoAppliedRef.current = false;
-    void loadCoaches(networkHospitals.map((h) => h.id));
+    void fetchCoachesByHospitals(networkHospitals.map((h) => h.id)).then(setCoaches);
   };
 
-  // เปลี่ยนผู้ดูแล → ปลดล็อกการ์ด เปิด dropdown (ยังเป็นรายชื่อในเครือข่ายผู้ป่วย)
   const handleUnlockCoach = () => {
     setLockedCoach(null);
+  };
+
+  const networkScopeLabel = (): string => {
+    if (!lockedPatient) return '-';
+    const net = getPatientNetwork(lockedPatient);
+    const main = net.find((h) => h.type === 'main');
+    return main ? main.name : lockedPatient.hospital_name || '-';
   };
 
   // =====================================================
@@ -590,11 +595,7 @@ function NewAppointmentContent() {
           <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
             <p className="text-red-700">{error}</p>
-            <button
-              type="button"
-              onClick={() => setError('')}
-              className="ml-auto text-red-600"
-            >
+            <button type="button" onClick={() => setError('')} className="ml-auto text-red-600">
               <XCircle className="w-5 h-5" />
             </button>
           </div>
@@ -613,9 +614,7 @@ function NewAppointmentContent() {
               </span>
             )}
           </h2>
-
           {lockedPatient ? (
-            /* การ์ดผู้ป่วยล็อก (เขียว) — ไม่ต้องค้นหาใหม่ */
             <div className="border-2 border-green-300 bg-green-50/60 rounded-xl p-5">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="flex items-start gap-4">
@@ -635,19 +634,14 @@ function NewAppointmentContent() {
                       </span>
                       {lockedPatient.id_card && (
                         <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <IdCard className="w-3 h-3 text-gray-400" /> บัตร:{' '}
-                          {lockedPatient.id_card}
+                          <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {lockedPatient.id_card}
                         </span>
                       )}
                       {lockedPatient.hospital_name && (
                         <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.:{' '}
-                          {lockedPatient.hospital_name}
+                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {lockedPatient.hospital_name}
                           {lockedPatient.parent_hospital ? (
-                            <span className="text-gray-400">
-                              {' '}
-                              (แม่ข่าย: {lockedPatient.parent_hospital.name})
-                            </span>
+                            <span className="text-gray-400"> (แม่ข่าย: {lockedPatient.parent_hospital.name})</span>
                           ) : null}
                         </span>
                       )}
@@ -658,14 +652,12 @@ function NewAppointmentContent() {
                   type="button"
                   onClick={handleUnlockPatient}
                   className="px-3 py-1.5 text-xs border border-green-300 bg-white text-green-700 rounded-lg hover:bg-green-100 transition-colors"
-                  title="หากต้องการเปลี่ยนเป็นผู้ป่วยรายอื่น"
                 >
                   เปลี่ยนผู้ป่วย
                 </button>
               </div>
             </div>
           ) : (
-            /* ค้นหาผู้ป่วยเอง (กรณีไม่มี URL) */
             <div ref={patientDropdownRef} className="relative">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -710,12 +702,14 @@ function NewAppointmentContent() {
                           </div>
                         </div>
                         <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
-                          <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
-                            <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {p.id_card || '-'}
-                          </span>
+                          {p.id_card && (
+                            <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
+                              <IdCard className="w-3 h-3 text-gray-400" /> บัตร: {p.id_card}
+                            </span>
+                          )}
                           <span className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded border border-gray-200">
                             <Hospital className="w-3 h-3 text-gray-400" /> รพ.:{' '}
-                            {p.hospital_name || 'ไม่ระบุ'}
+                            {p.hospital_name || allHospitals.find((h) => h.id === p.hospital_id)?.name || 'ไม่ระบุ'}
                           </span>
                         </div>
                       </div>
@@ -735,7 +729,7 @@ function NewAppointmentContent() {
           )}
         </div>
 
-        {/* ============ SECTION 2: แพทย์/เจ้าหน้าที่ (ผู้ดูแล) ============ */}
+        {/* ============ SECTION 2: ผู้ดูแล (เครือข่ายผู้ป่วย) ============ */}
         <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
           <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2 flex-wrap">
             <span className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-600 text-sm font-bold">
@@ -753,9 +747,7 @@ function NewAppointmentContent() {
               </span>
             )}
           </h2>
-
           {lockedCoach ? (
-            /* การ์ดผู้ดูแลล็อก (เขียว) */
             <div className="border-2 border-green-300 bg-green-50/60 rounded-xl p-5">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="flex items-start gap-4">
@@ -775,8 +767,7 @@ function NewAppointmentContent() {
                       )}
                       {lockedCoach.hospital_name && (
                         <span className="flex items-center gap-1 bg-white px-2 py-1 rounded border border-green-200">
-                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.:{' '}
-                          {lockedCoach.hospital_name}
+                          <Hospital className="w-3 h-3 text-gray-400" /> รพ.: {lockedCoach.hospital_name}
                           {lockedCoach.hospital_type === 'main'
                             ? ' (แม่ข่าย)'
                             : lockedCoach.hospital_type === 'sub'
@@ -791,7 +782,7 @@ function NewAppointmentContent() {
                   type="button"
                   onClick={handleUnlockCoach}
                   className="px-3 py-1.5 text-xs border border-green-300 bg-white text-green-700 rounded-lg hover:bg-green-100 transition-colors"
-                  title="หากต้องการเปลี่ยนผู้ดูแลเป็นท่านอื่น (เฉพาะในเครือข่ายผู้ป่วย)"
+                  title="เปลี่ยนผู้ดูแล — รายชื่อจะถูกกรองตามเครือข่าย รพ.ของผู้ป่วยเท่านั้น"
                 >
                   เปลี่ยนผู้ดูแล
                 </button>
@@ -803,7 +794,6 @@ function NewAppointmentContent() {
               กำลังเลือกผู้ดูแลให้อัตโนมัติ...
             </div>
           ) : (
-            /* ค้นหา/เลือกผู้ดูแลเอง — รายชื่อ = เครือข่าย รพ.ผู้ป่วย */
             <div ref={staffDropdownRef} className="relative">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -857,7 +847,7 @@ function NewAppointmentContent() {
               <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
                 <Building2 className="w-3 h-3" />
                 {lockedPatient
-                  ? `แสดงเฉพาะผู้ดูแลในเครือข่ายโรงพยาบาลของผู้ป่วย (${networkScopeLabel()})`
+                  ? `แสดงเฉพาะผู้ดูแลในเครือข่ายโรงพยาบาลของผู้ป่วย (${networkScopeLabel()} + ลูกข่าย)`
                   : 'เลือกผู้ป่วยก่อน ระบบจะกรองผู้ดูแลตามเครือข่ายของผู้ป่วยให้อัตโนมัติ'}
               </p>
               {validationErrors.staff_id && (
@@ -877,9 +867,7 @@ function NewAppointmentContent() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                ประเภทนัดหมาย *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ประเภทนัดหมาย *</label>
               <select
                 name="appointment_type"
                 value={formData.appointment_type}
@@ -909,9 +897,7 @@ function NewAppointmentContent() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                วันที่และเวลา *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">วันที่และเวลา *</label>
               <div className="flex gap-2">
                 <input
                   type="date"
@@ -961,7 +947,6 @@ function NewAppointmentContent() {
           </div>
         </div>
 
-        {/* ปุ่มส่งฟอร์ม */}
         <div className="flex gap-4 pt-4 pb-8">
           <button
             type="submit"
@@ -989,14 +974,6 @@ function NewAppointmentContent() {
       </form>
     </div>
   );
-
-  // helper: ชื่อเครือข่ายผู้ป่วยสำหรับ hint
-  function networkScopeLabel(): string {
-    if (!lockedPatient) return '-';
-    const net = getPatientNetwork(lockedPatient);
-    const main = net.find((h) => h.id === (lockedPatient!.hospital_type === 'main' ? lockedPatient!.hospital_id : lockedPatient!.parent_id) || h.type === 'main');
-    return main ? main.name : lockedPatient.hospital_name || '-';
-  }
 }
 
 // =====================================================
